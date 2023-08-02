@@ -1,0 +1,249 @@
+from enum import Enum, IntEnum, EnumMeta
+import hashlib
+import os
+import random
+import shlex
+import signal
+import subprocess
+import sys
+import time
+import traceback
+from shutil import which
+from tempfile import TemporaryDirectory
+from typing import Any, Generic, TypeVar
+
+import click
+
+from shrink_ray.work import Volume, WorkContext
+
+from shrink_ray.problem import BasicReductionProblem
+
+
+def validate_command(ctx: Any, param: Any, value: str) -> list[str]:
+    parts = shlex.split(value)
+    command = parts[0]
+
+    if os.path.exists(command):
+        command = os.path.abspath(command)
+    else:
+        what = which(command)
+        if what is None:
+            raise click.BadParameter("%s: command not found" % (command,))
+        command = os.path.abspath(what)
+    return [command] + parts[1:]
+
+
+def signal_group(sp: "subprocess.Popen[Any]", signal: int) -> None:
+    gid = os.getpgid(sp.pid)
+    assert gid != os.getgid()
+    os.killpg(gid, signal)
+
+
+def interrupt_wait_and_kill(sp: "subprocess.Popen[Any]", timeout: float = 0.1) -> None:
+    if sp.returncode is None:
+        try:
+            # In case the subprocess forked. Python might hang if you don't close
+            # all pipes.
+            for pipe in [sp.stdout, sp.stderr, sp.stdin]:
+                if pipe:
+                    pipe.close()
+            signal_group(sp, signal.SIGINT)
+            for _ in range(10):
+                if sp.poll() is not None:
+                    return
+                time.sleep(timeout)
+            signal_group(sp, signal.SIGKILL)
+        except ProcessLookupError:  # pragma: no cover
+            # This is incredibly hard to trigger reliably, because it only happens
+            # if the process exits at exactly the wrong time.
+            pass
+        sp.wait(timeout=timeout)
+
+
+EnumType = TypeVar("EnumType", bound=Enum)
+
+
+class EnumChoice(click.Choice, Generic[EnumType]):
+    def __init__(self, enum: type[EnumType]):
+        self.enum = enum
+        choices = [str(e.name) for e in enum]
+        self.__values = {e.name: e for e in enum}
+        super().__init__(choices)
+
+    def convert(self, value: str, param: Any, ctx: Any) -> EnumType:
+        return self.__values[value]
+
+
+class InputType(IntEnum):
+    all = 0
+    stdin = 1
+    arg = 2
+    basename = 3
+
+    def enabled(self, value: "InputType") -> bool:
+        if self == InputType.all:
+            return True
+        return self == value
+
+
+@click.command(
+    help="""
+""".strip()
+)
+@click.version_option()
+@click.option(
+    "--backup",
+    default="",
+    help=(
+        "Name of the backup file to create. Defaults to adding .bak to the "
+        "name of the source file"
+    ),
+)
+@click.option(
+    "--timeout",
+    default=1,
+    type=click.FLOAT,
+    help=(
+        "Time out subprocesses after this many seconds. If set to <= 0 then "
+        "no timeout will be used. Any commands that time out will be treated "
+        "as failing the test"
+    ),
+)
+@click.option(
+    "--seed",
+    default=0,
+    type=click.INT,
+    help=("Random seed to use for any non-deterministic reductions."),
+)
+@click.option(
+    "--parallelism",
+    default=os.cpu_count(),
+    type=click.INT,
+    help="Number of tests to run in parallel.",
+)
+@click.option(
+    "--volume",
+    default="normal",
+    type=EnumChoice(Volume),
+    help="Level of output to provide.",
+)
+@click.option(
+    "--input-type",
+    default="all",
+    type=EnumChoice(InputType),
+    help=""""
+How to pass input to the test function. Options are:
+
+1. basename writes it to a file of the same basename as the original, in the current working directory where the test is run.
+2. arg passes it in a file whose name is provided as an argument to the test.
+3. stdin passes its contents on stdin.
+4. all (the default) does all of the above.
+    """.strip(),
+)
+@click.argument("test", callback=validate_command)
+@click.argument(
+    "filename",
+    type=click.Path(exists=True, resolve_path=True, dir_okay=False, allow_dash=False),
+)
+def main(
+    input_type: InputType,
+    backup: str,
+    filename: str,
+    test: list[str],
+    timeout: float,
+    parallelism: int,
+    seed: int,
+    volume: Volume,
+) -> None:
+    debug = volume == Volume.debug
+
+    if debug:
+        # This is a debugging option so that when the reducer seems to be taking
+        # a long time you can Ctrl-\ to find out what it's up to. I have no idea
+        # how to test it in a way that shows up in coverage.
+        def dump_trace(signum: int, frame: Any) -> None:  # pragma: no cover
+            traceback.print_stack()
+
+        signal.signal(signal.SIGQUIT, dump_trace)
+
+    if not backup:
+        backup = filename + os.extsep + "bak"
+
+    try:
+        os.remove(backup)
+    except FileNotFoundError:
+        pass
+
+    base = os.path.basename(filename)
+    first_call = True
+
+    async def is_interesting(test_case: bytes) -> bool:
+        nonlocal first_call
+        with TemporaryDirectory() as d:
+            working = os.path.join(d, base)
+            with open(working, "wb") as o:
+                o.write(test_case)
+
+            if input_type.enabled(InputType.arg):
+                command = test + [working]
+            else:
+                command = test
+
+            kwargs = dict(
+                universal_newlines=True,
+                preexec_fn=os.setsid,
+                cwd=d,
+            )
+            if input_type.enabled(InputType.stdin):
+                kwargs["stdin"] = subprocess.PIPE
+                input_string = test_case
+            else:
+                kwargs["stdin"] = subprocess.DEVNULL
+                input_string = b""
+
+            if not debug:
+                kwargs["stdout"] = subprocess.DEVNULL
+                kwargs["stderr"] = subprocess.DEVNULL
+
+            sp = subprocess.Popen(command, **kwargs)  # type: ignore
+
+            try:
+                sp.communicate(input_string, timeout=timeout if timeout > 0 else None)
+            except subprocess.TimeoutExpired:
+                if first_call:
+                    raise ValueError(
+                        f"Initial test call exceeded timeout of {timeout}s. Try raising or disabling timeout."
+                    )
+                return False
+            finally:
+                first_call = False
+                interrupt_wait_and_kill(sp)
+        succeeded: bool = sp.returncode == 0
+        return succeeded
+
+    with open(filename, "rb") as reader:
+        initial = reader.read()
+
+    with open(backup, "wb") as writer:
+        writer.write(initial)
+
+    work = WorkContext(
+        random=random.Random(seed),
+        volume=volume,
+        parallelism=parallelism,
+    )
+
+    problem = BasicReductionProblem(
+        is_interesting=is_interesting,
+        initial=initial,
+        work=work,
+    )
+
+    @problem.on_reduce
+    async def _(test_case: bytes) -> None:
+        with open(filename, "wb") as o:
+            o.write(test_case)
+
+
+if __name__ == "__main__":
+    main(prog_name="shrinkray")  # pragma: no cover

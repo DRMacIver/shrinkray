@@ -1,27 +1,31 @@
-from abc import abstractmethod, ABC, abstractproperty
-from typing import cast
-from enum import Enum, IntEnum, auto
 import hashlib
-from itertools import islice
 import os
+import sys
+import threading
+from abc import ABC
+from abc import abstractmethod
+from abc import abstractproperty
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from enum import Enum
+from enum import IntEnum
+from enum import auto
+from itertools import islice
 from random import Random
-import sys
 from threading import Lock
-import threading
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Generator,
-    Generic,
-    Iterator,
-    Optional,
-    TypeVar,
-)
+from typing import Any
+from typing import Awaitable
+from typing import Callable
+from typing import Generator
+from typing import Generic
+from typing import Iterator
+from typing import Optional
+from typing import TypeVar
+from typing import cast
+
 from attrs import define
-from shrink_ray.work import WorkContext
+
+from shrinkray.work import WorkContext
 
 
 S = TypeVar("S")
@@ -100,7 +104,13 @@ class ReductionProblem(Generic[T], ABC):
 
 
 class BasicReductionProblem(ReductionProblem[T]):
-    def __init__(
+    @classmethod
+    async def __new__(self, cls, *args, **kwargs):
+        result = super().__new__(cls)
+        await result.__init__(*args, **kwargs)
+        return result
+
+    async def __init__(
         self,
         initial: T,
         is_interesting: Callable[[T], Awaitable[bool]],
@@ -123,7 +133,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         self.__on_reduce_callbacks: list[Callable[[T], Awaitable[None]]] = []
         self.__cache = {}
 
-        if not is_interesting(initial):
+        if not await is_interesting(initial):
             raise ValueError(
                 f"Initial example ({self.display(initial)}) does not satisfy interestingness test."
             )
@@ -132,7 +142,7 @@ class BasicReductionProblem(ReductionProblem[T]):
 
         canonical = self.canonicalise(initial)
 
-        if not is_interesting(canonical):
+        if not await is_interesting(canonical):
             self.work.warn(
                 f"Initial example ({self.display(initial)}) was interesting, but canonicalised version ({self.display(canonical)}) was not. Disabling canonicalisation."
             )
@@ -196,6 +206,10 @@ class BasicReductionProblem(ReductionProblem[T]):
     @property
     def current_test_case(self) -> T:
         return self.__current
+
+
+class ParseError(Exception):
+    pass
 
 
 class Format(Generic[S, T], ABC):

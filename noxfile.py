@@ -22,8 +22,8 @@ except ImportError:
     raise SystemExit(dedent(message)) from None
 
 
-package = "shrink_ray"
-python_versions = ["3.10", "3.9", "3.8", "3.7"]
+package = "shrinkray"
+python_versions = ["3.10"]
 nox.needs_version = ">= 2021.6.6"
 nox.options.sessions = (
     "pre-commit",
@@ -46,7 +46,7 @@ def activate_virtualenv_in_precommit_hooks(session: Session) -> None:
     Args:
         session: The Session object.
     """
-    assert session.bin is not None  # nosec
+    assert session.bin is not None  # noqa: S101
 
     # Only patch hooks containing a reference to this session's bindir. Support
     # quoting rules for Python and bash, but strip the outermost quotes so we
@@ -120,10 +120,10 @@ def precommit(session: Session) -> None:
         "--show-diff-on-failure",
     ]
     session.install(
-        "bandit",
         "black",
         "darglint",
         "flake8",
+        "flake8-bandit",
         "flake8-bugbear",
         "flake8-docstrings",
         "flake8-rst-docstrings",
@@ -136,6 +136,16 @@ def precommit(session: Session) -> None:
     session.run("pre-commit", *args)
     if args and args[0] == "install":
         activate_virtualenv_in_precommit_hooks(session)
+
+
+@session(python=python_versions[0])
+def format(session: Session) -> None:
+    session.install(
+        "black",
+        "isort",
+    )
+    session.run("isort", "src", "tests")
+    session.run("black", "src", "tests")
 
 
 @session(python=python_versions[0])
@@ -157,15 +167,16 @@ def mypy(session: Session) -> None:
         session.run("mypy", f"--python-executable={sys.executable}", "noxfile.py")
 
 
-@session(python=python_versions)
+@session(python=python_versions, reuse_venv=True)
 def tests(session: Session) -> None:
     """Run the test suite."""
     session.install(".")
+    session.run_always("poetry", "install", external=True)
     session.install("coverage[toml]", "pytest", "pygments")
     try:
         session.run("coverage", "run", "--parallel", "-m", "pytest", *session.posargs)
     finally:
-        if session.interactive:
+        if session.interactive and not session.posargs:
             session.notify("coverage", posargs=[])
 
 

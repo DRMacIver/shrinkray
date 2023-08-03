@@ -1,5 +1,3 @@
-from enum import Enum, IntEnum, EnumMeta
-import hashlib
 import os
 import random
 import shlex
@@ -8,15 +6,23 @@ import subprocess
 import sys
 import time
 import traceback
+from enum import Enum
+from enum import EnumMeta
+from enum import IntEnum
 from shutil import which
 from tempfile import TemporaryDirectory
-from typing import Any, Generic, TypeVar
+from typing import Any
+from typing import Generic
+from typing import TypeVar
 
 import click
+import trio
 
-from shrink_ray.work import Volume, WorkContext
-
-from shrink_ray.problem import BasicReductionProblem
+from shrinkray.passes.bytes import byte_passes
+from shrinkray.problem import BasicReductionProblem
+from shrinkray.reducer import Reducer
+from shrinkray.work import Volume
+from shrinkray.work import WorkContext
 
 
 def validate_command(ctx: Any, param: Any, value: str) -> list[str]:
@@ -190,7 +196,7 @@ def main(
                 command = test
 
             kwargs = dict(
-                universal_newlines=True,
+                universal_newlines=False,
                 preexec_fn=os.setsid,
                 cwd=d,
             )
@@ -227,22 +233,28 @@ def main(
     with open(backup, "wb") as writer:
         writer.write(initial)
 
-    work = WorkContext(
-        random=random.Random(seed),
-        volume=volume,
-        parallelism=parallelism,
-    )
+    @trio.run
+    async def _():
+        work = WorkContext(
+            random=random.Random(seed),
+            volume=volume,
+            parallelism=parallelism,
+        )
 
-    problem = BasicReductionProblem(
-        is_interesting=is_interesting,
-        initial=initial,
-        work=work,
-    )
+        problem = await BasicReductionProblem(
+            is_interesting=is_interesting,
+            initial=initial,
+            work=work,
+        )
 
-    @problem.on_reduce
-    async def _(test_case: bytes) -> None:
-        with open(filename, "wb") as o:
-            o.write(test_case)
+        @problem.on_reduce
+        async def _(test_case: bytes) -> None:
+            with open(filename, "wb") as o:
+                o.write(test_case)
+
+        reducer = Reducer(target=problem, reduction_passes=byte_passes(problem))
+
+        await reducer.run()
 
 
 if __name__ == "__main__":

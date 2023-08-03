@@ -1,33 +1,39 @@
-from typing import Awaitable, Callable, Generic, Sequence, TypeVar
-from shrink_ray.problem import ReductionProblem, Format
+from abc import ABC
+from abc import abstractmethod
+from functools import wraps
+from typing import Awaitable
+from typing import Callable
+from typing import Generic
+from typing import Sequence
+from typing import TypeVar
+
 from attrs import define
-from abc import ABC, abstractmethod
+
+from shrinkray.problem import Format
+from shrinkray.problem import ParseError
+from shrinkray.problem import ReductionProblem
+
 
 S = TypeVar("S")
 T = TypeVar("T")
 
 
-class ReductionPass(Generic[S]):
-    @abstractmethod
-    async def __call__(self, problem: ReductionProblem[S]) -> None:
-        ...
+ReductionPass = Callable[[ReductionProblem[T]], Awaitable[None]]
 
 
-@define
-class FunctionBasedPass(ReductionPass[S]):
-    function: Callable[[ReductionProblem[S]], Awaitable[None]]
+def compose(format: Format[S, T], reduction_pass: ReductionPass[T]) -> ReductionPass[S]:
+    @wraps(reduction_pass)
+    async def wrapped_pass(problem: ReductionProblem[S]) -> None:
+        view = problem.view(format)
 
-    async def __call__(self, problem: ReductionProblem[S]) -> None:
-        return await self.function(problem)
+        try:
+            view.current_test_case
+        except ParseError:
+            return
 
+        reduction_pass(view)
 
-@define
-class ViewBasedPass(Generic[S, T], ReductionPass[S]):
-    format: Format[S, T]
-    base_pass: ReductionPass[T]
-
-    async def __call__(self, problem: ReductionProblem[S]) -> None:
-        await self.base_pass(problem.view(self.format))
+    return wrapped_pass
 
 
 @define

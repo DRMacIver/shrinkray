@@ -1,8 +1,12 @@
+import sys
 from enum import IntEnum
 from itertools import islice
 from random import Random
-import sys
-from typing import Awaitable, Callable, Optional, Sequence, TypeVar
+from typing import Awaitable
+from typing import Callable
+from typing import Optional
+from typing import Sequence
+from typing import TypeVar
 
 
 class Volume(IntEnum):

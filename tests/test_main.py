@@ -2,7 +2,7 @@
 import pytest
 from click.testing import CliRunner
 
-from shrink_ray import __main__
+from shrinkray import __main__
 
 
 @pytest.fixture

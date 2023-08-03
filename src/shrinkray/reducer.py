@@ -33,6 +33,8 @@ def compose(format: Format[S, T], reduction_pass: ReductionPass[T]) -> Reduction
 
         reduction_pass(view)
 
+    wrapped_pass.__name__ = f"compose({format}, {reduction_pass.__name__})"
+
     return wrapped_pass
 
 
@@ -48,6 +50,7 @@ class Reducer(Generic[T]):
             prev = self.target.current_test_case
 
             for rp in self.reduction_passes:
+                self.target.work.note(rp.__name__)
                 await rp(self.target)
 
             if self.target.current_test_case == prev:

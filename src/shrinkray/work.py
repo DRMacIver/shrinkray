@@ -1,6 +1,7 @@
 import heapq
 import sys
 from contextlib import AsyncExitStack
+from contextlib import aclosing
 from contextlib import asynccontextmanager
 from enum import IntEnum
 from itertools import islice
@@ -54,13 +55,13 @@ class WorkContext:
                 if not values:
                     return
 
-                for v in parallel_map(values, f, parallelism=min(self.parallelism, n)):
-                    yield v
+                async with parallel_map(
+                    values, f, parallelism=min(self.parallelism, n)
+                ) as result:
+                    async for v in result:
+                        yield v
 
                 n *= 2
-
-            for x in parallel_map(ls, f, self.parallelism):
-                yield x
         else:
             for x in ls:
                 yield await f(x)
@@ -69,9 +70,10 @@ class WorkContext:
         async def apply(x: T) -> (T, bool):
             return (x, await f(x))
 
-        for x, v in self.map(ls, apply):
-            if v:
-                yield x
+        async with aclosing(self.map(ls, apply)) as results:
+            async for x, v in results:
+                if v:
+                    yield x
 
     async def find_first_value(
         self, ls: Sequence[T], f: Callable[[T], Awaitable[bool]]
@@ -81,8 +83,9 @@ class WorkContext:
 
         Will run in parallel if parallelism is enabled.
         """
-        for x in self.filter(ls, f):
-            return x
+        async with aclosing(self.filter(ls, f)) as filtered:
+            async for x in filtered:
+                return x
         raise NotFound()
 
     async def find_large_integer(self, f: Callable[[int], Awaitable[bool]]) -> int:
@@ -126,6 +129,9 @@ class WorkContext:
     def warn(self, msg: str) -> None:
         self.report(msg, Volume.normal)
 
+    def note(self, msg: str) -> None:
+        self.report(msg, Volume.normal)
+
     def debug(self, msg: str) -> None:
         self.report(msg, Volume.debug)
 
@@ -158,7 +164,7 @@ async def parallel_map(
             max_buffer_size=parallelism * 2
         )
 
-        async def worker():
+        async def worker(i):
             while True:
                 try:
                     i, x = await receive_ls_values.receive()
@@ -168,8 +174,8 @@ async def parallel_map(
                 result = await f(x)
                 await send_computed_values.send((i, result))
 
-        for _ in range(parallelism):
-            nursery.start_soon(worker)
+        for worker_n in range(parallelism):
+            nursery.start_soon(worker, worker_n)
 
         send_out_values, receive_out_values = trio.open_memory_channel(parallelism * 2)
 
@@ -189,7 +195,10 @@ async def parallel_map(
                 while heap:
                     j, x = heap[0]
                     if j == i:
-                        await send_out_values.send(x)
+                        try:
+                            await send_out_values.send(x)
+                        except trio.BrokenResourceError:
+                            return
                         heapq.heappop(heap)
                         i += 1
                     else:
@@ -198,4 +207,7 @@ async def parallel_map(
 
         nursery.start_soon(consolidate)
 
-        yield receive_out_values
+        try:
+            yield receive_out_values
+        finally:
+            await receive_out_values.aclose()

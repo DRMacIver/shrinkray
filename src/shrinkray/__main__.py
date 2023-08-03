@@ -45,25 +45,34 @@ def signal_group(sp: "subprocess.Popen[Any]", signal: int) -> None:
     os.killpg(gid, signal)
 
 
-def interrupt_wait_and_kill(sp: "subprocess.Popen[Any]", timeout: float = 0.1) -> None:
+async def interrupt_wait_and_kill(
+    sp: "subprocess.Popen[Any]", timeout: float = 0.1
+) -> None:
     if sp.returncode is None:
         try:
             # In case the subprocess forked. Python might hang if you don't close
             # all pipes.
             for pipe in [sp.stdout, sp.stderr, sp.stdin]:
                 if pipe:
-                    pipe.close()
+                    await pipe.aclose()
             signal_group(sp, signal.SIGINT)
             for _ in range(10):
                 if sp.poll() is not None:
                     return
-                time.sleep(timeout)
+                await trio.sleep(timeout)
             signal_group(sp, signal.SIGKILL)
         except ProcessLookupError:  # pragma: no cover
             # This is incredibly hard to trigger reliably, because it only happens
             # if the process exits at exactly the wrong time.
             pass
-        sp.wait(timeout=timeout)
+
+        with trio.move_on_after(timeout):
+            await sp.wait()
+
+        if sp.returncode is not None:
+            raise ValueError(
+                f"Could not kill subprocess with pid {sp.pid}. Something has gone seriously wrong."
+            )
 
 
 EnumType = TypeVar("EnumType", bound=Enum)
@@ -161,6 +170,8 @@ def main(
     seed: int,
     volume: Volume,
 ) -> None:
+    if timeout <= 0:
+        timeout = float("inf")
     debug = volume == Volume.debug
 
     if debug:
@@ -199,33 +210,40 @@ def main(
                 universal_newlines=False,
                 preexec_fn=os.setsid,
                 cwd=d,
+                check=False,
             )
             if input_type.enabled(InputType.stdin):
-                kwargs["stdin"] = subprocess.PIPE
-                input_string = test_case
+                kwargs["stdin"] = test_case
             else:
-                kwargs["stdin"] = subprocess.DEVNULL
-                input_string = b""
+                kwargs["stdin"] = b""
 
             if not debug:
                 kwargs["stdout"] = subprocess.DEVNULL
                 kwargs["stderr"] = subprocess.DEVNULL
 
-            sp = subprocess.Popen(command, **kwargs)  # type: ignore
+            async with trio.open_nursery() as nursery:
 
-            try:
-                sp.communicate(input_string, timeout=timeout if timeout > 0 else None)
-            except subprocess.TimeoutExpired:
-                if first_call:
-                    raise ValueError(
-                        f"Initial test call exceeded timeout of {timeout}s. Try raising or disabling timeout."
-                    )
-                return False
-            finally:
-                first_call = False
-                interrupt_wait_and_kill(sp)
-        succeeded: bool = sp.returncode == 0
-        return succeeded
+                def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):
+                    return trio.run_process(command, **kwargs, task_status=task_status)
+
+                sp = await nursery.start(call_with_kwargs)
+
+                try:
+                    with trio.move_on_after(timeout):
+                        await sp.wait()
+
+                    if sp.returncode is None:
+                        await interrupt_wait_and_kill(sp)
+                        if first_call:
+                            raise ValueError(
+                                f"Initial test call exceeded timeout of {timeout}s. Try raising or disabling timeout."
+                            )
+                        return False
+                finally:
+                    first_call = False
+
+                succeeded: bool = sp.returncode == 0
+                return succeeded
 
     with open(filename, "rb") as reader:
         initial = reader.read()

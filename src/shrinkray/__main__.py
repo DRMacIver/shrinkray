@@ -39,15 +39,13 @@ def validate_command(ctx: Any, param: Any, value: str) -> list[str]:
     return [command] + parts[1:]
 
 
-def signal_group(sp: "subprocess.Popen[Any]", signal: int) -> None:
+def signal_group(sp: "trio.Process", signal: int) -> None:
     gid = os.getpgid(sp.pid)
     assert gid != os.getgid()
     os.killpg(gid, signal)
 
 
-async def interrupt_wait_and_kill(
-    sp: "subprocess.Popen[Any]", timeout: float = 0.1
-) -> None:
+async def interrupt_wait_and_kill(sp: "trio.Process", timeout: float = 0.1) -> None:
     if sp.returncode is None:
         try:
             # In case the subprocess forked. Python might hang if you don't close
@@ -223,8 +221,8 @@ def main(
 
             async with trio.open_nursery() as nursery:
 
-                def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):
-                    return trio.run_process(command, **kwargs, task_status=task_status)
+                def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
+                    return trio.run_process(command, **kwargs, task_status=task_status)  # type: ignore
 
                 sp = await nursery.start(call_with_kwargs)
 
@@ -252,14 +250,14 @@ def main(
         writer.write(initial)
 
     @trio.run
-    async def _():
+    async def _() -> None:
         work = WorkContext(
             random=random.Random(seed),
             volume=volume,
             parallelism=parallelism,
         )
 
-        problem = await BasicReductionProblem(
+        problem: BasicReductionProblem[bytes] = await BasicReductionProblem(  # type: ignore
             is_interesting=is_interesting,
             initial=initial,
             work=work,

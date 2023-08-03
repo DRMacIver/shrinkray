@@ -4,13 +4,14 @@ import chardet
 from attrs import define
 
 from shrinkray.passes.sequences import sequence_passes
+from shrinkray.passes.strings import string_passes
 from shrinkray.problem import Format
 from shrinkray.problem import ReductionProblem
 from shrinkray.reducer import ReductionPass
 from shrinkray.reducer import compose
 
 
-@define
+@define(frozen=True)
 class Encoding(Format[bytes, str]):
     encoding: str
 
@@ -22,8 +23,6 @@ class Encoding(Format[bytes, str]):
 
 
 def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[bytes]]:
-    yield from sequence_passes(problem)
-
     value = problem.current_test_case
 
     for info in chardet.detect_all(problem.current_test_case):
@@ -38,5 +37,7 @@ def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[byte
 
         format = Encoding(encoding)
         view = problem.view(format)
-        for reduction_pass in sequence_passes(view):
+        for reduction_pass in string_passes(view):
             yield compose(format, reduction_pass)
+
+    yield from sequence_passes(problem)

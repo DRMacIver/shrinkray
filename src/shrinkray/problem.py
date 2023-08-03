@@ -105,12 +105,12 @@ class ReductionProblem(Generic[T], ABC):
 
 class BasicReductionProblem(ReductionProblem[T]):
     @classmethod
-    async def __new__(self, cls, *args, **kwargs):
+    async def __new__(self, cls, *args, **kwargs):  # type: ignore
         result = super().__new__(cls)
         await result.__init__(*args, **kwargs)
         return result
 
-    async def __init__(
+    async def __init__(  # type: ignore
         self,
         initial: T,
         is_interesting: Callable[[T], Awaitable[bool]],
@@ -120,7 +120,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         canonicalise: Callable[[T], T] = default_canonicalise,
         display: Callable[[T], str] = default_display,
     ):
-        self.work = work
+        super().__init__(work=work)
         self.__current = initial
         self.cache_key = cache_key
         self.__sort_key = sort_key
@@ -231,10 +231,10 @@ class View(ReductionProblem[T], Generic[S, T]):
         work: Optional[WorkContext] = None,
         sort_key: Optional[Callable[[T], Any]] = None,
     ):
+        super().__init__(work=work or problem.work)
         self.__problem = problem
         self.__parse = parse
         self.__dump = dump
-        self.work = work or self.__problem.work
         self.__sort_key = sort_key
 
         current = problem.current_test_case

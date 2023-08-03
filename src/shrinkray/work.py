@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from enum import IntEnum
 from itertools import islice
 from random import Random
-from typing import AsyncIterator
+from typing import AsyncGenerator
 from typing import Awaitable
 from typing import Callable
 from typing import Optional
@@ -43,7 +43,16 @@ class WorkContext:
 
     async def map(
         self, ls: Sequence[T], f: Callable[[T], Awaitable[S]]
-    ) -> AsyncIterator[S]:
+    ) -> AsyncGenerator[S, None]:
+        """Lazy parallel map.
+
+        Does a reasonable amount of fine tuning so that it doesn't race
+        ahead of the current point of iteration and will generallly have
+        prefetched at most as many values as you've already read. This
+        is especially important for its use in implementing `find_first`,
+        which we want to avoid doing redundant work when there are lots of
+        reduction opportunities.
+        """
         if self.parallelism > 1:
             it = iter(ls)
 
@@ -66,8 +75,10 @@ class WorkContext:
             for x in ls:
                 yield await f(x)
 
-    async def filter(self, ls: Sequence[T], f: Callable[[T], bool]) -> AsyncIterator[T]:
-        async def apply(x: T) -> (T, bool):
+    async def filter(
+        self, ls: Sequence[T], f: Callable[[T], Awaitable[bool]]
+    ) -> AsyncGenerator[T, None]:
+        async def apply(x: T) -> tuple[T, bool]:
             return (x, await f(x))
 
         async with aclosing(self.map(ls, apply)) as results:
@@ -117,7 +128,7 @@ class WorkContext:
             hi *= 2
 
         # Now binary search until lo + 1 = hi. At that point we have f(lo) and not
-        # f(lo + 1), as desired..
+        # f(lo + 1), as desired.
         while lo + 1 < hi:
             mid = (lo + hi) // 2
             if await f(mid):
@@ -146,25 +157,25 @@ class NotFound(Exception):
 
 @asynccontextmanager
 async def parallel_map(
-    ls: Sequence[T], f: Callable[[T], S], parallelism: int
-) -> AsyncIterator[S]:
+    ls: Sequence[T], f: Callable[[T], Awaitable[S]], parallelism: int
+) -> AsyncGenerator[trio.MemoryReceiveChannel[S], None]:
     async with trio.open_nursery() as nursery:
-        send_ls_values, receive_ls_values = trio.open_memory_channel(
+        send_ls_values, receive_ls_values = trio.open_memory_channel(  # type: ignore
             max_buffer_size=parallelism * 2
         )
 
-        async def queue_producer():
+        async def queue_producer() -> None:
             for i, x in enumerate(ls):
                 await send_ls_values.send((i, x))
             await send_ls_values.aclose()
 
         nursery.start_soon(queue_producer)
 
-        send_computed_values, receive_computed_values = trio.open_memory_channel(
+        send_computed_values, receive_computed_values = trio.open_memory_channel(  # type: ignore
             max_buffer_size=parallelism * 2
         )
 
-        async def worker(i):
+        async def worker(i: int) -> None:
             while True:
                 try:
                     i, x = await receive_ls_values.receive()
@@ -177,13 +188,13 @@ async def parallel_map(
         for worker_n in range(parallelism):
             nursery.start_soon(worker, worker_n)
 
-        send_out_values, receive_out_values = trio.open_memory_channel(parallelism * 2)
+        send_out_values, receive_out_values = trio.open_memory_channel(parallelism * 2)  # type: ignore
 
-        async def consolidate():
+        async def consolidate() -> None:
             i = 0
             completed = 0
 
-            heap = []
+            heap: list[tuple[int, S]] = []
 
             while completed < parallelism:
                 value = await receive_computed_values.receive()

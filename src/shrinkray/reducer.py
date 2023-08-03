@@ -1,7 +1,7 @@
 from abc import ABC
 from abc import abstractmethod
 from functools import wraps
-from typing import Awaitable
+from typing import Awaitable, Iterable
 from typing import Callable
 from typing import Generic
 from typing import Sequence
@@ -31,7 +31,7 @@ def compose(format: Format[S, T], reduction_pass: ReductionPass[T]) -> Reduction
         except ParseError:
             return
 
-        reduction_pass(view)
+        await reduction_pass(view)
 
     wrapped_pass.__name__ = f"compose({format}, {reduction_pass.__name__})"
 
@@ -41,7 +41,10 @@ def compose(format: Format[S, T], reduction_pass: ReductionPass[T]) -> Reduction
 @define
 class Reducer(Generic[T]):
     target: ReductionProblem[T]
-    reduction_passes: Sequence[ReductionPass[T]]
+    reduction_passes: Iterable[ReductionPass[T]]
+
+    def __attrs_post_init__(self) -> None:
+        self.reduction_passes = list(self.reduction_passes)
 
     async def run(self) -> None:
         # TODO: Better algorithms go here

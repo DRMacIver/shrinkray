@@ -1,14 +1,14 @@
-from typing import Iterable
+from typing import Iterator
 from attr import define
 
 from shrinkray.problem import Format, ReductionProblem
-from shrinkray.passes.sequences import single_backward_delete
-from collections import Counter
 
 from shrinkray.reducer import ReductionPass, compose
 
+from shrinkray.passes.sequences import single_backward_delete
 
-@define
+
+@define(frozen=True)
 class Split(Format[str, list[str]]):
     splitter: str
 
@@ -19,10 +19,9 @@ class Split(Format[str, list[str]]):
         return self.splitter.join(value)
 
 
-def string_reduction_passes(
-    problem: ReductionProblem[str],
-) -> Iterable[ReductionPass[str]]:
-    for splitter in [";", "\n", "n"]:
-        yield compose(Split(splitter), single_backward_delete)
+def string_passes(problem: ReductionProblem[str]) -> Iterator[ReductionPass[str]]:
+    for split in [";", "\n", " "]:
+        if split in problem.current_test_case:
+            yield compose(Split(split), single_backward_delete)
 
     yield single_backward_delete

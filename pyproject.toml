@@ -20,6 +20,7 @@ python = "^3.7"
 click = ">=8.0.1"
 chardet = "^5.2.0"
 trio = "^0.22.2"
+tqdm = "^4.65.0"
 
 [tool.poetry.dev-dependencies]
 Pygments = ">=2.10.0"

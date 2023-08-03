@@ -1,12 +1,18 @@
+import heapq
 import sys
+from contextlib import AsyncExitStack
+from contextlib import asynccontextmanager
 from enum import IntEnum
 from itertools import islice
 from random import Random
+from typing import AsyncIterator
 from typing import Awaitable
 from typing import Callable
 from typing import Optional
 from typing import Sequence
 from typing import TypeVar
+
+import trio
 
 
 class Volume(IntEnum):
@@ -16,6 +22,7 @@ class Volume(IntEnum):
     debug = 3
 
 
+S = TypeVar("S")
 T = TypeVar("T")
 
 
@@ -32,7 +39,39 @@ class WorkContext:
         self.random = random
         self.parallelism = parallelism
         self.volume = volume
-        assert self.parallelism <= 1  # TODO: Make parallelism work on trio
+
+    async def map(
+        self, ls: Sequence[T], f: Callable[[T], Awaitable[S]]
+    ) -> AsyncIterator[S]:
+        if self.parallelism > 1:
+            it = iter(ls)
+
+            yield await f(next(it))
+
+            n = 2
+            while True:
+                values = list(islice(it, n))
+                if not values:
+                    return
+
+                for v in parallel_map(values, f, parallelism=min(self.parallelism, n)):
+                    yield v
+
+                n *= 2
+
+            for x in parallel_map(ls, f, self.parallelism):
+                yield x
+        else:
+            for x in ls:
+                yield await f(x)
+
+    async def filter(self, ls: Sequence[T], f: Callable[[T], bool]) -> AsyncIterator[T]:
+        async def apply(x: T) -> (T, bool):
+            return (x, await f(x))
+
+        for x, v in self.map(ls, apply):
+            if v:
+                yield x
 
     async def find_first_value(
         self, ls: Sequence[T], f: Callable[[T], Awaitable[bool]]
@@ -42,15 +81,9 @@ class WorkContext:
 
         Will run in parallel if parallelism is enabled.
         """
-        if not ls:
-            raise NotFound()
-        if self.parallelism > 1:
-            assert False
-        else:
-            for x in ls:
-                if await f(x):
-                    return x
-            raise NotFound()
+        for x in self.filter(ls, f):
+            return x
+        raise NotFound()
 
     async def find_large_integer(self, f: Callable[[int], Awaitable[bool]]) -> int:
         """Finds a (hopefully large) integer n such that f(n) is True and f(n + 1)
@@ -103,3 +136,66 @@ class WorkContext:
 
 class NotFound(Exception):
     pass
+
+
+@asynccontextmanager
+async def parallel_map(
+    ls: Sequence[T], f: Callable[[T], S], parallelism: int
+) -> AsyncIterator[S]:
+    async with trio.open_nursery() as nursery:
+        send_ls_values, receive_ls_values = trio.open_memory_channel(
+            max_buffer_size=parallelism * 2
+        )
+
+        async def queue_producer():
+            for i, x in enumerate(ls):
+                await send_ls_values.send((i, x))
+            await send_ls_values.aclose()
+
+        nursery.start_soon(queue_producer)
+
+        send_computed_values, receive_computed_values = trio.open_memory_channel(
+            max_buffer_size=parallelism * 2
+        )
+
+        async def worker():
+            while True:
+                try:
+                    i, x = await receive_ls_values.receive()
+                except trio.EndOfChannel:
+                    await send_computed_values.send(None)
+                    return
+                result = await f(x)
+                await send_computed_values.send((i, result))
+
+        for _ in range(parallelism):
+            nursery.start_soon(worker)
+
+        send_out_values, receive_out_values = trio.open_memory_channel(parallelism * 2)
+
+        async def consolidate():
+            i = 0
+            completed = 0
+
+            heap = []
+
+            while completed < parallelism:
+                value = await receive_computed_values.receive()
+                if value is None:
+                    completed += 1
+                    continue
+                heapq.heappush(heap, value)
+
+                while heap:
+                    j, x = heap[0]
+                    if j == i:
+                        await send_out_values.send(x)
+                        heapq.heappop(heap)
+                        i += 1
+                    else:
+                        break
+            await send_out_values.aclose()
+
+        nursery.start_soon(consolidate)
+
+        yield receive_out_values

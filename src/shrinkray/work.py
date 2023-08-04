@@ -1,6 +1,6 @@
 import heapq
 import sys
-from contextlib import AsyncExitStack, aclosing, asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from enum import IntEnum
 from itertools import islice
 from random import Random
@@ -262,6 +262,6 @@ async def parallel_map(
 
 @define
 class ProgressBar:
-    bar: tqdm[None]
+    bar: "tqdm[None]"
     total: Callable[[], int]
     current: Callable[[], int]

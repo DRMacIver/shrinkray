@@ -1,9 +1,8 @@
-from typing import Any, Iterable, Sequence, TypeVar, cast
+from typing import Any, Iterable, Sequence, TypeVar
 
-from shrinkray.problem import Format, ReductionProblem
-from shrinkray.reducer import ReductionPass, compose
+from shrinkray.problem import ReductionProblem
+from shrinkray.reducer import ReductionPass
 from shrinkray.work import NotFound
-
 
 Seq = TypeVar("Seq", bound=Sequence[Any])
 

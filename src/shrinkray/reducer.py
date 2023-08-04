@@ -1,11 +1,9 @@
-from abc import ABC, abstractmethod
 from functools import wraps
-from typing import Awaitable, Callable, Generic, Iterable, Sequence, TypeVar
+from typing import Awaitable, Callable, Generic, Iterable, TypeVar
 
 from attrs import define
 
 from shrinkray.problem import Format, ParseError, ReductionProblem
-
 
 S = TypeVar("S")
 T = TypeVar("T")

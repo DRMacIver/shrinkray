@@ -1,30 +1,12 @@
 import hashlib
-import os
-import sys
-import threading
 from abc import ABC, abstractmethod, abstractproperty
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from enum import Enum, IntEnum, auto
-from itertools import islice
-from random import Random
 from threading import Lock
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Generator,
-    Generic,
-    Iterator,
-    Optional,
-    TypeVar,
-    cast,
-)
+from typing import Any, Awaitable, Callable, Generic, Iterator, Optional, TypeVar, cast
 
 from attrs import define
 
 from shrinkray.work import WorkContext
-
 
 S = TypeVar("S")
 T = TypeVar("T")

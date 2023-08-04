@@ -3,10 +3,8 @@ import random
 import shlex
 import signal
 import subprocess
-import sys
-import time
 import traceback
-from enum import Enum, EnumMeta, IntEnum
+from enum import Enum, IntEnum
 from shutil import which
 from tempfile import TemporaryDirectory
 from typing import Any, Generic, TypeVar
@@ -29,7 +27,7 @@ def validate_command(ctx: Any, param: Any, value: str) -> list[str]:
     else:
         what = which(command)
         if what is None:
-            raise click.BadParameter("%s: command not found" % (command,))
+            raise click.BadParameter(f"{command}: command not found")
         command = os.path.abspath(what)
     return [command] + parts[1:]
 

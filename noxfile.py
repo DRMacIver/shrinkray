@@ -8,10 +8,8 @@ from textwrap import dedent
 
 import nox
 
-
 try:
-    from nox_poetry import Session
-    from nox_poetry import session
+    from nox_poetry import Session, session
 except ImportError:
     message = f"""\
     Nox failed to import the 'nox-poetry' package.
@@ -116,7 +114,6 @@ def precommit(session: Session) -> None:
         "flake8",
         "flake8-bandit",
         "flake8-bugbear",
-        "flake8-docstrings",
         "flake8-rst-docstrings",
         "flake8-trio",
     )
@@ -127,11 +124,9 @@ def precommit(session: Session) -> None:
 @session(python=python_versions[0])
 def format(session: Session) -> None:
     session.install(
-        "black",
-        "isort",
+        "shed==2023.6.1",
     )
-    session.run("isort", "src", "tests")
-    session.run("black", "src", "tests")
+    session.run("shed")
 
 
 @session(python=python_versions[0])

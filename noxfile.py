@@ -110,32 +110,18 @@ def activate_virtualenv_in_precommit_hooks(session: Session) -> None:
                 break
 
 
-@session(name="pre-commit", python=python_versions[0])
+@session(name="lint", python=python_versions[0])
 def precommit(session: Session) -> None:
-    """Lint using pre-commit."""
-    args = session.posargs or [
-        "run",
-        "--all-files",
-        "--hook-stage=manual",
-        "--show-diff-on-failure",
-    ]
     session.install(
-        "black",
-        "darglint",
         "flake8",
         "flake8-bandit",
         "flake8-bugbear",
         "flake8-docstrings",
         "flake8-rst-docstrings",
-        "isort",
-        "pep8-naming",
-        "pre-commit",
-        "pre-commit-hooks",
-        "pyupgrade",
+        "flake8-trio",
     )
-    session.run("pre-commit", *args)
-    if args and args[0] == "install":
-        activate_virtualenv_in_precommit_hooks(session)
+
+    session.run("flake8", "src", "tests")
 
 
 @session(python=python_versions[0])
@@ -159,9 +145,9 @@ def safety(session: Session) -> None:
 @session(python=python_versions)
 def mypy(session: Session) -> None:
     """Type-check using mypy."""
-    args = session.posargs or ["src", "tests", "docs/conf.py"]
+    args = session.posargs or ["src", "tests"]
     session.install(".")
-    session.install("mypy", "pytest")
+    session.install("mypy", "pytest", "trio-typing", "types-tqdm")
     session.run("mypy", *args)
     if not session.posargs:
         session.run("mypy", f"--python-executable={sys.executable}", "noxfile.py")

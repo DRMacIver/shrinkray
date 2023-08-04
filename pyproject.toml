@@ -1,19 +1,19 @@
 [tool.poetry]
-name = "shrink-ray"
+name = "shrinkray"
 version = "0.0.0"
 description = "Shrink Ray"
 authors = ["David R. MacIver <david@drmaciver.com>"]
 license = "MIT"
 readme = "README.md"
-homepage = "https://github.com/DRMacIver/shrink-ray"
-repository = "https://github.com/DRMacIver/shrink-ray"
-documentation = "https://shrink-ray.readthedocs.io"
+homepage = "https://github.com/DRMacIver/shrinkray"
+repository = "https://github.com/DRMacIver/shrinkray"
+documentation = "https://shrinkray.readthedocs.io"
 classifiers = [
     "Development Status :: 3 - Alpha",
 ]
 
 [tool.poetry.urls]
-Changelog = "https://github.com/DRMacIver/shrink-ray/releases"
+Changelog = "https://github.com/DRMacIver/shrinkray/releases"
 
 [tool.poetry.dependencies]
 python = "^3.7"
@@ -49,7 +49,7 @@ xdoctest = {extras = ["colors"], version = ">=0.15.10"}
 myst-parser = {version = ">=0.16.1"}
 
 [tool.poetry.scripts]
-shrink-ray = "shrink_ray.__main__:main"
+shrinkray = "shrinkray.__main__:main"
 
 [tool.coverage.paths]
 source = ["src", "*/site-packages"]
@@ -57,7 +57,7 @@ tests = ["tests", "*/tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["shrink_ray", "tests"]
+source = ["shrinkray", "tests"]
 
 [tool.coverage.report]
 show_missing = true

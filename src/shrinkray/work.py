@@ -4,7 +4,16 @@ from contextlib import AsyncExitStack, aclosing, asynccontextmanager
 from enum import IntEnum
 from itertools import islice
 from random import Random
-from typing import AsyncGenerator, Awaitable, Callable, Optional, Sequence, TypeVar
+from typing import (
+    Any,
+    AsyncGenerator,
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Optional,
+    Sequence,
+    TypeVar,
+)
 
 import trio
 from attr import define
@@ -35,7 +44,7 @@ class WorkContext:
         self.random = random
         self.parallelism = parallelism
         self.volume = volume
-        self.__progress_bars: list[tqdm] = []
+        self.__progress_bars: list[ProgressBar] = []
 
     async def map(
         self, ls: Sequence[T], f: Callable[[T], Awaitable[S]]
@@ -147,7 +156,12 @@ class WorkContext:
             tqdm.write(msg, file=sys.stderr)
 
     @asynccontextmanager
-    async def pb(self, current, total, **kwargs):
+    async def pb(
+        self,
+        current: Callable[[], int],
+        total: Callable[[], int],
+        **kwargs: Any,
+    ) -> "AsyncIterator[None]":
         if self.volume < Volume.normal:
             yield
         else:
@@ -166,7 +180,7 @@ class WorkContext:
                 assert len(self.__progress_bars) == i + 1
                 self.__progress_bars.pop().bar.close()
 
-    def tick(self):
+    def tick(self) -> None:
         for pb in self.__progress_bars:
             pb.bar.total = pb.total()
             pb.bar.update(pb.current() - pb.bar.n)
@@ -248,6 +262,6 @@ async def parallel_map(
 
 @define
 class ProgressBar:
-    bar: tqdm
+    bar: tqdm[None]
     total: Callable[[], int]
     current: Callable[[], int]

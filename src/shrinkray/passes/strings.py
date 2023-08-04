@@ -11,11 +11,11 @@ from shrinkray.reducer import ReductionPass, compose
 class Split(Format[str, list[str]]):
     splitter: str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Split({repr(self.splitter)})"
 
     @property
-    def name(self):
+    def name(self) -> str:
         return f"split({repr(self.splitter)})"
 
     def parse(self, value: str) -> list[str]:

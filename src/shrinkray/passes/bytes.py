@@ -13,11 +13,11 @@ from shrinkray.reducer import ReductionPass, compose
 class Encoding(Format[bytes, str]):
     encoding: str
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Encoding({repr(self.encoding)})"
 
     @property
-    def name(self):
+    def name(self) -> str:
         return self.encoding
 
     def parse(self, value: bytes) -> str:

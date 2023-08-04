@@ -212,7 +212,7 @@ class ParseError(Exception):
 
 class Format(Generic[S, T], ABC):
     @property
-    def name(self):
+    def name(self) -> str:
         return repr(self)
 
     @abstractmethod

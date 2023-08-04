@@ -14,6 +14,8 @@ from typing import Sequence
 from typing import TypeVar
 
 import trio
+from attr import define
+from tqdm import tqdm
 
 
 class Volume(IntEnum):
@@ -40,6 +42,7 @@ class WorkContext:
         self.random = random
         self.parallelism = parallelism
         self.volume = volume
+        self.__progress_bars: list[tqdm] = []
 
     async def map(
         self, ls: Sequence[T], f: Callable[[T], Awaitable[S]]
@@ -148,7 +151,33 @@ class WorkContext:
 
     def report(self, msg: str, level: Volume) -> None:
         if self.volume >= level:
-            print(msg, file=sys.stderr)
+            tqdm.write(msg, file=sys.stderr)
+
+    @asynccontextmanager
+    async def pb(self, current, total, **kwargs):
+        if self.volume < Volume.normal:
+            yield
+        else:
+            i = len(self.__progress_bars)
+            self.__progress_bars.append(
+                ProgressBar(
+                    bar=tqdm(total=total(), **kwargs),
+                    total=total,
+                    current=current,
+                )
+            )
+            self.tick()
+            try:
+                yield
+            finally:
+                assert len(self.__progress_bars) == i + 1
+                self.__progress_bars.pop().bar.close()
+
+    def tick(self):
+        for pb in self.__progress_bars:
+            pb.bar.total = pb.total()
+            pb.bar.update(pb.current() - pb.bar.n)
+            pb.bar.refresh()
 
 
 class NotFound(Exception):
@@ -222,3 +251,10 @@ async def parallel_map(
             yield receive_out_values
         finally:
             await receive_out_values.aclose()
+
+
+@define
+class ProgressBar:
+    bar: tqdm
+    total: Callable[[], int]
+    current: Callable[[], int]

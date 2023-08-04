@@ -1,9 +1,10 @@
 from abc import ABC
 from abc import abstractmethod
 from functools import wraps
-from typing import Awaitable, Iterable
+from typing import Awaitable
 from typing import Callable
 from typing import Generic
+from typing import Iterable
 from typing import Sequence
 from typing import TypeVar
 
@@ -33,7 +34,7 @@ def compose(format: Format[S, T], reduction_pass: ReductionPass[T]) -> Reduction
 
         await reduction_pass(view)
 
-    wrapped_pass.__name__ = f"compose({format}, {reduction_pass.__name__})"
+    wrapped_pass.__name__ = f"{format.name}/{reduction_pass.__name__}"
 
     return wrapped_pass
 

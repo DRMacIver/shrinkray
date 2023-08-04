@@ -55,24 +55,31 @@ async def single_backward_delete(problem: ReductionProblem[Seq]) -> None:
         return await problem.is_interesting(deleted(j, k))
 
     i = len(test_case) - 1
-    while i >= 0:
-        try:
-            i = await problem.work.find_first_value(
-                range(i, -1, -1), lambda j: can_delete(j, j + 1)
-            )
-        except NotFound:
-            break
+    initial_length = i
 
-        test_case = deleted(i, i + 1)
+    async with problem.work.pb(
+        total=lambda: initial_length,
+        current=lambda: initial_length - i,
+        desc="Deletion steps",
+    ):
+        while i >= 0:
+            try:
+                i = await problem.work.find_first_value(
+                    range(i, -1, -1), lambda j: can_delete(j, j + 1)
+                )
+            except NotFound:
+                break
 
-        async def delete_k(k: int) -> bool:
-            if k > i:
-                return False
-            return await can_delete(i - k, i)
+            test_case = deleted(i, i + 1)
 
-        k = await problem.work.find_large_integer(delete_k)
-        test_case = deleted(i - k, i)
-        i -= k + 1
+            async def delete_k(k: int) -> bool:
+                if k > i:
+                    return False
+                return await can_delete(i - k, i)
+
+            k = await problem.work.find_large_integer(delete_k)
+            test_case = deleted(i - k, i)
+            i -= k + 1
 
 
 def sequence_passes(

@@ -1,11 +1,13 @@
+from collections import Counter
 from typing import Iterable
+
 from attr import define
 
-from shrinkray.problem import Format, ReductionProblem
 from shrinkray.passes.sequences import single_backward_delete
-from collections import Counter
-
-from shrinkray.reducer import ReductionPass, compose
+from shrinkray.problem import Format
+from shrinkray.problem import ReductionProblem
+from shrinkray.reducer import ReductionPass
+from shrinkray.reducer import compose
 
 
 @define

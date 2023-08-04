@@ -1,16 +1,24 @@
 from typing import Iterator
+
 from attr import define
 
-from shrinkray.problem import Format, ReductionProblem
-
-from shrinkray.reducer import ReductionPass, compose
-
 from shrinkray.passes.sequences import single_backward_delete
+from shrinkray.problem import Format
+from shrinkray.problem import ReductionProblem
+from shrinkray.reducer import ReductionPass
+from shrinkray.reducer import compose
 
 
 @define(frozen=True)
 class Split(Format[str, list[str]]):
     splitter: str
+
+    def __repr__(self):
+        return f"Split({repr(self.splitter)})"
+
+    @property
+    def name(self):
+        return f"split({repr(self.splitter)})"
 
     def parse(self, value: str) -> list[str]:
         return value.split(self.splitter)

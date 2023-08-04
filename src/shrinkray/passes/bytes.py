@@ -15,6 +15,13 @@ from shrinkray.reducer import compose
 class Encoding(Format[bytes, str]):
     encoding: str
 
+    def __repr__(self):
+        return f"Encoding({repr(self.encoding)})"
+
+    @property
+    def name(self):
+        return self.encoding
+
     def parse(self, value: bytes) -> str:
         return value.decode(self.encoding)
 

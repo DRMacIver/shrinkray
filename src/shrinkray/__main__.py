@@ -270,7 +270,12 @@ def main(
 
         reducer = Reducer(target=problem, reduction_passes=byte_passes(problem))
 
-        await reducer.run()
+        async with problem.work.pb(
+            total=lambda: len(initial),
+            current=lambda: len(initial) - len(problem.current_test_case),
+            desc="Bytes deleted",
+        ):
+            await reducer.run()
 
 
 if __name__ == "__main__":

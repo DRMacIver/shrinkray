@@ -192,13 +192,13 @@ class BasicReductionProblem(ReductionProblem[T]):
             result = self.__cache[keys[-1]]
         except KeyError:
             result = await self.__is_interesting(value)
-            if result:
-                with self.__locked():
+            with self.__locked():
+                if result:
                     if self.sort_key(value) < self.sort_key(self.current_test_case):
-                        self.work.debug(f"Shrunk to {self.display(value)}")
                         self.__current = value
                         for f in self.__on_reduce_callbacks:
                             await f(value)
+                self.work.tick()
         for key in keys:
             self.__cache[key] = result
         return result
@@ -213,6 +213,10 @@ class ParseError(Exception):
 
 
 class Format(Generic[S, T], ABC):
+    @property
+    def name(self):
+        return repr(self)
+
     @abstractmethod
     def parse(self, input: S) -> T:
         ...

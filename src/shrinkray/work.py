@@ -1,17 +1,10 @@
 import heapq
 import sys
-from contextlib import AsyncExitStack
-from contextlib import aclosing
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, aclosing, asynccontextmanager
 from enum import IntEnum
 from itertools import islice
 from random import Random
-from typing import AsyncGenerator
-from typing import Awaitable
-from typing import Callable
-from typing import Optional
-from typing import Sequence
-from typing import TypeVar
+from typing import AsyncGenerator, Awaitable, Callable, Optional, Sequence, TypeVar
 
 import trio
 from attr import define

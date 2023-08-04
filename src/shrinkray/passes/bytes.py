@@ -5,10 +5,8 @@ from attrs import define
 
 from shrinkray.passes.sequences import sequence_passes
 from shrinkray.passes.strings import string_passes
-from shrinkray.problem import Format
-from shrinkray.problem import ReductionProblem
-from shrinkray.reducer import ReductionPass
-from shrinkray.reducer import compose
+from shrinkray.problem import Format, ReductionProblem
+from shrinkray.reducer import ReductionPass, compose
 
 
 @define(frozen=True)

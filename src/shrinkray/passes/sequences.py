@@ -1,13 +1,7 @@
-from typing import Any
-from typing import Iterable
-from typing import Sequence
-from typing import TypeVar
-from typing import cast
+from typing import Any, Iterable, Sequence, TypeVar, cast
 
-from shrinkray.problem import Format
-from shrinkray.problem import ReductionProblem
-from shrinkray.reducer import ReductionPass
-from shrinkray.reducer import compose
+from shrinkray.problem import Format, ReductionProblem
+from shrinkray.reducer import ReductionPass, compose
 from shrinkray.work import NotFound
 
 

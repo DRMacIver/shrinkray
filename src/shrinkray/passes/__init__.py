@@ -4,10 +4,8 @@ from typing import Iterable
 from attr import define
 
 from shrinkray.passes.sequences import single_backward_delete
-from shrinkray.problem import Format
-from shrinkray.problem import ReductionProblem
-from shrinkray.reducer import ReductionPass
-from shrinkray.reducer import compose
+from shrinkray.problem import Format, ReductionProblem
+from shrinkray.reducer import ReductionPass, compose
 
 
 @define

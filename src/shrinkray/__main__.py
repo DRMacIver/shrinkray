@@ -6,14 +6,10 @@ import subprocess
 import sys
 import time
 import traceback
-from enum import Enum
-from enum import EnumMeta
-from enum import IntEnum
+from enum import Enum, EnumMeta, IntEnum
 from shutil import which
 from tempfile import TemporaryDirectory
-from typing import Any
-from typing import Generic
-from typing import TypeVar
+from typing import Any, Generic, TypeVar
 
 import click
 import trio
@@ -21,8 +17,7 @@ import trio
 from shrinkray.passes.bytes import byte_passes
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import Reducer
-from shrinkray.work import Volume
-from shrinkray.work import WorkContext
+from shrinkray.work import Volume, WorkContext
 
 
 def validate_command(ctx: Any, param: Any, value: str) -> list[str]:

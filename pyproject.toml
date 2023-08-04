@@ -65,7 +65,7 @@ fail_under = 100
 
 [tool.isort]
 profile = "black"
-force_single_line = true
+force_single_line = false
 lines_after_imports = 2
 
 [tool.mypy]

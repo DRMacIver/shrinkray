@@ -3,6 +3,7 @@ import os
 import shlex
 import shutil
 import sys
+from glob import glob
 from pathlib import Path
 from textwrap import dedent
 
@@ -119,6 +120,7 @@ def precommit(session: Session) -> None:
     )
 
     session.run("flake8", "src", "tests")
+    session.run("flake8-trio", *glob("{src,tests}/**/*.py"))
 
 
 @session(python=python_versions[0])

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from threading import Lock
 from typing import Any, Awaitable, Callable, Generic, Iterator, Optional, TypeVar, cast
 
+import trio
 from attrs import define
 
 from shrinkray.work import WorkContext
@@ -160,6 +161,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         will *not* lock around calling the underlying interestingness
         test.
         """
+        await trio.lowlevel.checkpoint()
         keys = [self.cache_key(value)]
         try:
             return self.__cache[keys[0]]

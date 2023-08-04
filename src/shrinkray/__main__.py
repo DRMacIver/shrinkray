@@ -38,7 +38,8 @@ def signal_group(sp: "trio.Process", signal: int) -> None:
     os.killpg(gid, signal)
 
 
-async def interrupt_wait_and_kill(sp: "trio.Process", timeout: float = 0.1) -> None:
+async def interrupt_wait_and_kill(sp: "trio.Process", delay: float = 0.1) -> None:
+    await trio.lowlevel.checkpoint()
     if sp.returncode is None:
         try:
             # In case the subprocess forked. Python might hang if you don't close
@@ -50,14 +51,14 @@ async def interrupt_wait_and_kill(sp: "trio.Process", timeout: float = 0.1) -> N
             for _ in range(10):
                 if sp.poll() is not None:
                     return
-                await trio.sleep(timeout)
+                await trio.sleep(delay)
             signal_group(sp, signal.SIGKILL)
         except ProcessLookupError:  # pragma: no cover
             # This is incredibly hard to trigger reliably, because it only happens
             # if the process exits at exactly the wrong time.
             pass
 
-        with trio.move_on_after(timeout):
+        with trio.move_on_after(delay):
             await sp.wait()
 
         if sp.returncode is not None:
@@ -189,8 +190,8 @@ def main(
         nonlocal first_call
         with TemporaryDirectory() as d:
             working = os.path.join(d, base)
-            with open(working, "wb") as o:
-                o.write(test_case)
+            async with await trio.open_file(working, "wb") as o:
+                await o.write(test_case)
 
             if input_type.enabled(InputType.arg):
                 command = test + [working]
@@ -215,7 +216,7 @@ def main(
             async with trio.open_nursery() as nursery:
 
                 def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
-                    return trio.run_process(command, **kwargs, task_status=task_status)  # type: ignore
+                    return trio.run_process(command, **kwargs, task_status=task_status)  # type: ignore  # noqa
 
                 sp = await nursery.start(call_with_kwargs)
 
@@ -258,8 +259,8 @@ def main(
 
         @problem.on_reduce
         async def _(test_case: bytes) -> None:
-            with open(filename, "wb") as o:
-                o.write(test_case)
+            async with await trio.open_file(filename, "wb") as o:
+                await o.write(test_case)
 
         reducer = Reducer(target=problem, reduction_passes=byte_passes(problem))
 

@@ -1,5 +1,7 @@
 from typing import Any, Iterable, Sequence, TypeVar
 
+import trio
+
 from shrinkray.problem import ReductionProblem
 from shrinkray.reducer import ReductionPass
 from shrinkray.work import NotFound
@@ -9,6 +11,10 @@ Seq = TypeVar("Seq", bound=Sequence[Any])
 
 async def single_forward_delete(problem: ReductionProblem[Seq]) -> None:
     test_case = problem.current_test_case
+
+    if not test_case:
+        await trio.lowlevel.checkpoint()
+        return
 
     def deleted(j: int, k: int) -> Seq:
         return test_case[:j] + test_case[k:]  # type: ignore
@@ -29,6 +35,7 @@ async def single_forward_delete(problem: ReductionProblem[Seq]) -> None:
 
         async def delete_k(k: int) -> bool:
             if i + k > len(test_case):
+                await trio.lowlevel.checkpoint()
                 return False
             return await can_delete(i, i + k)
 
@@ -40,6 +47,9 @@ async def single_forward_delete(problem: ReductionProblem[Seq]) -> None:
 
 async def single_backward_delete(problem: ReductionProblem[Seq]) -> None:
     test_case = problem.current_test_case
+    if not test_case:
+        await trio.lowlevel.checkpoint()
+        return
 
     def deleted(j: int, k: int) -> Seq:
         return test_case[:j] + test_case[k:]  # type: ignore
@@ -67,6 +77,7 @@ async def single_backward_delete(problem: ReductionProblem[Seq]) -> None:
 
             async def delete_k(k: int) -> bool:
                 if k > i:
+                    await trio.lowlevel.checkpoint()
                     return False
                 return await can_delete(i - k, i)
 

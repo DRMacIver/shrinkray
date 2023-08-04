@@ -254,10 +254,8 @@ async def parallel_map(
 
         nursery.start_soon(consolidate)
 
-        try:
+        async with aclosing(receive_out_values):
             yield receive_out_values
-        finally:
-            await receive_out_values.aclose()
 
 
 @define

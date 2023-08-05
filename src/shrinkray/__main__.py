@@ -166,14 +166,13 @@ def main(
         timeout = float("inf")
     debug = volume == Volume.debug
 
-    if debug:
-        # This is a debugging option so that when the reducer seems to be taking
-        # a long time you can Ctrl-\ to find out what it's up to. I have no idea
-        # how to test it in a way that shows up in coverage.
-        def dump_trace(signum: int, frame: Any) -> None:  # pragma: no cover
-            traceback.print_stack()
+    # This is a debugging option so that when the reducer seems to be taking
+    # a long time you can Ctrl-\ to find out what it's up to. I have no idea
+    # how to test it in a way that shows up in coverage.
+    def dump_trace(signum: int, frame: Any) -> None:  # pragma: no cover
+        traceback.print_stack()
 
-        signal.signal(signal.SIGQUIT, dump_trace)
+    signal.signal(signal.SIGQUIT, dump_trace)
 
     if not backup:
         backup = filename + os.extsep + "bak"

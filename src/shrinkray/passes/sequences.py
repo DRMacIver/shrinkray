@@ -22,27 +22,34 @@ async def single_forward_delete(problem: ReductionProblem[Seq]) -> None:
     async def can_delete(j: int, k: int) -> bool:
         return await problem.is_interesting(deleted(j, k))
 
+    initial_length = len(test_case)
     i = 0
-    while i < len(test_case):
-        try:
-            i = await problem.work.find_first_value(
-                range(i, len(test_case)), lambda j: can_delete(j, j + 1)
-            )
-        except NotFound:
-            break
 
-        test_case = deleted(i, i + 1)
+    async with problem.work.pb(
+        total=lambda: initial_length,
+        current=lambda: i + initial_length - len(test_case),
+        desc="Deletion steps",
+    ):
+        while i < len(test_case):
+            try:
+                i = await problem.work.find_first_value(
+                    range(i, len(test_case)), lambda j: can_delete(j, j + 1)
+                )
+            except NotFound:
+                break
 
-        async def delete_k(k: int) -> bool:
-            if i + k > len(test_case):
-                await trio.lowlevel.checkpoint()
-                return False
-            return await can_delete(i, i + k)
+            test_case = deleted(i, i + 1)
 
-        k = await problem.work.find_large_integer(delete_k)
-        test_case = deleted(i, i + k)
+            async def delete_k(k: int) -> bool:
+                if i + k > len(test_case):
+                    await trio.lowlevel.checkpoint()
+                    return False
+                return await can_delete(i, i + k)
 
-        i += 1
+            k = await problem.work.find_large_integer(delete_k)
+            test_case = deleted(i, i + k)
+
+            i += 1
 
 
 async def single_backward_delete(problem: ReductionProblem[Seq]) -> None:

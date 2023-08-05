@@ -3,6 +3,7 @@ from typing import Any, Awaitable, Callable, Generic, Iterable, Optional, TypeVa
 
 import trio
 from attrs import define
+from exceptiongroup import ExceptionGroup
 
 from shrinkray.problem import Format, ParseError, ReductionProblem
 from shrinkray.work import Volume, WorkContext
@@ -40,13 +41,35 @@ class Reducer(Generic[T]):
         self.reduction_passes = list(self.reduction_passes)
 
     async def run(self) -> None:
+        budget = 100
         while True:
             reduction_pass = await self.select_pass()
             if reduction_pass is None:
                 break
 
             self.target.work.note(reduction_pass.__name__)
-            await reduction_pass(self.target)
+            budget_exceeded = False
+            try:
+                await reduction_pass(
+                    BudgetedProblem(base_problem=self.target, budget=budget)
+                )
+            except BudgetExceeded:
+                budget_exceeded = True
+            except ExceptionGroup as e:
+                non_budget = [
+                    child
+                    for child in e.exceptions
+                    if not isinstance(child, BudgetExceeded)
+                ]
+                if not non_budget:
+                    budget_exceeded = True
+                elif len(non_budget) == 1:
+                    raise non_budget[0]
+                else:
+                    raise ExceptionGroup(e.message, non_budget)
+
+            if budget_exceeded:
+                budget = int(budget * 1.05)
 
     async def select_pass(self) -> Optional[ReductionPass[T]]:
         """Select a reduction pass to run, or None if no passes can make progress."""
@@ -184,3 +207,35 @@ class ChannelBackedProblem(ReductionProblem[T]):
     @property
     def current_test_case(self) -> T:
         return self.__current
+
+
+class BudgetExceeded(Exception):
+    pass
+
+
+class BudgetedProblem(ReductionProblem[T]):
+    def __init__(self, base_problem, budget: int):
+        super().__init__(work=base_problem.work)
+        self.base_problem = base_problem
+        self.budget = budget
+        self.__call_count = 0
+
+    def cached_is_interesting(self, test_case: T) -> bool | None:
+        return self.base_problem.cached_is_interesting(test_case)
+
+    async def is_interesting(self, test_case: T) -> bool:
+        cached = self.cached_is_interesting(test_case)
+        if cached is not None:
+            return cached
+        self.__call_count += 1
+        if self.__call_count >= self.budget:
+            raise BudgetExceeded()
+
+        return await self.base_problem.is_interesting(test_case)
+
+    def sort_key(self, test_case: T) -> Any:
+        return self.base_problem.sort_key(test_case)
+
+    @property
+    def current_test_case(self) -> T:
+        return self.base_problem.current_test_case

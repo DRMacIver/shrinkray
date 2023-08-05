@@ -1,8 +1,7 @@
 import hashlib
 from abc import ABC, abstractmethod, abstractproperty
-from contextlib import contextmanager
 from threading import Lock
-from typing import Any, Awaitable, Callable, Generic, Iterator, Optional, TypeVar, cast
+from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
 
 import trio
 from attrs import define
@@ -142,16 +141,6 @@ class BasicReductionProblem(ReductionProblem[T]):
         call `fn` with the new value. Note that these are called outside the lock."""
         self.__on_reduce_callbacks.append(callback)
 
-    @contextmanager
-    def __locked(self) -> Iterator[None]:
-        """Run the block of this context manager locked if parallelism
-        is enabled."""
-        try:
-            self.__lock.acquire()
-            yield
-        finally:
-            self.__lock.release()
-
     def cached_is_interesting(self, value: T) -> Optional[bool]:
         return self.__cache.get(self.cache_key(value))
 
@@ -177,13 +166,12 @@ class BasicReductionProblem(ReductionProblem[T]):
             result = self.__cache[keys[-1]]
         except KeyError:
             result = await self.__is_interesting(value)
-            with self.__locked():
-                if result:
-                    if self.sort_key(value) < self.sort_key(self.current_test_case):
-                        self.__current = value
-                        for f in self.__on_reduce_callbacks:
-                            await f(value)
-                self.work.tick()
+            if result:
+                if self.sort_key(value) < self.sort_key(self.current_test_case):
+                    self.__current = value
+                    for f in self.__on_reduce_callbacks:
+                        await f(value)
+            self.work.tick()
         for key in keys:
             self.__cache[key] = result
         return result

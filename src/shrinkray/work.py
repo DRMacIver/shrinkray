@@ -44,7 +44,7 @@ class WorkContext:
         self.random = random
         self.parallelism = parallelism
         self.volume = volume
-        self.__progress_bars: list[ProgressBar] = []
+        self.__progress_bars: dict[int, ProgressBar] = {}
 
     async def map(
         self, ls: Sequence[T], f: Callable[[T], Awaitable[S]]
@@ -166,22 +166,21 @@ class WorkContext:
             yield
         else:
             i = len(self.__progress_bars)
-            self.__progress_bars.append(
-                ProgressBar(
-                    bar=tqdm(total=total(), **kwargs),
-                    total=total,
-                    current=current,
-                )
+            while i in self.__progress_bars:
+                i += 1
+            self.__progress_bars[i] = ProgressBar(
+                bar=tqdm(total=total(), **kwargs),
+                total=total,
+                current=current,
             )
             self.tick()
             try:
                 yield
             finally:
-                assert len(self.__progress_bars) == i + 1
-                self.__progress_bars.pop().bar.close()
+                self.__progress_bars.pop(i).bar.close()
 
     def tick(self) -> None:
-        for pb in self.__progress_bars:
+        for pb in self.__progress_bars.values():
             pb.bar.total = pb.total()
             pb.bar.update(pb.current() - pb.bar.n)
             pb.bar.refresh()

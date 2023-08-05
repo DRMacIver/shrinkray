@@ -73,11 +73,11 @@ class ReductionProblem(Generic[T], ABC):
         pass
 
     @abstractmethod
-    def sort_key(self, test_case: T) -> Any:
-        ...
+    def cached_is_interesting(self, test_case: T) -> Optional[bool]:
+        pass
 
     @abstractmethod
-    def on_reduce(self, callback: Callable[[T], Awaitable[None]]) -> None:
+    def sort_key(self, test_case: T) -> Any:
         ...
 
     def canonicalise(self, test_case: T) -> T:
@@ -151,6 +151,9 @@ class BasicReductionProblem(ReductionProblem[T]):
             yield
         finally:
             self.__lock.release()
+
+    def cached_is_interesting(self, value: T) -> Optional[bool]:
+        return self.__cache.get(self.cache_key(value))
 
     async def is_interesting(self, value: T) -> bool:
         """Returns true if this value is interesting.
@@ -239,14 +242,14 @@ class View(ReductionProblem[T], Generic[S, T]):
                 self.__current = new_value
         return self.__current
 
+    def cached_is_interesting(self, test_case: T) -> bool:
+        return self.__problem.cached_is_interesting(self.__dump(test_case))
+
     async def is_interesting(self, test_case: T) -> bool:
         return await self.__problem.is_interesting(self.__dump(test_case))
 
-    def on_reduce(self, callback: Callable[[T], Awaitable[None]]) -> None:
-        async def composed(value: S) -> None:
-            await callback(self.__parse(value))
-
-        self.__problem.on_reduce(composed)
+    async def is_interesting(self, test_case: T) -> bool:
+        return await self.__problem.is_interesting(self.__dump(test_case))
 
     def canonicalise(self, test_case: T) -> T:
         return self.__parse(self.__problem.canonicalise(self.__dump(test_case)))

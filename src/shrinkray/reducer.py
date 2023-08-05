@@ -1,9 +1,11 @@
 from functools import wraps
-from typing import Awaitable, Callable, Generic, Iterable, TypeVar
+from typing import Any, Awaitable, Callable, Generic, Iterable, Optional, TypeVar
 
+import trio
 from attrs import define
 
 from shrinkray.problem import Format, ParseError, ReductionProblem
+from shrinkray.work import Volume, WorkContext
 
 S = TypeVar("S")
 T = TypeVar("T")
@@ -38,14 +40,147 @@ class Reducer(Generic[T]):
         self.reduction_passes = list(self.reduction_passes)
 
     async def run(self) -> None:
-        # TODO: Better algorithms go here
-
         while True:
-            prev = self.target.current_test_case
-
-            for rp in self.reduction_passes:
-                self.target.work.note(rp.__name__)
-                await rp(self.target)
-
-            if self.target.current_test_case == prev:
+            reduction_pass = await self.select_pass()
+            if reduction_pass is None:
                 break
+
+            self.target.work.note(reduction_pass.__name__)
+            await reduction_pass(self.target)
+
+    async def select_pass(self) -> Optional[ReductionPass[T]]:
+        """Select a reduction pass to run, or None if no passes can make progress."""
+
+        # Idea: Run all reduction passes in parallel. If one of them succeeds,
+        # we probably want to run that one. But we might get unlucky and succeed
+        # with some pass that mostly makes tiny changes, so we run for a little
+        # longer after we've found the first successful reduction and then return
+        # whichever pass found the best example in that window.
+        async with trio.open_nursery() as nursery:
+            passes = self.reduction_passes
+
+            work_queue_send, work_queue_receive = trio.open_memory_channel(
+                self.target.work.parallelism * 2
+            )
+
+            async def pass_worker(i):
+                problem = ChannelBackedProblem(
+                    base_problem=self.target,
+                    work_queue=work_queue_send,
+                    label=i,
+                )
+                try:
+                    await passes[i](problem)
+                except trio.BrokenResourceError:
+                    pass
+
+            for i in range(len(self.reduction_passes)):
+                nursery.start_soon(pass_worker, i)
+
+            results_queue_send, results_queue_receive = trio.open_memory_channel(
+                float("inf")
+            )
+
+            async def results_worker():
+                try:
+                    while True:
+                        chunk = await work_queue_receive.receive()
+                        result = await self.target.is_interesting(chunk.value)
+                        await chunk.response.send(result)
+                        await results_queue_send.send(
+                            CompletedWork(
+                                calling_pass=chunk.label,
+                                value=chunk.value,
+                                result=result,
+                            )
+                        )
+                except trio.BrokenResourceError:
+                    pass
+
+            for _ in range(self.target.work.parallelism):
+                nursery.start_soon(results_worker)
+
+            count = 0
+            succeeded_at = None
+            best: Any = None
+            best_pass = None
+
+            while True:
+                count += 1
+                if succeeded_at is not None and count > max(10, 2 * succeeded_at):
+                    break
+                completed: CompletedWork[T] = await results_queue_receive.receive()
+                if completed.result:
+                    if succeeded_at is None:
+                        succeeded_at = count
+                    key = self.target.sort_key(completed.value)
+                    if best is None or key < best:
+                        best = key
+                        best_pass = completed.calling_pass
+
+            await results_queue_receive.aclose()
+
+            nursery.cancel_scope.cancel()
+
+        if best_pass is not None:
+            return passes[best_pass]
+
+
+@define(frozen=True, slots=True)
+class WorkChunk(Generic[T]):
+    label: int
+    value: T
+    response: trio.MemorySendChannel[bool]
+
+
+@define(frozen=True, slots=True)
+class CompletedWork(Generic[T]):
+    calling_pass: int
+    value: T
+    result: bool
+
+
+class ChannelBackedProblem(ReductionProblem[T]):
+    def __init__(
+        self,
+        base_problem,
+        work_queue: trio.MemorySendChannel[WorkChunk],
+        label: int,
+    ):
+        super().__init__(
+            work=WorkContext(
+                parallelism=1,
+                volume=Volume.quiet,
+            )
+        )
+
+        self.base_problem = base_problem
+        self.send_channel, self.receive_channel = trio.open_memory_channel(0)
+        self.work_queue = work_queue
+        self.__current = self.base_problem.current_test_case
+        self.label = label
+
+    def cached_is_interesting(self, test_case: T) -> bool | None:
+        return self.base_problem.cached_is_interesting(test_case)
+
+    async def is_interesting(self, test_case: T) -> bool:
+        cached = self.cached_is_interesting(test_case)
+        if cached is not None:
+            result = cached
+        else:
+            await self.work_queue.send(
+                WorkChunk(label=self.label, value=test_case, response=self.send_channel)
+            )
+            result = await self.receive_channel.receive()
+
+        if result and self.sort_key(test_case) < self.sort_key(self.current_test_case):
+            self.__current = test_case
+
+        return result
+
+    def sort_key(self, test_case: T) -> Any:
+        return self.base_problem.sort_key(test_case)
+
+    @property
+    def current_test_case(self) -> T:
+        return self.__current

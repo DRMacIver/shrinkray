@@ -99,6 +99,14 @@ class InputType(IntEnum):
 )
 @click.version_option()
 @click.option(
+    "--smart-pass-selection/--no-smart-pass-selection",
+    default=True,
+    help=(
+        "If enabled, uses smarter algorithms to try to select which pass will run."
+        "When disabled will run each pass to completion in a hand-selected order."
+    ),
+)
+@click.option(
     "--backup",
     default="",
     help=(
@@ -161,6 +169,7 @@ def main(
     parallelism: int,
     seed: int,
     volume: Volume,
+    smart_pass_selection: bool,
 ) -> None:
     if timeout <= 0:
         timeout = float("inf")
@@ -261,7 +270,11 @@ def main(
             async with await trio.open_file(filename, "wb") as o:
                 await o.write(test_case)
 
-        reducer = Reducer(target=problem, reduction_passes=byte_passes(problem))
+        reducer = Reducer(
+            target=problem,
+            reduction_passes=byte_passes(problem),
+            dumb_mode=not smart_pass_selection,
+        )
 
         async with problem.work.pb(
             total=lambda: len(initial),

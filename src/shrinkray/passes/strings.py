@@ -26,7 +26,7 @@ class Split(Format[str, list[str]]):
 
 
 def string_passes(problem: ReductionProblem[str]) -> Iterator[ReductionPass[str]]:
-    for split in [";", "\n", " "]:
+    for split in ['"', "'", ";", "\n", " "]:
         if split in problem.current_test_case:
             yield compose(Split(split), single_backward_delete)
 

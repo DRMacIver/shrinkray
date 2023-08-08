@@ -36,11 +36,23 @@ def compose(format: Format[S, T], reduction_pass: ReductionPass[T]) -> Reduction
 class Reducer(Generic[T]):
     target: ReductionProblem[T]
     reduction_passes: Iterable[ReductionPass[T]]
+    dumb_mode: bool = False
 
     def __attrs_post_init__(self) -> None:
         self.reduction_passes = list(self.reduction_passes)
+        if len(self.reduction_passes) <= 1:
+            self.dumb_mode = True
 
     async def run(self) -> None:
+        if self.dumb_mode:
+            while True:
+                prev = self.target.current_test_case
+                for rp in self.reduction_passes:
+                    self.target.work.note(rp.__name__)
+                    await rp(self.target)
+                if prev == self.target.current_test_case:
+                    return
+
         budget = 100
         while True:
             reduction_pass = await self.select_pass()
@@ -226,6 +238,7 @@ class BudgetedProblem(ReductionProblem[T]):
     async def is_interesting(self, test_case: T) -> bool:
         cached = self.cached_is_interesting(test_case)
         if cached is not None:
+            self.work.tick()
             return cached
         self.__call_count += 1
         if self.__call_count >= self.budget:

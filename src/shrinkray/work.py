@@ -61,7 +61,11 @@ class WorkContext:
         if self.parallelism > 1:
             it = iter(ls)
 
-            yield await f(next(it))
+            for x in it:
+                yield await f(x)
+                break
+            else:
+                return
 
             n = 2
             while True:

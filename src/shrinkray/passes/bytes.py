@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+import math
 from typing import Iterator
 
 import chardet
@@ -8,8 +9,11 @@ from shrinkray.passes.sequences import sequence_passes, single_backward_delete
 from shrinkray.passes.strings import string_passes
 from shrinkray.problem import Format, ReductionProblem
 from shrinkray.reducer import ReductionPass, compose
+from shrinkray.work import parallel_map
 
 from shrinkray.work import NotFound
+import numpy as np
+from sklearn import tree
 
 
 @define(frozen=True)
@@ -101,14 +105,20 @@ async def lexeme_based_deletions(problem: ReductionProblem[bytes]) -> None:
     await delete_intervals(problem, intervals_to_delete)
 
 
-async def delete_intervals(
-    problem: ReductionProblem[bytes], intervals_to_delete: list[tuple[int, int]]
-) -> None:
-    target = problem.current_test_case
-    applied_deletions = []
+class IntervalApplier:
+    def __init__(self, problem: ReductionProblem, intervals: list[tuple[int, int]]):
+        self.problem = problem
+        self.intervals = list(map(list, intervals))
+        self.applied_deletions = []
+        self.target = problem.current_test_case
+        self.current = self.target
+        self.attempted = []
+        self.attempted_results = []
+        self.offset = 0
+        self.batch_size = 100
 
-    def with_extra_deletions(deletions):
-        deletions = applied_deletions + list(deletions)
+    def with_extra_deletions(self, deletions):
+        deletions = self.applied_deletions + list(deletions)
         normalized = []
         for start, end in sorted(deletions):
             if normalized and normalized[-1][-1] >= start:
@@ -118,64 +128,142 @@ async def delete_intervals(
         result = bytearray()
         prev = 0
         for start, end in normalized:
-            result.extend(target[prev:start])
+            result.extend(self.target[prev:start])
             prev = end
-        result.extend(target[prev:])
+        result.extend(self.target[prev:])
         return bytes(result)
 
-    initial_size = len(intervals_to_delete)
+    def apply_deletions(self, deletions):
+        self.current = self.with_extra_deletions(deletions)
+        self.applied_deletions.extend(deletions)
 
-    offset = 0
-    async with problem.work.pb(
-        total=lambda: initial_size,
-        current=lambda: initial_size - len(intervals_to_delete) + offset,
-        desc="Intervals considered",
-    ):
-        while True:
+    async def can_apply(self, deletions):
+        attempt = self.with_extra_deletions(deletions)
+        if attempt == self.current:
+            return False
+        return await self.problem.is_interesting(attempt)
 
-            async def delete_initial(k):
-                if k > len(intervals_to_delete):
-                    return False
-                return await problem.is_interesting(
-                    with_extra_deletions(intervals_to_delete[:k])
-                )
+    async def can_apply_single(self, deletion):
+        return await self.can_apply([deletion])
 
-            k = await problem.work.find_large_integer(delete_initial)
-            problem.work.debug(f"k={k}")
-            if k > 0:
-                applied_deletions.extend(intervals_to_delete[:k])
-                intervals_to_delete = intervals_to_delete[k + 1 :]
+    async def consider_batch(self, batch):
+        batch = list(batch)
 
-            offset = 0
-            try:
+        self.offset = 0
+        async with parallel_map(
+            batch, self.can_apply_single, parallelism=self.problem.work.parallelism
+        ) as fetch_results:
+            results = []
+            async for r in fetch_results:
+                results.append(r)
+                self.offset = len(results)
 
-                def check_interesting(i):
-                    nonlocal offset
-                    offset = max(offset, i)
-                    return problem.is_interesting(
-                        with_extra_deletions([intervals_to_delete[i]])
-                    )
+        self.attempted.extend(batch)
+        self.attempted_results.extend(results)
 
-                i = await problem.work.find_first_value(
-                    range(len(intervals_to_delete)),
-                    check_interesting,
-                )
-            except NotFound:
-                return
+        good_intervals = [b for b, r in zip(batch, results) if r]
 
-            deleted = intervals_to_delete[i]
+        if not good_intervals:
+            print("Dead batch")
+            self.batch_size *= 2
+            return
 
-            applied_deletions.append(deleted)
+        to_merge = len(good_intervals)
 
-            intervals_to_delete = [
-                t
-                for t in intervals_to_delete[i:]
-                if t[0] >= deleted[1] or t[1] <= deleted[0]
-            ]
+        if await self.can_apply(good_intervals):
+            merged = len(good_intervals)
+            self.apply_deletions(good_intervals)
+        else:
+            good_intervals.sort(key=lambda t: t[1] - t[0], reverse=True)
+            merged = 0
+            while good_intervals:
 
-            intervals_to_delete.sort(
-                key=lambda t: t[1] == deleted[0] or t[0] == deleted[1], reverse=True
+                async def can_apply_prefix(k):
+                    if k > len(good_intervals):
+                        return False
+                    return await self.can_apply(good_intervals[:k])
+
+                k = await self.problem.work.find_large_integer(can_apply_prefix)
+                merged += k
+                self.apply_deletions(good_intervals[:k])
+                good_intervals = good_intervals[k + 1 :]
+        print(f"Successfully merged {merged} / {to_merge} good intervals")
+        self.batch_size = math.ceil(len(batch) * merged / to_merge)
+
+    def normalize_intervals(self):
+        self.intervals = [
+            d
+            for d in self.intervals
+            if all(
+                start >= d[1] or end <= d[0] for start, end in self.applied_deletions
             )
+        ]
+
+    async def run(self):
+        initial_size = len(self.intervals)
+        async with self.problem.work.pb(
+            total=lambda: initial_size,
+            current=lambda: initial_size - len(self.intervals) + self.offset,
+            desc="Intervals considered",
+        ):
+            rnd = self.problem.work.random
+
+            while self.intervals and not self.applied_deletions:
+                rnd.shuffle(self.intervals)
+                await self.consider_batch(self.intervals[-self.batch_size :])
+                del self.intervals[-self.batch_size :]
+
+            self.normalize_intervals()
+
+            self.intervals.sort(key=lambda t: t[1] - t[0])
+            await self.consider_batch(self.intervals[-self.batch_size :])
+            del self.intervals[-self.batch_size :]
+
+            while self.intervals:
+                self.normalize_intervals()
+
+                if self.batch_size >= len(self.intervals):
+                    await self.consider_batch(self.intervals)
+                    self.intervals.clear()
+                    return
+
+                classifier = tree.DecisionTreeClassifier(
+                    min_samples_leaf=10,
+                )
+                classifier.fit(self.attempted, self.attempted_results)
+
+                predictions = classifier.predict_proba(self.intervals)[:, 1]
+
+                if not (predictions > 0).any():
+                    rnd.shuffle(self.intervals)
+                    await self.consider_batch(self.intervals[-self.batch_size :])
+                    del self.intervals[-self.batch_size :]
+                    continue
+
+                p = predictions.mean()
+
+                print(predictions)
+                self.problem.work.note(
+                    f"Estimate {p * 100:.2f}% of remaining intervals are deletable."
+                )
+
+                assert len(predictions) == len(self.intervals)
+
+                scores = {
+                    (u, v): (v - u) * p
+                    for (u, v), p in zip(self.intervals, predictions)
+                }
+
+                self.intervals.sort(key=lambda t: scores[tuple(t)])
+
+                await self.consider_batch(self.intervals[-self.batch_size :])
+                del self.intervals[-self.batch_size :]
+
+
+async def delete_intervals(
+    problem: ReductionProblem[bytes], intervals_to_delete: list[tuple[int, int]]
+) -> None:
+    await IntervalApplier(problem, intervals_to_delete).run()
 
 
 async def hollow_braces(problem: ReductionProblem[bytes]):
@@ -190,15 +278,16 @@ async def hollow_braces(problem: ReductionProblem[bytes]):
         elif c == close and stack:
             start = stack.pop() + 1
             end = i
-            intervals.append((start, end))
+            if end > start:
+                intervals.append((start, end))
 
     await delete_intervals(problem, intervals)
 
 
 def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[bytes]]:
+    yield lexeme_based_deletions
     yield hollow_braces
     yield compose(Split(b"\n"), single_backward_delete)
-    # yield lexeme_based_deletions
     return
     value = problem.current_test_case
 

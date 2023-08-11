@@ -4,6 +4,7 @@ from contextlib import aclosing, asynccontextmanager
 from enum import IntEnum
 from itertools import islice
 from random import Random
+import time
 from typing import (
     Any,
     AsyncGenerator,
@@ -31,6 +32,9 @@ S = TypeVar("S")
 T = TypeVar("T")
 
 
+TICK_FREQUENCY = 0.05
+
+
 class WorkContext:
     """A grab bag of useful tools for 'doing work'. Manages randomness,
     logging, concurrency."""
@@ -45,6 +49,7 @@ class WorkContext:
         self.parallelism = parallelism
         self.volume = volume
         self.__progress_bars: dict[int, ProgressBar] = {}
+        self.last_ticked = float("-inf")
 
     async def map(
         self, ls: Sequence[T], f: Callable[[T], Awaitable[S]]
@@ -184,6 +189,10 @@ class WorkContext:
                 self.__progress_bars.pop(i).bar.close()
 
     def tick(self) -> None:
+        now = time.time()
+        if now <= self.last_ticked + TICK_FREQUENCY:
+            return
+        self.last_ticked = now
         for pb in self.__progress_bars.values():
             pb.bar.total = pb.total()
             pb.bar.update(pb.current() - pb.bar.n)

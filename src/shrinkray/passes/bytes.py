@@ -14,6 +14,7 @@ from shrinkray.work import parallel_map
 from shrinkray.work import NotFound
 import numpy as np
 from sklearn import tree
+import trio
 
 
 @define(frozen=True)
@@ -99,177 +100,163 @@ async def lexeme_based_deletions(problem: ReductionProblem[bytes]) -> None:
         t
         for _, intervals in sorted(intervals_by_k.items(), reverse=True)
         for t in sorted(intervals, key=lambda t: (t[1] - t[0], t[0]), reverse=True)
-        if t[1] - t[0] > MAX_DELETE_INTERVAL
     ]
 
     await delete_intervals(problem, intervals_to_delete)
 
 
-class IntervalApplier:
+def merged_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    normalized = []
+    for start, end in sorted(intervals):
+        if normalized and normalized[-1][-1] >= start:
+            normalized[-1][-1] = max(normalized[-1][-1], end)
+        else:
+            normalized.append([start, end])
+    return list(map(tuple, normalized))
+
+
+def with_deletions(target: bytes, deletions: list[tuple[int, int]]) -> bytes:
+    result = bytearray()
+    prev = 0
+    total_deleted = 0
+    for start, end in deletions:
+        total_deleted += end - start
+        result.extend(target[prev:start])
+        prev = end
+    result.extend(target[prev:])
+    assert len(result) + total_deleted == len(target)
+    return bytes(result)
+
+
+class CutTarget:
     def __init__(self, problem: ReductionProblem, intervals: list[tuple[int, int]]):
         self.problem = problem
-        self.intervals = list(map(list, intervals))
-        self.applied_deletions = []
         self.target = problem.current_test_case
-        self.current = self.target
-        self.attempted = []
-        self.attempted_results = []
-        self.offset = 0
-        self.batch_size = 100
+        self.intervals = list(map(tuple, intervals))
+        self.intervals.sort()
+        self.applied = []
+        self.generation = 0
+        self.attempted = set()
 
-    def with_extra_deletions(self, deletions):
-        deletions = self.applied_deletions + list(deletions)
-        normalized = []
-        for start, end in sorted(deletions):
-            if normalized and normalized[-1][-1] >= start:
-                normalized[-1][-1] = max(normalized[-1][-1], end)
-            else:
-                normalized.append([start, end])
-        result = bytearray()
-        prev = 0
-        for start, end in normalized:
-            result.extend(self.target[prev:start])
-            prev = end
-        result.extend(self.target[prev:])
-        return bytes(result)
-
-    def apply_deletions(self, deletions):
-        self.current = self.with_extra_deletions(deletions)
-        self.applied_deletions.extend(deletions)
-
-    async def can_apply(self, deletions):
-        attempt = self.with_extra_deletions(deletions)
-        if attempt == self.current:
+    def is_redundant(self, interval: tuple[int, int]) -> bool:
+        if not self.applied:
             return False
-        return await self.problem.is_interesting(attempt)
+        if interval in self.attempted:
+            return True
+        start, end = interval
+        assert start < end
 
-    async def can_apply_single(self, deletion):
-        return await self.can_apply([deletion])
+        if start >= self.applied[-1][0]:
+            return end <= self.applied[-1][-1]
 
-    async def consider_batch(self, batch):
-        batch = list(batch)
+        if start < self.applied[0][0]:
+            return False
 
-        self.offset = 0
-        async with parallel_map(
-            batch, self.can_apply_single, parallelism=self.problem.work.parallelism
-        ) as fetch_results:
-            results = []
-            async for r in fetch_results:
-                results.append(r)
-                self.offset = len(results)
+        lo = 0
+        hi = len(self.applied) - 1
 
-        self.attempted.extend(batch)
-        self.attempted_results.extend(results)
+        # Invariant: start is >= start of lo and < start of hi
+        while lo + 1 < hi:
+            mid = (lo + hi) // 2
+            if start >= self.applied[mid][0]:
+                lo = mid
+            else:
+                hi = mid
 
-        good_intervals = [b for b, r in zip(batch, results) if r]
+        return end <= self.intervals[lo][1]
 
-        if not good_intervals:
-            print("Dead batch")
-            self.batch_size *= 2
-            return
+    async def try_apply(self, interval: tuple[int, int]) -> bool:
+        while True:
+            if self.is_redundant(interval):
+                return False
 
-        to_merge = len(good_intervals)
+            generation_at_start = self.generation
 
-        if await self.can_apply(good_intervals):
-            merged = len(good_intervals)
-            self.apply_deletions(good_intervals)
-        else:
-            good_intervals.sort(key=lambda t: t[1] - t[0], reverse=True)
-            merged = 0
-            while good_intervals:
+            merged = merged_intervals(self.applied + [interval])
+            attempt = with_deletions(self.target, merged)
 
-                async def can_apply_prefix(k):
-                    if k > len(good_intervals):
-                        return False
-                    return await self.can_apply(good_intervals[:k])
+            succeeded = await self.problem.is_interesting(attempt)
 
-                k = await self.problem.work.find_large_integer(can_apply_prefix)
-                merged += k
-                self.apply_deletions(good_intervals[:k])
-                good_intervals = good_intervals[k + 1 :]
-        print(f"Successfully merged {merged} / {to_merge} good intervals")
-        self.batch_size = math.ceil(len(batch) * merged / to_merge)
+            if not succeeded:
+                self.attempted.add(interval)
+                return False
 
-    def normalize_intervals(self):
-        self.intervals = [
-            d
-            for d in self.intervals
-            if all(
-                start >= d[1] or end <= d[0] for start, end in self.applied_deletions
-            )
-        ]
+            if self.generation == generation_at_start:
+                self.generation += 1
+                self.applied = merged
+                return True
 
-    async def run(self):
-        initial_size = len(self.intervals)
-        async with self.problem.work.pb(
-            total=lambda: initial_size,
-            current=lambda: initial_size - len(self.intervals) + self.offset,
-            desc="Intervals considered",
-        ):
-            rnd = self.problem.work.random
+    async def try_merge(self, intervals: list[tuple[int, int]]) -> bool:
+        while True:
+            generation_at_start = self.generation
 
-            while self.intervals and not self.applied_deletions:
-                rnd.shuffle(self.intervals)
-                await self.consider_batch(self.intervals[-self.batch_size :])
-                del self.intervals[-self.batch_size :]
+            merged = merged_intervals(self.applied + intervals)
+            if merged == self.applied:
+                return True
+            attempt = with_deletions(self.target, merged)
 
-            self.normalize_intervals()
+            succeeded = await self.problem.is_interesting(attempt)
 
-            self.intervals.sort(key=lambda t: t[1] - t[0])
-            await self.consider_batch(self.intervals[-self.batch_size :])
-            del self.intervals[-self.batch_size :]
+            if not succeeded:
+                return False
 
-            while self.intervals:
-                self.normalize_intervals()
+            if self.generation == generation_at_start:
+                self.generation += 1
+                self.applied = merged
+                return True
 
-                if self.batch_size >= len(self.intervals):
-                    await self.consider_batch(self.intervals)
-                    self.intervals.clear()
-                    return
-
-                classifier = tree.DecisionTreeClassifier(
-                    min_samples_leaf=10,
-                )
-                classifier.fit(self.attempted, self.attempted_results)
-
-                predictions = classifier.predict_proba(self.intervals)[:, 1]
-
-                if not (predictions > 0).any():
-                    rnd.shuffle(self.intervals)
-                    await self.consider_batch(self.intervals[-self.batch_size :])
-                    del self.intervals[-self.batch_size :]
-                    continue
-
-                p = predictions.mean()
-
-                print(predictions)
-                self.problem.work.note(
-                    f"Estimate {p * 100:.2f}% of remaining intervals are deletable."
-                )
-
-                assert len(predictions) == len(self.intervals)
-
-                scores = {
-                    (u, v): (v - u) * p
-                    for (u, v), p in zip(self.intervals, predictions)
-                }
-
-                self.intervals.sort(key=lambda t: scores[tuple(t)])
-
-                await self.consider_batch(self.intervals[-self.batch_size :])
-                del self.intervals[-self.batch_size :]
+    def intervals_touching(self, interval: tuple[int, int]) -> list[tuple[int, int]]:
+        start, end = interval
+        # TODO: Use binary search to cut this down to size.
+        return [t for t in self.intervals if not (t[1] < start or t[0] > end)]
 
 
 async def delete_intervals(
     problem: ReductionProblem[bytes], intervals_to_delete: list[tuple[int, int]]
 ) -> None:
-    await IntervalApplier(problem, intervals_to_delete).run()
+    intervals_considered = 0
+
+    async with problem.work.pb(
+        desc="Intervals considered",
+        current=lambda: intervals_considered,
+        total=lambda: len(intervals_to_delete),
+    ):
+        async with trio.open_nursery() as nursery:
+            cuts = CutTarget(problem, intervals_to_delete)
+            send_intervals, receive_intervals = trio.open_memory_channel(1000)
+
+            async def fill_queue():
+                nonlocal intervals_considered
+
+                intervals = list(cuts.intervals)
+                problem.work.random.shuffle(intervals)
+
+                for interval in intervals:
+                    if cuts.is_redundant(interval):
+                        intervals_considered += 1
+                    else:
+                        await send_intervals.send(interval)
+
+                send_intervals.close()
+
+            nursery.start_soon(fill_queue)
+
+            async def apply_intervals():
+                nonlocal intervals_considered
+                while True:
+                    try:
+                        interval = await receive_intervals.receive()
+                    except trio.EndOfChannel:
+                        return
+                    intervals_considered += 1
+                    await cuts.try_apply(interval)
+
+            for _ in range(problem.work.parallelism):
+                nursery.start_soon(apply_intervals)
 
 
-async def hollow_braces(problem: ReductionProblem[bytes]):
-    target = problem.current_test_case
-    open, close = b"{}"
-
+def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:
+    open, close = brace
     intervals = []
     stack = []
     for i, c in enumerate(target):
@@ -280,30 +267,29 @@ async def hollow_braces(problem: ReductionProblem[bytes]):
             end = i
             if end > start:
                 intervals.append((start, end))
+    return intervals
 
-    await delete_intervals(problem, intervals)
+
+async def hollow_braces(problem: ReductionProblem[bytes]):
+    target = problem.current_test_case
+    await delete_intervals(
+        problem, brace_intervals(target, b"{}") + brace_intervals(target, b"[]")
+    )
+
+
+async def short_deletions(problem: ReductionProblem[bytes]):
+    target = problem.current_test_case
+    await delete_intervals(
+        problem,
+        [
+            (i, j)
+            for i in range(len(target))
+            for j in range(i + 1, min(i + 11, len(target)))
+        ],
+    )
 
 
 def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[bytes]]:
-    yield lexeme_based_deletions
     yield hollow_braces
-    yield compose(Split(b"\n"), single_backward_delete)
-    return
-    value = problem.current_test_case
-
-    for info in chardet.detect_all(problem.current_test_case):
-        encoding = info["encoding"]
-        if encoding is None:
-            continue
-
-        try:
-            value.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-
-        format = Encoding(encoding)
-        view = problem.view(format)
-        for reduction_pass in string_passes(view):
-            yield compose(format, reduction_pass)
-
-    yield from sequence_passes(problem)
+    yield lexeme_based_deletions
+    yield short_deletions

@@ -1,8 +1,6 @@
 from collections import defaultdict, deque
-import math
 from typing import Iterator
 
-import chardet
 from attrs import define
 
 from shrinkray.passes.sequences import sequence_passes, single_backward_delete
@@ -12,8 +10,6 @@ from shrinkray.reducer import ReductionPass, compose
 from shrinkray.work import parallel_map
 
 from shrinkray.work import NotFound
-import numpy as np
-from sklearn import tree
 import trio
 
 
@@ -107,7 +103,7 @@ async def lexeme_based_deletions(problem: ReductionProblem[bytes]) -> None:
 
 def merged_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
     normalized = []
-    for start, end in sorted(intervals):
+    for start, end in sorted(map(tuple, intervals)):
         if normalized and normalized[-1][-1] >= start:
             normalized[-1][-1] = max(normalized[-1][-1], end)
         else:
@@ -136,11 +132,12 @@ class CutTarget:
         self.intervals.sort()
         self.applied = []
         self.generation = 0
-        self.attempted = set()
+        self.attempted = {}
 
     def is_redundant(self, interval: tuple[int, int]) -> bool:
         if not self.applied:
             return False
+        interval = tuple(interval)
         if interval in self.attempted:
             return True
         start, end = interval
@@ -166,6 +163,7 @@ class CutTarget:
         return end <= self.intervals[lo][1]
 
     async def try_apply(self, interval: tuple[int, int]) -> bool:
+        interval = tuple(interval)
         while True:
             if self.is_redundant(interval):
                 return False
@@ -178,12 +176,13 @@ class CutTarget:
             succeeded = await self.problem.is_interesting(attempt)
 
             if not succeeded:
-                self.attempted.add(interval)
+                self.attempted[interval] = False
                 return False
 
             if self.generation == generation_at_start:
                 self.generation += 1
                 self.applied = merged
+                self.attempted[interval] = True
                 return True
 
     async def try_merge(self, intervals: list[tuple[int, int]]) -> bool:

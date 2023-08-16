@@ -194,7 +194,7 @@ def main(
     base = os.path.basename(filename)
     first_call = True
 
-    async def is_interesting(test_case: bytes) -> bool:
+    async def is_interesting_do_work(test_case: bytes) -> bool:
         nonlocal first_call
         with TemporaryDirectory() as d:
             working = os.path.join(d, base)
@@ -259,29 +259,57 @@ def main(
             parallelism=parallelism,
         )
 
-        problem: BasicReductionProblem[bytes] = await BasicReductionProblem(  # type: ignore
-            is_interesting=is_interesting,
-            initial=initial,
-            work=work,
-        )
+        async with trio.open_nursery() as nursery:
+            send_test_cases: trio.MemorySendChannel[
+                tuple[bytes, trio.MemorySendChannel[bool]]
+            ]
+            receive_test_cases: trio.MemoryReceiveChannel[
+                tuple[bytes, trio.MemorySendChannel[bool]]
+            ]
+            send_test_cases, receive_test_cases = trio.open_memory_channel(
+                max(100, 10 * max(parallelism, 1))
+            )
 
-        @problem.on_reduce
-        async def _(test_case: bytes) -> None:
-            async with await trio.open_file(filename, "wb") as o:
-                await o.write(test_case)
+            async def is_interesting_worker():
+                try:
+                    while True:
+                        test_case, reply = await receive_test_cases.receive()
+                        result = await is_interesting_do_work(test_case)
+                        await reply.send(result)
+                except trio.EndOfChannel:
+                    pass
 
-        reducer = Reducer(
-            target=problem,
-            reduction_passes=byte_passes(problem),
-            dumb_mode=not smart_pass_selection,
-        )
+            for _ in range(max(parallelism, 1)):
+                nursery.start_soon(is_interesting_worker)
 
-        async with problem.work.pb(
-            total=lambda: len(initial),
-            current=lambda: len(initial) - len(problem.current_test_case),
-            desc="Bytes deleted",
-        ):
-            await reducer.run()
+            async def is_interesting(test_case: bytes) -> bool:
+                send_result, receive_result = trio.open_memory_channel(1)
+                await send_test_cases.send((test_case, send_result))
+                return await receive_result.receive()
+
+            problem: BasicReductionProblem[bytes] = await BasicReductionProblem(  # type: ignore
+                is_interesting=is_interesting,
+                initial=initial,
+                work=work,
+            )
+
+            @problem.on_reduce
+            async def _(test_case: bytes) -> None:
+                async with await trio.open_file(filename, "wb") as o:
+                    await o.write(test_case)
+
+            reducer = Reducer(
+                target=problem,
+                reduction_passes=byte_passes(problem),
+                dumb_mode=not smart_pass_selection,
+            )
+
+            async with problem.work.pb(
+                total=lambda: len(initial),
+                current=lambda: len(initial) - len(problem.current_test_case),
+                desc="Bytes deleted",
+            ):
+                await reducer.run()
 
 
 if __name__ == "__main__":

@@ -1,10 +1,8 @@
-import asyncio
 import os
 import random
 import shlex
 import signal
 import subprocess
-import sys
 import traceback
 from enum import Enum, IntEnum
 from shutil import which
@@ -13,21 +11,11 @@ from typing import Any, Generic, TypeVar
 
 import click
 import trio
-import trio_asyncio
 
 from shrinkray.passes.bytes import byte_passes
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import Reducer
 from shrinkray.work import Volume, WorkContext
-from prompt_toolkit import Application
-
-from prompt_toolkit import Application
-from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.layout.containers import VSplit, Window
-from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
-from prompt_toolkit.layout.layout import Layout
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout import ScrollablePane
 
 
 def validate_command(ctx: Any, param: Any, value: str) -> list[str]:
@@ -167,7 +155,6 @@ How to pass input to the test function. Options are:
 4. all (the default) does all of the above.
     """.strip(),
 )
-@click.option("--ui/--no-ui", default=True, help="Enable the fancy command line UI.")
 @click.argument("test", callback=validate_command)
 @click.argument(
     "filename",
@@ -183,11 +170,18 @@ def main(
     seed: int,
     volume: Volume,
     smart_pass_selection: bool,
-    ui: bool,
 ) -> None:
     if timeout <= 0:
         timeout = float("inf")
     debug = volume == Volume.debug
+
+    # This is a debugging option so that when the reducer seems to be taking
+    # a long time you can Ctrl-\ to find out what it's up to. I have no idea
+    # how to test it in a way that shows up in coverage.
+    def dump_trace(signum: int, frame: Any) -> None:  # pragma: no cover
+        traceback.print_stack()
+
+    signal.signal(signal.SIGQUIT, dump_trace)
 
     if not backup:
         backup = filename + os.extsep + "bak"
@@ -200,134 +194,123 @@ def main(
     base = os.path.basename(filename)
     first_call = True
 
-    child_stdout_read, child_stdout_write = os.pipe()
-    child_stderr_read, child_stderr_write = os.pipe()
-    child_stdin_read, child_stdin_write = os.pipe()
+    async def is_interesting_do_work(test_case: bytes) -> bool:
+        nonlocal first_call
+        with TemporaryDirectory() as d:
+            working = os.path.join(d, base)
+            async with await trio.open_file(working, "wb") as o:
+                await o.write(test_case)
 
-    os.set_inheritable(child_stderr_write, True)
-    os.set_inheritable(child_stdout_write, True)
-    os.set_inheritable(child_stdin_read, True)
+            if input_type.enabled(InputType.arg):
+                command = test + [working]
+            else:
+                command = test
 
-    if os.fork():
-        os.close(child_stdout_write)
-        os.close(child_stderr_write)
-        os.close(child_stdin_write)
-    else:
-        sys.stdin.
-
-
-        async def is_interesting_do_work(test_case: bytes) -> bool:
-            nonlocal first_call
-            with TemporaryDirectory() as d:
-                working = os.path.join(d, base)
-                async with await trio.open_file(working, "wb") as o:
-                    await o.write(test_case)
-
-                if input_type.enabled(InputType.arg):
-                    command = test + [working]
-                else:
-                    command = test
-
-                kwargs: dict[str, Any] = dict(
-                    universal_newlines=False,
-                    preexec_fn=os.setsid,
-                    cwd=d,
-                    check=False,
-                )
-                if input_type.enabled(InputType.stdin):
-                    kwargs["stdin"] = test_case
-                else:
-                    kwargs["stdin"] = b""
-
-                if not debug:
-                    kwargs["stdout"] = subprocess.DEVNULL
-                    kwargs["stderr"] = subprocess.DEVNULL
-
-                async with trio.open_nursery() as nursery:
-
-                    def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
-                        return trio.run_process(command, **kwargs, task_status=task_status)  # type: ignore  # noqa
-
-                    sp = await nursery.start(call_with_kwargs)
-
-                    try:
-                        with trio.move_on_after(timeout):
-                            await sp.wait()
-
-                        if sp.returncode is None:
-                            await interrupt_wait_and_kill(sp)
-                            if first_call:
-                                raise ValueError(
-                                    f"Initial test call exceeded timeout of {timeout}s. Try raising or disabling timeout."
-                                )
-                            return False
-                    finally:
-                        first_call = False
-
-                    succeeded: bool = sp.returncode == 0
-                    return succeeded
-
-        with open(filename, "rb") as reader:
-            initial = reader.read()
-
-        with open(backup, "wb") as writer:
-            writer.write(initial)
-
-        @trio.run
-        async def _() -> None:
-            work = WorkContext(
-                random=random.Random(seed),
-                volume=volume,
-                parallelism=parallelism,
+            kwargs = dict(
+                universal_newlines=False,
+                preexec_fn=os.setsid,
+                cwd=d,
+                check=False,
             )
+            if input_type.enabled(InputType.stdin):
+                kwargs["stdin"] = test_case
+            else:
+                kwargs["stdin"] = b""
+
+            if not debug:
+                kwargs["stdout"] = subprocess.DEVNULL
+                kwargs["stderr"] = subprocess.DEVNULL
 
             async with trio.open_nursery() as nursery:
-                send_test_cases: trio.MemorySendChannel[
-                    tuple[bytes, trio.MemorySendChannel[bool]]
-                ]
-                receive_test_cases: trio.MemoryReceiveChannel[
-                    tuple[bytes, trio.MemorySendChannel[bool]]
-                ]
-                send_test_cases, receive_test_cases = trio.open_memory_channel(
-                    max(100, 10 * max(parallelism, 1))
-                )
 
-                async def is_interesting_worker():
-                    try:
-                        while True:
-                            test_case, reply = await receive_test_cases.receive()
-                            result = await is_interesting_do_work(test_case)
-                            await reply.send(result)
-                    except trio.EndOfChannel:
-                        pass
+                def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
+                    return trio.run_process(command, **kwargs, task_status=task_status)  # type: ignore  # noqa
 
-                for _ in range(max(parallelism, 1)):
-                    nursery.start_soon(is_interesting_worker)
+                sp = await nursery.start(call_with_kwargs)
 
-                async def is_interesting(test_case: bytes) -> bool:
-                    send_result, receive_result = trio.open_memory_channel(1)
-                    await send_test_cases.send((test_case, send_result))
-                    return await receive_result.receive()
+                try:
+                    with trio.move_on_after(timeout):
+                        await sp.wait()
 
-                problem: BasicReductionProblem[bytes] = await BasicReductionProblem(  # type: ignore
-                    is_interesting=is_interesting,
-                    initial=initial,
-                    work=work,
-                )
+                    if sp.returncode is None:
+                        await interrupt_wait_and_kill(sp)
+                        if first_call:
+                            raise ValueError(
+                                f"Initial test call exceeded timeout of {timeout}s. Try raising or disabling timeout."
+                            )
+                        return False
+                finally:
+                    first_call = False
 
-                @problem.on_reduce
-                async def _(test_case: bytes) -> None:
-                    async with await trio.open_file(filename, "wb") as o:
-                        await o.write(test_case)
+                succeeded: bool = sp.returncode == 0
+                return succeeded
 
-                reducer = Reducer(
-                    target=problem,
-                    reduction_passes=byte_passes(problem),
-                    dumb_mode=not smart_pass_selection,
-                )
+    with open(filename, "rb") as reader:
+        initial = reader.read()
 
+    with open(backup, "wb") as writer:
+        writer.write(initial)
+
+    @trio.run
+    async def _() -> None:
+        work = WorkContext(
+            random=random.Random(seed),
+            volume=volume,
+            parallelism=parallelism,
+        )
+
+        async with trio.open_nursery() as nursery:
+            send_test_cases: trio.MemorySendChannel[
+                tuple[bytes, trio.MemorySendChannel[bool]]
+            ]
+            receive_test_cases: trio.MemoryReceiveChannel[
+                tuple[bytes, trio.MemorySendChannel[bool]]
+            ]
+            send_test_cases, receive_test_cases = trio.open_memory_channel(
+                max(100, 10 * max(parallelism, 1))
+            )
+
+            async def is_interesting_worker():
+                try:
+                    while True:
+                        test_case, reply = await receive_test_cases.receive()
+                        result = await is_interesting_do_work(test_case)
+                        await reply.send(result)
+                except trio.EndOfChannel:
+                    pass
+
+            for _ in range(max(parallelism, 1)):
+                nursery.start_soon(is_interesting_worker)
+
+            async def is_interesting(test_case: bytes) -> bool:
+                send_result, receive_result = trio.open_memory_channel(1)
+                await send_test_cases.send((test_case, send_result))
+                return await receive_result.receive()
+
+            problem: BasicReductionProblem[bytes] = await BasicReductionProblem(  # type: ignore
+                is_interesting=is_interesting,
+                initial=initial,
+                work=work,
+            )
+
+            @problem.on_reduce
+            async def _(test_case: bytes) -> None:
+                async with await trio.open_file(filename, "wb") as o:
+                    await o.write(test_case)
+
+            reducer = Reducer(
+                target=problem,
+                reduction_passes=byte_passes(problem),
+                dumb_mode=not smart_pass_selection,
+            )
+
+            async with problem.work.pb(
+                total=lambda: len(initial),
+                current=lambda: len(initial) - len(problem.current_test_case),
+                desc="Bytes deleted",
+            ):
                 await reducer.run()
 
 
-if __name__ == "__main__":  # pragma: no cover
-    main(prog_name="shrinkray")
+if __name__ == "__main__":
+    main(prog_name="shrinkray")  # pragma: no cover

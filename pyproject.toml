@@ -22,8 +22,6 @@ chardet = "^5.2.0"
 trio = "^0.22.2"
 tqdm = "^4.65.0"
 scikit-learn = "^1.3.0"
-prompt-toolkit = "^3.0.39"
-trio-asyncio = "^0.12.0"
 
 [tool.poetry.dev-dependencies]
 Pygments = ">=2.10.0"

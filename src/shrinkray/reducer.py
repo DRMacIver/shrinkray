@@ -98,7 +98,10 @@ class Reducer(Generic[T]):
                 self.target.work.parallelism * 2
             )
 
+            completed_passes = 0
+
             async def pass_worker(i):
+                nonlocal completed_passes
                 problem = ChannelBackedProblem(
                     base_problem=self.target,
                     work_queue=work_queue_send,
@@ -108,6 +111,8 @@ class Reducer(Generic[T]):
                     await passes[i](problem)
                 except trio.BrokenResourceError:
                     pass
+                finally:
+                    completed_passes += 1
 
             for i in range(len(self.reduction_passes)):
                 nursery.start_soon(pass_worker, i)
@@ -140,11 +145,14 @@ class Reducer(Generic[T]):
             best: Any = None
             best_pass = None
 
-            while True:
-                count += 1
+            while completed_passes < len(passes):
                 if succeeded_at is not None and count > max(10, 2 * succeeded_at):
                     break
-                completed: CompletedWork[T] = await results_queue_receive.receive()
+                with trio.move_on_after(1) as cancel_scope:
+                    completed: CompletedWork[T] = await results_queue_receive.receive()
+                if cancel_scope.cancel_called:
+                    continue
+                count += 1
                 if completed.result:
                     if succeeded_at is None:
                         succeeded_at = count

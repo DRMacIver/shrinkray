@@ -310,6 +310,7 @@ def main(
                 desc="Bytes deleted",
             ):
                 await reducer.run()
+            nursery.cancel_scope.cancel()
 
 
 if __name__ == "__main__":

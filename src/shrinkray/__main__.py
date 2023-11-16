@@ -199,14 +199,14 @@ def main(
         with TemporaryDirectory() as d:
             working = os.path.join(d, base)
             async with await trio.open_file(working, "wb") as o:
-                await o.write(test_case)
+                await o.write(test_case)  # type: ignore
 
             if input_type.enabled(InputType.arg):
                 command = test + [working]
             else:
                 command = test
 
-            kwargs = dict(
+            kwargs: dict[str, Any] = dict(
                 universal_newlines=False,
                 preexec_fn=os.setsid,
                 cwd=d,
@@ -279,7 +279,7 @@ def main(
                 except trio.EndOfChannel:
                     pass
 
-            for _ in range(max(parallelism, 1)):
+            for _i in range(max(parallelism, 1)):
                 nursery.start_soon(is_interesting_worker)
 
             async def is_interesting(test_case: bytes) -> bool:
@@ -296,7 +296,7 @@ def main(
             @problem.on_reduce
             async def _(test_case: bytes) -> None:
                 async with await trio.open_file(filename, "wb") as o:
-                    await o.write(test_case)
+                    await o.write(test_case)  # type: ignore
 
             reducer = Reducer(
                 target=problem,

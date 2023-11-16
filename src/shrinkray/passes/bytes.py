@@ -276,14 +276,14 @@ async def hollow_braces(problem: ReductionProblem[bytes]):
     )
 
 
-async def short_deletions(problem: ReductionProblem[bytes]):
+async def short_deletions(problem: ReductionProblem[bytes]) -> None:
     target = problem.current_test_case
     await delete_intervals(
         problem,
         [
             (i, j)
             for i in range(len(target))
-            for j in range(i + 1, min(i + 11, len(target)))
+            for j in range(i + 1, min(i + 11, len(target) + 1))
         ],
     )
 

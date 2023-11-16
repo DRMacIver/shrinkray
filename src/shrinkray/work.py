@@ -45,7 +45,7 @@ class WorkContext:
         parallelism: int = 1,
         volume: Volume = Volume.normal,
     ):
-        self.random = random
+        self.random = random or Random(0)
         self.parallelism = parallelism
         self.volume = volume
         self.__progress_bars: dict[int, ProgressBar] = {}

@@ -186,6 +186,7 @@ class ChannelBackedProblem(ReductionProblem[T]):
             work=WorkContext(
                 parallelism=1,
                 volume=Volume.quiet,
+                random=base_problem.work.random,
             )
         )
 

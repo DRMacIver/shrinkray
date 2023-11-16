@@ -146,13 +146,16 @@ class InputType(IntEnum):
     "--input-type",
     default="all",
     type=EnumChoice(InputType),
-    help=""""
+    help="""
 How to pass input to the test function. Options are:
 
-1. basename writes it to a file of the same basename as the original, in the current working directory where the test is run.
-2. arg passes it in a file whose name is provided as an argument to the test.
-3. stdin passes its contents on stdin.
-4. all (the default) does all of the above.
+1. `basename` writes it to a file of the same basename as the original, in the current working directory where the test is run.
+
+2. `arg` passes it in a file whose name is provided as an argument to the test.
+
+3. `stdin` passes its contents on stdin.
+
+4. `all` (the default) does all of the above.
     """.strip(),
 )
 @click.argument("test", callback=validate_command)

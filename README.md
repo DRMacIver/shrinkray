@@ -26,7 +26,9 @@ You then run it as follows:
 shrinkray is_interesting.sh my-test-case
 ```
 
-Where `my-test-case` is some file you want to reduce and `is_interesting.sh` can be any executable that exits with `0` when a test case is interesting and non-zero otherwise.
+Where `my-test-case` is some file you want to reduce and `is_interesting.sh` can be any executable that exits with `0` when a test case passed to it is interesting and non-zero otherwise.
+
+Variant test cases are passed to the interestingness test both on STDIN and as a file name passed as an argument. Additionally for creduce compatibility, the file has the same base name as the original test case and is in the current working directory the script is run with. This behaviour can be customised with the `--input-type` argument.
 
 `shrinkray --help` will give more usage instructions.
 
@@ -36,7 +38,9 @@ Shrink Ray is fully generic in the sense that it will work with literally any fi
 
 It has a generic reduction algorithm that should work pretty well with any textual format, and an architecture that is designed to make it easy to add specialised support for specific formats as needed. Currently there are no formats special cased in this way.
 
-If you run into a test case and interestingness test that you care about that shrink ray handles badly please let me know and I'll likely see about improving its handling of htat format.
+If you run into a test case and interestingness test that you care about that shrink ray handles badly please let me know and I'll likely see about improving its handling of that format.
+
+My main advice on format support is that if your format is C, C++, or a language with C-like syntax, you should consider using [creduce](https://github.com/csmith-project/creduce) instead. It's possible that shrinkray will be faster (especially when running in parallel) and might be a good first pass, but creduce will definitely get you better quality reduced test cases if you run it afterwards.
 
 ## Parallelism
 

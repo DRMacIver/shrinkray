@@ -103,7 +103,12 @@ async def reduce_integer_literals(problem):
 
 @regex_pass(rb"[0-9]+ [*+-/] [0-9]+")
 async def combine_expressions(problem):
-    await problem.is_interesting(str(eval(problem.current_test_case)).encode("ascii"))
+    try:
+        await problem.is_interesting(
+            str(eval(problem.current_test_case)).encode("ascii")
+        )
+    except ArithmeticError:
+        pass
 
 
 def language_passes(problem: ReductionProblem[bytes]):

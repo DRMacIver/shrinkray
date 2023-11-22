@@ -21,3 +21,7 @@ def test_can_reduce_integers_to_boundaries():
 
 def test_can_combine_expressions():
     assert reduce_with([combine_expressions], b"10 + 10", lambda x: True) == b"20"
+
+
+def test_does_not_error_on_bad_expression():
+    assert reduce_with([combine_expressions], b"1 / 0", lambda x: True) == b"1 / 0"

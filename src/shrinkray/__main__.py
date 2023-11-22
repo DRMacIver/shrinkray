@@ -11,6 +11,7 @@ from typing import Any, Generic, TypeVar
 
 import click
 import trio
+from shrinkray.passes import common_passes
 
 from shrinkray.passes.bytes import byte_passes
 from shrinkray.problem import BasicReductionProblem
@@ -303,7 +304,7 @@ def main(
 
             reducer = Reducer(
                 target=problem,
-                reduction_passes=byte_passes(problem),
+                reduction_passes=common_passes(problem),
                 dumb_mode=not smart_pass_selection,
             )
 

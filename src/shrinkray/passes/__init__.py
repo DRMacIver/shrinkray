@@ -1,27 +1,8 @@
-from typing import Iterable
-
-from attr import define
-
-from shrinkray.passes.sequences import single_backward_delete
-from shrinkray.problem import Format, ReductionProblem
-from shrinkray.reducer import ReductionPass, compose
+from shrinkray.passes.bytes import byte_passes
+from shrinkray.passes.genericlanguages import language_passes
+from shrinkray.problem import ReductionProblem
 
 
-@define
-class Split(Format[str, list[str]]):
-    splitter: str
-
-    def parse(self, value: str) -> list[str]:
-        return value.split(self.splitter)
-
-    def dumps(self, value: list[str]) -> str:
-        return self.splitter.join(value)
-
-
-def string_reduction_passes(
-    problem: ReductionProblem[str],
-) -> Iterable[ReductionPass[str]]:
-    for splitter in [";", "\n", "n"]:
-        yield compose(Split(splitter), single_backward_delete)
-
-    yield single_backward_delete
+def common_passes(problem: ReductionProblem[bytes]):
+    yield from byte_passes(problem)
+    yield from language_passes(problem)

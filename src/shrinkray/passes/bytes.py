@@ -3,13 +3,9 @@ from typing import Iterator
 
 from attrs import define
 
-from shrinkray.passes.sequences import sequence_passes, single_backward_delete
-from shrinkray.passes.strings import string_passes
 from shrinkray.problem import Format, ReductionProblem
-from shrinkray.reducer import ReductionPass, compose
-from shrinkray.work import parallel_map
+from shrinkray.reducer import ReductionPass
 
-from shrinkray.work import NotFound
 import trio
 
 
@@ -86,7 +82,7 @@ def find_ngram_endpoints(value: bytes) -> list[list[int]]:
 MAX_DELETE_INTERVAL = 8
 
 
-async def lexeme_based_deletions(problem: ReductionProblem[bytes]) -> None:
+async def lexeme_based_deletions(problem: ReductionProblem[bytes], min_size=0) -> None:
     intervals_by_k = defaultdict(set)
 
     for k, endpoints in find_ngram_endpoints(problem.current_test_case):
@@ -96,6 +92,7 @@ async def lexeme_based_deletions(problem: ReductionProblem[bytes]) -> None:
         t
         for _, intervals in sorted(intervals_by_k.items(), reverse=True)
         for t in sorted(intervals, key=lambda t: (t[1] - t[0], t[0]), reverse=True)
+        if t[1] - t[0] >= min_size
     ]
 
     await delete_intervals(problem, intervals_to_delete)
@@ -229,6 +226,7 @@ async def delete_intervals(
 
                 intervals = list(cuts.intervals)
                 problem.work.random.shuffle(intervals)
+                intervals.sort(key=lambda t: (t[1] - t[0] < 100))
 
                 for interval in intervals:
                     if cuts.is_redundant(interval):
@@ -289,6 +287,6 @@ async def short_deletions(problem: ReductionProblem[bytes]) -> None:
 
 
 def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[bytes]]:
-    yield hollow_braces
     yield lexeme_based_deletions
+    yield hollow_braces
     yield short_deletions

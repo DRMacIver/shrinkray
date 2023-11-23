@@ -45,7 +45,15 @@ algorithm:
       b. If it *would* then check whether any other edits have been applied while we were checking. If they
          have not, then add this edit to the list of successfully applied edits. Otherwise, try this edit again.
 
-The idea being that edits that result in interesting test cases are likely (though not certain) to be independent,
+This approach means that you don't have to stop when you find an interesting variant - you just apply the edit
+and keep going. In the cases where successful variants are *very* common this will still not be fully parallel,
+because it needs to do retries that can result in wasted work, but this only occurs when two successful edits
+race with each other, rather than every successful edit immediately halting everything else. In the case where
+the probability of a successful edit is significantly under 1 / number of parallel threads, this should scale
+linearly with the amount of parallelism.
+
+Strictly it doesn't need to do those retries, but it seems to be helpful. The idea of the retry is that edits
+that result in interesting test cases are likely (though not certain) to be independent,
 and are worth the effort of finding out if they are, so when there's evidence that a patch is likely to be good,
 we try it again in the hopes that it still is. The algorithm's correctness doesn't rely on this assumption - it
 would still provide the same guarantees (when run repeatedly to a fixed point) without it, but when the heuristic

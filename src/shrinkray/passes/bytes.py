@@ -248,8 +248,11 @@ async def delete_intervals(
                     intervals_considered += 1
                     await cuts.try_apply(interval)
 
-            for _ in range(problem.work.parallelism):
-                nursery.start_soon(apply_intervals)
+            async with trio.open_nursery() as sub_nursery:
+                for _ in range(problem.work.parallelism * 2):
+                    sub_nursery.start_soon(apply_intervals)
+
+            nursery.cancel_scope.cancel()
 
 
 def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:

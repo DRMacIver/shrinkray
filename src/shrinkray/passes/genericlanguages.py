@@ -7,8 +7,14 @@ import re
 from typing import Callable, AnyStr
 
 from attr import define
-from shrinkray.problem import Format, ParseError, ReductionProblem
+from shrinkray.problem import (
+    BasicReductionProblem,
+    Format,
+    ParseError,
+    ReductionProblem,
+)
 from shrinkray.reducer import ReductionPass
+import trio
 
 
 @define(frozen=True)
@@ -39,6 +45,8 @@ def regex_pass(
     def inner(fn):
         @wraps(fn)
         async def reduction_pass(problem: ReductionProblem[AnyStr]) -> None:
+            matching_regions = []
+
             i = 0
             while i < len(problem.current_test_case):
                 search = pattern.search(problem.current_test_case, i)
@@ -46,14 +54,70 @@ def regex_pass(
                     break
 
                 u, v = search.span()
+                matching_regions.append((u, v))
 
                 i = v
 
-                subformat = Substring(
-                    problem.current_test_case[:u], problem.current_test_case[v:]
-                )
+            if not matching_regions:
+                return
 
-                await fn(problem.view(subformat))
+            initial = problem.current_test_case
+
+            replacements = [initial[u:v] for u, v in matching_regions]
+
+            def replace(i: int, s: AnyStr) -> AnyStr:
+                empty = initial[:0]
+
+                parts = []
+
+                prev = 0
+                for j, (u, v) in enumerate(matching_regions):
+                    parts.append(initial[prev:u])
+                    if j != i:
+                        parts.append(replacements[j])
+                    else:
+                        parts.append(s)
+                    prev = v
+
+                parts.append(initial[prev:])
+
+                return empty.join(parts)
+
+            async with trio.open_nursery() as nursery:
+
+                async def reduce_region(i):
+                    async def is_interesting(s):
+                        retries = 0
+                        while True:
+                            # Other tasks may have updated the test case, so when we
+                            # check whether something is interesting but it doesn't update
+                            # the test case, this means something has changed. Given that
+                            # we found a promising reduction, it's likely to be worth trying
+                            # again. In theory an uninteresting test case could also become
+                            # interesting if the underlying test case changes, but that's
+                            # not likely enough to be worth checking.
+                            attempt = replace(i, s)
+                            if not await problem.is_interesting(attempt):
+                                return False
+                            if replace(i, s) == attempt:
+                                replacements[i] = s
+                                return True
+                            retries += 1
+
+                            # If we've retried this many times then something has gone seriously
+                            # wrong with our concurrency approach and it's probably a bug.
+                            assert retries <= 100
+
+                    subproblem = await BasicReductionProblem(
+                        replacements[i],
+                        is_interesting,
+                        work=problem.work,
+                    )  # type: ignore
+
+                    nursery.start_soon(fn, subproblem)
+
+                for i in range(len(matching_regions)):
+                    await reduce_region(i)
 
         return reduction_pass
 

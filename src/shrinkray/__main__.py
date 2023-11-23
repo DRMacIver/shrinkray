@@ -101,10 +101,12 @@ class InputType(IntEnum):
 @click.version_option()
 @click.option(
     "--smart-pass-selection/--no-smart-pass-selection",
-    default=True,
+    default=False,
     help=(
         "If enabled, uses smarter algorithms to try to select which pass will run."
         "When disabled will run each pass to completion in a hand-selected order."
+        "Currently the smarter algorithms are a bit unreliable and can lead to it"
+        "getting stuck, so are disabled by default."
     ),
 )
 @click.option(

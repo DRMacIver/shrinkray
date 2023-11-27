@@ -108,7 +108,7 @@ def regex_pass(
                             # wrong with our concurrency approach and it's probably a bug.
                             assert retries <= 100
 
-                    subproblem = await BasicReductionProblem(
+                    subproblem = BasicReductionProblem(
                         replacements[i],
                         is_interesting,
                         work=problem.work,

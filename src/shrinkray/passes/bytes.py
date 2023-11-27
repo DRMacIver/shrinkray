@@ -212,47 +212,42 @@ async def delete_intervals(
 ) -> None:
     intervals_considered = 0
 
-    async with problem.work.pb(
-        desc="Intervals considered",
-        current=lambda: intervals_considered,
-        total=lambda: len(intervals_to_delete),
-    ):
-        async with trio.open_nursery() as nursery:
-            cuts = CutTarget(problem, intervals_to_delete)
-            send_intervals, receive_intervals = trio.open_memory_channel(1000)
+    async with trio.open_nursery() as nursery:
+        cuts = CutTarget(problem, intervals_to_delete)
+        send_intervals, receive_intervals = trio.open_memory_channel(1000)
 
-            async def fill_queue():
-                nonlocal intervals_considered
+        async def fill_queue():
+            nonlocal intervals_considered
 
-                intervals = list(cuts.intervals)
-                problem.work.random.shuffle(intervals)
-                intervals.sort(key=lambda t: (t[1] - t[0] < 100))
+            intervals = list(cuts.intervals)
+            problem.work.random.shuffle(intervals)
+            intervals.sort(key=lambda t: (t[1] - t[0] < 100))
 
-                for interval in intervals:
-                    if cuts.is_redundant(interval):
-                        intervals_considered += 1
-                    else:
-                        await send_intervals.send(interval)
-
-                send_intervals.close()
-
-            nursery.start_soon(fill_queue)
-
-            async def apply_intervals():
-                nonlocal intervals_considered
-                while True:
-                    try:
-                        interval = await receive_intervals.receive()
-                    except trio.EndOfChannel:
-                        return
+            for interval in intervals:
+                if cuts.is_redundant(interval):
                     intervals_considered += 1
-                    await cuts.try_apply(interval)
+                else:
+                    await send_intervals.send(interval)
 
-            async with trio.open_nursery() as sub_nursery:
-                for _ in range(problem.work.parallelism * 2):
-                    sub_nursery.start_soon(apply_intervals)
+            send_intervals.close()
 
-            nursery.cancel_scope.cancel()
+        nursery.start_soon(fill_queue)
+
+        async def apply_intervals():
+            nonlocal intervals_considered
+            while True:
+                try:
+                    interval = await receive_intervals.receive()
+                except trio.EndOfChannel:
+                    return
+                intervals_considered += 1
+                await cuts.try_apply(interval)
+
+        async with trio.open_nursery() as sub_nursery:
+            for _ in range(problem.work.parallelism * 2):
+                sub_nursery.start_soon(apply_intervals)
+
+        nursery.cancel_scope.cancel()
 
 
 def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:

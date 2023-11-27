@@ -1,14 +1,10 @@
 import heapq
-import sys
 from contextlib import aclosing, asynccontextmanager
 from enum import IntEnum
 from itertools import islice
 from random import Random
-import time
 from typing import (
-    Any,
     AsyncGenerator,
-    AsyncIterator,
     Awaitable,
     Callable,
     Optional,
@@ -17,8 +13,6 @@ from typing import (
 )
 
 import trio
-from attr import define
-from tqdm import tqdm
 
 
 class Volume(IntEnum):
@@ -48,7 +42,6 @@ class WorkContext:
         self.random = random or Random(0)
         self.parallelism = parallelism
         self.volume = volume
-        self.__progress_bars: dict[int, ProgressBar] = {}
         self.last_ticked = float("-inf")
 
     async def map(
@@ -161,42 +154,7 @@ class WorkContext:
         self.report(msg, Volume.debug)
 
     def report(self, msg: str, level: Volume) -> None:
-        if self.volume >= level:
-            tqdm.write(msg, file=sys.stderr)
-
-    @asynccontextmanager
-    async def pb(
-        self,
-        current: Callable[[], int],
-        total: Callable[[], int],
-        **kwargs: Any,
-    ) -> "AsyncIterator[None]":
-        if self.volume < Volume.normal:
-            yield
-        else:
-            i = len(self.__progress_bars)
-            while i in self.__progress_bars:
-                i += 1
-            self.__progress_bars[i] = ProgressBar(
-                bar=tqdm(total=total(), **kwargs),
-                total=total,
-                current=current,
-            )
-            self.tick()
-            try:
-                yield
-            finally:
-                self.__progress_bars.pop(i).bar.close()
-
-    def tick(self) -> None:
-        now = time.time()
-        if now <= self.last_ticked + TICK_FREQUENCY:
-            return
-        self.last_ticked = now
-        for pb in self.__progress_bars.values():
-            pb.bar.total = pb.total()
-            pb.bar.update(pb.current() - pb.bar.n)
-            pb.bar.refresh()
+        return
 
 
 class NotFound(Exception):
@@ -268,10 +226,3 @@ async def parallel_map(
 
         async with aclosing(receive_out_values):
             yield receive_out_values
-
-
-@define
-class ProgressBar:
-    bar: "tqdm[None]"
-    total: Callable[[], int]
-    current: Callable[[], int]

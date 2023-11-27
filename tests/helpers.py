@@ -23,7 +23,7 @@ def reduce_with(
         return is_interesting(x)
 
     async def calc_result() -> T:
-        problem: BasicReductionProblem[T] = await BasicReductionProblem(  # type: ignore
+        problem: BasicReductionProblem[T] = BasicReductionProblem(
             initial=initial,
             is_interesting=acondition,
             work=WorkContext(parallelism=parallelism),

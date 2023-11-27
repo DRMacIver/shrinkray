@@ -1,6 +1,6 @@
 import hashlib
 from abc import ABC, abstractmethod, abstractproperty
-from threading import Lock
+import time
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
 
 import trio
@@ -37,6 +37,48 @@ def default_display(value: Any) -> str:
     return f"value of size {len(value)}"
 
 
+def default_size(value: Any) -> int:
+    try:
+        return len(value)
+    except TypeError:
+        return 0
+
+
+@define
+class ReductionStats:
+    cache_hits: int = 0
+    cache_misses: int = 0
+
+    reductions: int = 0
+    failed_reductions: int = 0
+
+    time_of_last_reduction: float = 0.0
+
+    initial_test_case_size: int = 0
+    current_test_case_size: int = 0
+
+    def time_since_last_reduction(self) -> float:
+        return time.time() - self.time_of_last_reduction
+
+    def display_stats(self) -> str:
+        reduction_percentage = (
+            1.0 - self.current_test_case_size / self.initial_test_case_size
+        ) * 100
+
+        calls = self.cache_hits + self.cache_misses
+        cache_hit_rate = (self.cache_hits / calls if calls > 0 else 0) * 100
+
+        return "\n".join(
+            [
+                f"Current test case size: {self.current_test_case_size} bytes ({reduction_percentage:.2f}% reduction)",
+                f"Time since last reduction: {self.time_since_last_reduction():.2f}s"
+                if self.reductions
+                else "No reductions yet",
+                f"Cache Hit Rate: {cache_hit_rate:.2f}",
+            ]
+        )
+
+
 @define
 class ReductionProblem(Generic[T], ABC):
     work: WorkContext
@@ -63,6 +105,9 @@ class ReductionProblem(Generic[T], ABC):
 
         return cast(ReductionProblem[S], self.__view_cache.setdefault(format, result))
 
+    async def setup(self):
+        pass
+
     @abstractproperty
     def current_test_case(self) -> T:
         ...
@@ -79,24 +124,27 @@ class ReductionProblem(Generic[T], ABC):
     def sort_key(self, test_case: T) -> Any:
         ...
 
+    @abstractmethod
+    def size(self, test_case: T) -> int:
+        return len(test_case)  # type: ignore
+
+    @property
+    def current_size(self) -> int:
+        return self.size(self.current_test_case)
+
     def canonicalise(self, test_case: T) -> T:
         return test_case
 
 
 class BasicReductionProblem(ReductionProblem[T]):
-    @classmethod
-    async def __new__(self, cls, *args, **kwargs):  # type: ignore
-        result = super().__new__(cls)
-        await result.__init__(*args, **kwargs)
-        return result
-
-    async def __init__(  # type: ignore
+    def __init__(
         self,
         initial: T,
         is_interesting: Callable[[T], Awaitable[bool]],
         work: WorkContext,
         cache_key: Callable[[T], str] = default_cache_key,
         sort_key: Callable[[T], Any] = shortlex,
+        size: Callable[[T], int] = default_size,
         canonicalise: Callable[[T], T] = default_canonicalise,
         display: Callable[[T], str] = default_display,
     ):
@@ -104,37 +152,49 @@ class BasicReductionProblem(ReductionProblem[T]):
         self.__current = initial
         self.cache_key = cache_key
         self.__sort_key = sort_key
+        self.__size = size
         self.__canonicalise = canonicalise
         self.display = display
-
-        self.__lock = Lock()
+        self.stats = ReductionStats()
+        self.stats.initial_test_case_size = self.size(initial)
+        self.stats.current_test_case_size = self.size(initial)
 
         self.__is_interesting = is_interesting
         self.__on_reduce_callbacks: list[Callable[[T], Awaitable[None]]] = []
         self.__cache = {}
+        self.__current = initial
+        self.__has_set_up = False
 
-        if not await is_interesting(initial):
+    async def setup(self):
+        if self.__has_set_up:
+            return
+        self.__has_set_up = True
+        if not await self.__is_interesting(self.current_test_case):
             raise ValueError(
-                f"Initial example ({self.display(initial)}) does not satisfy interestingness test."
+                f"Initial example ({self.display(self.current_test_case)}) does not satisfy interestingness test."
             )
 
-        self.__cache[self.cache_key(initial)] = True
+        self.__cache[self.cache_key(self.__current)] = True
 
-        canonical = self.canonicalise(initial)
+        canonical = self.canonicalise(self.__current)
 
-        if not await is_interesting(canonical):
-            self.work.warn(
-                f"Initial example ({self.display(initial)}) was interesting, but canonicalised version ({self.display(canonical)}) was not. Disabling canonicalisation."
-            )
-            self.__canonicalise = default_canonicalise
-        else:
-            self.__cache[self.cache_key(canonical)] = True
+        if canonical != self.__current:
+            if not await self.__is_interesting(canonical):
+                self.work.warn(
+                    f"Initial example ({self.display(self.__current)}) was interesting, but canonicalised version ({self.display(canonical)}) was not. Disabling canonicalisation."
+                )
+                self.__canonicalise = default_canonicalise
+            else:
+                self.__cache[self.cache_key(canonical)] = True
 
     def canonicalise(self, test_case: T) -> T:
         return self.__canonicalise(test_case)
 
     def sort_key(self, test_case: T) -> Any:
         return self.__sort_key(test_case)
+
+    def size(self, test_case: T) -> int:
+        return self.__size(test_case)
 
     def on_reduce(self, callback: Callable[[T], Awaitable[None]]) -> None:
         """Every time `is_interesting` is called with a successful reduction,
@@ -156,6 +216,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         await trio.lowlevel.checkpoint()
         keys = [self.cache_key(value)]
         try:
+            self.stats.cache_hits += 1
             return self.__cache[keys[0]]
         except KeyError:
             pass
@@ -165,13 +226,19 @@ class BasicReductionProblem(ReductionProblem[T]):
         try:
             result = self.__cache[keys[-1]]
         except KeyError:
+            self.stats.cache_hits -= 1
+            self.stats.cache_misses += 1
             result = await self.__is_interesting(value)
+            self.stats.failed_reductions += 1
             if result:
                 if self.sort_key(value) < self.sort_key(self.current_test_case):
+                    self.stats.failed_reductions -= 1
+                    self.stats.reductions += 1
+                    self.stats.time_of_last_reduction = time.time()
+                    self.stats.current_test_case_size = self.size(value)
                     self.__current = value
                     for f in self.__on_reduce_callbacks:
                         await f(value)
-            self.work.tick()
         for key in keys:
             self.__cache[key] = result
         return result
@@ -213,6 +280,7 @@ class View(ReductionProblem[T], Generic[S, T]):
         self.__parse = parse
         self.__dump = dump
         self.__sort_key = sort_key
+        self.stats = problem.stats
 
         current = problem.current_test_case
         self.__prev = current
@@ -230,11 +298,8 @@ class View(ReductionProblem[T], Generic[S, T]):
                 self.__current = new_value
         return self.__current
 
-    def cached_is_interesting(self, test_case: T) -> bool:
+    def cached_is_interesting(self, test_case: T) -> None | bool:
         return self.__problem.cached_is_interesting(self.__dump(test_case))
-
-    async def is_interesting(self, test_case: T) -> bool:
-        return await self.__problem.is_interesting(self.__dump(test_case))
 
     async def is_interesting(self, test_case: T) -> bool:
         return await self.__problem.is_interesting(self.__dump(test_case))
@@ -246,3 +311,6 @@ class View(ReductionProblem[T], Generic[S, T]):
         if self.__sort_key is not None:
             return self.__sort_key(test_case)
         return self.__problem.sort_key(self.__dump(test_case))
+
+    def size(self, test_case: T) -> int:
+        return self.__problem.size(self.__dump(test_case))

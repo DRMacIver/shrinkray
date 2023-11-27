@@ -17,6 +17,11 @@ from shrinkray.passes.bytes import byte_passes
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import Reducer
 from shrinkray.work import Volume, WorkContext
+from typing import Any
+
+import urwid
+import urwid.raw_display
+import trio
 
 
 def validate_command(ctx: Any, param: Any, value: str) -> list[str]:
@@ -257,6 +262,36 @@ def main(
     with open(backup, "wb") as writer:
         writer.write(initial)
 
+    text_header = "Shrink Ray. Press q to exit."
+    blank = urwid.Divider()
+
+    details_text = urwid.Text("")
+
+    listbox_content = [urwid.Divider("-"), blank, blank, details_text]
+
+    header = urwid.AttrMap(urwid.Text(text_header, align="center"), "header")
+    listbox = urwid.ListBox(urwid.SimpleListWalker(listbox_content))
+    frame = urwid.Frame(urwid.AttrMap(listbox, "body"), header=header)
+
+    palette = []
+
+    screen = urwid.raw_display.Screen()
+
+    def unhandled(key: Any) -> bool:
+        if key == "q":
+            raise urwid.ExitMainLoop()
+        return False
+
+    event_loop = urwid.TrioEventLoop()
+
+    ui_loop = urwid.MainLoop(
+        frame,
+        palette,
+        screen,
+        unhandled_input=unhandled,
+        event_loop=event_loop,
+    )
+
     @trio.run
     async def _() -> None:
         work = WorkContext(
@@ -293,11 +328,18 @@ def main(
                 await send_test_cases.send((test_case, send_result))
                 return await receive_result.receive()
 
-            problem: BasicReductionProblem[bytes] = await BasicReductionProblem(  # type: ignore
+            problem: BasicReductionProblem[bytes] = BasicReductionProblem(
                 is_interesting=is_interesting,
                 initial=initial,
                 work=work,
             )
+
+            @nursery.start_soon
+            async def _():
+                while True:
+                    await trio.sleep(0.05)
+
+                    details_text.set_text(problem.stats.display_stats())
 
             @problem.on_reduce
             async def _(test_case: bytes) -> None:
@@ -310,12 +352,11 @@ def main(
                 dumb_mode=not smart_pass_selection,
             )
 
-            async with problem.work.pb(
-                total=lambda: len(initial),
-                current=lambda: len(initial) - len(problem.current_test_case),
-                desc="Bytes deleted",
-            ):
-                await reducer.run()
+            nursery.start_soon(reducer.run)
+
+            with ui_loop.start():
+                await event_loop.run_async()
+
             nursery.cancel_scope.cancel()
 
 

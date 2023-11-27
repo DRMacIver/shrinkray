@@ -1,9 +1,10 @@
 from functools import wraps
+import math
+from pdb import Restart
 from typing import Any, Awaitable, Callable, Generic, Iterable, Optional, TypeVar
 
 import trio
 from attrs import define
-from exceptiongroup import ExceptionGroup
 
 from shrinkray.problem import Format, ParseError, ReductionProblem
 from shrinkray.work import Volume, WorkContext
@@ -43,13 +44,25 @@ class Reducer(Generic[T]):
         if len(self.reduction_passes) <= 1:
             self.dumb_mode = True
 
+    async def run_pass(self, rp):
+        self.target.work.note(rp.__name__)
+
+        halt = 0.9
+        while True:
+            try:
+                await rp(ReductionLimitedProblem(self.target, halt_at=halt))
+                break
+            except* RestartPass:
+                halt *= 0.95
+
     async def run(self) -> None:
+        await self.target.setup()
+
         if self.dumb_mode:
             while True:
                 prev = self.target.current_test_case
                 for rp in self.reduction_passes:
-                    self.target.work.note(rp.__name__)
-                    await rp(self.target)
+                    await self.run_pass(rp)
                 if prev == self.target.current_test_case:
                     return
 
@@ -65,20 +78,8 @@ class Reducer(Generic[T]):
                 await reduction_pass(
                     BudgetedProblem(base_problem=self.target, budget=budget)
                 )
-            except BudgetExceeded:
+            except* BudgetExceeded:
                 budget_exceeded = True
-            except ExceptionGroup as e:
-                non_budget = [
-                    child
-                    for child in e.exceptions
-                    if not isinstance(child, BudgetExceeded)
-                ]
-                if not non_budget:
-                    budget_exceeded = True
-                elif len(non_budget) == 1:
-                    raise non_budget[0]
-                else:
-                    raise ExceptionGroup(e.message, non_budget)
 
             if budget_exceeded:
                 budget = int(budget * 1.05)
@@ -247,7 +248,6 @@ class BudgetedProblem(ReductionProblem[T]):
     async def is_interesting(self, test_case: T) -> bool:
         cached = self.cached_is_interesting(test_case)
         if cached is not None:
-            self.work.tick()
             return cached
         self.__call_count += 1
         if self.__call_count >= self.budget:
@@ -257,6 +257,40 @@ class BudgetedProblem(ReductionProblem[T]):
 
     def sort_key(self, test_case: T) -> Any:
         return self.base_problem.sort_key(test_case)
+
+    @property
+    def current_test_case(self) -> T:
+        return self.base_problem.current_test_case
+
+
+class RestartPass(Exception):
+    pass
+
+
+class ReductionLimitedProblem(ReductionProblem[T]):
+    def __init__(self, base_problem, halt_at: float = 0.5):
+        super().__init__(work=base_problem.work)
+        self.base_problem = base_problem
+        n = self.base_problem.size(self.base_problem.current_test_case)
+        self.threshold = min(n - 1, math.ceil(halt_at * n))
+
+    def cached_is_interesting(self, test_case: T) -> bool | None:
+        return self.base_problem.cached_is_interesting(test_case)
+
+    async def is_interesting(self, test_case: T) -> bool:
+        cached = self.cached_is_interesting(test_case)
+        if cached is not None:
+            return cached
+        result = await self.base_problem.is_interesting(test_case)
+        if self.current_size <= self.threshold:
+            raise RestartPass()
+        return result
+
+    def sort_key(self, test_case: T) -> Any:
+        return self.base_problem.sort_key(test_case)
+
+    def size(self, test_case: T) -> int:
+        return self.base_problem.size(test_case)
 
     @property
     def current_test_case(self) -> T:

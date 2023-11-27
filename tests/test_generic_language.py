@@ -25,3 +25,10 @@ def test_can_combine_expressions():
 
 def test_does_not_error_on_bad_expression():
     assert reduce_with([combine_expressions], b"1 / 0", lambda x: True) == b"1 / 0"
+
+
+def test_can_combine_expressions_with_no_expressions():
+    assert (
+        reduce_with([combine_expressions], b"hello world", lambda x: True)
+        == b"hello world"
+    )

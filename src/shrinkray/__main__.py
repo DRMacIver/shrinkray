@@ -267,8 +267,19 @@ def main(
 
     details_text = urwid.Text("")
     reducer_status = urwid.Text("")
+    parallelism_status = urwid.Text("")
 
-    listbox_content = [urwid.Divider("-"), blank, blank, details_text, reducer_status]
+    parallel_samples = 0
+    parallel_total = 0
+
+    listbox_content = [
+        urwid.Divider("-"),
+        blank,
+        blank,
+        details_text,
+        reducer_status,
+        parallelism_status,
+    ]
 
     header = urwid.AttrMap(urwid.Text(text_header, align="center"), "header")
     listbox = urwid.ListBox(urwid.SimpleListWalker(listbox_content))
@@ -312,11 +323,16 @@ def main(
                 max(100, 10 * max(parallelism, 1))
             )
 
+            parallel_tasks_running = 0
+
             async def is_interesting_worker():
+                nonlocal parallel_tasks_running
                 try:
                     while True:
                         test_case, reply = await receive_test_cases.receive()
+                        parallel_tasks_running += 1
                         result = await is_interesting_do_work(test_case)
+                        parallel_tasks_running -= 1
                         await reply.send(result)
                 except trio.EndOfChannel:
                     pass
@@ -342,6 +358,17 @@ def main(
 
                     details_text.set_text(problem.stats.display_stats())
                     reducer_status.set_text(f"Reducer status: {reducer.status}")
+
+            @nursery.start_soon
+            async def _():
+                while True:
+                    await trio.sleep(random.expovariate(10.0))
+                    nonlocal parallel_samples, parallel_total
+                    parallel_samples += 1
+                    parallel_total += parallel_tasks_running
+                    parallelism_status.set_text(
+                        f"Current parallel workers: {parallel_tasks_running} (Average {parallel_total / parallel_samples:.2f})"
+                    )
 
             @problem.on_reduce
             async def _(test_case: bytes) -> None:

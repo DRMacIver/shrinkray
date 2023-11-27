@@ -285,6 +285,6 @@ async def short_deletions(problem: ReductionProblem[bytes]) -> None:
 
 
 def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[bytes]]:
-    yield lexeme_based_deletions
     yield hollow_braces
+    yield lexeme_based_deletions
     yield short_deletions

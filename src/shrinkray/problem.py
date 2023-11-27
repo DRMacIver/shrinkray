@@ -13,22 +13,8 @@ S = TypeVar("S")
 T = TypeVar("T")
 
 
-def default_cache_key(value: Any) -> str:
-    if not isinstance(value, bytes):
-        if not isinstance(value, str):
-            value = repr(value)
-        value = value.encode("utf-8")
-
-    hex = hashlib.sha1(value).hexdigest()[:8]
-    return f"{len(value)}:{hex}"
-
-
 def shortlex(value: Any) -> Any:
     return (len(value), value)
-
-
-def default_canonicalise(value: T) -> T:
-    return value
 
 
 def default_display(value: Any) -> str:
@@ -47,9 +33,6 @@ def default_size(value: Any) -> int:
 
 @define
 class ReductionStats:
-    cache_hits: int = 0
-    cache_misses: int = 0
-
     reductions: int = 0
     failed_reductions: int = 0
 
@@ -80,16 +63,12 @@ class ReductionStats:
                 f"Current test case size: {self.current_test_case_size} bytes"
             )
 
-        calls = self.cache_hits + self.cache_misses
-        cache_hit_rate = (self.cache_hits / calls if calls > 0 else 0) * 100
-
         return "\n".join(
             [
                 reduction_msg,
                 f"Time since last reduction: {self.time_since_last_reduction():.2f}s ({self.reductions / runtime:.2f} reductions/s)"
                 if self.reductions
                 else "No reductions yet",
-                f"Cache Hit Rate: {cache_hit_rate}",
             ]
         )
 
@@ -132,10 +111,6 @@ class ReductionProblem(Generic[T], ABC):
         pass
 
     @abstractmethod
-    def cached_is_interesting(self, test_case: T) -> Optional[bool]:
-        pass
-
-    @abstractmethod
     def sort_key(self, test_case: T) -> Any:
         ...
 
@@ -147,9 +122,6 @@ class ReductionProblem(Generic[T], ABC):
     def current_size(self) -> int:
         return self.size(self.current_test_case)
 
-    def canonicalise(self, test_case: T) -> T:
-        return test_case
-
 
 class BasicReductionProblem(ReductionProblem[T]):
     def __init__(
@@ -157,18 +129,14 @@ class BasicReductionProblem(ReductionProblem[T]):
         initial: T,
         is_interesting: Callable[[T], Awaitable[bool]],
         work: WorkContext,
-        cache_key: Callable[[T], str] = default_cache_key,
         sort_key: Callable[[T], Any] = shortlex,
         size: Callable[[T], int] = default_size,
-        canonicalise: Callable[[T], T] = default_canonicalise,
         display: Callable[[T], str] = default_display,
     ):
         super().__init__(work=work)
         self.__current = initial
-        self.cache_key = cache_key
         self.__sort_key = sort_key
         self.__size = size
-        self.__canonicalise = canonicalise
         self.display = display
         self.stats = ReductionStats()
         self.stats.initial_test_case_size = self.size(initial)
@@ -176,7 +144,6 @@ class BasicReductionProblem(ReductionProblem[T]):
 
         self.__is_interesting = is_interesting
         self.__on_reduce_callbacks: list[Callable[[T], Awaitable[None]]] = []
-        self.__cache = {}
         self.__current = initial
         self.__has_set_up = False
 
@@ -189,22 +156,6 @@ class BasicReductionProblem(ReductionProblem[T]):
                 f"Initial example ({self.display(self.current_test_case)}) does not satisfy interestingness test."
             )
 
-        self.__cache[self.cache_key(self.__current)] = True
-
-        canonical = self.canonicalise(self.__current)
-
-        if canonical != self.__current:
-            if not await self.__is_interesting(canonical):
-                self.work.warn(
-                    f"Initial example ({self.display(self.__current)}) was interesting, but canonicalised version ({self.display(canonical)}) was not. Disabling canonicalisation."
-                )
-                self.__canonicalise = default_canonicalise
-            else:
-                self.__cache[self.cache_key(canonical)] = True
-
-    def canonicalise(self, test_case: T) -> T:
-        return self.__canonicalise(test_case)
-
     def sort_key(self, test_case: T) -> Any:
         return self.__sort_key(test_case)
 
@@ -216,46 +167,20 @@ class BasicReductionProblem(ReductionProblem[T]):
         call `fn` with the new value. Note that these are called outside the lock."""
         self.__on_reduce_callbacks.append(callback)
 
-    def cached_is_interesting(self, value: T) -> Optional[bool]:
-        return self.__cache.get(self.cache_key(value))
-
     async def is_interesting(self, value: T) -> bool:
-        """Returns true if this value is interesting.
-
-        Caches and maintains relevant state.
-
-        Note: This function will lock while maintaining state, but
-        will *not* lock around calling the underlying interestingness
-        test.
-        """
+        """Returns true if this value is interesting."""
         await trio.lowlevel.checkpoint()
-        keys = [self.cache_key(value)]
-        try:
-            self.stats.cache_hits += 1
-            return self.__cache[keys[0]]
-        except KeyError:
-            pass
-
-        value = self.canonicalise(value)
-        keys.append(self.cache_key(value))
-        try:
-            result = self.__cache[keys[-1]]
-        except KeyError:
-            self.stats.cache_hits -= 1
-            self.stats.cache_misses += 1
-            result = await self.__is_interesting(value)
-            self.stats.failed_reductions += 1
-            if result:
-                if self.sort_key(value) < self.sort_key(self.current_test_case):
-                    self.stats.failed_reductions -= 1
-                    self.stats.reductions += 1
-                    self.stats.time_of_last_reduction = time.time()
-                    self.stats.current_test_case_size = self.size(value)
-                    self.__current = value
-                    for f in self.__on_reduce_callbacks:
-                        await f(value)
-        for key in keys:
-            self.__cache[key] = result
+        result = await self.__is_interesting(value)
+        self.stats.failed_reductions += 1
+        if result:
+            if self.sort_key(value) < self.sort_key(self.current_test_case):
+                self.stats.failed_reductions -= 1
+                self.stats.reductions += 1
+                self.stats.time_of_last_reduction = time.time()
+                self.stats.current_test_case_size = self.size(value)
+                self.__current = value
+                for f in self.__on_reduce_callbacks:
+                    await f(value)
         return result
 
     @property
@@ -313,14 +238,8 @@ class View(ReductionProblem[T], Generic[S, T]):
                 self.__current = new_value
         return self.__current
 
-    def cached_is_interesting(self, test_case: T) -> None | bool:
-        return self.__problem.cached_is_interesting(self.__dump(test_case))
-
     async def is_interesting(self, test_case: T) -> bool:
         return await self.__problem.is_interesting(self.__dump(test_case))
-
-    def canonicalise(self, test_case: T) -> T:
-        return self.__parse(self.__problem.canonicalise(self.__dump(test_case)))
 
     def sort_key(self, test_case: T) -> Any:
         if self.__sort_key is not None:

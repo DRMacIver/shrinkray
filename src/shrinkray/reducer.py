@@ -208,18 +208,11 @@ class ChannelBackedProblem(ReductionProblem[T]):
         self.__current = self.base_problem.current_test_case
         self.label = label
 
-    def cached_is_interesting(self, test_case: T) -> bool | None:
-        return self.base_problem.cached_is_interesting(test_case)
-
     async def is_interesting(self, test_case: T) -> bool:
-        cached = self.cached_is_interesting(test_case)
-        if cached is not None:
-            result = cached
-        else:
-            await self.work_queue.send(
-                WorkChunk(label=self.label, value=test_case, response=self.send_channel)
-            )
-            result = await self.receive_channel.receive()
+        await self.work_queue.send(
+            WorkChunk(label=self.label, value=test_case, response=self.send_channel)
+        )
+        result = await self.receive_channel.receive()
 
         if result and self.sort_key(test_case) < self.sort_key(self.current_test_case):
             self.__current = test_case
@@ -245,13 +238,7 @@ class BudgetedProblem(ReductionProblem[T]):
         self.budget = budget
         self.__call_count = 0
 
-    def cached_is_interesting(self, test_case: T) -> bool | None:
-        return self.base_problem.cached_is_interesting(test_case)
-
     async def is_interesting(self, test_case: T) -> bool:
-        cached = self.cached_is_interesting(test_case)
-        if cached is not None:
-            return cached
         self.__call_count += 1
         if self.__call_count >= self.budget:
             raise BudgetExceeded()
@@ -277,13 +264,7 @@ class ReductionLimitedProblem(ReductionProblem[T]):
         n = self.base_problem.size(self.base_problem.current_test_case)
         self.threshold = min(n - 1, math.ceil(halt_at * n))
 
-    def cached_is_interesting(self, test_case: T) -> bool | None:
-        return self.base_problem.cached_is_interesting(test_case)
-
     async def is_interesting(self, test_case: T) -> bool:
-        cached = self.cached_is_interesting(test_case)
-        if cached is not None:
-            return cached
         result = await self.base_problem.is_interesting(test_case)
         if self.current_size <= self.threshold:
             raise RestartPass()

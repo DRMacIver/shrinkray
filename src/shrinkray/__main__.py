@@ -105,16 +105,6 @@ class InputType(IntEnum):
 )
 @click.version_option()
 @click.option(
-    "--smart-pass-selection/--no-smart-pass-selection",
-    default=False,
-    help=(
-        "If enabled, uses smarter algorithms to try to select which pass will run."
-        "When disabled will run each pass to completion in a hand-selected order."
-        "Currently the smarter algorithms are a bit unreliable and can lead to it"
-        "getting stuck, so are disabled by default."
-    ),
-)
-@click.option(
     "--backup",
     default="",
     help=(
@@ -180,7 +170,6 @@ def main(
     parallelism: int,
     seed: int,
     volume: Volume,
-    smart_pass_selection: bool,
 ) -> None:
     if timeout <= 0:
         timeout = float("inf")
@@ -378,7 +367,6 @@ def main(
             reducer = Reducer(
                 target=problem,
                 reduction_passes=common_passes(problem),
-                dumb_mode=not smart_pass_selection,
             )
 
             nursery.start_soon(reducer.run)

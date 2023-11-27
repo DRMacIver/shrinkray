@@ -112,8 +112,7 @@ def regex_pass(
                         replacements[i],
                         is_interesting,
                         work=problem.work,
-                    )  # type: ignore
-
+                    )
                     nursery.start_soon(fn, subproblem)
 
                 for i in range(len(matching_regions)):

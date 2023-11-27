@@ -374,7 +374,10 @@ def main(
                 reduction_passes=common_passes(problem),
             )
 
-            nursery.start_soon(reducer.run)
+            @nursery.start_soon
+            async def _():
+                await reducer.run()
+                nursery.cancel_scope.cancel()
 
             with ui_loop.start():
                 await event_loop.run_async()
@@ -382,5 +385,5 @@ def main(
             nursery.cancel_scope.cancel()
 
 
-if __name__ == "__main__":
-    main(prog_name="shrinkray")  # pragma: no cover
+if __name__ == "__main__":  # pragma: no cover
+    main(prog_name="shrinkray")

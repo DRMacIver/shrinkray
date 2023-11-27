@@ -45,6 +45,10 @@ class ReductionStats:
     def time_since_last_reduction(self) -> float:
         return time.time() - self.time_of_last_reduction
 
+    @property
+    def calls(self):
+        return self.reductions + self.failed_reductions
+
     def display_stats(self) -> str:
         runtime = time.time() - self.start_time
         if self.reductions > 0:
@@ -66,6 +70,7 @@ class ReductionStats:
         return "\n".join(
             [
                 reduction_msg,
+                f"Calls to interestingness test: {self.calls}",
                 f"Time since last reduction: {self.time_since_last_reduction():.2f}s ({self.reductions / runtime:.2f} reductions/s)"
                 if self.reductions
                 else "No reductions yet",

@@ -15,7 +15,6 @@ def reduce_with(
     rp: Iterable[ReductionPass[T]],
     initial: T,
     is_interesting: Callable[[T], bool],
-    dumb=True,
     parallelism=1,
 ) -> T:
     async def acondition(x):
@@ -32,7 +31,6 @@ def reduce_with(
         reducer = Reducer(
             target=problem,
             reduction_passes=rp,
-            dumb_mode=dumb,
         )
 
         await reducer.run()

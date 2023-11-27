@@ -266,8 +266,9 @@ def main(
     blank = urwid.Divider()
 
     details_text = urwid.Text("")
+    reducer_status = urwid.Text("")
 
-    listbox_content = [urwid.Divider("-"), blank, blank, details_text]
+    listbox_content = [urwid.Divider("-"), blank, blank, details_text, reducer_status]
 
     header = urwid.AttrMap(urwid.Text(text_header, align="center"), "header")
     listbox = urwid.ListBox(urwid.SimpleListWalker(listbox_content))
@@ -337,9 +338,10 @@ def main(
             @nursery.start_soon
             async def _():
                 while True:
-                    await trio.sleep(0.05)
+                    await trio.sleep(0.1)
 
                     details_text.set_text(problem.stats.display_stats())
+                    reducer_status.set_text(f"Reducer status: {reducer.status}")
 
             @problem.on_reduce
             async def _(test_case: bytes) -> None:

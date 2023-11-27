@@ -39,13 +39,15 @@ class Reducer(Generic[T]):
     reduction_passes: Iterable[ReductionPass[T]]
     dumb_mode: bool = False
 
+    status: str = "Starting up"
+
     def __attrs_post_init__(self) -> None:
         self.reduction_passes = list(self.reduction_passes)
         if len(self.reduction_passes) <= 1:
             self.dumb_mode = True
 
     async def run_pass(self, rp):
-        self.target.work.note(rp.__name__)
+        self.status = f"Running reduction pass {rp.__name__}"
 
         halt = 0.9
         while True:
@@ -92,6 +94,7 @@ class Reducer(Generic[T]):
         # with some pass that mostly makes tiny changes, so we run for a little
         # longer after we've found the first successful reduction and then return
         # whichever pass found the best example in that window.
+        self.status = "Selecting a reduction pass to run."
         async with trio.open_nursery() as nursery:
             passes = self.reduction_passes
 

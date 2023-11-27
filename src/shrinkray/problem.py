@@ -2,6 +2,7 @@ import hashlib
 from abc import ABC, abstractmethod, abstractproperty
 import time
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
+import attrs
 
 import trio
 from attrs import define
@@ -53,6 +54,7 @@ class ReductionStats:
     failed_reductions: int = 0
 
     time_of_last_reduction: float = 0.0
+    start_time: float = attrs.Factory(time.time)
 
     initial_test_case_size: int = 0
     current_test_case_size: int = 0
@@ -61,20 +63,33 @@ class ReductionStats:
         return time.time() - self.time_of_last_reduction
 
     def display_stats(self) -> str:
-        reduction_percentage = (
-            1.0 - self.current_test_case_size / self.initial_test_case_size
-        ) * 100
+        runtime = time.time() - self.start_time
+        if self.reductions > 0:
+            reduction_percentage = (
+                1.0 - self.current_test_case_size / self.initial_test_case_size
+            ) * 100
+            reduction_rate = (
+                self.initial_test_case_size - self.current_test_case_size
+            ) / runtime
+            reduction_msg = (
+                f"Current test case size: {self.current_test_case_size} bytes "
+                f"({reduction_percentage:.2f}% reduction, {reduction_rate:.2f} bytes / second)"
+            )
+        else:
+            reduction_msg = (
+                f"Current test case size: {self.current_test_case_size} bytes"
+            )
 
         calls = self.cache_hits + self.cache_misses
         cache_hit_rate = (self.cache_hits / calls if calls > 0 else 0) * 100
 
         return "\n".join(
             [
-                f"Current test case size: {self.current_test_case_size} bytes ({reduction_percentage:.2f}% reduction)",
-                f"Time since last reduction: {self.time_since_last_reduction():.2f}s"
+                reduction_msg,
+                f"Time since last reduction: {self.time_since_last_reduction():.2f}s ({self.reductions / runtime:.2f} reductions/s)"
                 if self.reductions
                 else "No reductions yet",
-                f"Cache Hit Rate: {cache_hit_rate:.2f}",
+                f"Cache Hit Rate: {cache_hit_rate}",
             ]
         )
 

@@ -8,9 +8,14 @@ from enum import Enum, IntEnum
 from shutil import which
 from tempfile import TemporaryDirectory
 from typing import Any, Generic, TypeVar
+import warnings
 
 import click
+
 import trio
+
+warnings.filterwarnings("ignore", category=trio.TrioDeprecationWarning)
+
 from shrinkray.passes import common_passes
 
 from shrinkray.passes.bytes import byte_passes

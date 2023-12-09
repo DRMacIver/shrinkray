@@ -69,7 +69,7 @@ class ReductionStats:
             [
                 reduction_msg,
                 f"Total runtime: {precisedelta(runtime)}",
-                f"Calls to interestingness test: {self.calls} ({self.interesting_calls / self.calls * 100.0:.2f}% interesting)"
+                f"Calls to interestingness test: {self.calls} ({self.calls / runtime:.2f} calls / second, {self.interesting_calls / self.calls * 100.0:.2f}% interesting)"
                 if self.calls > 0
                 else "Not yet called interestingness test",
                 f"Time since last reduction: {self.time_since_last_reduction():.2f}s ({self.reductions / runtime:.2f} reductions / second)"

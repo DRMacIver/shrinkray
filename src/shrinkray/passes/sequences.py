@@ -182,7 +182,7 @@ class ElementDeleter(Generic[Seq]):
 
     async def run(self):
         async with trio.open_nursery() as nursery:
-            for _ in range(math.ceil(self.problem.work.parallelism / 3)):
+            for _ in range(self.problem.work.parallelism):
                 nursery.start_soon(self.delete_backwards)
                 nursery.start_soon(self.delete_forwards)
                 nursery.start_soon(self.delete_randomly)

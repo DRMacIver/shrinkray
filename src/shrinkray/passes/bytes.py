@@ -124,11 +124,18 @@ def with_deletions(target: bytes, deletions: list[tuple[int, int]]) -> bytes:
 
 
 class CutTarget:
-    def __init__(self, problem: ReductionProblem, intervals: list[tuple[int, int]]):
+    def __init__(
+        self, problem: ReductionProblem[bytes], intervals: list[tuple[int, int]]
+    ):
         self.problem = problem
         self.target = problem.current_test_case
         self.intervals = list(map(tuple, intervals))
         self.intervals.sort()
+
+        self.intervals_by_content = defaultdict(list)
+        for u, v in intervals:
+            self.intervals_by_content[self.target[u:v]].append([u, v])
+
         self.applied = []
         self.generation = 0
         self.attempted = {}
@@ -160,6 +167,13 @@ class CutTarget:
                 hi = mid
 
         return end <= self.intervals[lo][1]
+
+    def similar_cuts(self, cut):
+        return [
+            s
+            for s in self.intervals_by_content[self.target[cut[0] : cut[1]]]
+            if s != cut
+        ]
 
     async def try_apply(self, interval: tuple[int, int]) -> bool:
         interval = tuple(interval)
@@ -251,7 +265,10 @@ async def delete_intervals(
                 except trio.EndOfChannel:
                     return
                 intervals_considered += 1
-                await cuts.try_apply(interval)
+                if await cuts.try_apply(interval):
+                    similar = cuts.similar_cuts(interval)
+                    if similar:
+                        await cuts.try_merge(similar)
 
         async with trio.open_nursery() as sub_nursery:
             for _ in range(problem.work.parallelism * 2):

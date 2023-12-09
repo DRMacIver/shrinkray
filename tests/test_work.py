@@ -1,4 +1,5 @@
 from contextlib import aclosing
+
 import pytest
 
 from shrinkray.work import WorkContext, parallel_map

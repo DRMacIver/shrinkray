@@ -1,12 +1,10 @@
-from typing import TypeVar
-from typing import Callable, Iterable
-import trio
-from shrinkray.reducer import Reducer, ReductionPass
-from shrinkray.problem import BasicReductionProblem
+from typing import Callable, Iterable, TypeVar
 
+import trio
+
+from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import Reducer, ReductionPass
 from shrinkray.work import WorkContext
-
 
 T = TypeVar("T")
 

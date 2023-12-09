@@ -1,37 +1,34 @@
-from difflib import unified_diff
 import os
 import random
 import shlex
 import signal
 import subprocess
 import time
-from tkinter import W
 import traceback
+import warnings
+from difflib import unified_diff
 from enum import Enum, IntEnum
 from shutil import which
 from tempfile import TemporaryDirectory
 from typing import Any, Generic, TypeVar
-import warnings
-import chardet
 
+import chardet
 import click
 import humanize
-
 import trio
 
 warnings.filterwarnings("ignore", category=trio.TrioDeprecationWarning)
 
-from shrinkray.passes import common_passes
+from typing import Any
 
-from shrinkray.passes.bytes import byte_passes
+import trio
+import urwid
+import urwid.raw_display
+
+from shrinkray.passes import common_passes
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import Reducer
 from shrinkray.work import Volume, WorkContext
-from typing import Any
-
-import urwid
-import urwid.raw_display
-import trio
 
 
 def validate_command(ctx: Any, param: Any, value: str) -> list[str]:

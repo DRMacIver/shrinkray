@@ -3,14 +3,7 @@ from contextlib import aclosing, asynccontextmanager
 from enum import IntEnum
 from itertools import islice
 from random import Random
-from typing import (
-    AsyncGenerator,
-    Awaitable,
-    Callable,
-    Optional,
-    Sequence,
-    TypeVar,
-)
+from typing import AsyncGenerator, Awaitable, Callable, Optional, Sequence, TypeVar
 
 import trio
 

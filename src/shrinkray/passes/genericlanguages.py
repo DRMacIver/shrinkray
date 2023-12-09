@@ -2,11 +2,13 @@
 Module of reduction passes designed for "things that look like programming languages".
 """
 
-from functools import wraps
 import re
-from typing import Callable, AnyStr
+from functools import wraps
+from typing import AnyStr, Callable
 
+import trio
 from attr import define
+
 from shrinkray.problem import (
     BasicReductionProblem,
     Format,
@@ -14,7 +16,6 @@ from shrinkray.problem import (
     ReductionProblem,
 )
 from shrinkray.reducer import ReductionPass
-import trio
 
 
 @define(frozen=True)

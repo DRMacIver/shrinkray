@@ -1,4 +1,3 @@
-import math
 from typing import Any, Generic, Iterable, Sequence, TypeVar, cast
 
 import trio

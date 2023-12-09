@@ -1,9 +1,9 @@
-from tests.helpers import reduce_with
-
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
     reduce_integer_literals,
 )
+
+from tests.helpers import reduce_with
 
 
 def test_can_reduce_an_integer_in_the_middle_of_a_string():

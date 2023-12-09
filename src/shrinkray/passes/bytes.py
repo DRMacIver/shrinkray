@@ -1,14 +1,13 @@
-from collections import Counter, defaultdict, deque
 import math
+from collections import Counter, defaultdict, deque
 from typing import Iterator
 
+import trio
 from attrs import define
-from shrinkray.passes.sequences import ElementDeleter, delete_elements
 
+from shrinkray.passes.sequences import delete_elements
 from shrinkray.problem import Format, ReductionProblem
 from shrinkray.reducer import ReductionPass, compose
-
-import trio
 
 
 @define(frozen=True)
@@ -66,7 +65,7 @@ def find_ngram_endpoints(value: bytes) -> list[list[int]]:
         ):
             k += 1
 
-        if k > 0 and (indices[0] == 0 or len(set(value[i - 1] for i in indices)) > 1):
+        if k > 0 and (indices[0] == 0 or len({value[i - 1] for i in indices}) > 1):
             assert isinstance(indices, list)
             results.append((k, indices))
 

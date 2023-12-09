@@ -1,5 +1,5 @@
-from functools import wraps
 import math
+from functools import wraps
 from typing import Any, Awaitable, Callable, Generic, Iterable, TypeVar
 
 from attrs import define

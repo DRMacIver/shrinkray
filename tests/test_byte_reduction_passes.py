@@ -2,6 +2,7 @@ import ast
 
 from shrinkray.passes.bytes import short_deletions
 from shrinkray.passes.sequences import single_backward_delete
+
 from tests.helpers import reduce_with
 
 

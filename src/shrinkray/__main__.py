@@ -4,6 +4,7 @@ import random
 import shlex
 import signal
 import subprocess
+import time
 import traceback
 from enum import Enum, IntEnum
 from shutil import which
@@ -12,6 +13,7 @@ from typing import Any, Generic, TypeVar
 import warnings
 
 import click
+import humanize
 
 import trio
 
@@ -420,6 +422,14 @@ def main(
                 await event_loop.run_async()
 
             nursery.cancel_scope.cancel()
+        print("Reduction completed!")
+        stats = problem.stats
+        if stats.reductions == 0:
+            print("Test case was already maximally reduced.")
+        else:
+            print(
+                f"Deleted {humanize.naturalsize(stats.initial_test_case_size - stats.current_test_case_size)} in {humanize.precisedelta(time.time() - stats.start_time)}"
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover

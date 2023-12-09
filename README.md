@@ -53,3 +53,11 @@ Currently the bottleneck on scaling to a very large number of cores is how fast 
 This also depends on the performance of the interestingness test - the slower your test is to run, the more you'll be able to scale linearly with the number of cores available.
 
 I'm quite interested in getting this part to scale well, so please let me know if you find examples where it doesn't seem to work.
+
+## Bug Reports
+
+Shrink Ray is still pretty new and under-tested software, so it definitely has bugs. If you run into any, [please file an issue](https://github.com/DRMacIver/shrinkray/issues).
+
+As well as obvious bugs (crashes, etc) I'm also very interested in hearing about usability issues and cases where the reduced test case isn't very good.
+
+Requests for new features, new supported formats, etc. also welcome although I'm less likely to jump right on them.

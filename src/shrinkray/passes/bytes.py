@@ -2,7 +2,7 @@ from collections import Counter, defaultdict, deque
 from typing import Iterator
 
 from attrs import define
-import chardet
+import string
 from shrinkray.passes.sequences import delete_elements
 
 from shrinkray.problem import Format, ReductionProblem
@@ -81,10 +81,37 @@ def find_ngram_endpoints(value: bytes) -> list[list[int]]:
     return results
 
 
+def tokenize(text: bytes) -> list[bytes]:
+    result = []
+    i = 0
+    while i < len(text):
+        c = bytes([text[i]])
+        j = i + 1
+        if b"A" <= c <= b"z":
+            while j < len(text) and (
+                b"A"[0] <= text[j] <= b"z"[0]
+                or text[j] == b"_"[0]
+                or b"0"[0] <= text[j] <= b"9"[0]
+            ):
+                j += 1
+        elif b"0" <= c <= b"9":
+            while j < len(text) and (
+                text[j] == b"."[0] or b"0"[0] <= text[j] <= b"9"[0]
+            ):
+                j += 1
+        elif c == b" ":
+            while j < len(text) and (text[j] == b" "[0]):
+                j += 1
+        result.append(text[i:j])
+        i = j
+    assert b"".join(result) == text
+    return result
+
+
 MAX_DELETE_INTERVAL = 8
 
 
-async def lexeme_based_deletions(problem: ReductionProblem[bytes], min_size=0) -> None:
+async def lexeme_based_deletions(problem: ReductionProblem[bytes], min_size=8) -> None:
     intervals_by_k = defaultdict(set)
 
     for k, endpoints in find_ngram_endpoints(problem.current_test_case):
@@ -292,10 +319,26 @@ def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:
     return intervals
 
 
-async def hollow_braces(problem: ReductionProblem[bytes]):
+def quote_intervals(target: bytes) -> list[tuple[int, int]]:
+    indices = defaultdict(list)
+    for i, c in enumerate(target):
+        indices[c].append(i)
+
+    intervals = []
+    for quote in b"\"'":
+        xs = indices[quote]
+        for u, v in zip(xs, xs[1:], strict=False):
+            intervals.append((u + 1, v))
+    return intervals
+
+
+async def hollow(problem: ReductionProblem[bytes]):
     target = problem.current_test_case
     await delete_intervals(
-        problem, brace_intervals(target, b"{}") + brace_intervals(target, b"[]")
+        problem,
+        brace_intervals(target, b"{}")
+        + brace_intervals(target, b"[]")
+        + quote_intervals(target),
     )
 
 
@@ -311,12 +354,30 @@ async def short_deletions(problem: ReductionProblem[bytes]) -> None:
     )
 
 
-def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[bytes]]:
-    yield hollow_braces
+@define(frozen=True)
+class Tokenize(Format[bytes, list[bytes]]):
+    def __repr__(self) -> bytes:
+        return "tokenize"
 
-    high_prio_splitters = [b"\n", b";", b",", b'"', b"'", b" "]
+    @property
+    def name(self) -> bytes:
+        return "tokenize"
+
+    def parse(self, value: bytes) -> list[bytes]:
+        return tokenize(value)
+
+    def dumps(self, value: list[bytes]) -> bytes:
+        return b"".join(value)
+
+
+def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[bytes]]:
+    yield hollow
+
+    high_prio_splitters = [b"\n", b";"]
     for split in high_prio_splitters:
         yield compose(Split(split), delete_elements)
+
+    yield compose(Tokenize(), delete_elements)
 
     all_bytes = Counter(problem.current_test_case)
 

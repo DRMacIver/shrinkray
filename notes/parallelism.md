@@ -66,8 +66,8 @@ The sleeping wasn't in earlier versions, and it plays badly with the adaptive na
 passes, where once you start succeeding you find many other similar ways to delete. This means that you can
 potentially end up with very long retry loops as the other task keeps sniping the work out from under you.
 The sleep thus assumes that if you got sniped once you're likely to get sniped again and it's better to just
-back off and let the other task do its thing. Currently we implement a per patch randomized exponential backoff.
-This is unlikely to be optimal but seems to work reasonably well.
+back off and let the other task do its thing. Currently we sleep for an exponential variate with an average of
+1s. This is unlikely to be optimal but seems to work reasonable well.
 
 ## Bounding the amount of parallelism
 

@@ -1,8 +1,8 @@
 from collections import Counter, defaultdict, deque
+import math
 from typing import Iterator
 
 from attrs import define
-import string
 from shrinkray.passes.sequences import ElementDeleter, delete_elements
 
 from shrinkray.problem import Format, ReductionProblem
@@ -354,20 +354,52 @@ async def short_deletions(problem: ReductionProblem[bytes]) -> None:
     )
 
 
+class SimpleCutTarget:
+    def __init__(self, problem: ReductionProblem[bytes]):
+        self.problem = problem
+        self.target = problem.current_test_case
+
+        self.applied = []
+        self.generation = 0
+
+    async def try_merge(self, intervals: list[tuple[int, int]]) -> bool:
+        while True:
+            generation_at_start = self.generation
+
+            merged = merged_intervals(self.applied + intervals)
+            if merged == self.applied:
+                return True
+            attempt = with_deletions(self.target, merged)
+
+            succeeded = await self.problem.is_interesting(attempt)
+
+            if not succeeded:
+                return False
+
+            if self.generation == generation_at_start:
+                self.generation += 1
+                self.applied = merged
+                return True
+
+            # Sleep for a bit to give whichever other task is making progress
+            # that's stomping on ours time to do its thing.
+            await trio.sleep(self.problem.work.random.expovariate(1))
+
+
 async def lift_braces(problem: ReductionProblem[bytes]):
     target = problem.current_test_case
 
-    open, close = b"{}"
+    open_brace, close_brace = b"{}"
     start_stack = []
     child_stack = []
 
     results = []
 
     for i, c in enumerate(target):
-        if c == open:
+        if c == open_brace:
             start_stack.append(i)
             child_stack.append([])
-        elif c == close and start_stack:
+        elif c == close_brace and start_stack:
             start = start_stack.pop() + 1
             end = i
             children = child_stack.pop()
@@ -376,15 +408,31 @@ async def lift_braces(problem: ReductionProblem[bytes]):
             if end > start:
                 results.append((start, end, children))
 
-    deleter = ElementDeleter(problem)
+    target = SimpleCutTarget(problem)
 
     async with trio.open_nursery() as nursery:
-        for start, end, children in results:
-            for child_start, child_end in children:
-                to_delete = frozenset(range(start, child_start)) | frozenset(
-                    range(child_end, end)
-                )
-                nursery.start_soon(deleter.try_delete_set, to_delete)
+        async with trio.open_nursery() as nursery:
+            send_cuts, receive_cuts = trio.open_memory_channel(max_buffer_size=math.inf)
+            sent_any = False
+            for start, end, children in results:
+                for child_start, child_end in children:
+                    sent_any = True
+                    await send_cuts.send([(start, child_start), (child_end, end)])
+
+            send_cuts.close()
+
+            if sent_any:
+
+                async def consumer():
+                    try:
+                        while True:
+                            cuts = await receive_cuts.receive()
+                            await target.try_merge(cuts)
+                    except trio.EndOfChannel:
+                        pass
+
+                for _ in range(problem.work.parallelism):
+                    nursery.start_soon(consumer)
 
 
 @define(frozen=True)

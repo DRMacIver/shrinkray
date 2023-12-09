@@ -1,9 +1,8 @@
-import hashlib
 from abc import ABC, abstractmethod, abstractproperty
 import time
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
 import attrs
-
+from humanize import precisedelta
 import trio
 from attrs import define
 
@@ -36,6 +35,9 @@ class ReductionStats:
     reductions: int = 0
     failed_reductions: int = 0
 
+    calls: int = 0
+    interesting_calls: int = 0
+
     time_of_last_reduction: float = 0.0
     start_time: float = attrs.Factory(time.time)
 
@@ -44,10 +46,6 @@ class ReductionStats:
 
     def time_since_last_reduction(self) -> float:
         return time.time() - self.time_of_last_reduction
-
-    @property
-    def calls(self):
-        return self.reductions + self.failed_reductions
 
     def display_stats(self) -> str:
         runtime = time.time() - self.start_time
@@ -70,8 +68,11 @@ class ReductionStats:
         return "\n".join(
             [
                 reduction_msg,
-                f"Calls to interestingness test: {self.calls}",
-                f"Time since last reduction: {self.time_since_last_reduction():.2f}s ({self.reductions / runtime:.2f} reductions/s)"
+                f"Total runtime: {precisedelta(runtime)}",
+                f"Calls to interestingness test: {self.calls} ({self.interesting_calls / self.calls * 100.0:.2f}% interesting)"
+                if self.calls > 0
+                else "Not yet called interestingness test",
+                f"Time since last reduction: {self.time_since_last_reduction():.2f}s ({self.reductions / runtime:.2f} reductions / second)"
                 if self.reductions
                 else "No reductions yet",
             ]
@@ -177,7 +178,9 @@ class BasicReductionProblem(ReductionProblem[T]):
         await trio.lowlevel.checkpoint()
         result = await self.__is_interesting(value)
         self.stats.failed_reductions += 1
+        self.stats.calls += 1
         if result:
+            self.stats.interesting_calls += 1
             if self.sort_key(value) < self.sort_key(self.current_test_case):
                 self.stats.failed_reductions -= 1
                 self.stats.reductions += 1

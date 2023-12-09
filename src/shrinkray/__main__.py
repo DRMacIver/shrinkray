@@ -465,7 +465,7 @@ def main(
                     if not can_format:
                         return data
                     attempt = reformat_data(data)
-                    if await problem.is_interesting(attempt):
+                    if attempt == data or await problem.is_interesting(attempt):
                         return attempt
                     else:
                         can_format = False

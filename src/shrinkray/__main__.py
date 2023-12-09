@@ -5,6 +5,7 @@ import shlex
 import signal
 import subprocess
 import time
+from tkinter import W
 import traceback
 from enum import Enum, IntEnum
 from shutil import which
@@ -128,10 +129,17 @@ def reformat_data(data):
     def newline():
         result.append("\n" + indent * " ")
 
+    start_of_newline = True
     for i, c in enumerate(decoded):
         if c == "\n":
+            start_of_newline = True
             newline()
             continue
+        elif c == " ":
+            if start_of_newline:
+                continue
+        else:
+            start_of_newline = False
         if c == "{":
             result.append(c)
             indent += 4
@@ -155,7 +163,7 @@ def reformat_data(data):
         prev = result
 
         result = result.replace(" \n", "\n")
-        result = result.replace("\n\n\n", "\n\n")
+        result = result.replace("\n\n", "\n")
 
     return result.encode(encoding)
 
@@ -471,10 +479,14 @@ def main(
                         can_format = False
                         return data
 
-                prev = await attempt_format(problem.current_test_case)
+                prev_unformatted = problem.current_test_case
+                prev = await attempt_format(prev_unformatted)
 
                 time_of_last_update = time.time()
                 while True:
+                    if problem.current_test_case == prev_unformatted:
+                        await trio.sleep(0.1)
+                        continue
                     current = await attempt_format(problem.current_test_case)
                     if prev == current:
                         await trio.sleep(0.1)
@@ -493,6 +505,7 @@ def main(
                         continue
                     diff_to_display.set_text(diff)
                     prev = current
+                    prev = problem.current_test_case
                     time_of_last_update = time.time()
                     if can_format:
                         await trio.sleep(4)
@@ -545,7 +558,7 @@ def main(
         else:
             assert reformat
             print(
-                f"Running reformatting resulted in an increase of {humanize.naturalsize(formatting_increase)} bytes."
+                f"Running reformatting resulted in an increase of {humanize.naturalsize(formatting_increase)}."
             )
 
 

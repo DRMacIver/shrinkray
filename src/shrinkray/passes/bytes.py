@@ -327,7 +327,8 @@ def quote_intervals(target: bytes) -> list[tuple[int, int]]:
     for quote in b"\"'":
         xs = indices[quote]
         for u, v in zip(xs, xs[1:], strict=False):
-            intervals.append((u + 1, v))
+            if u + 1 < v:
+                intervals.append((u + 1, v))
     return intervals
 
 

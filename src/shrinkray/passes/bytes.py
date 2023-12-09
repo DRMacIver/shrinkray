@@ -3,7 +3,7 @@ from typing import Iterator
 
 from attrs import define
 import string
-from shrinkray.passes.sequences import delete_elements
+from shrinkray.passes.sequences import ElementDeleter, delete_elements
 
 from shrinkray.problem import Format, ReductionProblem
 from shrinkray.reducer import ReductionPass, compose
@@ -354,6 +354,39 @@ async def short_deletions(problem: ReductionProblem[bytes]) -> None:
     )
 
 
+async def lift_braces(problem: ReductionProblem[bytes]):
+    target = problem.current_test_case
+
+    open, close = b"{}"
+    start_stack = []
+    child_stack = []
+
+    results = []
+
+    for i, c in enumerate(target):
+        if c == open:
+            start_stack.append(i)
+            child_stack.append([])
+        elif c == close and start_stack:
+            start = start_stack.pop() + 1
+            end = i
+            children = child_stack.pop()
+            if child_stack:
+                child_stack[-1].append((start, end))
+            if end > start:
+                results.append((start, end, children))
+
+    deleter = ElementDeleter(problem)
+
+    async with trio.open_nursery() as nursery:
+        for start, end, children in results:
+            for child_start, child_end in children:
+                to_delete = frozenset(range(start, child_start)) | frozenset(
+                    range(child_end, end)
+                )
+                nursery.start_soon(deleter.try_delete_set, to_delete)
+
+
 @define(frozen=True)
 class Tokenize(Format[bytes, list[bytes]]):
     def __repr__(self) -> bytes:
@@ -372,6 +405,7 @@ class Tokenize(Format[bytes, list[bytes]]):
 
 def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[bytes]]:
     yield hollow
+    yield lift_braces
 
     high_prio_splitters = [b"\n", b";"]
     for split in high_prio_splitters:

@@ -452,11 +452,12 @@ class Tokenize(Format[bytes, list[bytes]]):
 
 def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[bytes]]:
     yield hollow
-    yield lift_braces
 
     high_prio_splitters = [b"\n", b";"]
     for split in high_prio_splitters:
         yield compose(Split(split), delete_elements)
+
+    yield lift_braces
 
     yield compose(Tokenize(), delete_elements)
 

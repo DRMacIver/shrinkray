@@ -42,14 +42,7 @@ class Reducer(Generic[T]):
 
     async def run_pass(self, rp):
         self.status = f"Running reduction pass {rp.__name__}"
-
-        halt = 0.9
-        while True:
-            try:
-                await rp(ReductionLimitedProblem(self.target, halt_at=halt))
-                break
-            except* RestartPass:
-                halt *= 0.95
+        await rp(self.target)
 
     async def run(self) -> None:
         await self.target.setup()
@@ -72,6 +65,7 @@ class ReductionLimitedProblem(ReductionProblem[T]):
         self.base_problem = base_problem
         n = self.base_problem.size(self.base_problem.current_test_case)
         self.threshold = min(n - 1, math.ceil(halt_at * n))
+        self.stats = base_problem.stats
 
     async def is_interesting(self, test_case: T) -> bool:
         result = await self.base_problem.is_interesting(test_case)

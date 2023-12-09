@@ -43,7 +43,8 @@ algorithm:
 2. Check if applying this edit on top of the already applied edits would lead to an interesting test case.
       a. If it would not, then skip this edit.
       b. If it *would* then check whether any other edits have been applied while we were checking. If they
-         have not, then add this edit to the list of successfully applied edits. Otherwise, try this edit again.
+         have not, then add this edit to the list of successfully applied edits. Otherwise, try this edit again,
+         after sleeping briefly to give the other task that's working some time to proceed.
 
 This approach means that you don't have to stop when you find an interesting variant - you just apply the edit
 and keep going. In the cases where successful variants are *very* common this will still not be fully parallel,
@@ -60,6 +61,13 @@ would still provide the same guarantees (when run repeatedly to a fixed point) w
 holds it is likely to be signfiicantly faster. When it doesn't, in theory it can produce arbitrary slowdowns in
 the case where the reducer produces many successful edits many of which block other edits, but this seems like a
 relatively unusual case.
+
+The sleeping wasn't in earlier versions, and it plays badly with the adaptive nature of a number of shrink ray
+passes, where once you start succeeding you find many other similar ways to delete. This means that you can
+potentially end up with very long retry loops as the other task keeps sniping the work out from under you.
+The sleep thus assumes that if you got sniped once you're likely to get sniped again and it's better to just
+back off and let the other task do its thing. Currently we sleep for an exponential variate with an average of
+1s. This is unlikely to be optimal but seems to work reasonable well.
 
 ## Bounding the amount of parallelism
 

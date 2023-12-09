@@ -1,10 +1,12 @@
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from typing import Iterator
 
 from attrs import define
+import chardet
+from shrinkray.passes.sequences import delete_elements
 
 from shrinkray.problem import Format, ReductionProblem
-from shrinkray.reducer import ReductionPass
+from shrinkray.reducer import ReductionPass, compose
 
 import trio
 
@@ -95,7 +97,7 @@ async def lexeme_based_deletions(problem: ReductionProblem[bytes], min_size=0) -
         if t[1] - t[0] >= min_size
     ]
 
-    await delete_intervals(problem, intervals_to_delete)
+    await delete_intervals(problem, intervals_to_delete, shuffle=True)
 
 
 def merged_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -201,6 +203,10 @@ class CutTarget:
                 self.applied = merged
                 return True
 
+            # Sleep for a bit to give whichever other task is making progress
+            # that's stomping on ours time to do its thing.
+            await trio.sleep(self.problem.work.random.expovariate(1))
+
     def intervals_touching(self, interval: tuple[int, int]) -> list[tuple[int, int]]:
         start, end = interval
         # TODO: Use binary search to cut this down to size.
@@ -208,7 +214,9 @@ class CutTarget:
 
 
 async def delete_intervals(
-    problem: ReductionProblem[bytes], intervals_to_delete: list[tuple[int, int]]
+    problem: ReductionProblem[bytes],
+    intervals_to_delete: list[tuple[int, int]],
+    shuffle=False,
 ) -> None:
     intervals_considered = 0
 
@@ -220,8 +228,10 @@ async def delete_intervals(
             nonlocal intervals_considered
 
             intervals = list(cuts.intervals)
-            problem.work.random.shuffle(intervals)
-            intervals.sort(key=lambda t: (t[1] - t[0] < 100))
+            if shuffle:
+                problem.work.random.shuffle(intervals)
+            else:
+                intervals.sort(key=lambda t: (t[1] - t[0], t[0]), reverse=True)
 
             for interval in intervals:
                 if cuts.is_redundant(interval):
@@ -286,5 +296,17 @@ async def short_deletions(problem: ReductionProblem[bytes]) -> None:
 
 def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[bytes]]:
     yield hollow_braces
+
+    high_prio_splitters = [b"\n", b";", b",", b'"', b"'", b" "]
+    for split in high_prio_splitters:
+        yield compose(Split(split), delete_elements)
+
+    all_bytes = Counter(problem.current_test_case)
+
+    for s in sorted(all_bytes, key=all_bytes.__getitem__):
+        split = bytes([s])
+        if split not in high_prio_splitters:
+            yield compose(Split(split), delete_elements)
+
     yield lexeme_based_deletions
     yield short_deletions

@@ -399,7 +399,7 @@ def main(
                     diff = format_diff(unified_diff(to_lines(prev), to_lines(current)))
                     diff_to_display.set_text(diff)
                     prev = current
-                    await trio.sleep(1)
+                    await trio.sleep(2)
 
             @problem.on_reduce
             async def _(test_case: bytes) -> None:

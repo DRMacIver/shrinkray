@@ -11,6 +11,7 @@ from shutil import which
 from tempfile import TemporaryDirectory
 from typing import Any, Generic, TypeVar
 import warnings
+import chardet
 
 import click
 import humanize
@@ -107,6 +108,58 @@ class InputType(IntEnum):
         return self == value
 
 
+def try_decode(data):
+    for guess in chardet.detect_all(data):
+        try:
+            enc = guess["encoding"]
+            return enc, data.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    return None, None
+
+
+def reformat_data(data):
+    encoding, decoded = try_decode(data)
+    if encoding is None:
+        return data
+    result = []
+    indent = 0
+
+    def newline():
+        result.append("\n" + indent * " ")
+
+    for i, c in enumerate(decoded):
+        if c == "\n":
+            newline()
+            continue
+        if c == "{":
+            result.append(c)
+            indent += 4
+            if i + 1 == len(decoded) or decoded[i + 1] != "}":
+                newline()
+        elif c == "}":
+            if len(result) > 1 and result[-1].endswith("    "):
+                result[-1] = result[-1][:-4]
+            result.append(c)
+            indent -= 4
+            newline()
+        elif c == ";":
+            result.append(c)
+            newline()
+        else:
+            result.append(c)
+
+    result = "".join(result)
+    prev = None
+    while prev != result:
+        prev = result
+
+        result = result.replace(" \n", "\n")
+        result = result.replace("\n\n\n", "\n\n")
+
+    return result.encode(encoding)
+
+
 @click.command(
     help="""
 """.strip()
@@ -164,6 +217,18 @@ How to pass input to the test function. Options are:
 4. `all` (the default) does all of the above.
     """.strip(),
 )
+@click.option(
+    "--reformat/--no-reformat",
+    default=True,
+    help="""
+Internally Shrink Ray tries to delete as much data as possible. This results in very small
+test cases, but not always very pleasant ones. If --format is set, Shrink Ray will
+try to reformat the test case at the end to be a bit more manageable.
+
+Note that this is not as good as a dedicated formatter for your format, and you should
+probably use that after reduction if you have one.
+""",
+)
 @click.argument("test", callback=validate_command)
 @click.argument(
     "filename",
@@ -178,6 +243,7 @@ def main(
     parallelism: int,
     seed: int,
     volume: Volume,
+    reformat: bool,
 ) -> None:
     if timeout <= 0:
         timeout = float("inf")
@@ -392,16 +458,33 @@ def main(
 
             @nursery.start_soon
             async def _():
-                prev = problem.current_test_case
+                can_format = reformat
+
+                async def attempt_format(data):
+                    nonlocal can_format
+                    if not can_format:
+                        return data
+                    attempt = reformat_data(data)
+                    if await problem.is_interesting(attempt):
+                        return attempt
+                    else:
+                        can_format = False
+                        return data
+
+                prev = await attempt_format(problem.current_test_case)
+
                 while True:
-                    current = problem.current_test_case
+                    current = await attempt_format(problem.current_test_case)
                     if prev == current:
                         await trio.sleep(0.1)
                         continue
                     diff = format_diff(unified_diff(to_lines(prev), to_lines(current)))
                     diff_to_display.set_text(diff)
                     prev = current
-                    await trio.sleep(2)
+                    if can_format:
+                        await trio.sleep(4)
+                    else:
+                        await trio.sleep(2)
 
             @problem.on_reduce
             async def _(test_case: bytes) -> None:
@@ -422,13 +505,34 @@ def main(
                 await event_loop.run_async()
 
             nursery.cancel_scope.cancel()
+
+        formatting_increase = 0
+        if reformat:
+            final_result = problem.current_test_case
+            reformatted = reformat_data(final_result)
+            if reformatted != final_result:
+                if await is_interesting_do_work(reformatted):
+                    async with await trio.open_file(filename, "wb") as o:
+                        await o.write(reformatted)
+                formatting_increase = max(0, len(reformatted) - len(final_result))
+                final_result = reformatted
+
         print("Reduction completed!")
         stats = problem.stats
-        if stats.reductions == 0:
+        if initial == final_result:
             print("Test case was already maximally reduced.")
-        else:
+        elif len(final_result) < len(initial):
             print(
-                f"Deleted {humanize.naturalsize(stats.initial_test_case_size - stats.current_test_case_size)} in {humanize.precisedelta(time.time() - stats.start_time)}"
+                f"Deleted {humanize.naturalsize(stats.initial_test_case_size - len(final_result))} "
+                f"out of {humanize.naturalsize(stats.initial_test_case_size)} "
+                f"in {humanize.precisedelta(time.time() - stats.start_time)}"
+            )
+        elif len(final_result) == len(initial):
+            print("Some changes were made but no bytes were deleted")
+        else:
+            assert reformat
+            print(
+                f"Running reformatting resulted in an increase of {humanize.naturalsize(formatting_increase)} bytes."
             )
 
 

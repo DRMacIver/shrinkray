@@ -1,3 +1,4 @@
+from difflib import unified_diff
 import os
 import random
 import shlex
@@ -262,6 +263,7 @@ def main(
     details_text = urwid.Text("")
     reducer_status = urwid.Text("")
     parallelism_status = urwid.Text("")
+    diff_to_display = urwid.Text("")
 
     parallel_samples = 0
     parallel_total = 0
@@ -273,6 +275,8 @@ def main(
         details_text,
         reducer_status,
         parallelism_status,
+        urwid.Divider("-"),
+        diff_to_display,
     ]
 
     header = urwid.AttrMap(urwid.Text(text_header, align="center"), "header")
@@ -363,6 +367,28 @@ def main(
                     parallelism_status.set_text(
                         f"Current parallel workers: {parallel_tasks_running} (Average {parallel_total / parallel_samples:.2f})"
                     )
+
+            def to_lines(test_case: bytes) -> list[str]:
+                result = []
+                for l in test_case.split(b"\n"):
+                    try:
+                        result.append(l.decode("utf-8"))
+                    except UnicodeDecodeError:
+                        result.append(l.hex())
+                return result
+
+            @nursery.start_soon
+            async def _():
+                prev = problem.current_test_case
+                while True:
+                    current = problem.current_test_case
+                    if prev == current:
+                        await trio.sleep(0.1)
+                        continue
+                    diff = "\n".join(unified_diff(to_lines(prev), to_lines(current)))
+                    diff_to_display.set_text("Recent changes\n\n" + diff)
+                    prev = current
+                    await trio.sleep(1)
 
             @problem.on_reduce
             async def _(test_case: bytes) -> None:

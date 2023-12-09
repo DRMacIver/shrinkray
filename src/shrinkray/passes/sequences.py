@@ -134,7 +134,7 @@ class ElementDeleter(Generic[Seq]):
                 return True
             # Sleep for a bit to give whichever other task is making progress
             # that's stomping on ours time to do its thing.
-            await trio.sleep(self.problem.work.random.expovariate(1))
+            await trio.sleep(self.problem.work.random.expovariate(0.5**iters))
 
     async def try_delete_element(self, i: int) -> bool:
         if i in self.claimed or i in self.deleted:

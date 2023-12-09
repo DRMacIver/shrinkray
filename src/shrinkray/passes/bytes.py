@@ -225,6 +225,7 @@ class CutTarget:
                 return True
 
     async def try_merge(self, intervals: list[tuple[int, int]]) -> bool:
+        backoff = 1.0
         while True:
             generation_at_start = self.generation
 
@@ -245,7 +246,8 @@ class CutTarget:
 
             # Sleep for a bit to give whichever other task is making progress
             # that's stomping on ours time to do its thing.
-            await trio.sleep(self.problem.work.random.expovariate(1))
+            await trio.sleep(self.problem.work.random.expovariate(1.0 / backoff))
+            backoff *= 2
 
     def intervals_touching(self, interval: tuple[int, int]) -> list[tuple[int, int]]:
         start, end = interval
@@ -363,6 +365,7 @@ class SimpleCutTarget:
         self.generation = 0
 
     async def try_merge(self, intervals: list[tuple[int, int]]) -> bool:
+        backoff = 1.0
         while True:
             generation_at_start = self.generation
 
@@ -383,7 +386,8 @@ class SimpleCutTarget:
 
             # Sleep for a bit to give whichever other task is making progress
             # that's stomping on ours time to do its thing.
-            await trio.sleep(self.problem.work.random.expovariate(1))
+            await trio.sleep(self.problem.work.random.expovariate(1.0 / backoff))
+            backoff *= 2
 
 
 async def lift_braces(problem: ReductionProblem[bytes]):

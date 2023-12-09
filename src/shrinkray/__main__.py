@@ -270,8 +270,6 @@ def main(
 
     listbox_content = [
         urwid.Divider("-"),
-        blank,
-        blank,
         details_text,
         reducer_status,
         parallelism_status,
@@ -370,12 +368,25 @@ def main(
 
             def to_lines(test_case: bytes) -> list[str]:
                 result = []
-                for l in test_case.split(b"\n"):
+                for line in test_case.split(b"\n"):
                     try:
-                        result.append(l.decode("utf-8"))
+                        result.append(line.decode("utf-8"))
                     except UnicodeDecodeError:
-                        result.append(l.hex())
+                        result.append(line.hex())
                 return result
+
+            def format_diff(diff):
+                results = []
+                start_writing = False
+                for line in diff:
+                    if not start_writing and line.startswith("@@"):
+                        start_writing = True
+                    if start_writing:
+                        results.append(line)
+                        if len(results) > 500:
+                            results.append("...")
+                            break
+                return "\n".join(results)
 
             @nursery.start_soon
             async def _():
@@ -385,8 +396,8 @@ def main(
                     if prev == current:
                         await trio.sleep(0.1)
                         continue
-                    diff = "\n".join(unified_diff(to_lines(prev), to_lines(current)))
-                    diff_to_display.set_text("Recent changes\n\n" + diff)
+                    diff = format_diff(unified_diff(to_lines(prev), to_lines(current)))
+                    diff_to_display.set_text(diff)
                     prev = current
                     await trio.sleep(1)
 

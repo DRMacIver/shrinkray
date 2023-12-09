@@ -505,7 +505,7 @@ def main(
                         continue
                     diff_to_display.set_text(diff)
                     prev = current
-                    prev = problem.current_test_case
+                    prev_unformatted = problem.current_test_case
                     time_of_last_update = time.time()
                     if can_format:
                         await trio.sleep(4)

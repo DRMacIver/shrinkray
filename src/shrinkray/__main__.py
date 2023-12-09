@@ -473,14 +473,27 @@ def main(
 
                 prev = await attempt_format(problem.current_test_case)
 
+                time_of_last_update = time.time()
                 while True:
                     current = await attempt_format(problem.current_test_case)
                     if prev == current:
                         await trio.sleep(0.1)
                         continue
                     diff = format_diff(unified_diff(to_lines(prev), to_lines(current)))
+                    # When running in parallel sometimes we can produce diffs that have
+                    # a lot of insertions because we undo some work and then immediately
+                    # redo it. this can be quite confusing when it happens in the UI
+                    # (and makes Shrink Ray look bad), so when this happens we pause a
+                    # little bit to try to get a better diff.
+                    if (
+                        diff.count("\n+") > 2 * diff.count("\n-")
+                        and time.time() <= time_of_last_update + 10
+                    ):
+                        await trio.sleep(0.5)
+                        continue
                     diff_to_display.set_text(diff)
                     prev = current
+                    time_of_last_update = time.time()
                     if can_format:
                         await trio.sleep(4)
                     else:

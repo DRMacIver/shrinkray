@@ -3,7 +3,7 @@ from typing import Callable, Iterable, TypeVar
 import trio
 
 from shrinkray.problem import BasicReductionProblem
-from shrinkray.reducer import Reducer, ReductionPass
+from shrinkray.reducer import BasicReducer, ReductionPass
 from shrinkray.work import WorkContext
 
 T = TypeVar("T")
@@ -26,7 +26,7 @@ def reduce_with(
             work=WorkContext(parallelism=parallelism),
         )
 
-        reducer = Reducer(
+        reducer = BasicReducer(
             target=problem,
             reduction_passes=rp,
         )

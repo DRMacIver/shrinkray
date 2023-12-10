@@ -27,9 +27,8 @@ import trio
 import urwid
 import urwid.raw_display
 
-from shrinkray.passes import common_passes
 from shrinkray.problem import BasicReductionProblem, ReductionProblem
-from shrinkray.reducer import Reducer
+from shrinkray.reducer import Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
 from glob import glob
 from shutil import which
@@ -542,19 +541,7 @@ def main(
                 async with await trio.open_file(filename, "wb") as o:
                     await o.write(test_case)  # type: ignore
 
-            passes = list(common_passes(problem))
-
-            async def format_pump(problem: ReductionProblem[bytes]) -> bool:
-                attempt = reformat_data(problem.current_test_case)
-                if (
-                    attempt != problem.current_test_case
-                    and await problem.is_interesting(attempt)
-                ):
-                    return attempt
-                return problem.current_test_case
-
-            pumps = [format_pump]
-
+            cd_exec = None
             if (
                 os.path.splitext(filename)[1] in (".c", ".cpp", ".h", ".hpp")
                 and not no_clang_delta
@@ -577,13 +564,7 @@ def main(
 
                 cd_exec = ClangDelta(clang_delta)
 
-                pumps = clang_delta_pumps(cd_exec) + pumps
-
-            reducer = Reducer(
-                target=problem,
-                reduction_passes=passes,
-                pumps=pumps,
-            )
+            reducer = ShrinkRay(target=problem, clang_delta=cd_exec)
 
             @nursery.start_soon
             async def _():

@@ -3,7 +3,7 @@ from typing import Any, Generic, Iterable, Sequence, TypeVar, cast
 import trio
 
 from shrinkray.problem import ReductionProblem
-from shrinkray.reducer import ReductionPass
+from shrinkray.passes.definitions import ReductionPass
 from shrinkray.work import NotFound
 
 Seq = TypeVar("Seq", bound=Sequence[Any])

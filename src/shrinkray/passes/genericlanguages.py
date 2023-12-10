@@ -15,7 +15,7 @@ from shrinkray.problem import (
     ParseError,
     ReductionProblem,
 )
-from shrinkray.reducer import ReductionPass
+from shrinkray.passes.definitions import ReductionPass
 
 
 @define(frozen=True)

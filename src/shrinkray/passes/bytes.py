@@ -7,7 +7,7 @@ from attrs import define
 
 from shrinkray.passes.sequences import delete_elements
 from shrinkray.problem import Format, ReductionProblem
-from shrinkray.reducer import ReductionPass, compose
+from shrinkray.passes.definitions import ReductionPass
 
 
 @define(frozen=True)

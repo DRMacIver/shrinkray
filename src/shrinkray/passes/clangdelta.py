@@ -4,7 +4,7 @@ from tempfile import NamedTemporaryFile
 import trio
 
 from shrinkray.problem import ReductionProblem
-from shrinkray.reducer import ReductionPass
+from shrinkray.passes.definitions import ReductionPass
 from shrinkray.work import NotFound
 
 

@@ -1,11 +1,10 @@
-import time
 from abc import ABC, abstractmethod, abstractproperty
+import time
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
-
 import attrs
+from humanize import naturalsize, precisedelta
 import trio
 from attrs import define
-from humanize import precisedelta
 
 from shrinkray.work import WorkContext
 
@@ -38,6 +37,7 @@ class ReductionStats:
 
     calls: int = 0
     interesting_calls: int = 0
+    wasted_interesting_calls: int = 0
 
     time_of_last_reduction: float = 0.0
     start_time: float = attrs.Factory(time.time)
@@ -58,7 +58,7 @@ class ReductionStats:
                 self.initial_test_case_size - self.current_test_case_size
             ) / runtime
             reduction_msg = (
-                f"Current test case size: {self.current_test_case_size} bytes "
+                f"Current test case size: {naturalsize(self.current_test_case_size)} "
                 f"({reduction_percentage:.2f}% reduction, {reduction_rate:.2f} bytes / second)"
             )
         else:
@@ -70,7 +70,11 @@ class ReductionStats:
             [
                 reduction_msg,
                 f"Total runtime: {precisedelta(runtime)}",
-                f"Calls to interestingness test: {self.calls} ({self.calls / runtime:.2f} calls / second, {self.interesting_calls / self.calls * 100.0:.2f}% interesting)"
+                (
+                    f"Calls to interestingness test: {self.calls} ({self.calls / runtime:.2f} calls / second, "
+                    f"{self.interesting_calls / self.calls * 100.0:.2f}% interesting, "
+                    f"{self.wasted_interesting_calls / self.calls * 100:.2f}% wasted)"
+                )
                 if self.calls > 0
                 else "Not yet called interestingness test",
                 f"Time since last reduction: {self.time_since_last_reduction():.2f}s ({self.reductions / runtime:.2f} reductions / second)"
@@ -149,15 +153,19 @@ class BasicReductionProblem(ReductionProblem[T]):
         sort_key: Callable[[T], Any] = shortlex,
         size: Callable[[T], int] = default_size,
         display: Callable[[T], str] = default_display,
+        stats: Optional[ReductionStats] = None,
     ):
         super().__init__(work=work)
         self.__current = initial
         self.__sort_key = sort_key
         self.__size = size
         self.display = display
-        self.stats = ReductionStats()
-        self.stats.initial_test_case_size = self.size(initial)
-        self.stats.current_test_case_size = self.size(initial)
+        if stats is None:
+            self.stats = ReductionStats()
+            self.stats.initial_test_case_size = self.size(initial)
+            self.stats.current_test_case_size = self.size(initial)
+        else:
+            self.stats = stats
 
         self.__is_interesting = is_interesting
         self.__on_reduce_callbacks: list[Callable[[T], Awaitable[None]]] = []
@@ -200,6 +208,8 @@ class BasicReductionProblem(ReductionProblem[T]):
                 self.__current = value
                 for f in self.__on_reduce_callbacks:
                     await f(value)
+            else:
+                self.stats.wasted_interesting_calls += 1
         return result
 
     @property

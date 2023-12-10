@@ -454,8 +454,17 @@ def main(
                     nonlocal parallel_samples, parallel_total
                     parallel_samples += 1
                     parallel_total += parallel_tasks_running
+                    stats = problem.stats
+                    if stats.calls > 0:
+                        wasteage = stats.wasted_interesting_calls / stats.calls
+                    else:
+                        wasteage = 0.0
+
+                    average_parallelism = parallel_total / parallel_samples
+
                     parallelism_status.set_text(
-                        f"Current parallel workers: {parallel_tasks_running} (Average {parallel_total / parallel_samples:.2f})"
+                        f"Current parallel workers: {parallel_tasks_running} (Average {average_parallelism:.2f}) "
+                        f"(effective parallelism: {average_parallelism * (1.0 - wasteage):.2f})"
                     )
 
             def to_lines(test_case: bytes) -> list[str]:

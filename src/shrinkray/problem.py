@@ -195,6 +195,8 @@ class BasicReductionProblem(ReductionProblem[T]):
     async def is_interesting(self, value: T) -> bool:
         """Returns true if this value is interesting."""
         await trio.lowlevel.checkpoint()
+        if value == self.current_test_case:
+            return True
         result = await self.__is_interesting(value)
         self.stats.failed_reductions += 1
         self.stats.calls += 1

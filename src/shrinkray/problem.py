@@ -129,6 +129,16 @@ class ReductionProblem(Generic[T], ABC):
     def current_size(self) -> int:
         return self.size(self.current_test_case)
 
+    def backtrack(self, new_test_case: T) -> "ReductionProblem[T]":
+        return BasicReductionProblem(
+            initial=new_test_case,
+            is_interesting=self.is_interesting,
+            work=self.work,
+            sort_key=self.sort_key,
+            size=self.size,
+            display=self.display,
+        )
+
 
 class BasicReductionProblem(ReductionProblem[T]):
     def __init__(

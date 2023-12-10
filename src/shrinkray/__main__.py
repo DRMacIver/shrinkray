@@ -10,12 +10,14 @@ from difflib import unified_diff
 from enum import Enum, IntEnum
 from shutil import which
 from tempfile import TemporaryDirectory
-from typing import Any, Generic, TypeVar
+from typing import Any, Awaitable, Callable, Generic, TypeVar
 
 import chardet
 import click
 import humanize
 import trio
+
+from shrinkray.passes.clangdelta import ClangDelta, clang_delta_pumps
 
 warnings.filterwarnings("ignore", category=trio.TrioDeprecationWarning)
 
@@ -26,9 +28,11 @@ import urwid
 import urwid.raw_display
 
 from shrinkray.passes import common_passes
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.problem import BasicReductionProblem, ReductionProblem
 from shrinkray.reducer import Reducer
 from shrinkray.work import Volume, WorkContext
+from glob import glob
+from shutil import which
 
 
 def validate_command(ctx: Any, param: Any, value: str) -> list[str]:
@@ -236,6 +240,17 @@ Note that this is not as good as a dedicated formatter for your format, and you 
 probably use that after reduction if you have one.
 """,
 )
+@click.option(
+    "--no-clang-delta",
+    is_flag=True,
+    default=False,
+    help="Pass this if you do not want to use clang delta for C/C++ transformations.",
+)
+@click.option(
+    "--clang-delta",
+    default="",
+    help="Path to your clang_delta executable.",
+)
 @click.argument("test", callback=validate_command)
 @click.argument(
     "filename",
@@ -251,6 +266,8 @@ def main(
     seed: int,
     volume: Volume,
     reformat: bool,
+    no_clang_delta: bool,
+    clang_delta: str,
 ) -> None:
     if timeout <= 0:
         timeout = float("inf")
@@ -463,21 +480,21 @@ def main(
                             break
                 return "\n".join(results)
 
+            can_format = reformat
+
+            async def attempt_format(data):
+                nonlocal can_format
+                if not can_format:
+                    return data
+                attempt = reformat_data(data)
+                if attempt == data or await problem.is_interesting(attempt):
+                    return attempt
+                else:
+                    can_format = False
+                    return data
+
             @nursery.start_soon
             async def _():
-                can_format = reformat
-
-                async def attempt_format(data):
-                    nonlocal can_format
-                    if not can_format:
-                        return data
-                    attempt = reformat_data(data)
-                    if attempt == data or await problem.is_interesting(attempt):
-                        return attempt
-                    else:
-                        can_format = False
-                        return data
-
                 prev_unformatted = problem.current_test_case
                 prev = await attempt_format(prev_unformatted)
 
@@ -516,9 +533,47 @@ def main(
                 async with await trio.open_file(filename, "wb") as o:
                     await o.write(test_case)  # type: ignore
 
+            passes = list(common_passes(problem))
+
+            async def format_pump(problem: ReductionProblem[bytes]) -> bool:
+                attempt = reformat_data(problem.current_test_case)
+                if (
+                    attempt != problem.current_test_case
+                    and await problem.is_interesting(attempt)
+                ):
+                    return attempt
+                return problem.current_test_case
+
+            pumps = [format_pump]
+
+            if (
+                os.path.splitext(filename)[1] in (".c", ".cpp", ".h", ".hpp")
+                and not no_clang_delta
+            ):
+                nonlocal clang_delta
+                if not clang_delta:
+                    clang_delta = which("clang_delta")
+                if not clang_delta:
+                    possible_locations = glob(
+                        "/opt/homebrew//Cellar/creduce/*/libexec/clang_delta"
+                    ) + glob("/usr/libexec/clang_delta")
+                    if not possible_locations:
+                        raise click.UsageError(
+                            "Attempting to reduce a C or C++ file, but clang_delta is not installed. "
+                            "Please run with --no-clang-delta, or install creduce on your system. "
+                            "If creduce is already installed and you wish to use clang_delta, please "
+                            "pass its path with the --clang-delta argument."
+                        )
+                    clang_delta = max(possible_locations)
+
+                cd_exec = ClangDelta(clang_delta)
+
+                pumps = clang_delta_pumps(cd_exec) + pumps
+
             reducer = Reducer(
                 target=problem,
-                reduction_passes=common_passes(problem),
+                reduction_passes=passes,
+                pumps=pumps,
             )
 
             @nursery.start_soon

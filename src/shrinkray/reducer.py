@@ -1,6 +1,7 @@
+from contextlib import contextmanager
 import math
 from functools import wraps
-from typing import Any, Awaitable, Callable, Generic, Iterable, TypeVar
+from typing import Any, Awaitable, Callable, Generic, Iterable, Optional, TypeVar
 
 from attrs import define
 
@@ -11,6 +12,8 @@ T = TypeVar("T")
 
 
 ReductionPass = Callable[[ReductionProblem[T]], Awaitable[None]]
+
+ReductionPump = Callable[[ReductionProblem[T]], Awaitable[T]]
 
 
 def compose(format: Format[S, T], reduction_pass: ReductionPass[T]) -> ReductionPass[S]:
@@ -34,6 +37,7 @@ def compose(format: Format[S, T], reduction_pass: ReductionPass[T]) -> Reduction
 class Reducer(Generic[T]):
     target: ReductionProblem[T]
     reduction_passes: Iterable[ReductionPass[T]]
+    pumps: Iterable[ReductionPump[T]] = ()
 
     status: str = "Starting up"
 
@@ -41,8 +45,16 @@ class Reducer(Generic[T]):
         self.reduction_passes = list(self.reduction_passes)
 
     async def run_pass(self, rp):
-        self.status = f"Running reduction pass {rp.__name__}"
         await rp(self.target)
+
+    @contextmanager
+    def backtrack(self, restart: T):
+        current = self.target
+        try:
+            self.target = self.target.backtrack(restart)
+            yield
+        finally:
+            self.target = current
 
     async def run(self) -> None:
         await self.target.setup()
@@ -50,7 +62,20 @@ class Reducer(Generic[T]):
         while True:
             prev = self.target.current_test_case
             for rp in self.reduction_passes:
+                self.status = f"Running reduction pass {rp.__name__}"
                 await self.run_pass(rp)
+            if (
+                self.target.size(self.target.current_test_case) / self.target.size(prev)
+                >= 0.99
+            ):
+                for pump in self.pumps:
+                    self.status = f"Pumping with {pump.__name__}"
+                    pumped = await pump(self.target)
+                    if pumped != self.target.current_test_case:
+                        with self.backtrack(pumped):
+                            for rp in self.reduction_passes:
+                                self.status = f"Running reduction pass {rp.__name__} under pump {pump.__name__}"
+                                await self.run_pass(rp)
             if prev == self.target.current_test_case:
                 return
 

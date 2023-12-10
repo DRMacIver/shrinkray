@@ -61,15 +61,17 @@ async def interrupt_wait_and_kill(sp: "trio.Process", delay: float = 0.1) -> Non
                 if pipe:
                     await pipe.aclose()
             signal_group(sp, signal.SIGINT)
-            for _ in range(10):
+            for n in range(10):
                 if sp.poll() is not None:
                     return
-                await trio.sleep(delay)
-            signal_group(sp, signal.SIGKILL)
+                await trio.sleep(delay * 1.5**n * random.random())
         except ProcessLookupError:  # pragma: no cover
             # This is incredibly hard to trigger reliably, because it only happens
             # if the process exits at exactly the wrong time.
             pass
+
+        if sp.returncode is None:
+            signal_group(sp, signal.SIGKILL)
 
         with trio.move_on_after(delay):
             await sp.wait()

@@ -195,9 +195,9 @@ def clang_delta_pump(clang_delta: ClangDelta, transformation: str) -> bytes:
                 if "Assertion failed" in e.args[0]:
                     return target
 
-            target = clang_delta.apply_transformation(transformation, i, target)
+            target = await clang_delta.apply_transformation(transformation, i, target)
             assert target is not None
-            n = clang_delta.query_instances(transformation, target)
+            n = await clang_delta.query_instances(transformation, target)
         return target
 
     apply.__name__ = f"clang_delta({transformation})"

@@ -9,78 +9,6 @@ from shrinkray.work import NotFound
 Seq = TypeVar("Seq", bound=Sequence[Any])
 
 
-async def single_forward_delete(problem: ReductionProblem[Seq]) -> None:
-    test_case = problem.current_test_case
-
-    if not test_case:
-        await trio.lowlevel.checkpoint()
-        return
-
-    def deleted(j: int, k: int) -> Seq:
-        return test_case[:j] + test_case[k:]  # type: ignore
-
-    async def can_delete(j: int, k: int) -> bool:
-        return await problem.is_interesting(deleted(j, k))
-
-    i = 0
-
-    while i < len(test_case):
-        try:
-            i = await problem.work.find_first_value(
-                range(i, len(test_case)), lambda j: can_delete(j, j + 1)
-            )
-        except NotFound:
-            break
-
-        test_case = deleted(i, i + 1)
-
-        async def delete_k(k: int) -> bool:
-            if i + k > len(test_case):
-                await trio.lowlevel.checkpoint()
-                return False
-            return await can_delete(i, i + k)
-
-        k = await problem.work.find_large_integer(delete_k)
-        test_case = deleted(i, i + k)
-
-        i += 1
-
-
-async def single_backward_delete(problem: ReductionProblem[Seq]) -> None:
-    test_case = problem.current_test_case
-    if not test_case:
-        await trio.lowlevel.checkpoint()
-        return
-
-    def deleted(j: int, k: int) -> Seq:
-        return test_case[:j] + test_case[k:]  # type: ignore
-
-    async def can_delete(j: int, k: int) -> bool:
-        return await problem.is_interesting(deleted(j, k))
-
-    i = len(test_case) - 1
-
-    while i >= 0:
-        try:
-            i = await problem.work.find_first_value(
-                range(i, -1, -1), lambda j: can_delete(j, j + 1)
-            )
-        except NotFound:
-            break
-
-        test_case = deleted(i, i + 1)
-
-        async def delete_k(k: int) -> bool:
-            if k > i:
-                await trio.lowlevel.checkpoint()
-                return False
-            return await can_delete(i - k, i)
-
-        k = await problem.work.find_large_integer(delete_k)
-        test_case = deleted(i - k, i)
-        i -= k + 1
-
-
 class ElementDeleter(Generic[Seq]):
     def __init__(self, problem: ReductionProblem[Seq]):
         self.problem = problem
@@ -191,7 +119,106 @@ async def delete_elements(problem: ReductionProblem[Seq]):
     await ElementDeleter(problem).run()
 
 
-def sequence_passes(
-    problem: ReductionProblem[Seq],
-) -> Iterable[ReductionPass[Seq]]:
-    yield delete_elements
+def merged_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    normalized = []
+    for start, end in sorted(map(tuple, intervals)):
+        if normalized and normalized[-1][-1] >= start:
+            normalized[-1][-1] = max(normalized[-1][-1], end)
+        else:
+            normalized.append([start, end])
+    return list(map(tuple, normalized))
+
+
+def with_deletions(target: Seq, deletions: list[tuple[int, int]]) -> Seq:
+    result = []
+    prev = 0
+    total_deleted = 0
+    for start, end in deletions:
+        total_deleted += end - start
+        result.extend(target[prev:start])
+        prev = end
+    result.extend(target[prev:])
+    assert len(result) + total_deleted == len(target)
+    return type(target)(result)
+
+
+class SimpleCutTarget(Generic[Seq]):
+    def __init__(self, problem: ReductionProblem[Seq]):
+        self.problem = problem
+        self.target = problem.current_test_case
+
+        self.applied = []
+        self.generation = 0
+        self.current_merge_attempts = 0
+
+    async def try_merge(self, intervals: list[tuple[int, int]]) -> bool:
+        iters = 0
+        while self.current_merge_attempts > 0:
+            iters += 1
+            if iters == 1:
+                await trio.lowlevel.checkpoint()
+            else:
+                await trio.sleep(0.05)
+
+        trying_to_merge = False
+        try:
+            while True:
+                generation_at_start = self.generation
+
+                merged = merged_intervals(self.applied + intervals)
+                if merged == self.applied:
+                    return True
+                attempt = with_deletions(self.target, merged)
+
+                succeeded = await self.problem.is_interesting(attempt)
+
+                if not succeeded:
+                    return False
+
+                if self.generation == generation_at_start:
+                    self.generation += 1
+                    self.applied = merged
+                    return True
+                if not trying_to_merge:
+                    trying_to_merge = True
+                    self.current_merge_attempts += 1
+        finally:
+            if trying_to_merge:
+                self.current_merge_attempts -= 1
+                assert self.current_merge_attempts >= 0
+
+
+def block_deletion(min_block, max_block):
+    async def apply(problem: ReductionProblem[Seq]):
+        async with trio.open_nursery() as nursery:
+            send_blocks, receive_blocks = trio.open_memory_channel(1000)
+
+            cutter = SimpleCutTarget(problem)
+
+            @nursery.start_soon
+            async def _():
+                cuts = [
+                    (i, i + block_size)
+                    for block_size in range(min_block, max_block + 1)
+                    for i in range(len(problem.current_test_case) - block_size)
+                ]
+                while cuts:
+                    i = problem.work.random.randrange(0, len(cuts))
+                    cuts[i], cuts[-1] = cuts[-1], cuts[i]
+                    await send_blocks.send(cuts.pop())
+
+                send_blocks.close()
+
+            for _ in range(problem.work.parallelism):
+
+                @nursery.start_soon
+                async def _():
+                    while True:
+                        try:
+                            cut = await receive_blocks.receive()
+                        except trio.EndOfChannel:
+                            break
+                        await cutter.try_merge([cut])
+
+    apply.__name__ = f"block_deletion({min_block}, {max_block})"
+    return apply

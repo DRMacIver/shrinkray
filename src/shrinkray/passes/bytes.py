@@ -166,6 +166,8 @@ class CutTarget:
         self.generation = 0
         self.attempted = {}
 
+        self.current_merge_attempts = 0
+
     def is_redundant(self, interval: tuple[int, int]) -> bool:
         if not self.applied:
             return False
@@ -202,50 +204,43 @@ class CutTarget:
         ]
 
     async def try_apply(self, interval: tuple[int, int]) -> bool:
-        interval = tuple(interval)
-        while True:
-            if self.is_redundant(interval):
-                return False
-
-            generation_at_start = self.generation
-
-            merged = merged_intervals(self.applied + [interval])
-            attempt = with_deletions(self.target, merged)
-
-            succeeded = await self.problem.is_interesting(attempt)
-
-            if not succeeded:
-                self.attempted[interval] = False
-                return False
-
-            if self.generation == generation_at_start:
-                self.generation += 1
-                self.applied = merged
-                self.attempted[interval] = True
-                return True
+        return await self.try_merge([interval])
 
     async def try_merge(self, intervals: list[tuple[int, int]]) -> bool:
-        while True:
-            generation_at_start = self.generation
+        iters = 0
+        while self.current_merge_attempts > 0:
+            iters += 1
+            if iters == 1:
+                await trio.lowlevel.checkpoint()
+            else:
+                await trio.sleep(0.05)
 
-            merged = merged_intervals(self.applied + intervals)
-            if merged == self.applied:
-                return True
-            attempt = with_deletions(self.target, merged)
+        trying_to_merge = False
+        try:
+            while True:
+                generation_at_start = self.generation
 
-            succeeded = await self.problem.is_interesting(attempt)
+                merged = merged_intervals(self.applied + intervals)
+                if merged == self.applied:
+                    return True
+                attempt = with_deletions(self.target, merged)
 
-            if not succeeded:
-                return False
+                succeeded = await self.problem.is_interesting(attempt)
 
-            if self.generation == generation_at_start:
-                self.generation += 1
-                self.applied = merged
-                return True
+                if not succeeded:
+                    return False
 
-            # Sleep for a bit to give whichever other task is making progress
-            # that's stomping on ours time to do its thing.
-            await trio.sleep(self.problem.work.random.expovariate(1))
+                if self.generation == generation_at_start:
+                    self.generation += 1
+                    self.applied = merged
+                    return True
+                if not trying_to_merge:
+                    trying_to_merge = True
+                    self.current_merge_attempts += 1
+        finally:
+            if trying_to_merge:
+                self.current_merge_attempts -= 1
+                assert self.current_merge_attempts >= 0
 
     def intervals_touching(self, interval: tuple[int, int]) -> list[tuple[int, int]]:
         start, end = interval

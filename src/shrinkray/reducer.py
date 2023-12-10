@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager, contextmanager
 import math
 from functools import wraps
 from typing import Any, Awaitable, Callable, Generic, Iterable, Optional, TypeVar
+import trio
 
 from attrs import define
 from shrinkray.passes.bytes import (
@@ -19,7 +20,7 @@ from shrinkray.passes.genericlanguages import (
     combine_expressions,
     reduce_integer_literals,
 )
-from shrinkray.passes.sequences import delete_elements
+from shrinkray.passes.sequences import block_deletion, delete_elements
 
 from shrinkray.problem import Format, ParseError, ReductionProblem
 from shrinkray.passes.definitions import ReductionPass, ReductionPump
@@ -131,6 +132,17 @@ class ShrinkRay(Reducer[bytes]):
     current_reduction_pass: Optional[ReductionPass[bytes]] = None
     current_pump: Optional[ReductionPump[bytes]] = None
 
+    unlocked_ok_passes: bool = False
+
+    great_passes = [
+        hollow,
+        compose(Split(b"\n"), block_deletion(2, 5)),
+        compose(Split(b";"), block_deletion(2, 5)),
+        compose(Split(b";"), delete_elements),
+        compose(Split(b"\n"), delete_elements),
+        lift_braces,
+    ]
+
     @property
     def pumps(self):
         if self.clang_delta is None:
@@ -183,14 +195,13 @@ class ShrinkRay(Reducer[bytes]):
             self.current_pump = None
 
     async def run_great_passes(self):
-        await self.run_pass(hollow)
-        high_prio_splitters = [b"\n", b";"]
-        for split in high_prio_splitters:
-            await self.run_pass(compose(Split(split), delete_elements))
-        await self.run_pass(lift_braces)
+        for rp in self.great_passes:
+            await self.run_pass(rp)
 
     async def run_ok_passes(self):
+        await self.run_pass(compose(Split(b"\n"), block_deletion(6, 10)))
         await self.run_pass(compose(Tokenize(), delete_elements))
+        await self.run_pass(compose(Tokenize(), block_deletion(2, 20)))
 
         all_bytes = Counter(self.target.current_test_case)
 
@@ -202,20 +213,33 @@ class ShrinkRay(Reducer[bytes]):
         await self.run_pass(combine_expressions)
 
     async def run_last_ditch_passes(self):
+        await self.run_pass(compose(Split(b"\n"), block_deletion(11, 100)))
         await self.run_pass(lexeme_based_deletions)
         await self.run_pass(short_deletions)
 
     async def run_some_passes(self):
         prev = self.target.current_test_case
         await self.run_great_passes()
-        if prev == self.target.current_test_case:
+        if prev == self.target.current_test_case and not self.unlocked_ok_passes:
             return
+        self.unlocked_ok_passes = True
         await self.run_ok_passes()
         if prev == self.target.current_test_case:
             return
         await self.run_last_ditch_passes()
 
+    async def initial_cut(self):
+        while True:
+            prev = self.target.current_test_case
+            for rp in self.great_passes:
+                with trio.move_on_after(60):
+                    await self.run_pass(rp)
+            if prev == self.target.current_test_case:
+                return
+
     async def run(self):
+        await self.initial_cut()
+
         while True:
             prev = self.target.current_test_case
             await self.run_some_passes()

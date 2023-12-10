@@ -59,7 +59,7 @@ class ReductionStats:
             ) / runtime
             reduction_msg = (
                 f"Current test case size: {naturalsize(self.current_test_case_size)} "
-                f"({reduction_percentage:.2f}% reduction, {reduction_rate:.2f} bytes / second)"
+                f"({reduction_percentage:.2f}% reduction, {naturalsize(reduction_rate)} / second)"
             )
         else:
             reduction_msg = (

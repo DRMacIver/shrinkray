@@ -594,7 +594,7 @@ def main(
         elif len(final_result) < len(initial):
             print(
                 f"Deleted {humanize.naturalsize(stats.initial_test_case_size - len(final_result))} "
-                f"out of {humanize.naturalsize(stats.initial_test_case_size)} "
+                f"out of {humanize.naturalsize(stats.initial_test_case_size)} ({(1.0 - len(final_result) / stats.initial_test_case_size) * 100:.2f}% reduction)"
                 f"in {humanize.precisedelta(time.time() - stats.start_time)}"
             )
         elif len(final_result) == len(initial):

@@ -40,7 +40,8 @@ It has a generic reduction algorithm that should work pretty well with any textu
 
 If you run into a test case and interestingness test that you care about that shrink ray handles badly please let me know and I'll likely see about improving its handling of that format.
 
-My main advice on format support is that if your format is C, C++, or a language with C-like syntax, you should consider using [creduce](https://github.com/csmith-project/creduce) instead. It's possible that shrinkray will be faster (especially when running in parallel) and might be a good first pass, but creduce will definitely get you better quality reduced test cases if you run it afterwards.
+Additionally, if you have it installed (the most normal way to get it is to install [creduce](https://github.com/csmith-project/creduce)) it will use
+`clang_delta` to make transformations to C or C++ source files for additional transformations such as e.g. inlining functions that are hard or impossible to do in a language agnostic way.
 
 ## Parallelism
 

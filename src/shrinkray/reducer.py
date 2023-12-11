@@ -146,7 +146,7 @@ class ShrinkRay(Reducer[bytes]):
     @property
     def pumps(self):
         if self.clang_delta is None:
-            return None
+            return ()
         else:
             return clang_delta_pumps(self.clang_delta)
 

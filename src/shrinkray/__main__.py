@@ -359,12 +359,14 @@ def main(
     parallel_samples = 0
     parallel_total = 0
 
+    line = urwid.Divider("─")
+
     listbox_content = [
-        urwid.Divider("-"),
+        line,
         details_text,
         reducer_status,
         parallelism_status,
-        urwid.Divider("-"),
+        line,
         diff_to_display,
     ]
 

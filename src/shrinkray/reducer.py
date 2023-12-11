@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager, contextmanager
 import math
 from functools import wraps
 from typing import Any, Awaitable, Callable, Generic, Iterable, Optional, TypeVar
+import attrs
 import trio
 
 from attrs import define
@@ -20,6 +21,7 @@ from shrinkray.passes.genericlanguages import (
     combine_expressions,
     reduce_integer_literals,
 )
+from shrinkray.passes.python import is_python, lift_indented_constructs
 from shrinkray.passes.sequences import block_deletion, delete_elements
 
 from shrinkray.problem import Format, ParseError, ReductionProblem
@@ -134,14 +136,20 @@ class ShrinkRay(Reducer[bytes]):
 
     unlocked_ok_passes: bool = False
 
-    great_passes = [
-        hollow,
-        compose(Split(b"\n"), block_deletion(2, 5)),
-        compose(Split(b";"), block_deletion(2, 5)),
-        compose(Split(b";"), delete_elements),
-        compose(Split(b"\n"), delete_elements),
-        lift_braces,
-    ]
+    great_passes: list[ReductionPass[bytes]] = attrs.Factory(
+        lambda: [
+            hollow,
+            compose(Split(b"\n"), block_deletion(2, 5)),
+            compose(Split(b";"), block_deletion(2, 5)),
+            compose(Split(b";"), delete_elements),
+            compose(Split(b"\n"), delete_elements),
+            lift_braces,
+        ]
+    )
+
+    def __attrs_post_init__(self):
+        if is_python(self.target.current_test_case):
+            self.great_passes.append(lift_indented_constructs)
 
     @property
     def pumps(self):

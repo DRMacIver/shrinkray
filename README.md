@@ -40,8 +40,10 @@ It has a generic reduction algorithm that should work pretty well with any textu
 
 If you run into a test case and interestingness test that you care about that shrink ray handles badly please let me know and I'll likely see about improving its handling of that format.
 
-Additionally, if you have it installed (the most normal way to get it is to install [creduce](https://github.com/csmith-project/creduce)) it will use
-`clang_delta` to make transformations to C or C++ source files for additional transformations such as e.g. inlining functions that are hard or impossible to do in a language agnostic way.
+Additionally, Shrink Ray has special support for the following formats:
+
+* C and C++ (via `clang_delta`, which you will have if creduce is installed)
+* Python (Quite basic support, but easy to improve)
 
 ## Parallelism
 

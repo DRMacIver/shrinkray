@@ -20,8 +20,8 @@ pipx install git+https://github.com/DRMacIver/shrinkray.git
 
 (if you don't have or want [pipx](https://pypa.github.io/pipx/) you could also do this with pip and it would work fine)
 
-Shrink Ray requires Python 3.11 or later and won't work on earlier versions. If everything is working correctly, it should refuse to install
-on versions it's incompatible with. If you do not have Python 3.11 installed, I recommend [pyenv](https://github.com/pyenv/pyenv) for managing
+Shrink Ray requires Python 3.12 or later and won't work on earlier versions. If everything is working correctly, it should refuse to install
+on versions it's incompatible with. If you do not have Python 3.12 installed, I recommend [pyenv](https://github.com/pyenv/pyenv) for managing
 Python installs.
 
 You then run it as follows:

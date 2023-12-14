@@ -1,5 +1,6 @@
 [tool.poetry]
 name = "shrinkray"
+requires-python = ">=3.11.0"
 version = "0.0.0"
 description = "Shrink Ray"
 authors = ["David R. MacIver <david@drmaciver.com>"]

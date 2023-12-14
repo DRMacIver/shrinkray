@@ -1,6 +1,5 @@
 [tool.poetry]
 name = "shrinkray"
-requires-python = ">=3.12.0"
 version = "0.0.0"
 description = "Shrink Ray"
 authors = ["David R. MacIver <david@drmaciver.com>"]
@@ -17,7 +16,7 @@ classifiers = [
 Changelog = "https://github.com/DRMacIver/shrinkray/releases"
 
 [tool.poetry.dependencies]
-python = ">=3.10, <4.0"
+python = ">=3.12, <4.0"
 click = ">=8.0.1"
 chardet = "^5.2.0"
 trio = "^0.22.2"

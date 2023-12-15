@@ -8,6 +8,7 @@ from attrs import define
 from shrinkray.passes.sequences import delete_elements
 from shrinkray.problem import Format, ReductionProblem
 from shrinkray.passes.definitions import ReductionPass
+from shrinkray.passes.patching import apply_patches, Cuts
 
 
 @define(frozen=True)
@@ -253,49 +254,7 @@ async def delete_intervals(
     intervals_to_delete: list[tuple[int, int]],
     shuffle=False,
 ) -> None:
-    intervals_considered = 0
-
-    async with trio.open_nursery() as nursery:
-        cuts = CutTarget(problem, intervals_to_delete)
-        send_intervals, receive_intervals = trio.open_memory_channel(1000)
-
-        async def fill_queue():
-            nonlocal intervals_considered
-
-            intervals = list(cuts.intervals)
-            if shuffle:
-                problem.work.random.shuffle(intervals)
-            else:
-                intervals.sort(key=lambda t: (t[1] - t[0], t[0]), reverse=True)
-
-            for interval in intervals:
-                if cuts.is_redundant(interval):
-                    intervals_considered += 1
-                else:
-                    await send_intervals.send(interval)
-
-            send_intervals.close()
-
-        nursery.start_soon(fill_queue)
-
-        async def apply_intervals():
-            nonlocal intervals_considered
-            while True:
-                try:
-                    interval = await receive_intervals.receive()
-                except trio.EndOfChannel:
-                    return
-                intervals_considered += 1
-                if await cuts.try_apply(interval):
-                    similar = cuts.similar_cuts(interval)
-                    if similar:
-                        await cuts.try_merge(similar)
-
-        async with trio.open_nursery() as sub_nursery:
-            for _ in range(problem.work.parallelism * 2):
-                sub_nursery.start_soon(apply_intervals)
-
-        nursery.cancel_scope.cancel()
+    await apply_patches(problem, Cuts(), [[t] for t in intervals_to_delete])
 
 
 def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:
@@ -329,11 +288,17 @@ def quote_intervals(target: bytes) -> list[tuple[int, int]]:
 
 async def hollow(problem: ReductionProblem[bytes]):
     target = problem.current_test_case
+    intervals = []
+    for b in [
+        quote_intervals(target),
+        brace_intervals(target, b"[]"),
+        brace_intervals(target, b"{}"),
+    ]:
+        b.sort(key=lambda t: (t[1] - t[0], t[0]))
+        intervals.extend(b)
     await delete_intervals(
         problem,
-        brace_intervals(target, b"{}")
-        + brace_intervals(target, b"[]")
-        + quote_intervals(target),
+        intervals,
     )
 
 
@@ -444,25 +409,3 @@ class Tokenize(Format[bytes, list[bytes]]):
 
     def dumps(self, value: list[bytes]) -> bytes:
         return b"".join(value)
-
-
-def byte_passes(problem: ReductionProblem[bytes]) -> Iterator[ReductionPass[bytes]]:
-    yield hollow
-
-    high_prio_splitters = [b"\n", b";"]
-    for split in high_prio_splitters:
-        yield compose(Split(split), delete_elements)
-
-    yield lift_braces
-
-    yield compose(Tokenize(), delete_elements)
-
-    all_bytes = Counter(problem.current_test_case)
-
-    for s in sorted(all_bytes, key=all_bytes.__getitem__):
-        split = bytes([s])
-        if split not in high_prio_splitters:
-            yield compose(Split(split), delete_elements)
-
-    yield lexeme_based_deletions
-    yield short_deletions

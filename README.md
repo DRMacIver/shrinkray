@@ -8,9 +8,9 @@ It's designed to be highly parallel, and work with a very wide variety of format
 
 Currently shrink ray in a very alpha quality state. I expect it to mostly work for most use cases, but also is probably super buggy in ways I've not discovered yet. I encourage people to try it out, but also please let me know when it inevitably breaks, or if it doesn't produce very good results for your use cases.
 
-Also, the output as it runs is probably mostly incomprehensible if you're not me right now. Sorry. I tried to make a better UI for it and fell down a rabbit hole of annoying details that stalled development for more than a month because I didn't want to touch it, so I ripped all of that out and decided to release a version for general use with incomprehensible output. You mostly don't need this output anyway, it's just there to give you something to look at while it runs.
+## Installation
 
-## Usage
+Shrink Ray requires Python 3.12 or later, and can be installed using pip.
 
 There is currently no official release for shrink ray, and I recommend running off main. You can install it as follows:
 
@@ -24,7 +24,20 @@ Shrink Ray requires Python 3.12 or later and won't work on earlier versions. If 
 on versions it's incompatible with. If you do not have Python 3.12 installed, I recommend [pyenv](https://github.com/pyenv/pyenv) for managing
 Python installs.
 
-You then run it as follows:
+If you want to use it from the git repo directly, you can do the following:
+
+```
+git checkout https://github.com/DRMacIver/shrinkray.git
+cd shrinkray
+virtualenv .venv
+.venv/bin/pip install -e .
+```
+
+You will now have a shrinkray executable in .venv/bin, which you can also put on your path by running `source .venv/bin/activate`.
+
+## Usage
+
+Shrink Ray is run as follows:
 
 ```
 shrinkray is_interesting.sh my-test-case

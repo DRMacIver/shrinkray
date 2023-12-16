@@ -144,6 +144,10 @@ class ReductionProblem(Generic[T], ABC):
         )
 
 
+class InvalidInitialExample(ValueError):
+    pass
+
+
 class BasicReductionProblem(ReductionProblem[T]):
     def __init__(
         self,
@@ -177,7 +181,7 @@ class BasicReductionProblem(ReductionProblem[T]):
             return
         self.__has_set_up = True
         if not await self.__is_interesting(self.current_test_case):
-            raise ValueError(
+            raise InvalidInitialExample(
                 f"Initial example ({self.display(self.current_test_case)}) does not satisfy interestingness test."
             )
 

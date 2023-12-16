@@ -246,6 +246,8 @@ class ShrinkRay(Reducer[bytes]):
                 return
 
     async def run(self):
+        await self.target.setup()
+
         await self.initial_cut()
 
         while True:

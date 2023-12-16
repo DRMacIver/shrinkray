@@ -1,8 +1,10 @@
+import math
 import os
 import random
 import shlex
 import signal
 import subprocess
+import sys
 import time
 import traceback
 import warnings
@@ -27,7 +29,11 @@ import trio
 import urwid
 import urwid.raw_display
 
-from shrinkray.problem import BasicReductionProblem, ReductionProblem
+from shrinkray.problem import (
+    BasicReductionProblem,
+    InvalidInitialExample,
+    ReductionProblem,
+)
 from shrinkray.reducer import Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
 from glob import glob
@@ -119,6 +125,15 @@ def try_decode(data):
         except UnicodeDecodeError:
             pass
     return None, None
+
+
+class TimeoutExceededOnInitial(InvalidInitialExample):
+    def __init__(self, runtime, timeout):
+        self.runtime = runtime
+        self.timeout = timeout
+        super().__init__(
+            f"Initial test call exceeded timeout of {timeout}s. Try raising or disabling timeout."
+        )
 
 
 def reformat_data(data):
@@ -270,7 +285,13 @@ def main(
 ) -> None:
     if timeout <= 0:
         timeout = float("inf")
-    debug = volume == Volume.debug
+
+    if not os.access(test[0], os.X_OK):
+        print(
+            f"Interestingness test {os.path.relpath(test[0])} is not executable.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # This is a debugging option so that when the reducer seems to be taking
     # a long time you can Ctrl-\ to find out what it's up to. I have no idea
@@ -290,57 +311,74 @@ def main(
 
     base = os.path.basename(filename)
     first_call = True
+    initial_exit_code = None
 
-    async def is_interesting_do_work(test_case: bytes) -> bool:
-        nonlocal first_call
+    async def run_script_on_file(working: str, cwd, test_case, debug=False):
+        nonlocal first_call, initial_exit_code
+        if input_type.enabled(InputType.arg):
+            command = test + [working]
+        else:
+            command = test
+
+        kwargs: dict[str, Any] = dict(
+            universal_newlines=False,
+            preexec_fn=os.setsid,
+            cwd=cwd,
+            check=False,
+        )
+        if input_type.enabled(InputType.stdin):
+            kwargs["stdin"] = test_case
+        else:
+            kwargs["stdin"] = b""
+
+        if not debug:
+            kwargs["stdout"] = subprocess.DEVNULL
+            kwargs["stderr"] = subprocess.DEVNULL
+
+        async with trio.open_nursery() as nursery:
+
+            def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
+                return trio.run_process(command, **kwargs, task_status=task_status)  # type: ignore  # noqa
+
+            start_time = time.time()
+            sp = await nursery.start(call_with_kwargs)
+
+            try:
+                with trio.move_on_after(timeout * 10 if first_call else timeout):
+                    await sp.wait()
+
+                runtime = time.time() - start_time
+
+                if sp.returncode is None:
+                    await interrupt_wait_and_kill(sp)
+
+                if runtime >= timeout and first_call:
+                    raise TimeoutExceededOnInitial(
+                        timeout=timeout,
+                        runtime=runtime,
+                    )
+            finally:
+                if first_call:
+                    initial_exit_code = sp.returncode
+                first_call = False
+
+            return sp.returncode
+
+    async def run_for_exit_code(test_case: bytes, debug=False) -> int:
         with TemporaryDirectory() as d:
             working = os.path.join(d, base)
             async with await trio.open_file(working, "wb") as o:
                 await o.write(test_case)  # type: ignore
 
-            if input_type.enabled(InputType.arg):
-                command = test + [working]
-            else:
-                command = test
-
-            kwargs: dict[str, Any] = dict(
-                universal_newlines=False,
-                preexec_fn=os.setsid,
+            return await run_script_on_file(
+                working=working,
+                test_case=test_case,
+                debug=debug,
                 cwd=d,
-                check=False,
             )
-            if input_type.enabled(InputType.stdin):
-                kwargs["stdin"] = test_case
-            else:
-                kwargs["stdin"] = b""
 
-            if not debug:
-                kwargs["stdout"] = subprocess.DEVNULL
-                kwargs["stderr"] = subprocess.DEVNULL
-
-            async with trio.open_nursery() as nursery:
-
-                def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
-                    return trio.run_process(command, **kwargs, task_status=task_status)  # type: ignore  # noqa
-
-                sp = await nursery.start(call_with_kwargs)
-
-                try:
-                    with trio.move_on_after(timeout):
-                        await sp.wait()
-
-                    if sp.returncode is None:
-                        await interrupt_wait_and_kill(sp)
-                        if first_call:
-                            raise ValueError(
-                                f"Initial test call exceeded timeout of {timeout}s. Try raising or disabling timeout."
-                            )
-                        return False
-                finally:
-                    first_call = False
-
-                succeeded: bool = sp.returncode == 0
-                return succeeded
+    async def is_interesting_do_work(test_case: bytes, debug=False) -> bool:
+        return await run_for_exit_code(test_case, debug=debug) == 0
 
     with open(filename, "rb") as reader:
         initial = reader.read()
@@ -349,7 +387,6 @@ def main(
         writer.write(initial)
 
     text_header = "Shrink Ray. Press q to exit."
-    blank = urwid.Divider()
 
     details_text = urwid.Text("")
     reducer_status = urwid.Text("")
@@ -430,6 +467,9 @@ def main(
                 nursery.start_soon(is_interesting_worker)
 
             async def is_interesting(test_case: bytes) -> bool:
+                if first_call:
+                    return await is_interesting_do_work(test_case)
+
                 send_result, receive_result = trio.open_memory_channel(1)
                 await send_test_cases.send((test_case, send_result))
                 return await receive_result.receive()
@@ -439,6 +479,72 @@ def main(
                 initial=initial,
                 work=work,
             )
+
+            try:
+                await problem.setup()
+            except InvalidInitialExample as e:
+                print(
+                    "Shrink ray cannot proceed because the initial call of the interestingness test resulted in an uninteresting test case.",
+                    file=sys.stderr,
+                )
+                if isinstance(e, TimeoutExceededOnInitial):
+                    print(
+                        f"This is because your initial test case took {e.runtime:.2f}s exceeding your timeout setting of {timeout}.",
+                        file=sys.stderr,
+                    )
+                    print(
+                        f"Try rerunning with --timeout={math.ceil(e.runtime * 2)}.",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        "Rerunning the initerestingness test for debugging purposes...",
+                        file=sys.stderr,
+                    )
+                    exit_code = await run_for_exit_code(problem.current_test_case)
+                    if exit_code != 0:
+                        print(
+                            f"This exited with code {exit_code}, but the script should return 0 for interesting test cases.",
+                            file=sys.stderr,
+                        )
+                        local_exit_code = await run_script_on_file(
+                            working=filename,
+                            test_case=problem.current_test_case,
+                            debug=False,
+                            cwd=os.getcwd(),
+                        )
+                        if local_exit_code == 0:
+                            print(
+                                "Note that Shrink Ray runs your script on a copy of the file in a temporary directory. "
+                                "Here are the results of running it in the current directory directory...",
+                                file=sys.stderr,
+                            )
+                            other_exit_code = await run_script_on_file(
+                                working=filename,
+                                test_case=problem.current_test_case,
+                                debug=True,
+                                cwd=os.getcwd(),
+                            )
+                            if other_exit_code != local_exit_code:
+                                print(
+                                    f"This interestingness is probably flaky as the first time we reran it locally it exited with {local_exit_code}, "
+                                    f"but the second time it exited with {other_exit_code}. Please make sure your interestingness test is deterministic.",
+                                    file=sys.stderr,
+                                )
+                            else:
+                                print(
+                                    "This suggests that your script depends on being run from the current working directory. Please fix it to be directory independent.",
+                                    file=sys.stderr,
+                                )
+                    else:
+                        assert initial_exit_code not in (None, 0)
+                        print(
+                            f"This exited with code 0, but previously the script exited with {initial_exit_code}. "
+                            "This suggests your interestingness test exhibits nondeterministic behaviour.",
+                            file=sys.stderr,
+                        )
+                reducer = None
+                sys.exit(1)
 
             @nursery.start_soon
             async def _():
@@ -510,6 +616,11 @@ def main(
 
                 time_of_last_update = time.time()
                 while True:
+                    if problem.current_test_case.count(b"\n") <= 50:
+                        diff_to_display.set_text(problem.current_test_case)
+                        await trio.sleep(0.1)
+                        continue
+
                     if problem.current_test_case == prev_unformatted:
                         await trio.sleep(0.1)
                         continue
@@ -596,7 +707,8 @@ def main(
         elif len(final_result) < len(initial):
             print(
                 f"Deleted {humanize.naturalsize(stats.initial_test_case_size - len(final_result))} "
-                f"out of {humanize.naturalsize(stats.initial_test_case_size)} ({(1.0 - len(final_result) / stats.initial_test_case_size) * 100:.2f}% reduction)"
+                f"out of {humanize.naturalsize(stats.initial_test_case_size)} "
+                f"({(1.0 - len(final_result) / stats.initial_test_case_size) * 100:.2f}% reduction) "
                 f"in {humanize.precisedelta(time.time() - stats.start_time)}"
             )
         elif len(final_result) == len(initial):

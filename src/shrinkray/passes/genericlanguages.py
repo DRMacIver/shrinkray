@@ -168,6 +168,9 @@ async def reduce_integer_literals(problem):
 @regex_pass(rb"[0-9]+ [*+-/] [0-9]+")
 async def combine_expressions(problem):
     try:
+        # NB: Use of eval is safe, as everything passed to this is a simple
+        # arithmetic expression. Would ideally replace with a guaranteed
+        # safe version though.
         await problem.is_interesting(
             str(eval(problem.current_test_case)).encode("ascii")
         )

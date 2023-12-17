@@ -11,18 +11,26 @@ from attrs import define
 from shrinkray.passes.bytes import (
     Split,
     Tokenize,
+    debrace,
+    delete_byte_spans,
     hollow,
     lexeme_based_deletions,
     lift_braces,
+    remove_indents,
     short_deletions,
 )
 from shrinkray.passes.clangdelta import ClangDelta, clang_delta_pumps
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
+    merge_adjacent_strings,
     reduce_integer_literals,
 )
 from shrinkray.passes.python import is_python, lift_indented_constructs
-from shrinkray.passes.sequences import block_deletion, delete_elements
+from shrinkray.passes.sequences import (
+    block_deletion,
+    delete_duplicates,
+    delete_elements,
+)
 
 from shrinkray.problem import Format, ParseError, ReductionProblem
 from shrinkray.passes.definitions import ReductionPass, ReductionPump
@@ -136,14 +144,26 @@ class ShrinkRay(Reducer[bytes]):
 
     unlocked_ok_passes: bool = False
 
-    great_passes: list[ReductionPass[bytes]] = attrs.Factory(
+    initial_cuts: list[ReductionPass[bytes]] = attrs.Factory(
         lambda: [
             hollow,
-            compose(Split(b"\n"), block_deletion(2, 5)),
-            compose(Split(b";"), block_deletion(2, 5)),
-            compose(Split(b";"), delete_elements),
-            compose(Split(b"\n"), delete_elements),
+            compose(Split(b"\n"), delete_duplicates),
+            compose(Split(b"\n"), block_deletion(10, 100)),
             lift_braces,
+            remove_indents,
+        ]
+    )
+
+    great_passes: list[ReductionPass[bytes]] = attrs.Factory(
+        lambda: [
+            debrace,
+            compose(Split(b"\n"), delete_duplicates),
+            compose(Split(b"\n"), block_deletion(1, 10)),
+            compose(Split(b";"), block_deletion(1, 10)),
+            remove_indents,
+            hollow,
+            lift_braces,
+            delete_byte_spans,
         ]
     )
 
@@ -207,22 +227,15 @@ class ShrinkRay(Reducer[bytes]):
             await self.run_pass(rp)
 
     async def run_ok_passes(self):
-        await self.run_pass(compose(Split(b"\n"), block_deletion(6, 10)))
-        await self.run_pass(compose(Tokenize(), delete_elements))
-        await self.run_pass(compose(Tokenize(), block_deletion(2, 20)))
-
-        all_bytes = Counter(self.target.current_test_case)
-
-        for s in sorted(all_bytes, key=all_bytes.__getitem__):
-            split = bytes([s])
-            await self.run_pass(compose(Split(split), delete_elements))
-
+        await self.run_pass(compose(Split(b"\n"), block_deletion(11, 20)))
+        await self.run_pass(compose(Tokenize(), block_deletion(1, 20)))
         await self.run_pass(reduce_integer_literals)
         await self.run_pass(combine_expressions)
+        await self.run_pass(merge_adjacent_strings)
+        await self.run_pass(lexeme_based_deletions)
 
     async def run_last_ditch_passes(self):
-        await self.run_pass(compose(Split(b"\n"), block_deletion(11, 100)))
-        await self.run_pass(lexeme_based_deletions)
+        await self.run_pass(compose(Split(b"\n"), block_deletion(21, 100)))
         await self.run_pass(short_deletions)
 
     async def run_some_passes(self):
@@ -239,8 +252,45 @@ class ShrinkRay(Reducer[bytes]):
     async def initial_cut(self):
         while True:
             prev = self.target.current_test_case
-            for rp in self.great_passes:
-                with trio.move_on_after(60):
+            for rp in self.initial_cuts:
+                async with trio.open_nursery() as nursery:
+
+                    @nursery.start_soon
+                    async def _():
+                        """
+                        Watcher task that cancels the current reduction pass as
+                        soon as it stops looking like a good idea to keep running
+                        it. Current criteria:
+
+                        1. If it's been more than 5s since the last successful reduction.
+                        2. If the reduction rate of the task has dropped under 50% of its
+                           best so far.
+                        """
+                        iters = 0
+                        initial_size = self.target.current_size
+                        best_reduction_rate = None
+
+                        while True:
+                            iters += 1
+                            deleted = initial_size - self.target.current_size
+
+                            current = self.target.current_test_case
+                            await trio.sleep(10)
+                            rate = deleted / iters
+
+                            if (
+                                best_reduction_rate is None
+                                or rate > best_reduction_rate
+                            ):
+                                best_reduction_rate = rate
+
+                            if (
+                                rate < 0.5 * best_reduction_rate
+                                or current == self.target.current_test_case
+                            ):
+                                nursery.cancel_scope.cancel()
+                                break
+
                     await self.run_pass(rp)
             if prev == self.target.current_test_case:
                 return

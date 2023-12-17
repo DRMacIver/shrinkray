@@ -85,29 +85,44 @@ def regex_pass(
                 return empty.join(parts)
 
             async with trio.open_nursery() as nursery:
+                current_merge_attempts = 0
 
                 async def reduce_region(i):
                     async def is_interesting(s):
+                        nonlocal current_merge_attempts
+                        is_merging = False
                         retries = 0
-                        while True:
-                            # Other tasks may have updated the test case, so when we
-                            # check whether something is interesting but it doesn't update
-                            # the test case, this means something has changed. Given that
-                            # we found a promising reduction, it's likely to be worth trying
-                            # again. In theory an uninteresting test case could also become
-                            # interesting if the underlying test case changes, but that's
-                            # not likely enough to be worth checking.
-                            attempt = replace(i, s)
-                            if not await problem.is_interesting(attempt):
-                                return False
-                            if replace(i, s) == attempt:
-                                replacements[i] = s
-                                return True
-                            retries += 1
+                        try:
+                            while True:
+                                # Other tasks may have updated the test case, so when we
+                                # check whether something is interesting but it doesn't update
+                                # the test case, this means something has changed. Given that
+                                # we found a promising reduction, it's likely to be worth trying
+                                # again. In theory an uninteresting test case could also become
+                                # interesting if the underlying test case changes, but that's
+                                # not likely enough to be worth checking.
+                                while not is_merging and current_merge_attempts > 0:
+                                    await trio.sleep(0.01)
 
-                            # If we've retried this many times then something has gone seriously
-                            # wrong with our concurrency approach and it's probably a bug.
-                            assert retries <= 100
+                                attempt = replace(i, s)
+                                if not await problem.is_interesting(attempt):
+                                    return False
+                                if replace(i, s) == attempt:
+                                    replacements[i] = s
+                                    return True
+                                if not is_merging:
+                                    is_merging = True
+                                    current_merge_attempts += 1
+
+                                retries += 1
+
+                                # If we've retried this many times then something has gone seriously
+                                # wrong with our concurrency approach and it's probably a bug.
+                                assert retries <= 100
+                        finally:
+                            if is_merging:
+                                current_merge_attempts -= 1
+                                assert current_merge_attempts >= 0
 
                     subproblem = BasicReductionProblem(
                         replacements[i],
@@ -178,6 +193,6 @@ async def combine_expressions(problem):
         pass
 
 
-def language_passes(problem: ReductionProblem[bytes]):
-    yield reduce_integer_literals
-    yield combine_expressions
+@regex_pass(rb'([\'"])\s*\1')
+async def merge_adjacent_strings(problem):
+    await problem.is_interesting(b"")

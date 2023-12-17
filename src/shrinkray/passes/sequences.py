@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Any, Generic, Iterable, Sequence, TypeVar, cast
 
 import trio
@@ -98,3 +99,17 @@ def block_deletion(min_block, max_block):
 
     apply.__name__ = f"block_deletion({min_block}, {max_block})"
     return apply
+
+
+async def delete_duplicates(problem: ReductionProblem[Seq]):
+    index = defaultdict(list)
+
+    for i, c in enumerate(problem.current_test_case):
+        index[c].append(i)
+
+    cuts = []
+
+    for ix in index.values():
+        if len(ix) > 1:
+            cuts.append([(i, i + 1) for i in ix])
+    await apply_patches(problem, Cuts(), cuts)

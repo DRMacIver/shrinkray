@@ -150,6 +150,17 @@ def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:
     return intervals
 
 
+async def debrace(problem: ReductionProblem[bytes]):
+    await apply_patches(
+        problem,
+        Cuts(),
+        [
+            [(u - 1, u), (v, v + 1)]
+            for u, v in brace_intervals(problem.current_test_case, b"{}")
+        ],
+    )
+
+
 def quote_intervals(target: bytes) -> list[tuple[int, int]]:
     indices = defaultdict(list)
     for i, c in enumerate(target):
@@ -236,3 +247,39 @@ class Tokenize(Format[bytes, list[bytes]]):
 
     def dumps(self, value: list[bytes]) -> bytes:
         return b"".join(value)
+
+
+async def delete_byte_spans(problem: ReductionProblem[bytes]):
+    indices = defaultdict(list)
+    target = problem.current_test_case
+    for i, c in enumerate(target):
+        indices[c].append(i)
+
+    spans = []
+
+    for c, ix in sorted(indices.items()):
+        if len(ix) > 1:
+            spans.append((0, ix[0] + 1))
+            spans.extend(zip(ix, ix[1:]))
+            spans.append((ix[-1], len(target)))
+
+    await apply_patches(problem, Cuts(), [[s] for s in spans])
+
+
+async def remove_indents(problem: ReductionProblem[bytes]):
+    target = problem.current_test_case
+    spans = []
+
+    newline = ord(b"\n")
+    space = ord(b" ")
+
+    for i, c in enumerate(target):
+        if c == newline:
+            j = i + 1
+            while j < len(target) and target[j] == space:
+                j += 1
+
+            if j > i + 1:
+                spans.append([(i + 1, j)])
+
+    await apply_patches(problem, Cuts(), spans)

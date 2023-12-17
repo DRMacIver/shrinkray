@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod, abstractproperty
 from enum import Enum
+from lib2to3.fixes.fix_next import is_assign_target
 import sys
 from typing import Any, Generic, Iterable, Sequence, TypeVar
 import trio
@@ -52,6 +53,10 @@ class PatchApplicationSharedState(Generic[PatchType, TargetType]):
         self.concurrent_merge_attempts = 0
         self.inflight_patch_size = 0
 
+        self.pending_patches = []
+        self.running_tasks = 0
+        self.started_tasks = 0
+
 
 class Direction(Enum):
     LEFT = 0
@@ -72,20 +77,25 @@ class PatchApplicationTask(Generic[PatchType, TargetType]):
 
     async def run(self, patch_indices):
         state = self.shared_state
-        work = state.problem.work
-        for start in patch_indices:
-            if start in state.claimed:
-                continue
-            if await self.try_apply_patch(state.patches[start]):
-                end = start + 1
-                end += await work.find_large_integer(
-                    lambda k: self.try_apply_range(start, end + k)
-                )
-                start -= await work.find_large_integer(
-                    lambda k: self.try_apply_range(start - k, end)
-                )
-                state.claimed.add(start - 1)
-                state.claimed.add(end)
+        state.running_tasks += 1
+        state.started_tasks += 1
+        try:
+            work = state.problem.work
+            for start in patch_indices:
+                if start in state.claimed:
+                    continue
+                if await self.try_apply_patch(state.patches[start]):
+                    end = start + 1
+                    end += await work.find_large_integer(
+                        lambda k: self.try_apply_range(start, end + k)
+                    )
+                    start -= await work.find_large_integer(
+                        lambda k: self.try_apply_range(start - k, end)
+                    )
+                    state.claimed.add(start - 1)
+                    state.claimed.add(end)
+        finally:
+            state.running_tasks -= 1
 
     async def try_apply_range(self, start: int, end: int) -> bool:
         if start < 0 or end > len(self.shared_state.patches):
@@ -117,68 +127,43 @@ class PatchApplicationTask(Generic[PatchType, TargetType]):
         state = self.shared_state
         patch_info: Patches[PatchType, TargetType] = state.patch_info
 
-        patch_size = patch_info.size(patch)
+        await trio.lowlevel.checkpoint()
+        prev_patch = state.current_patch
 
-        trying_to_merge = False
         try:
-            while True:
-                await trio.lowlevel.checkpoint()
-                prev_patch = state.current_patch
+            merged = patch_info.combine(prev_patch, patch)
+        except Conflict:
+            return False
+        if merged == state.current_patch:
+            return True
+        attempt = patch_info.apply(
+            merged,
+            state.base,
+        )
 
-                try:
-                    merged = patch_info.combine(prev_patch, patch)
-                except Conflict:
-                    return False
-                if merged == state.current_patch:
-                    return True
-                attempt = patch_info.apply(
-                    merged,
-                    state.base,
+        succeeded = await state.problem.is_interesting(attempt)
+
+        if not succeeded:
+            self.sequential_failures += 1
+            return False
+
+        self.sequential_failures = 0
+
+        if state.current_patch == prev_patch:
+            state.current_patch = merged
+            return True
+        else:
+            state.pending_patches.append(patch)
+            while state.pending_patches:
+                await trio.sleep(0.01)
+
+            try:
+                return (
+                    patch_info.combine(state.current_patch, patch)
+                    == state.current_patch
                 )
-
-                # If we are likely to get a successful call to the interestingness test,
-                # and some other task is currently trying to apply a patch that it thinks
-                # will work, we pause here until it's made its attempt, so as to avoid
-                # doing a lot of duplicated work where we repeatedly stomp on each other's
-                # toes. If however we don't think this is likely to succeed, we try it
-                # anyway so as to get some book keeping done in the background.
-                if (
-                    not trying_to_merge
-                    # We let tasks that we don't think are going to succeed run, because
-                    # an uninteresting test case doesn't conflict with applying other
-                    # test cases.
-                    and self.sequential_failures <= 10
-                    # We also prioritise really large patches, because we want to apply
-                    # as many of those as possible, so it's best not to slow them down.
-                    # This is useful both for when we're originally trying larger patches
-                    # and also for letting adaptive patching run to completion.
-                    and patch_size <= state.inflight_patch_size * 2
-                ):
-                    while state.concurrent_merge_attempts > 0:
-                        await trio.sleep(0.01)
-
-                succeeded = await state.problem.is_interesting(attempt)
-
-                if not succeeded:
-                    self.sequential_failures += 1
-                    return False
-
-                self.sequential_failures = 0
-
-                if state.current_patch == prev_patch:
-                    state.current_patch = merged
-                    return True
-                if not trying_to_merge:
-                    trying_to_merge = True
-                    state.concurrent_merge_attempts += 1
-                    state.inflight_patch_size += patch_size
-        finally:
-            if trying_to_merge:
-                state.concurrent_merge_attempts -= 1
-                state.inflight_patch_size -= patch_size
-                assert state.concurrent_merge_attempts >= 0
-                if state.concurrent_merge_attempts == 0:
-                    assert state.inflight_patch_size == 0
+            except Conflict:
+                return False
 
 
 async def apply_patches(
@@ -230,6 +215,41 @@ async def apply_patches(
                 ).run,
                 long_order,
             )
+
+        while state.started_tasks == 0:
+            await trio.sleep(0.01)
+
+        @nursery.start_soon
+        async def _():
+            while state.running_tasks > 0 or state.pending_patches:
+                if not state.pending_patches:
+                    await trio.sleep(0.01)
+                    continue
+
+                async def can_apply(k):
+                    if k > len(state.pending_patches):
+                        return False
+
+                    patches_to_apply = state.pending_patches[:k]
+
+                    while True:
+                        prev_patch = state.current_patch
+                        try:
+                            combined = patch_info.combine(prev_patch, *patches_to_apply)
+                        except Conflict:
+                            return False
+                        attempt = patch_info.apply(combined, state.base)
+                        if await state.problem.is_interesting(attempt):
+                            if state.current_patch == prev_patch:
+                                state.current_patch = combined
+                                return True
+                            else:
+                                await trio.lowlevel.checkpoint()
+                        else:
+                            return False
+
+                k = await problem.work.find_large_integer(can_apply)
+                del state.pending_patches[: k + 1]
 
 
 class LazyMutableRange:

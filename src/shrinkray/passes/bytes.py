@@ -127,128 +127,6 @@ async def lexeme_based_deletions(problem: ReductionProblem[bytes], min_size=8) -
     await delete_intervals(problem, intervals_to_delete, shuffle=True)
 
 
-def merged_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    normalized = []
-    for start, end in sorted(map(tuple, intervals)):
-        if normalized and normalized[-1][-1] >= start:
-            normalized[-1][-1] = max(normalized[-1][-1], end)
-        else:
-            normalized.append([start, end])
-    return list(map(tuple, normalized))
-
-
-def with_deletions(target: bytes, deletions: list[tuple[int, int]]) -> bytes:
-    result = bytearray()
-    prev = 0
-    total_deleted = 0
-    for start, end in deletions:
-        total_deleted += end - start
-        result.extend(target[prev:start])
-        prev = end
-    result.extend(target[prev:])
-    assert len(result) + total_deleted == len(target)
-    return bytes(result)
-
-
-class CutTarget:
-    def __init__(
-        self, problem: ReductionProblem[bytes], intervals: list[tuple[int, int]]
-    ):
-        self.problem = problem
-        self.target = problem.current_test_case
-        self.intervals = list(map(tuple, intervals))
-        self.intervals.sort()
-
-        self.intervals_by_content = defaultdict(list)
-        for u, v in intervals:
-            self.intervals_by_content[self.target[u:v]].append([u, v])
-
-        self.applied = []
-        self.generation = 0
-        self.attempted = {}
-
-        self.current_merge_attempts = 0
-
-    def is_redundant(self, interval: tuple[int, int]) -> bool:
-        if not self.applied:
-            return False
-        interval = tuple(interval)
-        if interval in self.attempted:
-            return True
-        start, end = interval
-        assert start < end
-
-        if start >= self.applied[-1][0]:
-            return end <= self.applied[-1][-1]
-
-        if start < self.applied[0][0]:
-            return False
-
-        lo = 0
-        hi = len(self.applied) - 1
-
-        # Invariant: start is >= start of lo and < start of hi
-        while lo + 1 < hi:
-            mid = (lo + hi) // 2
-            if start >= self.applied[mid][0]:
-                lo = mid
-            else:
-                hi = mid
-
-        return end <= self.intervals[lo][1]
-
-    def similar_cuts(self, cut):
-        return [
-            s
-            for s in self.intervals_by_content[self.target[cut[0] : cut[1]]]
-            if s != cut
-        ]
-
-    async def try_apply(self, interval: tuple[int, int]) -> bool:
-        return await self.try_merge([interval])
-
-    async def try_merge(self, intervals: list[tuple[int, int]]) -> bool:
-        iters = 0
-        while self.current_merge_attempts > 0:
-            iters += 1
-            if iters == 1:
-                await trio.lowlevel.checkpoint()
-            else:
-                await trio.sleep(0.05)
-
-        trying_to_merge = False
-        try:
-            while True:
-                generation_at_start = self.generation
-
-                merged = merged_intervals(self.applied + intervals)
-                if merged == self.applied:
-                    return True
-                attempt = with_deletions(self.target, merged)
-
-                succeeded = await self.problem.is_interesting(attempt)
-
-                if not succeeded:
-                    return False
-
-                if self.generation == generation_at_start:
-                    self.generation += 1
-                    self.applied = merged
-                    return True
-                if not trying_to_merge:
-                    trying_to_merge = True
-                    self.current_merge_attempts += 1
-        finally:
-            if trying_to_merge:
-                self.current_merge_attempts -= 1
-                assert self.current_merge_attempts >= 0
-
-    def intervals_touching(self, interval: tuple[int, int]) -> list[tuple[int, int]]:
-        start, end = interval
-        # TODO: Use binary search to cut this down to size.
-        return [t for t in self.intervals if not (t[1] < start or t[0] > end)]
-
-
 async def delete_intervals(
     problem: ReductionProblem[bytes],
     intervals_to_delete: list[tuple[int, int]],
@@ -314,38 +192,6 @@ async def short_deletions(problem: ReductionProblem[bytes]) -> None:
     )
 
 
-class SimpleCutTarget:
-    def __init__(self, problem: ReductionProblem[bytes]):
-        self.problem = problem
-        self.target = problem.current_test_case
-
-        self.applied = []
-        self.generation = 0
-
-    async def try_merge(self, intervals: list[tuple[int, int]]) -> bool:
-        while True:
-            generation_at_start = self.generation
-
-            merged = merged_intervals(self.applied + intervals)
-            if merged == self.applied:
-                return True
-            attempt = with_deletions(self.target, merged)
-
-            succeeded = await self.problem.is_interesting(attempt)
-
-            if not succeeded:
-                return False
-
-            if self.generation == generation_at_start:
-                self.generation += 1
-                self.applied = merged
-                return True
-
-            # Sleep for a bit to give whichever other task is making progress
-            # that's stomping on ours time to do its thing.
-            await trio.sleep(self.problem.work.random.expovariate(1))
-
-
 async def lift_braces(problem: ReductionProblem[bytes]):
     target = problem.current_test_case
 
@@ -368,31 +214,12 @@ async def lift_braces(problem: ReductionProblem[bytes]):
             if end > start:
                 results.append((start, end, children))
 
-    target = SimpleCutTarget(problem)
+    cuts = []
+    for start, end, children in results:
+        for child_start, child_end in children:
+            cuts.append([(start, child_start), (child_end, end)])
 
-    async with trio.open_nursery() as nursery:
-        async with trio.open_nursery() as nursery:
-            send_cuts, receive_cuts = trio.open_memory_channel(max_buffer_size=math.inf)
-            sent_any = False
-            for start, end, children in results:
-                for child_start, child_end in children:
-                    sent_any = True
-                    await send_cuts.send([(start, child_start), (child_end, end)])
-
-            send_cuts.close()
-
-            if sent_any:
-
-                async def consumer():
-                    try:
-                        while True:
-                            cuts = await receive_cuts.receive()
-                            await target.try_merge(cuts)
-                    except trio.EndOfChannel:
-                        pass
-
-                for _ in range(problem.work.parallelism):
-                    nursery.start_soon(consumer)
+    await apply_patches(problem, Cuts(), cuts)
 
 
 @define(frozen=True)

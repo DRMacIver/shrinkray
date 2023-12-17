@@ -144,12 +144,19 @@ class PatchApplicationTask(Generic[PatchType, TargetType]):
                 # toes. If however we don't think this is likely to succeed, we try it
                 # anyway so as to get some book keeping done in the background.
                 if (
-                    self.sequential_failures <= 10
-                    and not trying_to_merge
-                    and patch_size <= state.inflight_patch_size
+                    not trying_to_merge
+                    # We let tasks that we don't think are going to succeed run, because
+                    # an uninteresting test case doesn't conflict with applying other
+                    # test cases.
+                    and self.sequential_failures <= 10
+                    # We also prioritise really large patches, because we want to apply
+                    # as many of those as possible, so it's best not to slow them down.
+                    # This is useful both for when we're originally trying larger patches
+                    # and also for letting adaptive patching run to completion.
+                    and patch_size <= state.inflight_patch_size * 2
                 ):
                     while state.concurrent_merge_attempts > 0:
-                        await trio.sleep(0.05)
+                        await trio.sleep(0.01)
 
                 succeeded = await state.problem.is_interesting(attempt)
 

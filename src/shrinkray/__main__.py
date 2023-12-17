@@ -690,8 +690,8 @@ def main(
             nursery.cancel_scope.cancel()
 
         formatting_increase = 0
+        final_result = problem.current_test_case
         if reformat:
-            final_result = problem.current_test_case
             reformatted = reformat_data(final_result)
             if reformatted != final_result:
                 if await is_interesting_do_work(reformatted):

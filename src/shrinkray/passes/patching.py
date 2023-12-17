@@ -49,7 +49,6 @@ class PatchApplicationSharedState(Generic[PatchType, TargetType]):
         self.current_patch = patch_info.empty
 
         self.claimed = set()
-        self.remaining_starts = LazyMutableRange(len(self.patches))
         self.concurrent_merge_attempts = 0
         self.inflight_patch_size = 0
 
@@ -188,6 +187,16 @@ async def apply_patches(
     patches: Iterable[PatchType],
 ):
     patches = sorted(patches, key=patch_info.size)
+    try:
+        full_patch = patch_info.combine(*patches)
+    except Conflict:
+        pass
+    else:
+        initial = problem.current_test_case
+        all_applied = patch_info.apply(full_patch, initial)
+        if all_applied == initial or await problem.is_interesting(all_applied):
+            return
+
     state = PatchApplicationSharedState(problem, patch_info, patches)
     rnd = problem.work.random
 
@@ -221,8 +230,6 @@ async def apply_patches(
                 ).run,
                 long_order,
             )
-
-    assert len(state.remaining_starts) == 0
 
 
 class LazyMutableRange:

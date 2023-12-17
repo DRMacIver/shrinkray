@@ -51,6 +51,7 @@ class PatchApplicationSharedState(Generic[PatchType, TargetType]):
         self.claimed = set()
         self.remaining_starts = LazyMutableRange(len(self.patches))
         self.concurrent_merge_attempts = 0
+        self.inflight_patch_size = 0
 
 
 class Direction(Enum):
@@ -66,113 +67,58 @@ class PatchApplicationTask(Generic[PatchType, TargetType]):
     def __init__(
         self,
         shared_state: PatchApplicationSharedState[PatchType, TargetType],
-        index: int,
-        direction: Direction,
     ):
-        if index >= len(shared_state.patches) or index < 0:
-            raise ValueError(
-                f"Index {index} out of range [0, {len(shared_state.patches)}]"
-            )
         self.shared_state = shared_state
-        self.index = index
-        self.direction = direction
-
         self.sequential_failures = 0
 
-    def bounce(self):
-        self.sequential_failures = 0
+    async def run(self, patch_indices):
         state = self.shared_state
-        starts = state.remaining_starts
-        random = state.problem.work.random
-        while starts:
-            i = random.randrange(0, len(starts))
-            j = len(starts) - 1
-            starts[i], starts[j] = starts[j], starts[i]
-            start = starts[j]
+        work = state.problem.work
+        for start in patch_indices:
             if start in state.claimed:
-                starts.pop()
                 continue
-            self.index = start
-            if self.index - 1 in state.claimed or random.randint(0, 1):
-                self.direction = Direction.RIGHT
-            else:
-                self.direction = Direction.LEFT
-            return
-
-        raise Completed()
-
-    async def run(self):
-        try:
-            while True:
-                state = self.shared_state
-                work = state.problem.work
-                if (
-                    self.index in state.claimed
-                    or self.index < 0
-                    or self.index >= len(state.patches)
-                    or self.sequential_failures >= 100
-                ):
-                    self.bounce()
-
-                state.claimed.add(self.index)
-                await self.try_apply_patch(state.patches[self.index])
-                match self.direction:
-                    case Direction.LEFT:
-                        k = await work.find_large_integer(
-                            lambda k: self.try_apply_range(
-                                self.index - k, self.index + 1
-                            )
-                        )
-                        state.claimed.update(
-                            range(max(0, self.index - k - 1), self.index + 1)
-                        )
-                        self.index -= k + 1
-                    case Direction.RIGHT:
-                        k = await work.find_large_integer(
-                            lambda k: self.try_apply_range(self.index, self.index + k)
-                        )
-                        state.claimed.update(range(self.index, self.index + k + 1))
-                        self.index += k + 1
-        except Completed:
-            return
+            if await self.try_apply_patch(state.patches[start]):
+                end = start + 1
+                end += await work.find_large_integer(
+                    lambda k: self.try_apply_range(start, end + k)
+                )
+                start -= await work.find_large_integer(
+                    lambda k: self.try_apply_range(start - k, end)
+                )
+                state.claimed.add(start - 1)
+                state.claimed.add(end)
 
     async def try_apply_range(self, start: int, end: int) -> bool:
         if start < 0 or end > len(self.shared_state.patches):
             return False
 
+        state = self.shared_state
+        all_patches = state.patches
+        patches = [all_patches[i] for i in range(start, end) if i not in state.claimed]
+
+        if not patches:
+            await trio.lowlevel.checkpoint()
+            return True
+
         try:
             patch = self.shared_state.patch_info.combine(
-                self.shared_state.current_patch, *self.shared_state.patches[start:end]
+                *patches,
             )
         except Conflict:
             await trio.lowlevel.checkpoint()
             return False
 
-        if patch == self.shared_state.current_patch:
-            await trio.lowlevel.checkpoint()
+        if await self.try_apply_patch(patch):
+            state.claimed.update(range(start, end))
             return True
 
-        return await self.try_apply_patch(patch)
+        return False
 
     async def try_apply_patch(self, patch: PatchType) -> bool:
-        print(self.sequential_failures, file=sys.stderr)
         state = self.shared_state
         patch_info: Patches[PatchType, TargetType] = state.patch_info
 
-        # If we are likely to get a successful call to the interestingness test,
-        # and some other task is currently trying to apply a patch that it thinks
-        # will work, we pause here until it's made its attempt, so as to avoid
-        # doing a lot of duplicated work where we repeatedly stomp on each other's
-        # toes. If however we don't think this is likely to succeed, we try it
-        # anyway so as to get some book keeping done in the background.
-        if self.sequential_failures <= 10:
-            iters = 0
-            while state.concurrent_merge_attempts > 0:
-                iters += 1
-                if iters == 1:
-                    await trio.lowlevel.checkpoint()
-                else:
-                    await trio.sleep(0.05)
+        patch_size = patch_info.size(patch)
 
         trying_to_merge = False
         try:
@@ -191,6 +137,20 @@ class PatchApplicationTask(Generic[PatchType, TargetType]):
                     state.base,
                 )
 
+                # If we are likely to get a successful call to the interestingness test,
+                # and some other task is currently trying to apply a patch that it thinks
+                # will work, we pause here until it's made its attempt, so as to avoid
+                # doing a lot of duplicated work where we repeatedly stomp on each other's
+                # toes. If however we don't think this is likely to succeed, we try it
+                # anyway so as to get some book keeping done in the background.
+                if (
+                    self.sequential_failures <= 10
+                    and not trying_to_merge
+                    and patch_size <= state.inflight_patch_size
+                ):
+                    while state.concurrent_merge_attempts > 0:
+                        await trio.sleep(0.05)
+
                 succeeded = await state.problem.is_interesting(attempt)
 
                 if not succeeded:
@@ -205,10 +165,14 @@ class PatchApplicationTask(Generic[PatchType, TargetType]):
                 if not trying_to_merge:
                     trying_to_merge = True
                     state.concurrent_merge_attempts += 1
+                    state.inflight_patch_size += patch_size
         finally:
             if trying_to_merge:
                 state.concurrent_merge_attempts -= 1
+                state.inflight_patch_size -= patch_size
                 assert state.concurrent_merge_attempts >= 0
+                if state.concurrent_merge_attempts == 0:
+                    assert state.inflight_patch_size == 0
 
 
 async def apply_patches(
@@ -218,32 +182,37 @@ async def apply_patches(
 ):
     patches = sorted(patches, key=patch_info.size)
     state = PatchApplicationSharedState(problem, patch_info, patches)
-    n = len(state.patches)
+    rnd = problem.work.random
 
     async with trio.open_nursery() as nursery:
-        nursery.start_soon(
-            PatchApplicationTask(
-                shared_state=state,
-                index=0,
-                direction=Direction.RIGHT,
-            ).run
-        )
-        nursery.start_soon(
-            PatchApplicationTask(
-                shared_state=state,
-                index=n - 1,
-                direction=Direction.LEFT,
-            ).run
+        indices = range(len(patches))
+        long_order = sorted(
+            indices, key=lambda i: patch_info.size(patches[i]), reverse=True
         )
 
-        rnd = problem.work.random
-        for _ in range(max(1, problem.work.parallelism - 2)):
+        # It's in some sense clearly correct to always try the patches in order
+        # from largest to smallest. Instead we don't do that, we spend some of
+        # our time trying patches in random order. This is to avoid stalls. We
+        # will eventually want to try all the long patches, but it may well be
+        # the case that long patches mostly don't work, and if that happens we
+        # want to make sure we're trying some calls that do if there's a
+        # reasonable percentage of patches that would actually work.
+        for _ in range(2):
             nursery.start_soon(
                 PatchApplicationTask(
                     shared_state=state,
-                    index=rnd.randrange(0, n),
-                    direction=rnd.choice((Direction.LEFT, Direction.RIGHT)),
-                ).run
+                ).run,
+                lazy_shuffle(indices, rnd),
+            )
+
+        for _ in range(
+            min(problem.work.parallelism, max(2, problem.work.parallelism - 2))
+        ):
+            nursery.start_soon(
+                PatchApplicationTask(
+                    shared_state=state,
+                ).run,
+                long_order,
             )
 
     assert len(state.remaining_starts) == 0
@@ -269,6 +238,15 @@ class LazyMutableRange:
         self.__size = i
         self.__mask.pop(i, None)
         return result
+
+
+def lazy_shuffle(seq, rnd):
+    indices = LazyMutableRange(len(seq))
+    while indices:
+        j = len(indices) - 1
+        i = rnd.randrange(0, len(indices))
+        indices[i], indices[j] = indices[j], indices[i]
+        yield seq[indices.pop()]
 
 
 CutPatch = list[tuple[int, int]]

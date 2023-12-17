@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod, abstractproperty
+import hashlib
 import time
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
 import attrs
@@ -148,6 +149,16 @@ class InvalidInitialExample(ValueError):
     pass
 
 
+def default_cache_key(value: Any) -> str:
+    if not isinstance(value, bytes):
+        if not isinstance(value, str):
+            value = repr(value)
+        value = value.encode("utf-8")
+
+    hex = hashlib.sha1(value).hexdigest()[:8]
+    return f"{len(value)}:{hex}"
+
+
 class BasicReductionProblem(ReductionProblem[T]):
     def __init__(
         self,
@@ -158,6 +169,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         size: Callable[[T], int] = default_size,
         display: Callable[[T], str] = default_display,
         stats: Optional[ReductionStats] = None,
+        cache_key: Callable[[Any], str] = default_cache_key,
     ):
         super().__init__(work=work)
         self.__current = initial
@@ -171,6 +183,8 @@ class BasicReductionProblem(ReductionProblem[T]):
         else:
             self.stats = stats
 
+        self.__is_interesting_cache = {}
+        self.__cache_key = cache_key
         self.__is_interesting = is_interesting
         self.__on_reduce_callbacks: list[Callable[[T], Awaitable[None]]] = []
         self.__current = initial
@@ -201,12 +215,19 @@ class BasicReductionProblem(ReductionProblem[T]):
         await trio.lowlevel.checkpoint()
         if value == self.current_test_case:
             return True
+        cache_key = self.__cache_key(value)
+        try:
+            return self.__is_interesting_cache[cache_key]
+        except KeyError:
+            pass
         result = await self.__is_interesting(value)
+        self.__is_interesting_cache[cache_key] = result
         self.stats.failed_reductions += 1
         self.stats.calls += 1
         if result:
             self.stats.interesting_calls += 1
             if self.sort_key(value) < self.sort_key(self.current_test_case):
+                self.__is_interesting_cache.clear()
                 self.stats.failed_reductions -= 1
                 self.stats.reductions += 1
                 self.stats.time_of_last_reduction = time.time()

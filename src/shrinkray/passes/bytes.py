@@ -305,6 +305,7 @@ async def remove_whitespace(problem: ReductionProblem[bytes]):
 
 
 class NewlineReplacer(Patches[frozenset[int], bytes]):
+    @property
     def empty(self):
         return frozenset()
 

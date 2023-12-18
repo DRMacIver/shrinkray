@@ -393,6 +393,13 @@ def main(
     parallelism_status = urwid.Text("")
     diff_to_display = urwid.Text("")
 
+    try:
+        text = initial.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    else:
+        diff_to_display.set_text("\n".join(text.splitlines()[:1000]))
+
     parallel_samples = 0
     parallel_total = 0
 

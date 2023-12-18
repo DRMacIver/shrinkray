@@ -275,7 +275,7 @@ class ShrinkRay(Reducer[bytes]):
                             deleted = initial_size - self.target.current_size
 
                             current = self.target.current_test_case
-                            await trio.sleep(10)
+                            await trio.sleep(5)
                             rate = deleted / iters
 
                             if (

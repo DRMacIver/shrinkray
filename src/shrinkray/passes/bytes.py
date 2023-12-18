@@ -8,7 +8,7 @@ from attrs import define
 from shrinkray.passes.sequences import delete_elements
 from shrinkray.problem import Format, ReductionProblem
 from shrinkray.passes.definitions import ReductionPass
-from shrinkray.passes.patching import apply_patches, Cuts
+from shrinkray.passes.patching import Patches, apply_patches, Cuts
 
 
 @define(frozen=True)
@@ -283,3 +283,58 @@ async def remove_indents(problem: ReductionProblem[bytes]):
                 spans.append([(i + 1, j)])
 
     await apply_patches(problem, Cuts(), spans)
+
+
+async def remove_whitespace(problem: ReductionProblem[bytes]):
+    target = problem.current_test_case
+    spans = []
+
+    for i, c in enumerate(target):
+        c = bytes([c])
+        if c.isspace():
+            j = i + 1
+            while j < len(target) and target[j : j + 1].isspace():
+                j += 1
+
+            if j > i + 1:
+                spans.append([(i, j)])
+            if j > i + 2:
+                spans.append([(i + 1, j)])
+
+    await apply_patches(problem, Cuts(), spans)
+
+
+class NewlineReplacer(Patches[frozenset[int], bytes]):
+    def empty(self):
+        return frozenset()
+
+    def combine(self, *patches: frozenset[int]) -> frozenset[int]:
+        result = set()
+        for p in patches:
+            result.update(p)
+        return frozenset(result)
+
+    def apply(self, patch: frozenset[int], target: bytes) -> bytes:
+        result = bytearray()
+
+        for i, c in enumerate(target):
+            if i in patch:
+                result.extend(b"\n")
+            else:
+                result.append(c)
+        return bytes(result)
+
+    def size(self, patch: frozenset[int]) -> int:
+        return len(patch)
+
+
+async def replace_space_with_newlines(problem: ReductionProblem[bytes]):
+    await apply_patches(
+        problem,
+        NewlineReplacer(),
+        [
+            frozenset({i})
+            for i, c in enumerate(problem.current_test_case)
+            if c in b" \t"
+        ],
+    )

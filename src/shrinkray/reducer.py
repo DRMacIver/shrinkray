@@ -17,6 +17,8 @@ from shrinkray.passes.bytes import (
     lexeme_based_deletions,
     lift_braces,
     remove_indents,
+    remove_whitespace,
+    replace_space_with_newlines,
     short_deletions,
 )
 from shrinkray.passes.clangdelta import ClangDelta, clang_delta_pumps
@@ -151,6 +153,8 @@ class ShrinkRay(Reducer[bytes]):
             compose(Split(b"\n"), block_deletion(10, 100)),
             lift_braces,
             remove_indents,
+            remove_whitespace,
+            replace_space_with_newlines,
         ]
     )
 
@@ -164,6 +168,27 @@ class ShrinkRay(Reducer[bytes]):
             hollow,
             lift_braces,
             delete_byte_spans,
+        ]
+    )
+
+    ok_passes: list[ReductionPass[bytes]] = attrs.Factory(
+        lambda: [
+            compose(Split(b"\n"), block_deletion(11, 20)),
+            remove_indents,
+            remove_whitespace,
+            compose(Tokenize(), block_deletion(1, 20)),
+            reduce_integer_literals,
+            combine_expressions,
+            merge_adjacent_strings,
+            lexeme_based_deletions,
+        ]
+    )
+
+    last_ditch_passes: list[ReductionPass[bytes]] = attrs.Factory(
+        lambda: [
+            compose(Split(b"\n"), block_deletion(21, 100)),
+            short_deletions,
+            replace_space_with_newlines,
         ]
     )
 
@@ -227,16 +252,12 @@ class ShrinkRay(Reducer[bytes]):
             await self.run_pass(rp)
 
     async def run_ok_passes(self):
-        await self.run_pass(compose(Split(b"\n"), block_deletion(11, 20)))
-        await self.run_pass(compose(Tokenize(), block_deletion(1, 20)))
-        await self.run_pass(reduce_integer_literals)
-        await self.run_pass(combine_expressions)
-        await self.run_pass(merge_adjacent_strings)
-        await self.run_pass(lexeme_based_deletions)
+        for rp in self.ok_passes:
+            await self.run_pass(rp)
 
     async def run_last_ditch_passes(self):
-        await self.run_pass(compose(Split(b"\n"), block_deletion(21, 100)))
-        await self.run_pass(short_deletions)
+        for rp in self.last_ditch_passes:
+            await self.run(rp)
 
     async def run_some_passes(self):
         prev = self.target.current_test_case

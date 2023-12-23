@@ -7,9 +7,10 @@ import subprocess
 import sys
 import time
 import traceback
-import warnings
+from datetime import timedelta
 from difflib import unified_diff
 from enum import Enum, IntEnum
+from glob import glob
 from shutil import which
 from tempfile import TemporaryDirectory
 from typing import Any, Generic, TypeVar
@@ -18,19 +19,10 @@ import chardet
 import click
 import humanize
 import trio
-
-from shrinkray.passes.clangdelta import ClangDelta
-
-warnings.filterwarnings("ignore", category=trio.TrioDeprecationWarning)
-
-from glob import glob
-from shutil import which
-from typing import Any
-
-import trio
 import urwid
 import urwid.raw_display
 
+from shrinkray.passes.clangdelta import ClangDelta
 from shrinkray.problem import BasicReductionProblem, InvalidInitialExample
 from shrinkray.reducer import ShrinkRay
 from shrinkray.work import Volume, WorkContext
@@ -91,7 +83,7 @@ EnumType = TypeVar("EnumType", bound=Enum)
 
 
 class EnumChoice(click.Choice, Generic[EnumType]):
-    def __init__(self, enum: type[EnumType]):
+    def __init__(self, enum: type[EnumType]) -> None:
         self.enum = enum
         choices = [str(e.name) for e in enum]
         self.__values = {e.name: e for e in enum}
@@ -113,18 +105,18 @@ class InputType(IntEnum):
         return self == value
 
 
-def try_decode(data):
+def try_decode(data: bytes) -> (str | None, str):
     for guess in chardet.detect_all(data):
         try:
             enc = guess["encoding"]
             return enc, data.decode(enc)
         except UnicodeDecodeError:
             pass
-    return None, None
+    return None, ""
 
 
 class TimeoutExceededOnInitial(InvalidInitialExample):
-    def __init__(self, runtime, timeout):
+    def __init__(self, runtime: float, timeout: float) -> None:
         self.runtime = runtime
         self.timeout = timeout
         super().__init__(
@@ -132,7 +124,7 @@ class TimeoutExceededOnInitial(InvalidInitialExample):
         )
 
 
-def reformat_data(data):
+def reformat_data(data: bytes) -> bytes:
     encoding, decoded = try_decode(data)
     if encoding is None:
         return data
@@ -550,7 +542,7 @@ def main(
                 sys.exit(1)
 
             @nursery.start_soon
-            async def _():
+            async def _() -> None():
                 while True:
                     await trio.sleep(0.1)
 
@@ -558,7 +550,7 @@ def main(
                     reducer_status.set_text(f"Reducer status: {reducer.status}")
 
             @nursery.start_soon
-            async def _():
+            async def _() -> None():
                 while True:
                     await trio.sleep(random.expovariate(10.0))
                     nonlocal parallel_samples, parallel_total
@@ -613,7 +605,7 @@ def main(
                     return data
 
             @nursery.start_soon
-            async def _():
+            async def _() -> None():
                 prev_unformatted = problem.current_test_case
                 prev = await attempt_format(prev_unformatted)
 
@@ -683,7 +675,7 @@ def main(
             reducer = ShrinkRay(target=problem, clang_delta=cd_exec)
 
             @nursery.start_soon
-            async def _():
+            async def _() -> None:
                 await reducer.run()
                 nursery.cancel_scope.cancel()
 
@@ -712,7 +704,7 @@ def main(
                 f"Deleted {humanize.naturalsize(stats.initial_test_case_size - len(final_result))} "
                 f"out of {humanize.naturalsize(stats.initial_test_case_size)} "
                 f"({(1.0 - len(final_result) / stats.initial_test_case_size) * 100:.2f}% reduction) "
-                f"in {humanize.precisedelta(time.time() - stats.start_time)}"
+                f"in {humanize.precisedelta(timedelta(time.time() - stats.start_time))}"
             )
         elif len(final_result) == len(initial):
             print("Some changes were made but no bytes were deleted")

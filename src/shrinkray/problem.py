@@ -1,3 +1,4 @@
+from datetime import timedelta
 import hashlib
 import time
 from abc import ABC, abstractmethod, abstractproperty
@@ -71,7 +72,7 @@ class ReductionStats:
         return "\n".join(
             [
                 reduction_msg,
-                f"Total runtime: {precisedelta(runtime)}",
+                f"Total runtime: {precisedelta(timedelta(runtime))}",
                 (
                     f"Calls to interestingness test: {self.calls} ({self.calls / runtime:.2f} calls / second, "
                     f"{self.interesting_calls / self.calls * 100.0:.2f}% interesting, "
@@ -86,7 +87,7 @@ class ReductionStats:
         )
 
 
-@define
+@define(slots=False)
 class ReductionProblem(Generic[T], ABC):
     work: WorkContext
 
@@ -112,7 +113,7 @@ class ReductionProblem(Generic[T], ABC):
 
         return cast(ReductionProblem[S], self.__view_cache.setdefault(format, result))
 
-    async def setup(self):
+    async def setup(self) -> None:
         pass
 
     @abstractproperty
@@ -134,6 +135,10 @@ class ReductionProblem(Generic[T], ABC):
     @property
     def current_size(self) -> int:
         return self.size(self.current_test_case)
+
+    @abstractmethod
+    def display(self, value: T) -> str:
+        ...
 
     def backtrack(self, new_test_case: T) -> "ReductionProblem[T]":
         return BasicReductionProblem(
@@ -176,7 +181,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         self.__current = initial
         self.__sort_key = sort_key
         self.__size = size
-        self.display = display
+        self.__display = display
         if stats is None:
             self.stats = ReductionStats()
             self.stats.initial_test_case_size = self.size(initial)
@@ -184,14 +189,14 @@ class BasicReductionProblem(ReductionProblem[T]):
         else:
             self.stats = stats
 
-        self.__is_interesting_cache = {}
+        self.__is_interesting_cache: dict[str, bool] = {}
         self.__cache_key = cache_key
         self.__is_interesting = is_interesting
         self.__on_reduce_callbacks: list[Callable[[T], Awaitable[None]]] = []
         self.__current = initial
         self.__has_set_up = False
 
-    async def setup(self):
+    async def setup(self) -> None:
         if self.__has_set_up:
             return
         self.__has_set_up = True
@@ -199,6 +204,9 @@ class BasicReductionProblem(ReductionProblem[T]):
             raise InvalidInitialExample(
                 f"Initial example ({self.display(self.current_test_case)}) does not satisfy interestingness test."
             )
+
+    def display(self, value: T) -> str:
+        return self.__display(value)
 
     def sort_key(self, test_case: T) -> Any:
         return self.__sort_key(test_case)
@@ -277,11 +285,17 @@ class View(ReductionProblem[T], Generic[S, T]):
         self.__parse = parse
         self.__dump = dump
         self.__sort_key = sort_key
-        self.stats = problem.stats
 
         current = problem.current_test_case
         self.__prev = current
         self.__current = parse(current)
+
+    def display(self, value: T) -> str:
+        return default_display(value)
+
+    @property
+    def stats(self) -> ReductionStats:
+        return self.__problem.stats  # type: ignore
 
     @property
     def current_test_case(self) -> T:

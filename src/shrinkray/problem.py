@@ -72,7 +72,7 @@ class ReductionStats:
         return "\n".join(
             [
                 reduction_msg,
-                f"Total runtime: {precisedelta(timedelta(runtime))}",
+                f"Total runtime: {precisedelta(timedelta(seconds=runtime))}",
                 (
                     f"Calls to interestingness test: {self.calls} ({self.calls / runtime:.2f} calls / second, "
                     f"{self.interesting_calls / self.calls * 100.0:.2f}% interesting, "

@@ -542,7 +542,7 @@ def main(
                 sys.exit(1)
 
             @nursery.start_soon
-            async def _() -> None():
+            async def _() -> None:
                 while True:
                     await trio.sleep(0.1)
 
@@ -550,7 +550,7 @@ def main(
                     reducer_status.set_text(f"Reducer status: {reducer.status}")
 
             @nursery.start_soon
-            async def _() -> None():
+            async def _() -> None:
                 while True:
                     await trio.sleep(random.expovariate(10.0))
                     nonlocal parallel_samples, parallel_total
@@ -605,7 +605,7 @@ def main(
                     return data
 
             @nursery.start_soon
-            async def _() -> None():
+            async def _() -> None:
                 prev_unformatted = problem.current_test_case
                 prev = await attempt_format(prev_unformatted)
 
@@ -704,7 +704,7 @@ def main(
                 f"Deleted {humanize.naturalsize(stats.initial_test_case_size - len(final_result))} "
                 f"out of {humanize.naturalsize(stats.initial_test_case_size)} "
                 f"({(1.0 - len(final_result) / stats.initial_test_case_size) * 100:.2f}% reduction) "
-                f"in {humanize.precisedelta(timedelta(time.time() - stats.start_time))}"
+                f"in {humanize.precisedelta(timedelta(seconds=time.time() - stats.start_time))}"
             )
         elif len(final_result) == len(initial):
             print("Some changes were made but no bytes were deleted")

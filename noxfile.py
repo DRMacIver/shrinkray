@@ -155,7 +155,7 @@ def tests(session: Session) -> None:
     """Run the test suite."""
     session.install(".")
     session.run_always("poetry", "install", external=True)
-    session.install("coverage[toml]", "pytest", "pygments")
+    session.install("coverage[toml]", "pytest", "pytest-trio", "pygments")
     try:
         session.run("coverage", "run", "--parallel", "-m", "pytest", *session.posargs)
     finally:

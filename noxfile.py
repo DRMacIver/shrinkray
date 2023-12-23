@@ -128,7 +128,7 @@ def format(session: Session) -> None:
     session.install(
         "shed==2023.6.1",
     )
-    session.run("shed")
+    session.run("shed", "--refactor")
 
 
 @session(python=python_versions[0])

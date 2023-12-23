@@ -22,7 +22,7 @@ except ImportError:
 
 
 package = "shrinkray"
-python_versions = ["3.10"]
+python_versions = ["3.12"]
 nox.needs_version = ">= 2021.6.6"
 nox.options.sessions = (
     "pre-commit",

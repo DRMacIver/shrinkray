@@ -9,13 +9,13 @@ from typing import AnyStr, Callable
 import trio
 from attr import define
 
+from shrinkray.passes.definitions import ReductionPass
 from shrinkray.problem import (
     BasicReductionProblem,
     Format,
     ParseError,
     ReductionProblem,
 )
-from shrinkray.passes.definitions import ReductionPass
 
 
 @define(frozen=True)

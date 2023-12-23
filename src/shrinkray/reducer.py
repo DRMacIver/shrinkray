@@ -1,13 +1,13 @@
-from abc import ABC, abstractmethod
-from collections import Counter
-from contextlib import asynccontextmanager, contextmanager
 import math
+from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Awaitable, Callable, Generic, Iterable, Optional, TypeVar
+from typing import Any, Generic, Iterable, Optional, TypeVar
+
 import attrs
 import trio
-
 from attrs import define
+
 from shrinkray.passes.bytes import (
     Split,
     Tokenize,
@@ -22,20 +22,15 @@ from shrinkray.passes.bytes import (
     short_deletions,
 )
 from shrinkray.passes.clangdelta import ClangDelta, clang_delta_pumps
+from shrinkray.passes.definitions import ReductionPass, ReductionPump
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
     merge_adjacent_strings,
     reduce_integer_literals,
 )
 from shrinkray.passes.python import is_python, lift_indented_constructs
-from shrinkray.passes.sequences import (
-    block_deletion,
-    delete_duplicates,
-    delete_elements,
-)
-
+from shrinkray.passes.sequences import block_deletion, delete_duplicates
 from shrinkray.problem import Format, ParseError, ReductionProblem
-from shrinkray.passes.definitions import ReductionPass, ReductionPump
 
 S = TypeVar("S")
 T = TypeVar("T")

@@ -1,12 +1,12 @@
 import os
 import subprocess
 from tempfile import NamedTemporaryFile
+
 import trio
 
-from shrinkray.problem import ReductionProblem
 from shrinkray.passes.definitions import ReductionPass
+from shrinkray.problem import ReductionProblem
 from shrinkray.work import NotFound
-
 
 TRANSFORMATIONS = [
     "aggregate-to-scalar",

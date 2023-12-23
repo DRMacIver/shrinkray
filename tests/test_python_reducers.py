@@ -1,4 +1,5 @@
 from shrinkray.passes.python import lift_indented_constructs
+
 from tests.helpers import reduce_with
 
 

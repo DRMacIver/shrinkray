@@ -1,11 +1,12 @@
-from abc import ABC, abstractmethod, abstractproperty
 import hashlib
 import time
+from abc import ABC, abstractmethod, abstractproperty
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
+
 import attrs
-from humanize import naturalsize, precisedelta
 import trio
 from attrs import define
+from humanize import naturalsize, precisedelta
 
 from shrinkray.work import WorkContext
 

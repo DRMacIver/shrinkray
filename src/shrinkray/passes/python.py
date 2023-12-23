@@ -1,12 +1,11 @@
 import ast
-from asyncio import _leave_task
 from typing import Callable
-import libcst
 
-from shrinkray.problem import ReductionProblem
+import libcst
 import libcst.matchers as m
 from libcst import codemod
 
+from shrinkray.problem import ReductionProblem
 from shrinkray.work import NotFound
 
 

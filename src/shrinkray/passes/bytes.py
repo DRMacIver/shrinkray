@@ -1,14 +1,9 @@
-import math
-from collections import Counter, defaultdict, deque
-from typing import Iterator
+from collections import defaultdict, deque
 
-import trio
 from attrs import define
 
-from shrinkray.passes.sequences import delete_elements
+from shrinkray.passes.patching import Cuts, Patches, apply_patches
 from shrinkray.problem import Format, ReductionProblem
-from shrinkray.passes.definitions import ReductionPass
-from shrinkray.passes.patching import Patches, apply_patches, Cuts
 
 
 @define(frozen=True)

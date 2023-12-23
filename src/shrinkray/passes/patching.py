@@ -1,8 +1,7 @@
 from abc import ABC, abstractmethod, abstractproperty
 from enum import Enum
-from lib2to3.fixes.fix_next import is_assign_target
-import sys
 from typing import Any, Generic, Iterable, Sequence, TypeVar
+
 import trio
 
 from shrinkray.problem import ReductionProblem

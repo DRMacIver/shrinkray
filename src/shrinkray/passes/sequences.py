@@ -1,11 +1,10 @@
 from collections import defaultdict
-from typing import Any, Generic, Iterable, Sequence, TypeVar, cast
+from typing import Any, Generic, Sequence, TypeVar
 
 import trio
 
+from shrinkray.passes.patching import Cuts, apply_patches
 from shrinkray.problem import ReductionProblem
-
-from shrinkray.passes.patching import apply_patches, Cuts
 
 Seq = TypeVar("Seq", bound=Sequence[Any])
 

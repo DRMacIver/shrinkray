@@ -12,32 +12,28 @@ from difflib import unified_diff
 from enum import Enum, IntEnum
 from shutil import which
 from tempfile import TemporaryDirectory
-from typing import Any, Awaitable, Callable, Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 import chardet
 import click
 import humanize
 import trio
 
-from shrinkray.passes.clangdelta import ClangDelta, clang_delta_pumps
+from shrinkray.passes.clangdelta import ClangDelta
 
 warnings.filterwarnings("ignore", category=trio.TrioDeprecationWarning)
 
+from glob import glob
+from shutil import which
 from typing import Any
 
 import trio
 import urwid
 import urwid.raw_display
 
-from shrinkray.problem import (
-    BasicReductionProblem,
-    InvalidInitialExample,
-    ReductionProblem,
-)
-from shrinkray.reducer import Reducer, ShrinkRay
+from shrinkray.problem import BasicReductionProblem, InvalidInitialExample
+from shrinkray.reducer import ShrinkRay
 from shrinkray.work import Volume, WorkContext
-from glob import glob
-from shutil import which
 
 
 def validate_command(ctx: Any, param: Any, value: str) -> list[str]:

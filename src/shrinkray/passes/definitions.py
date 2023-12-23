@@ -1,4 +1,5 @@
-from typing import TypeVar, Callable, Awaitable
+from typing import Awaitable, Callable, TypeVar
+
 from shrinkray.problem import ReductionProblem
 
 T = TypeVar("T")

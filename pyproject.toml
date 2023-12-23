@@ -23,6 +23,7 @@ trio = "^0.22.2"
 urwid = "^2.2.3"
 humanize = "^4.9.0"
 libcst = "^1.1.0"
+exceptiongroup = "^1.2.0"
 
 [tool.poetry.scripts]
 shrinkray = "shrinkray.__main__:main"

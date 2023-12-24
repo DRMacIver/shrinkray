@@ -13,7 +13,7 @@ from enum import Enum, IntEnum
 from glob import glob
 from shutil import which
 from tempfile import TemporaryDirectory
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Iterable, TypeVar
 
 import chardet
 import click
@@ -105,11 +105,12 @@ class InputType(IntEnum):
         return self == value
 
 
-def try_decode(data: bytes) -> (str | None, str):
+def try_decode(data: bytes) -> tuple[str | None, str]:
     for guess in chardet.detect_all(data):
         try:
             enc = guess["encoding"]
-            return enc, data.decode(enc)
+            if enc is not None:
+                return enc, data.decode(enc)
         except UnicodeDecodeError:
             pass
     return None, ""
@@ -131,7 +132,7 @@ def reformat_data(data: bytes) -> bytes:
     result = []
     indent = 0
 
-    def newline():
+    def newline() -> None:
         result.append("\n" + indent * " ")
 
     start_of_newline = True
@@ -162,15 +163,15 @@ def reformat_data(data: bytes) -> bytes:
         else:
             result.append(c)
 
-    result = "".join(result)
+    output = "".join(result)
     prev = None
-    while prev != result:
-        prev = result
+    while prev != output:
+        prev = output
 
-        result = result.replace(" \n", "\n")
-        result = result.replace("\n\n", "\n")
+        output = output.replace(" \n", "\n")
+        output = output.replace("\n\n", "\n")
 
-    return result.encode(encoding)
+    return output.encode(encoding)
 
 
 @click.command(
@@ -301,7 +302,9 @@ def main(
     first_call = True
     initial_exit_code = None
 
-    async def run_script_on_file(working: str, cwd, test_case, debug=False):
+    async def run_script_on_file(
+        working: str, cwd: str, test_case: bytes, debug: bool = False
+    ) -> int:
         nonlocal first_call, initial_exit_code
         if input_type.enabled(InputType.arg):
             command = test + [working]
@@ -326,7 +329,7 @@ def main(
         async with trio.open_nursery() as nursery:
 
             def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
-                return trio.run_process(command, **kwargs, task_status=task_status)  # type: ignore  # noqa
+                return trio.run_process(command, **kwargs, task_status=task_status)
 
             start_time = time.time()
             sp = await nursery.start(call_with_kwargs)
@@ -350,13 +353,15 @@ def main(
                     initial_exit_code = sp.returncode
                 first_call = False
 
-            return sp.returncode
+            result: int | None = sp.returncode
+            assert result is not None
+            return result
 
-    async def run_for_exit_code(test_case: bytes, debug=False) -> int:
+    async def run_for_exit_code(test_case: bytes, debug: bool = False) -> int:
         with TemporaryDirectory() as d:
             working = os.path.join(d, base)
             async with await trio.open_file(working, "wb") as o:
-                await o.write(test_case)  # type: ignore
+                await o.write(test_case)
 
             return await run_script_on_file(
                 working=working,
@@ -365,7 +370,7 @@ def main(
                 cwd=d,
             )
 
-    async def is_interesting_do_work(test_case: bytes, debug=False) -> bool:
+    async def is_interesting_do_work(test_case: bytes, debug: bool = False) -> bool:
         return await run_for_exit_code(test_case, debug=debug) == 0
 
     with open(filename, "rb") as reader:
@@ -406,8 +411,6 @@ def main(
     listbox = urwid.ListBox(urwid.SimpleListWalker(listbox_content))
     frame = urwid.Frame(urwid.AttrMap(listbox, "body"), header=header)
 
-    palette = []
-
     screen = urwid.raw_display.Screen()
 
     def unhandled(key: Any) -> bool:
@@ -419,7 +422,7 @@ def main(
 
     ui_loop = urwid.MainLoop(
         frame,
-        palette,
+        [],
         screen,
         unhandled_input=unhandled,
         event_loop=event_loop,
@@ -446,7 +449,7 @@ def main(
 
             parallel_tasks_running = 0
 
-            async def is_interesting_worker():
+            async def is_interesting_worker() -> None:
                 nonlocal parallel_tasks_running
                 try:
                     while True:
@@ -465,6 +468,8 @@ def main(
                 if first_call:
                     return await is_interesting_do_work(test_case)
 
+                receive_result: trio.MemoryReceiveChannel[bool]
+                send_result: trio.MemorySendChannel[bool]
                 send_result, receive_result = trio.open_memory_channel(1)
                 await send_test_cases.send((test_case, send_result))
                 return await receive_result.receive()
@@ -474,6 +479,8 @@ def main(
                 initial=initial,
                 work=work,
             )
+
+            reducer: ShrinkRay | None
 
             try:
                 await problem.setup()
@@ -547,7 +554,9 @@ def main(
                     await trio.sleep(0.1)
 
                     details_text.set_text(problem.stats.display_stats())
-                    reducer_status.set_text(f"Reducer status: {reducer.status}")
+
+                    if reducer is not None:
+                        reducer_status.set_text(f"Reducer status: {reducer.status}")
 
             @nursery.start_soon
             async def _() -> None:
@@ -578,7 +587,7 @@ def main(
                         result.append(line.hex())
                 return result
 
-            def format_diff(diff):
+            def format_diff(diff: Iterable[str]) -> str:
                 results = []
                 start_writing = False
                 for line in diff:
@@ -593,7 +602,7 @@ def main(
 
             can_format = reformat
 
-            async def attempt_format(data):
+            async def attempt_format(data: bytes) -> bytes:
                 nonlocal can_format
                 if not can_format:
                     return data
@@ -647,7 +656,7 @@ def main(
             @problem.on_reduce
             async def _(test_case: bytes) -> None:
                 async with await trio.open_file(filename, "wb") as o:
-                    await o.write(test_case)  # type: ignore
+                    await o.write(test_case)
 
             cd_exec = None
             if (
@@ -656,7 +665,7 @@ def main(
             ):
                 nonlocal clang_delta
                 if not clang_delta:
-                    clang_delta = which("clang_delta")
+                    clang_delta = which("clang_delta") or ""
                 if not clang_delta:
                     possible_locations = glob(
                         "/opt/homebrew//Cellar/creduce/*/libexec/clang_delta"

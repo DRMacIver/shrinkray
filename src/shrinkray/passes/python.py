@@ -35,8 +35,11 @@ async def libcst_transform(
             self.current_index = 0
             self.fired = False
 
+        # We have to have an ignore on the return type because if we don't LibCST
+        # will do some stupid bullshit with checking if the return type is correct
+        # and we use this generically in a way that makes it hard to type correctly.
         @m.leave(matcher)
-        def maybe_change_node(self, _: Any, updated_node: CSTNode) -> Replacement:
+        def maybe_change_node(self, _, updated_node):  # type: ignore
             if self.current_index == self.target_index:
                 self.fired = True
                 return transformer(updated_node)

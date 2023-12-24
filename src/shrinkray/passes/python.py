@@ -1,30 +1,33 @@
 import ast
-from typing import Callable
+from typing import Any, AnyStr, Callable
 
 import libcst
 import libcst.matchers as m
-from libcst import codemod
+from libcst import CSTNode, codemod
 
 from shrinkray.problem import ReductionProblem
 from shrinkray.work import NotFound
 
 
-def is_python(source):
+def is_python(source: AnyStr) -> bool:
     try:
         ast.parse(source)
         return True
     except SyntaxError:
-        pass
+        return False
+
+
+Replacement = CSTNode | libcst.RemovalSentinel | libcst.FlattenSentinel[Any]
 
 
 async def libcst_transform(
     problem: ReductionProblem[bytes],
     matcher: m.BaseMatcherNode,
     transformer: Callable[
-        [libcst.CSTNode],
-        libcst.CSTNode | libcst.RemovalSentinel | libcst.FlattenSentinel,
+        [CSTNode],
+        Replacement,
     ],
-):
+) -> None:
     class CM(codemod.VisitorBasedCodemodCommand):
         def __init__(self, context: codemod.CodemodContext, target_index: int):
             super().__init__(context)
@@ -33,7 +36,7 @@ async def libcst_transform(
             self.fired = False
 
         @m.leave(matcher)
-        def maybe_change_node(self, _, updated_node):
+        def maybe_change_node(self, _: Any, updated_node: CSTNode) -> Replacement:
             if self.current_index == self.target_index:
                 self.fired = True
                 return transformer(updated_node)
@@ -53,7 +56,7 @@ async def libcst_transform(
 
     n = counting_mod.current_index + 1
 
-    async def can_apply(i):
+    async def can_apply(i: int) -> bool:
         nonlocal n
         if i >= n:
             return False
@@ -90,9 +93,9 @@ async def libcst_transform(
             break
 
 
-async def lift_indented_constructs(problem: ReductionProblem[bytes]):
+async def lift_indented_constructs(problem: ReductionProblem[bytes]) -> None:
     await libcst_transform(
         problem,
         m.OneOf(m.While(), m.If(), m.Try(), m.With()),
-        lambda x: libcst.FlattenSentinel(x.body.body),
+        lambda x: libcst.FlattenSentinel(x.body.body),  # type: ignore
     )

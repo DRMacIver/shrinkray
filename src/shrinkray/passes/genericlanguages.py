@@ -41,9 +41,9 @@ def regex_pass(
     pattern: AnyStr | re.Pattern[AnyStr],
 ) -> Callable[[ReductionPass[AnyStr]], ReductionPass[AnyStr]]:
     if not isinstance(pattern, re.Pattern):
-        pattern = re.compile(pattern)  # type: ignore
+        pattern = re.compile(pattern)
 
-    def inner(fn):
+    def inner(fn: ReductionPass[AnyStr]) -> ReductionPass[AnyStr]:
         @wraps(fn)
         async def reduction_pass(problem: ReductionProblem[AnyStr]) -> None:
             matching_regions = []
@@ -87,8 +87,8 @@ def regex_pass(
             async with trio.open_nursery() as nursery:
                 current_merge_attempts = 0
 
-                async def reduce_region(i):
-                    async def is_interesting(s):
+                async def reduce_region(i: int) -> None:
+                    async def is_interesting(s: AnyStr) -> bool:
                         nonlocal current_merge_attempts
                         is_merging = False
                         retries = 0
@@ -165,23 +165,23 @@ async def reduce_integer(problem: ReductionProblem[int]) -> None:
 
 
 class IntegerFormat(Format[bytes, int]):
-    def parse(self, s: bytes) -> int:
+    def parse(self, input: bytes) -> int:
         try:
-            return int(s.decode("ascii"))
+            return int(input.decode("ascii"))
         except (ValueError, UnicodeDecodeError):
             raise ParseError()
 
-    def dumps(self, i: int) -> bytes:
-        return str(i).encode("ascii")
+    def dumps(self, input: int) -> bytes:
+        return str(input).encode("ascii")
 
 
 @regex_pass(b"[0-9]+")
-async def reduce_integer_literals(problem):
+async def reduce_integer_literals(problem: ReductionProblem[bytes]) -> None:
     await reduce_integer(problem.view(IntegerFormat()))
 
 
 @regex_pass(rb"[0-9]+ [*+-/] [0-9]+")
-async def combine_expressions(problem):
+async def combine_expressions(problem: ReductionProblem[bytes]) -> None:
     try:
         # NB: Use of eval is safe, as everything passed to this is a simple
         # arithmetic expression. Would ideally replace with a guaranteed
@@ -194,5 +194,5 @@ async def combine_expressions(problem):
 
 
 @regex_pass(rb'([\'"])\s*\1')
-async def merge_adjacent_strings(problem):
+async def merge_adjacent_strings(problem: ReductionProblem[bytes]) -> None:
     await problem.is_interesting(b"")

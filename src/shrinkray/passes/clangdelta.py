@@ -4,11 +4,11 @@ from tempfile import NamedTemporaryFile
 
 import trio
 
-from shrinkray.passes.definitions import ReductionPass
+from shrinkray.passes.definitions import ReductionPump
 from shrinkray.problem import ReductionProblem
 from shrinkray.work import NotFound
 
-TRANSFORMATIONS = [
+TRANSFORMATIONS: list[str] = [
     "aggregate-to-scalar",
     "binop-simplification",
     "callexpr-to-value",
@@ -81,12 +81,12 @@ TRANSFORMATIONS = [
 
 
 class ClangDelta:
-    def __init__(self, path):
+    def __init__(self, path: str):
         self.path_to_exec = path
 
-        self.transformations = TRANSFORMATIONS
+        self.transformations: list[str] = TRANSFORMATIONS
 
-    def __validate_transformation(self, transformation):
+    def __validate_transformation(self, transformation: str) -> None:
         if transformation not in self.transformations:
             raise ValueError(f"Invalid transformation {transformation}")
 
@@ -108,7 +108,7 @@ class ClangDelta:
                         capture_stderr=True,
                     )
                 ).stdout
-            except subprocess.SubprocessError as e:
+            except subprocess.CalledProcessError as e:
                 msg = (e.stdout + e.stderr).strip()
                 if msg == b"Error: Unsupported file type!":
                     raise ValueError("Not a C or C++ test case")
@@ -144,7 +144,7 @@ class ClangDelta:
                         capture_stderr=True,
                     )
                 ).stdout
-            except subprocess.SubprocessError as e:
+            except subprocess.CalledProcessError as e:
                 if e.stdout.strip() == b"Error: Unsupported file type!":
                     raise ValueError("Not a C or C++ test case")
                 elif (
@@ -162,8 +162,10 @@ class ClangDeltaError(Exception):
     pass
 
 
-def clang_delta_pump(clang_delta: ClangDelta, transformation: str) -> bytes:
-    async def apply(problem: ReductionProblem[bytes]):
+def clang_delta_pump(
+    clang_delta: ClangDelta, transformation: str
+) -> ReductionPump[bytes]:
+    async def apply(problem: ReductionProblem[bytes]) -> bytes:
         target = problem.current_test_case
         assert target is not None
         try:
@@ -176,7 +178,7 @@ def clang_delta_pump(clang_delta: ClangDelta, transformation: str) -> bytes:
         i = 1
         while i <= n:
 
-            async def can_apply(j):
+            async def can_apply(j: int) -> bool:
                 attempt = await clang_delta.apply_transformation(
                     transformation, j, target
                 )
@@ -205,7 +207,7 @@ def clang_delta_pump(clang_delta: ClangDelta, transformation: str) -> bytes:
     return apply
 
 
-def clang_delta_pumps(clang_delta: ClangDelta) -> list[ReductionPass[bytes]]:
+def clang_delta_pumps(clang_delta: ClangDelta) -> list[ReductionPump[bytes]]:
     return [
         clang_delta_pump(clang_delta, transformation)
         for transformation in clang_delta.transformations

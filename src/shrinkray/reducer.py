@@ -1,8 +1,8 @@
-import math
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any, Generic, Iterable, Optional, TypeVar
+from typing import Generic, Iterable, Optional, TypeVar
 
 import attrs
 import trio
@@ -58,7 +58,7 @@ class Reducer(Generic[T], ABC):
     target: ReductionProblem[T]
 
     @contextmanager
-    def backtrack(self, restart: T):
+    def backtrack(self, restart: T) -> Generator[None, None, None]:
         current = self.target
         try:
             self.target = self.target.backtrack(restart)
@@ -80,7 +80,7 @@ class BasicReducer(Reducer[T]):
     def __attrs_post_init__(self) -> None:
         self.reduction_passes = list(self.reduction_passes)
 
-    async def run_pass(self, rp):
+    async def run_pass(self, rp: ReductionPass[T]) -> None:
         await rp(self.target)
 
     async def run(self) -> None:
@@ -105,31 +105,6 @@ class BasicReducer(Reducer[T]):
 
 class RestartPass(Exception):
     pass
-
-
-class ReductionLimitedProblem(ReductionProblem[T]):
-    def __init__(self, base_problem, halt_at: float = 0.5):
-        super().__init__(work=base_problem.work)
-        self.base_problem = base_problem
-        n = self.base_problem.size(self.base_problem.current_test_case)
-        self.threshold = min(n - 1, math.ceil(halt_at * n))
-        self.stats = base_problem.stats
-
-    async def is_interesting(self, test_case: T) -> bool:
-        result = await self.base_problem.is_interesting(test_case)
-        if self.current_size <= self.threshold:
-            raise RestartPass()
-        return result
-
-    def sort_key(self, test_case: T) -> Any:
-        return self.base_problem.sort_key(test_case)
-
-    def size(self, test_case: T) -> int:
-        return self.base_problem.size(test_case)
-
-    @property
-    def current_test_case(self) -> T:
-        return self.base_problem.current_test_case
 
 
 @define
@@ -187,19 +162,19 @@ class ShrinkRay(Reducer[bytes]):
         ]
     )
 
-    def __attrs_post_init__(self):
+    def __attrs_post_init__(self) -> None:
         if is_python(self.target.current_test_case):
             self.great_passes.append(lift_indented_constructs)
 
     @property
-    def pumps(self):
+    def pumps(self) -> Iterable[ReductionPump[bytes]]:
         if self.clang_delta is None:
             return ()
         else:
             return clang_delta_pumps(self.clang_delta)
 
     @property
-    def status(self):
+    def status(self) -> str:
         if self.current_pump is None:
             if self.current_reduction_pass is not None:
                 return f"Running reduction pass {self.current_reduction_pass.__name__}"
@@ -211,7 +186,7 @@ class ShrinkRay(Reducer[bytes]):
             else:
                 return f"Running reduction pump {self.current_pump.__name__}"
 
-    async def run_pass(self, rp: ReductionPass[bytes]):
+    async def run_pass(self, rp: ReductionPass[bytes]) -> None:
         try:
             assert self.current_reduction_pass is None
             self.current_reduction_pass = rp
@@ -219,7 +194,7 @@ class ShrinkRay(Reducer[bytes]):
         finally:
             self.current_reduction_pass = None
 
-    async def pump(self, rp: ReductionPump[bytes]):
+    async def pump(self, rp: ReductionPump[bytes]) -> None:
         try:
             assert self.current_pump is None
             self.current_pump = rp
@@ -242,37 +217,37 @@ class ShrinkRay(Reducer[bytes]):
         finally:
             self.current_pump = None
 
-    async def run_great_passes(self):
+    async def run_great_passes(self) -> None:
         for rp in self.great_passes:
             await self.run_pass(rp)
 
-    async def run_ok_passes(self):
+    async def run_ok_passes(self) -> None:
         for rp in self.ok_passes:
             await self.run_pass(rp)
 
-    async def run_last_ditch_passes(self):
+    async def run_last_ditch_passes(self) -> None:
         for rp in self.last_ditch_passes:
-            await self.run(rp)
+            await self.run_pass(rp)
 
-    async def run_some_passes(self):
+    async def run_some_passes(self) -> None:
         prev = self.target.current_test_case
         await self.run_great_passes()
         if prev == self.target.current_test_case and not self.unlocked_ok_passes:
             return
         self.unlocked_ok_passes = True
         await self.run_ok_passes()
-        if prev == self.target.current_test_case:
+        if prev != self.target.current_test_case:
             return
         await self.run_last_ditch_passes()
 
-    async def initial_cut(self):
+    async def initial_cut(self) -> None:
         while True:
             prev = self.target.current_test_case
             for rp in self.initial_cuts:
                 async with trio.open_nursery() as nursery:
 
                     @nursery.start_soon
-                    async def _():
+                    async def _() -> None:
                         """
                         Watcher task that cancels the current reduction pass as
                         soon as it stops looking like a good idea to keep running
@@ -284,7 +259,7 @@ class ShrinkRay(Reducer[bytes]):
                         """
                         iters = 0
                         initial_size = self.target.current_size
-                        best_reduction_rate = None
+                        best_reduction_rate: float | None = None
 
                         while True:
                             iters += 1
@@ -300,6 +275,8 @@ class ShrinkRay(Reducer[bytes]):
                             ):
                                 best_reduction_rate = rate
 
+                            assert best_reduction_rate is not None
+
                             if (
                                 rate < 0.5 * best_reduction_rate
                                 or current == self.target.current_test_case
@@ -311,7 +288,7 @@ class ShrinkRay(Reducer[bytes]):
             if prev == self.target.current_test_case:
                 return
 
-    async def run(self):
+    async def run(self) -> None:
         await self.target.setup()
 
         await self.initial_cut()

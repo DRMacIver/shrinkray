@@ -1,12 +1,14 @@
 from abc import ABC, abstractmethod, abstractproperty
 from enum import Enum
-from typing import Any, Generic, Iterable, Sequence, TypeVar
+from random import Random
+from typing import Any, Generic, Iterable, Sequence, TypeVar, cast
 
 import trio
 
 from shrinkray.problem import ReductionProblem
 
 Seq = TypeVar("Seq", bound=Sequence[Any])
+T = TypeVar("T")
 
 PatchType = TypeVar("PatchType")
 TargetType = TypeVar("TargetType")
@@ -18,7 +20,7 @@ class Conflict(Exception):
 
 class Patches(Generic[PatchType, TargetType], ABC):
     @abstractproperty
-    def empty(self):
+    def empty(self) -> PatchType:
         ...
 
     @abstractmethod
@@ -48,11 +50,11 @@ class PatchApplicationSharedState(Generic[PatchType, TargetType]):
 
         self.current_patch = patch_info.empty
 
-        self.claimed = set()
+        self.claimed: set[int] = set()
         self.concurrent_merge_attempts = 0
         self.inflight_patch_size = 0
 
-        self.pending_patches = []
+        self.pending_patches: list[PatchType] = []
         self.running_tasks = 0
         self.started_tasks = 0
 
@@ -74,7 +76,7 @@ class PatchApplicationTask(Generic[PatchType, TargetType]):
         self.shared_state = shared_state
         self.sequential_failures = 0
 
-    async def run(self, patch_indices):
+    async def run(self, patch_indices: Iterable[int]) -> None:
         state = self.shared_state
         state.running_tasks += 1
         state.started_tasks += 1
@@ -169,7 +171,7 @@ async def apply_patches(
     problem: ReductionProblem[TargetType],
     patch_info: Patches[PatchType, TargetType],
     patches: Iterable[PatchType],
-):
+) -> None:
     patches = sorted(patches, key=patch_info.size)
     try:
         full_patch = patch_info.combine(*patches)
@@ -219,13 +221,13 @@ async def apply_patches(
             await trio.sleep(0.01)
 
         @nursery.start_soon
-        async def _():
+        async def _() -> None:
             while state.running_tasks > 0 or state.pending_patches:
                 if not state.pending_patches:
                     await trio.sleep(0.01)
                     continue
 
-                async def can_apply(k):
+                async def can_apply(k: int) -> bool:
                     if k > len(state.pending_patches):
                         return False
 
@@ -252,20 +254,20 @@ async def apply_patches(
 
 
 class LazyMutableRange:
-    def __init__(self, n):
+    def __init__(self, n: int):
         self.__size = n
-        self.__mask = {}
+        self.__mask: dict[int, int] = {}
 
-    def __getitem__(self, i):
+    def __getitem__(self, i: int) -> int:
         return self.__mask.get(i, i)
 
-    def __setitem__(self, i, v):
+    def __setitem__(self, i: int, v: int) -> None:
         self.__mask[i] = v
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.__size
 
-    def pop(self):
+    def pop(self) -> int:
         i = len(self) - 1
         result = self[i]
         self.__size = i
@@ -273,7 +275,7 @@ class LazyMutableRange:
         return result
 
 
-def lazy_shuffle(seq, rnd):
+def lazy_shuffle(seq: Sequence[T], rnd: Random) -> Iterable[T]:
     indices = LazyMutableRange(len(seq))
     while indices:
         j = len(indices) - 1
@@ -287,24 +289,24 @@ CutPatch = list[tuple[int, int]]
 
 class Cuts(Patches[CutPatch, Seq]):
     @property
-    def empty(self):
+    def empty(self) -> CutPatch:
         return []
 
     def combine(self, *patches: CutPatch) -> CutPatch:
-        all_cuts = []
+        all_cuts: CutPatch = []
         for p in patches:
             all_cuts.extend(p)
         all_cuts.sort()
-        normalized = []
+        normalized: list[list[int]] = []
         for start, end in all_cuts:
             if normalized and normalized[-1][-1] >= start:
                 normalized[-1][-1] = max(normalized[-1][-1], end)
             else:
                 normalized.append([start, end])
-        return list(map(tuple, normalized))
+        return [cast(tuple[int, int], tuple(x)) for x in normalized]
 
-    def apply(self, patch: CutPatch, target: TargetType) -> TargetType:
-        result = []
+    def apply(self, patch: CutPatch, target: Seq) -> Seq:
+        result: list[Any] = []
         prev = 0
         total_deleted = 0
         for start, end in patch:
@@ -313,7 +315,7 @@ class Cuts(Patches[CutPatch, Seq]):
             prev = end
         result.extend(target[prev:])
         assert len(result) + total_deleted == len(target)
-        return type(target)(result)
+        return type(target)(result)  # type: ignore
 
     def size(self, patch: CutPatch) -> int:
         return sum(v - u for u, v in patch)

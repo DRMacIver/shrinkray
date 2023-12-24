@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+from typing import Sequence
 
 from attrs import define
 
@@ -17,40 +18,40 @@ class Encoding(Format[bytes, str]):
     def name(self) -> str:
         return self.encoding
 
-    def parse(self, value: bytes) -> str:
-        return value.decode(self.encoding)
+    def parse(self, input: bytes) -> str:
+        return input.decode(self.encoding)
 
-    def dumps(self, value: str) -> bytes:
-        return value.encode(self.encoding)
+    def dumps(self, input: str) -> bytes:
+        return input.encode(self.encoding)
 
 
 @define(frozen=True)
 class Split(Format[bytes, list[bytes]]):
     splitter: bytes
 
-    def __repr__(self) -> bytes:
+    def __repr__(self) -> str:
         return f"Split({repr(self.splitter)})"
 
     @property
-    def name(self) -> bytes:
+    def name(self) -> str:
         return f"split({repr(self.splitter)})"
 
-    def parse(self, value: bytes) -> list[bytes]:
-        return value.split(self.splitter)
+    def parse(self, input: bytes) -> list[bytes]:
+        return input.split(self.splitter)
 
-    def dumps(self, value: list[bytes]) -> bytes:
-        return self.splitter.join(value)
+    def dumps(self, input: list[bytes]) -> bytes:
+        return self.splitter.join(input)
 
 
-def find_ngram_endpoints(value: bytes) -> list[list[int]]:
-    queue = deque([(0, range(len(value)))])
-    results = []
+def find_ngram_endpoints(value: bytes) -> list[tuple[int, list[int]]]:
+    queue: deque[tuple[int, Sequence[int]]] = deque([(0, range(len(value)))])
+    results: list[tuple[int, list[int]]] = []
 
     while queue and len(results) < 10000:
         k, indices = queue.popleft()
 
         if k > 1:
-            normalized = []
+            normalized: list[int] = []
             for i in indices:
                 if not normalized or i >= normalized[-1] + k:
                     normalized.append(i)
@@ -65,7 +66,7 @@ def find_ngram_endpoints(value: bytes) -> list[list[int]]:
             assert isinstance(indices, list)
             results.append((k, indices))
 
-        split = defaultdict(list)
+        split: dict[int, list[int]] = defaultdict(list)
         for i in indices:
             try:
                 split[value[i + k]].append(i)
@@ -77,7 +78,7 @@ def find_ngram_endpoints(value: bytes) -> list[list[int]]:
 
 
 def tokenize(text: bytes) -> list[bytes]:
-    result = []
+    result: list[bytes] = []
     i = 0
     while i < len(text):
         c = bytes([text[i]])
@@ -106,8 +107,10 @@ def tokenize(text: bytes) -> list[bytes]:
 MAX_DELETE_INTERVAL = 8
 
 
-async def lexeme_based_deletions(problem: ReductionProblem[bytes], min_size=8) -> None:
-    intervals_by_k = defaultdict(set)
+async def lexeme_based_deletions(
+    problem: ReductionProblem[bytes], min_size: int = 8
+) -> None:
+    intervals_by_k: dict[int, set[tuple[int, int]]] = defaultdict(set)
 
     for k, endpoints in find_ngram_endpoints(problem.current_test_case):
         intervals_by_k[k].update(zip(endpoints, endpoints[1:]))
@@ -125,15 +128,15 @@ async def lexeme_based_deletions(problem: ReductionProblem[bytes], min_size=8) -
 async def delete_intervals(
     problem: ReductionProblem[bytes],
     intervals_to_delete: list[tuple[int, int]],
-    shuffle=False,
+    shuffle: bool = False,
 ) -> None:
     await apply_patches(problem, Cuts(), [[t] for t in intervals_to_delete])
 
 
 def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:
     open, close = brace
-    intervals = []
-    stack = []
+    intervals: list[tuple[int, int]] = []
+    stack: list[int] = []
     for i, c in enumerate(target):
         if c == open:
             stack.append(i)
@@ -145,7 +148,7 @@ def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:
     return intervals
 
 
-async def debrace(problem: ReductionProblem[bytes]):
+async def debrace(problem: ReductionProblem[bytes]) -> None:
     await apply_patches(
         problem,
         Cuts(),
@@ -157,11 +160,11 @@ async def debrace(problem: ReductionProblem[bytes]):
 
 
 def quote_intervals(target: bytes) -> list[tuple[int, int]]:
-    indices = defaultdict(list)
+    indices: dict[int, list[int]] = defaultdict(list)
     for i, c in enumerate(target):
         indices[c].append(i)
 
-    intervals = []
+    intervals: list[tuple[int, int]] = []
     for quote in b"\"'":
         xs = indices[quote]
         for u, v in zip(xs, xs[1:], strict=False):
@@ -170,9 +173,9 @@ def quote_intervals(target: bytes) -> list[tuple[int, int]]:
     return intervals
 
 
-async def hollow(problem: ReductionProblem[bytes]):
+async def hollow(problem: ReductionProblem[bytes]) -> None:
     target = problem.current_test_case
-    intervals = []
+    intervals: list[tuple[int, int]] = []
     for b in [
         quote_intervals(target),
         brace_intervals(target, b"[]"),
@@ -198,14 +201,14 @@ async def short_deletions(problem: ReductionProblem[bytes]) -> None:
     )
 
 
-async def lift_braces(problem: ReductionProblem[bytes]):
+async def lift_braces(problem: ReductionProblem[bytes]) -> None:
     target = problem.current_test_case
 
     open_brace, close_brace = b"{}"
-    start_stack = []
-    child_stack = []
+    start_stack: list[int] = []
+    child_stack: list[list[tuple[int, int]]] = []
 
-    results = []
+    results: list[tuple[int, int, list[tuple[int, int]]]] = []
 
     for i, c in enumerate(target):
         if c == open_brace:
@@ -220,7 +223,7 @@ async def lift_braces(problem: ReductionProblem[bytes]):
             if end > start:
                 results.append((start, end, children))
 
-    cuts = []
+    cuts: list[list[tuple[int, int]]] = []
     for start, end, children in results:
         for child_start, child_end in children:
             cuts.append([(start, child_start), (child_end, end)])
@@ -230,27 +233,27 @@ async def lift_braces(problem: ReductionProblem[bytes]):
 
 @define(frozen=True)
 class Tokenize(Format[bytes, list[bytes]]):
-    def __repr__(self) -> bytes:
+    def __repr__(self) -> str:
         return "tokenize"
 
     @property
-    def name(self) -> bytes:
+    def name(self) -> str:
         return "tokenize"
 
-    def parse(self, value: bytes) -> list[bytes]:
-        return tokenize(value)
+    def parse(self, input: bytes) -> list[bytes]:
+        return tokenize(input)
 
-    def dumps(self, value: list[bytes]) -> bytes:
-        return b"".join(value)
+    def dumps(self, input: list[bytes]) -> bytes:
+        return b"".join(input)
 
 
-async def delete_byte_spans(problem: ReductionProblem[bytes]):
-    indices = defaultdict(list)
+async def delete_byte_spans(problem: ReductionProblem[bytes]) -> None:
+    indices: dict[int, list[int]] = defaultdict(list)
     target = problem.current_test_case
     for i, c in enumerate(target):
         indices[c].append(i)
 
-    spans = []
+    spans: list[tuple[int, int]] = []
 
     for c, ix in sorted(indices.items()):
         if len(ix) > 1:
@@ -261,9 +264,9 @@ async def delete_byte_spans(problem: ReductionProblem[bytes]):
     await apply_patches(problem, Cuts(), [[s] for s in spans])
 
 
-async def remove_indents(problem: ReductionProblem[bytes]):
+async def remove_indents(problem: ReductionProblem[bytes]) -> None:
     target = problem.current_test_case
-    spans = []
+    spans: list[list[tuple[int, int]]] = []
 
     newline = ord(b"\n")
     space = ord(b" ")
@@ -280,13 +283,13 @@ async def remove_indents(problem: ReductionProblem[bytes]):
     await apply_patches(problem, Cuts(), spans)
 
 
-async def remove_whitespace(problem: ReductionProblem[bytes]):
+async def remove_whitespace(problem: ReductionProblem[bytes]) -> None:
     target = problem.current_test_case
-    spans = []
+    spans: list[list[tuple[int, int]]] = []
 
     for i, c in enumerate(target):
-        c = bytes([c])
-        if c.isspace():
+        char = bytes([c])
+        if char.isspace():
             j = i + 1
             while j < len(target) and target[j : j + 1].isspace():
                 j += 1
@@ -301,11 +304,11 @@ async def remove_whitespace(problem: ReductionProblem[bytes]):
 
 class NewlineReplacer(Patches[frozenset[int], bytes]):
     @property
-    def empty(self):
+    def empty(self) -> frozenset[int]:
         return frozenset()
 
     def combine(self, *patches: frozenset[int]) -> frozenset[int]:
-        result = set()
+        result: set[int] = set()
         for p in patches:
             result.update(p)
         return frozenset(result)
@@ -324,7 +327,7 @@ class NewlineReplacer(Patches[frozenset[int], bytes]):
         return len(patch)
 
 
-async def replace_space_with_newlines(problem: ReductionProblem[bytes]):
+async def replace_space_with_newlines(problem: ReductionProblem[bytes]) -> None:
     await apply_patches(
         problem,
         NewlineReplacer(),

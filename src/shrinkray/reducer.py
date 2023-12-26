@@ -244,7 +244,6 @@ class ShrinkRay(Reducer[bytes]):
         while True:
             prev = self.target.current_test_case
             for rp in self.initial_cuts:
-                print(rp.__name__)
                 async with trio.open_nursery() as nursery:
                     completed_pass = False
 

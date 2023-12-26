@@ -12,7 +12,7 @@ from attrs import define
 from shrinkray.passes.bytes import (
     Split,
     Tokenize,
-    debrace,
+    debracket,
     delete_byte_spans,
     hollow,
     lexeme_based_deletions,
@@ -136,7 +136,7 @@ class ShrinkRay(Reducer[bytes]):
 
     great_passes: list[ReductionPass[bytes]] = attrs.Factory(
         lambda: [
-            debrace,
+            debracket,
             compose(Split(b"\n"), delete_duplicates),
             compose(Split(b"\n"), block_deletion(1, 10)),
             compose(Split(b";"), block_deletion(1, 10)),

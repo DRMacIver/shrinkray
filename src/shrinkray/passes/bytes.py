@@ -150,14 +150,17 @@ def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:
     return intervals
 
 
-async def debrace(problem: ReductionProblem[bytes]) -> None:
+async def debracket(problem: ReductionProblem[bytes]) -> None:
+    cuts = [
+        [(u - 1, u), (v, v + 1)]
+        for brackets in [b"{}", b"()", b"[]"]
+        for u, v in brace_intervals(problem.current_test_case, brackets)
+    ]
+    print(cuts)
     await apply_patches(
         problem,
         Cuts(),
-        [
-            [(u - 1, u), (v, v + 1)]
-            for u, v in brace_intervals(problem.current_test_case, b"{}")
-        ],
+        cuts,
     )
 
 

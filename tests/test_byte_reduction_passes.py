@@ -9,6 +9,7 @@ from shrinkray.passes.bytes import (
     find_ngram_endpoints,
     short_deletions,
     sort_whitespace,
+    debracket,
 )
 from shrinkray.passes.python import is_python
 
@@ -134,3 +135,9 @@ def test_sorting_whitespace_preserving_python(initial):
 
     for run in whitespace_runs[1:]:
         assert len(run) <= 1
+
+def test_debracket():
+    assert (
+        reduce_with([debracket], b"(1 + 2) + (3 + 4)", lambda x: b"(3 + 4)" in x)
+        == b"1 + 2 + (3 + 4)"
+    )

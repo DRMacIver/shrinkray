@@ -28,6 +28,9 @@ exceptiongroup = "^1.2.0"
 [tool.poetry.scripts]
 shrinkray = "shrinkray.__main__:main"
 
+[tool.poetry.group.dev.dependencies]
+hypothesis = "^6.92.1"
+
 [tool.coverage.paths]
 source = ["src", "*/site-packages"]
 tests = ["tests", "*/tests"]

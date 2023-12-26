@@ -40,6 +40,8 @@ def with_deletions(target: Seq, deletions: list[tuple[int, int]]) -> Seq:
 def block_deletion(min_block: int, max_block: int) -> ReductionPass[Seq]:
     async def apply(problem: ReductionProblem[Seq]) -> None:
         n = len(problem.current_test_case)
+        if n <= min_block:
+            return
         blocks = [
             [(i, i + block_size)]
             for block_size in range(min_block, max_block + 1)

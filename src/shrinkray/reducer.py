@@ -244,7 +244,9 @@ class ShrinkRay(Reducer[bytes]):
         while True:
             prev = self.target.current_test_case
             for rp in self.initial_cuts:
+                print(rp.__name__)
                 async with trio.open_nursery() as nursery:
+                    completed_pass = False
 
                     @nursery.start_soon
                     async def _() -> None:
@@ -261,7 +263,7 @@ class ShrinkRay(Reducer[bytes]):
                         initial_size = self.target.current_size
                         best_reduction_rate: float | None = None
 
-                        while True:
+                        while not completed_pass:
                             iters += 1
                             deleted = initial_size - self.target.current_size
 
@@ -285,6 +287,7 @@ class ShrinkRay(Reducer[bytes]):
                                 break
 
                     await self.run_pass(rp)
+                    completed_pass = True
             if prev == self.target.current_test_case:
                 return
 

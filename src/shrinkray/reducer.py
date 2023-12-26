@@ -232,7 +232,7 @@ class ShrinkRay(Reducer[bytes]):
     async def run_some_passes(self) -> None:
         prev = self.target.current_test_case
         await self.run_great_passes()
-        if prev == self.target.current_test_case and not self.unlocked_ok_passes:
+        if prev != self.target.current_test_case and not self.unlocked_ok_passes:
             return
         self.unlocked_ok_passes = True
         await self.run_ok_passes()

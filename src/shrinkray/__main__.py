@@ -688,6 +688,12 @@ def main(
                 await reducer.run()
                 nursery.cancel_scope.cancel()
 
+            @nursery.start_soon
+            async def _() -> None:
+                while True:
+                    ui_loop.screen.clear()
+                    await trio.sleep(1)
+
             with ui_loop.start():
                 await event_loop.run_async()
 

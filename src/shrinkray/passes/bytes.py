@@ -65,7 +65,7 @@ def find_ngram_endpoints(value: bytes) -> list[tuple[int, list[int]]]:
             k += 1
 
         if k > 0 and (indices[0] == 0 or len({value[i - 1] for i in indices}) > 1):
-            assert isinstance(indices, list)
+            assert isinstance(indices, list), value
             results.append((k, indices))
 
         split: dict[int, list[int]] = defaultdict(list)
@@ -338,4 +338,151 @@ async def replace_space_with_newlines(problem: ReductionProblem[bytes]) -> None:
             for i, c in enumerate(problem.current_test_case)
             if c in b" \t"
         ],
+    )
+
+
+ReplacementPatch = dict[int, int]
+
+
+class ByteReplacement(Patches[ReplacementPatch, bytes]):
+    @property
+    def empty(self) -> ReplacementPatch:
+        return {}
+
+    def combine(self, *patches: ReplacementPatch) -> ReplacementPatch:
+        result = {}
+        for p in patches:
+            for k, v in p.items():
+                if k not in result:
+                    result[k] = v
+                else:
+                    result[k] = min(result[k], v)
+        return result
+
+    def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
+        result = bytearray()
+        for c in target:
+            result.append(patch.get(c, c))
+        return bytes(result)
+
+    def size(self, patch: ReplacementPatch) -> int:
+        return 0
+
+
+async def lower_bytes(problem: ReductionProblem[bytes]) -> None:
+    sources = sorted(set(problem.current_test_case))
+
+    patches = [
+        {c: r}
+        for c in sources
+        for r in sorted({0, 1, c // 2, c - 1} | set(b" \t\r\n"))
+        if r < c and r >= 0
+    ] + [
+        {c: r, d: r}
+        for c in sources
+        for d in sources
+        if c != d
+        for r in sorted({0, 1, c // 2, c - 1, d // 2, d - 1} | set(b" \t\r\n"))
+        if (r < c or r < d) and r >= 0
+    ]
+
+    await apply_patches(problem, ByteReplacement(), patches)
+
+
+RegionReplacementPatch = list[tuple[int, int, int]]
+
+
+class RegionReplacement(Patches[ReplacementPatch, bytes]):
+    @property
+    def empty(self) -> ReplacementPatch:
+        return []
+
+    def combine(self, *patches: ReplacementPatch) -> ReplacementPatch:
+        result = []
+        for p in patches:
+            result.extend(p)
+        return result
+
+    def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
+        result = bytearray(target)
+        for i, j, d in patch:
+            if d < result[i]:
+                for k in range(i, j):
+                    result[k] = d
+        return bytes(result)
+
+    def size(self, patch: ReplacementPatch) -> int:
+        return 0
+
+
+async def short_replacements(problem: ReductionProblem[bytes]) -> None:
+    target = problem.current_test_case
+    patches = [
+        [(i, j, c)]
+        for c in [0, 1] + list(b"01 \t\n\r.")
+        for i in range(len(target))
+        if target[i] > c
+        for j in range(i + 1, min(i + 5, len(target) + 1))
+    ]
+
+    print(f"{len(patches)} patches")
+
+    await apply_patches(problem, RegionReplacement(), patches)
+
+
+WHITESPACE = b" \t\r\n"
+
+
+async def sort_whitespace(problem: ReductionProblem[bytes]) -> None:
+    """NB: This is a stupid pass that we only really need for artificial
+    test cases, but it's helpful for allowing those artificial test cases
+    to expose other issues."""
+
+    whitespace_up_to = 0
+    while (
+        whitespace_up_to < len(problem.current_test_case)
+        and problem.current_test_case[whitespace_up_to] not in WHITESPACE
+    ):
+        whitespace_up_to += 1
+    while (
+        whitespace_up_to < len(problem.current_test_case)
+        and problem.current_test_case[whitespace_up_to] in WHITESPACE
+    ):
+        whitespace_up_to += 1
+
+    # If the initial whitespace ends with a newline we want to keep it doing
+    # that. This is mostly for Python purposes.
+    if (
+        whitespace_up_to > 0
+        and problem.current_test_case[whitespace_up_to - 1] == b"\n"[0]
+    ):
+        whitespace_up_to -= 1
+
+    i = whitespace_up_to + 1
+
+    while i < len(problem.current_test_case):
+        if problem.current_test_case[i] not in WHITESPACE:
+            i += 1
+            continue
+
+        async def can_move_to_whitespace(k):
+            if i + k > len(problem.current_test_case):
+                return False
+
+            base = problem.current_test_case
+            target = base[i : i + k]
+
+            if any(c not in WHITESPACE for c in target):
+                return False
+
+            prefix = base[:whitespace_up_to]
+            attempt = prefix + target + base[whitespace_up_to:i] + base[i + k :]
+            return await problem.is_interesting(attempt)
+
+        k = await problem.work.find_large_integer(can_move_to_whitespace)
+        whitespace_up_to += k
+        i += k + 1
+    test_case = problem.current_test_case
+    await problem.is_interesting(
+        bytes(sorted(test_case[:whitespace_up_to])) + test_case[whitespace_up_to:]
     )

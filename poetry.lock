@@ -159,6 +159,7 @@ files = [
 
 [package.dependencies]
 attrs = ">=22.2.0"
+lark = {version = ">=0.10.1", optional = true, markers = "extra == \"lark\""}
 sortedcontainers = ">=2.1.0,<3.0.0"
 
 [package.extras]
@@ -178,6 +179,21 @@ redis = ["redis (>=3.0.0)"]
 zoneinfo = ["backports.zoneinfo (>=0.2.1)", "tzdata (>=2023.3)"]
 
 [[package]]
+name = "hypothesmith"
+version = "0.3.1"
+description = "Hypothesis strategies for generating Python programs, something like CSmith"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "hypothesmith-0.3.1-py3-none-any.whl", hash = "sha256:f435f2a912b2b81979e2860d8e0bd6b62f75756f6746a37fc3a710601875b0c6"},
+    {file = "hypothesmith-0.3.1.tar.gz", hash = "sha256:8799177a6493e832c81746842a8686752b3b1bb9530d6e832bae1758410daf3a"},
+]
+
+[package.dependencies]
+hypothesis = {version = ">=6.84.1", extras = ["lark"]}
+libcst = ">=1.0.1"
+
+[[package]]
 name = "idna"
 version = "3.6"
 description = "Internationalized Domain Names in Applications (IDNA)"
@@ -187,6 +203,23 @@ files = [
     {file = "idna-3.6-py3-none-any.whl", hash = "sha256:c05567e9c24a6b9faaa835c4821bad0590fbb9d5779e7caa6e1cc4978e7eb24f"},
     {file = "idna-3.6.tar.gz", hash = "sha256:9ecdbbd083b06798ae1e86adcbfe8ab1479cf864e4ee30fe4e46a003d12491ca"},
 ]
+
+[[package]]
+name = "lark"
+version = "1.1.8"
+description = "a modern parsing library"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "lark-1.1.8-py3-none-any.whl", hash = "sha256:7d2c221a66a8165f3f81aacb958d26033d40d972fdb70213ab0a2e0627e29c86"},
+    {file = "lark-1.1.8.tar.gz", hash = "sha256:7ef424db57f59c1ffd6f0d4c2b705119927f566b68c0fe1942dddcc0e44391a5"},
+]
+
+[package.extras]
+atomic-cache = ["atomicwrites"]
+interegular = ["interegular (>=0.3.1,<0.4.0)"]
+nearley = ["js2py"]
+regex = ["regex"]
 
 [[package]]
 name = "libcst"
@@ -454,4 +487,4 @@ zmq = ["zmq"]
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.12, <4.0"
-content-hash = "efdf56c1a4085fb67afcad0baa22b8ffb9856e22051a90d744428658e68c2d23"
+content-hash = "7dc192339ab1a98cb80f081e48f315656df80f62fdbb45298f1c6dce343d1df6"

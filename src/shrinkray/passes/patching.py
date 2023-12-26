@@ -142,7 +142,12 @@ class PatchApplicationTask(Generic[PatchType, TargetType]):
             state.base,
         )
 
-        succeeded = await state.problem.is_interesting(attempt)
+        prob = state.problem
+
+        if prob.sort_key(attempt) >= prob.sort_key(prob.current_test_case):
+            return False
+
+        succeeded = await prob.is_interesting(attempt)
 
         if not succeeded:
             self.sequential_failures += 1

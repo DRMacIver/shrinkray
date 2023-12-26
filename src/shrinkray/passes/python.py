@@ -62,9 +62,9 @@ async def libcst_transform(
         nonlocal n
         if i >= n:
             return False
-
+        initial_test_case = problem.current_test_case
         try:
-            module = libcst.parse_module(problem.current_test_case)
+            module = libcst.parse_module(initial_test_case)
         except libcst.ParserSyntaxError:
             n = 0
             return False
@@ -83,9 +83,14 @@ async def libcst_transform(
             n = i
             return False
 
-        return await problem.is_interesting(
-            transformed.code.encode(transformed.encoding)
-        )
+        transformed_test_case = transformed.code.encode(transformed.encoding)
+
+        if problem.sort_key(transformed_test_case) >= problem.sort_key(
+            initial_test_case
+        ):
+            return False
+
+        return await problem.is_interesting(transformed_test_case)
 
     i = 0
     while i < n:
@@ -101,3 +106,26 @@ async def lift_indented_constructs(problem: ReductionProblem[bytes]) -> None:
         m.OneOf(m.While(), m.If(), m.Try(), m.With()),
         lambda x: libcst.FlattenSentinel(x.body.body),  # type: ignore
     )
+
+
+async def delete_statements(problem: ReductionProblem[bytes]) -> None:
+    await libcst_transform(
+        problem,
+        m.SimpleStatementLine(),
+        lambda x: libcst.RemoveFromParent(),  # type: ignore
+    )
+
+
+async def replace_statements_with_pass(problem: ReductionProblem[bytes]) -> None:
+    await libcst_transform(
+        problem,
+        m.SimpleStatementLine(),
+        lambda x: x.with_changes(body=[libcst.Pass()]),  # type: ignore
+    )
+
+
+PYTHON_PASSES = [
+    lift_indented_constructs,
+    delete_statements,
+    replace_statements_with_pass,
+]

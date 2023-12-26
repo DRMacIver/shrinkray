@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
 from functools import wraps
+from time import time
 from typing import Generic, Iterable, Optional, TypeVar
 
 import attrs
@@ -16,10 +17,13 @@ from shrinkray.passes.bytes import (
     hollow,
     lexeme_based_deletions,
     lift_braces,
+    lower_bytes,
     remove_indents,
     remove_whitespace,
     replace_space_with_newlines,
     short_deletions,
+    short_replacements,
+    sort_whitespace,
 )
 from shrinkray.passes.clangdelta import ClangDelta, clang_delta_pumps
 from shrinkray.passes.definitions import ReductionPass, ReductionPump
@@ -27,8 +31,10 @@ from shrinkray.passes.genericlanguages import (
     combine_expressions,
     merge_adjacent_strings,
     reduce_integer_literals,
+    replace_falsey_with_zero,
+    simplify_brackets,
 )
-from shrinkray.passes.python import is_python, lift_indented_constructs
+from shrinkray.passes.python import PYTHON_PASSES, is_python
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
 from shrinkray.problem import Format, ParseError, ReductionProblem
 
@@ -148,23 +154,28 @@ class ShrinkRay(Reducer[bytes]):
             remove_whitespace,
             compose(Tokenize(), block_deletion(1, 20)),
             reduce_integer_literals,
+            replace_falsey_with_zero,
             combine_expressions,
             merge_adjacent_strings,
             lexeme_based_deletions,
+            short_deletions,
         ]
     )
 
     last_ditch_passes: list[ReductionPass[bytes]] = attrs.Factory(
         lambda: [
             compose(Split(b"\n"), block_deletion(21, 100)),
-            short_deletions,
             replace_space_with_newlines,
+            lower_bytes,
+            simplify_brackets,
+            short_replacements,
+            sort_whitespace,
         ]
     )
 
     def __attrs_post_init__(self) -> None:
         if is_python(self.target.current_test_case):
-            self.great_passes.append(lift_indented_constructs)
+            self.great_passes.extend(PYTHON_PASSES)
 
     @property
     def pumps(self) -> Iterable[ReductionPump[bytes]]:
@@ -189,6 +200,7 @@ class ShrinkRay(Reducer[bytes]):
     async def run_pass(self, rp: ReductionPass[bytes]) -> None:
         try:
             assert self.current_reduction_pass is None
+            start = time()
             self.current_reduction_pass = rp
             await rp(self.target)
         finally:
@@ -245,7 +257,6 @@ class ShrinkRay(Reducer[bytes]):
             prev = self.target.current_test_case
             for rp in self.initial_cuts:
                 async with trio.open_nursery() as nursery:
-                    completed_pass = False
 
                     @nursery.start_soon
                     async def _() -> None:
@@ -262,7 +273,7 @@ class ShrinkRay(Reducer[bytes]):
                         initial_size = self.target.current_size
                         best_reduction_rate: float | None = None
 
-                        while not completed_pass:
+                        while True:
                             iters += 1
                             deleted = initial_size - self.target.current_size
 
@@ -286,7 +297,7 @@ class ShrinkRay(Reducer[bytes]):
                                 break
 
                     await self.run_pass(rp)
-                    completed_pass = True
+                    nursery.cancel_scope.cancel()
             if prev == self.target.current_test_case:
                 return
 

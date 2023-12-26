@@ -9,7 +9,9 @@ from typing import AnyStr, Callable
 import trio
 from attr import define
 
+from shrinkray.passes.bytes import ByteReplacement
 from shrinkray.passes.definitions import ReductionPass
+from shrinkray.passes.patching import apply_patches
 from shrinkray.problem import (
     BasicReductionProblem,
     Format,
@@ -39,9 +41,10 @@ class Substring(Format[AnyStr, AnyStr]):
 
 def regex_pass(
     pattern: AnyStr | re.Pattern[AnyStr],
+    flags: re.RegexFlag = 0,
 ) -> Callable[[ReductionPass[AnyStr]], ReductionPass[AnyStr]]:
     if not isinstance(pattern, re.Pattern):
-        pattern = re.compile(pattern)
+        pattern = re.compile(pattern, flags=flags)
 
     def inner(fn: ReductionPass[AnyStr]) -> ReductionPass[AnyStr]:
         @wraps(fn)
@@ -196,3 +199,16 @@ async def combine_expressions(problem: ReductionProblem[bytes]) -> None:
 @regex_pass(rb'([\'"])\s*\1')
 async def merge_adjacent_strings(problem: ReductionProblem[bytes]) -> None:
     await problem.is_interesting(b"")
+
+
+@regex_pass(rb"''|\"\"|false|\(\)|\[\]", re.IGNORECASE)
+async def replace_falsey_with_zero(problem: ReductionProblem[bytes]) -> None:
+    await problem.is_interesting(b"0")
+
+
+async def simplify_brackets(problem: ReductionProblem[bytes]) -> None:
+    bracket_types = [b"[]", b"{}", b"()"]
+
+    patches = [dict(zip(u, v)) for u in bracket_types for v in bracket_types if u > v]
+
+    await apply_patches(problem, ByteReplacement(), patches)

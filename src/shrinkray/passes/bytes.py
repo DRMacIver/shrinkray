@@ -156,7 +156,6 @@ async def debracket(problem: ReductionProblem[bytes]) -> None:
         for brackets in [b"{}", b"()", b"[]"]
         for u, v in brace_intervals(problem.current_test_case, brackets)
     ]
-    print(cuts)
     await apply_patches(
         problem,
         Cuts(),
@@ -427,8 +426,6 @@ async def short_replacements(problem: ReductionProblem[bytes]) -> None:
         if target[i] > c
         for j in range(i + 1, min(i + 5, len(target) + 1))
     ]
-
-    print(f"{len(patches)} patches")
 
     await apply_patches(problem, RegionReplacement(), patches)
 

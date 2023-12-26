@@ -30,6 +30,7 @@ from shrinkray.passes.definitions import ReductionPass, ReductionPump
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
     merge_adjacent_strings,
+    normalize_identifiers,
     reduce_integer_literals,
     replace_falsey_with_zero,
     simplify_brackets,
@@ -159,6 +160,7 @@ class ShrinkRay(Reducer[bytes]):
             merge_adjacent_strings,
             lexeme_based_deletions,
             short_deletions,
+            normalize_identifiers,
         ]
     )
 

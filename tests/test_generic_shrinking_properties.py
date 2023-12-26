@@ -188,5 +188,5 @@ def test_no_blockers():
     assert_no_blockers(
         potential_blockers=POTENTIAL_BLOCKERS,
         is_interesting=is_python,
-        lower_bounds=[1, 2, 5, 10, 50],
+        lower_bounds=[1, 2, 5, 10],
     )

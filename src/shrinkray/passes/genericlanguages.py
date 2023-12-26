@@ -4,6 +4,7 @@ Module of reduction passes designed for "things that look like programming langu
 
 import re
 from functools import wraps
+from string import ascii_lowercase, ascii_uppercase
 from typing import AnyStr, Callable
 
 import trio
@@ -18,6 +19,7 @@ from shrinkray.problem import (
     ParseError,
     ReductionProblem,
 )
+from shrinkray.work import NotFound
 
 
 @define(frozen=True)
@@ -212,3 +214,44 @@ async def simplify_brackets(problem: ReductionProblem[bytes]) -> None:
     patches = [dict(zip(u, v)) for u in bracket_types for v in bracket_types if u > v]
 
     await apply_patches(problem, ByteReplacement(), patches)
+
+
+IDENTIFIER = re.compile(rb"(\b[A-Za-z][A-Za-z0-9_]*\b)|([0-9]+)")
+
+
+def shortlex(s):
+    return (len(s), s)
+
+
+async def normalize_identifiers(problem: ReductionProblem[bytes]) -> None:
+    identifiers = {m.group(0) for m in IDENTIFIER.finditer(problem.current_test_case)}
+    replacements = set(identifiers)
+
+    for char_type in [ascii_lowercase, ascii_uppercase]:
+        for cc in char_type.encode("ascii"):
+            c = bytes([cc])
+            if c not in replacements:
+                replacements.add(c)
+                break
+
+    replacements = sorted(replacements, key=shortlex)
+    targets = sorted(identifiers, key=shortlex, reverse=True)
+
+    # TODO: This could use better parallelisation.
+    for t in targets:
+        pattern = re.compile(rb"\b" + t + rb"\b")
+        source = problem.current_test_case
+        if not pattern.search(source):
+            continue
+
+        async def can_replace(r):
+            if shortlex(r) >= shortlex(t):
+                return False
+            attempt = pattern.sub(r, source)
+            assert attempt != source
+            return await problem.is_interesting(attempt)
+
+        try:
+            await problem.work.find_first_value(replacements, can_replace)
+        except NotFound:
+            pass

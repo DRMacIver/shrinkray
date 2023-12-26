@@ -6,10 +6,10 @@ from hypothesis import assume, example, given, strategies as st
 
 from shrinkray.passes.bytes import (
     WHITESPACE,
+    debracket,
     find_ngram_endpoints,
     short_deletions,
     sort_whitespace,
-    debracket,
 )
 from shrinkray.passes.python import is_python
 
@@ -135,6 +135,7 @@ def test_sorting_whitespace_preserving_python(initial):
 
     for run in whitespace_runs[1:]:
         assert len(run) <= 1
+
 
 def test_debracket():
     assert (

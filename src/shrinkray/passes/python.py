@@ -1,4 +1,3 @@
-import ast
 from typing import Any, AnyStr, Callable
 
 import libcst
@@ -11,9 +10,9 @@ from shrinkray.work import NotFound
 
 def is_python(source: AnyStr) -> bool:
     try:
-        ast.parse(source)
+        libcst.parse_module(source)
         return True
-    except SyntaxError:
+    except (SyntaxError, UnicodeDecodeError, libcst.ParserSyntaxError):
         return False
 
 

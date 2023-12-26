@@ -44,6 +44,8 @@ class Split(Format[bytes, list[bytes]]):
 
 
 def find_ngram_endpoints(value: bytes) -> list[tuple[int, list[int]]]:
+    if len(set(value)) <= 1:
+        return []
     queue: deque[tuple[int, Sequence[int]]] = deque([(0, range(len(value)))])
     results: list[tuple[int, list[int]]] = []
 

@@ -6,7 +6,7 @@ It's designed to be highly parallel, and work with a very wide variety of format
 
 ## Disclaimers about quality
 
-Currently shrink ray in a very alpha quality state. I expect it to mostly work for most use cases, but also is probably super buggy in ways I've not discovered yet. I encourage people to try it out, but also please let me know when it inevitably breaks, or if it doesn't produce very good results for your use cases.
+Currently shrink ray is in a very alpha quality state. I expect it to mostly work for most use cases, but also is probably super buggy in ways I've not discovered yet. I encourage people to try it out, but also please let me know when it inevitably breaks, or if it doesn't produce very good results for your use cases.
 
 ## Installation
 

@@ -125,7 +125,41 @@ class TimeoutExceededOnInitial(InvalidInitialExample):
         )
 
 
-def reformat_data(data: bytes) -> bytes:
+def find_python_command(name: str) -> str | None:
+    first_attempt = which(name)
+    if first_attempt is not None:
+        return first_attempt
+    second_attempt = os.path.join(os.path.dirname(sys.executable), name)
+    if os.path.exists(second_attempt):
+        return second_attempt
+    return None
+
+
+async def run_formatter_command(
+    command: str | list[str], input: bytes
+) -> subprocess.CompletedProcess:
+    return await trio.run_process(
+        command,
+        stdin=input,
+        capture_stdout=True,
+        capture_stderr=True,
+        check=False,
+    )
+
+
+def default_formatter_command_for(filename):
+    *_, ext = os.path.splitext(filename)
+
+    if ext in (".c", ".h", ".cpp", ".hpp", ".cc", ".cxx"):
+        return which("clang-format")
+
+    if ext == ".py":
+        black = find_python_command("black")
+        if black is not None:
+            return [black, "-"]
+
+
+def default_reformat_data(data: bytes) -> bytes:
     encoding, decoded = try_decode(data)
     if encoding is None:
         return data
@@ -232,15 +266,22 @@ How to pass input to the test function. Options are:
     """.strip(),
 )
 @click.option(
-    "--reformat/--no-reformat",
-    default=True,
+    "--formatter",
+    default="default",
     help="""
-Internally Shrink Ray tries to delete as much data as possible. This results in very small
-test cases, but not always very pleasant ones. If --format is set, Shrink Ray will
-try to reformat the test case at the end to be a bit more manageable.
+Path to a formatter for Shrink Ray to use. This is mostly used for display purposes,
+and to format the final test case.
 
-Note that this is not as good as a dedicated formatter for your format, and you should
-probably use that after reduction if you have one.
+A formatter should accept input on stdin and write to stdout, and exit with a status
+code of 0. If the formatter exits with a non-zero status code its output will be
+ignored.
+
+Special values for this:
+
+* 'none' turns off formatting.
+* 'default' causes Shrink Ray to use its default behaviour, which is to look for
+  formatters it knows about on PATH and use one of those if found, otherwise to
+  use a very simple language-agnostic formatter.
 """,
 )
 @click.option(
@@ -278,7 +319,7 @@ def main(
     parallelism: int,
     seed: int,
     volume: Volume,
-    reformat: bool,
+    formatter: str,
     no_clang_delta: bool,
     clang_delta: str,
     trivial_is_error: bool,
@@ -439,13 +480,70 @@ def main(
         event_loop=event_loop,
     )
 
+    if formatter.lower() == "default":
+        formatter_command = default_formatter_command_for(filename)
+    elif formatter.lower() != "none":
+        formatter_command = formatter
+    else:
+        formatter_command = None
+    if isinstance(formatter_command, str):
+        formatter_command = [formatter_command]
+
     @trio.run
     async def _() -> None:
+        nonlocal initial
+
         work = WorkContext(
             random=random.Random(seed),
             volume=volume,
             parallelism=parallelism,
         )
+
+        if formatter_command is not None:
+            formatter_result = await run_formatter_command(formatter_command, initial)
+            if formatter_result.returncode != 0:
+                print(
+                    "Formatter exited unexpectedly on initial test case. If this is expected, please run with --formatter=none.",
+                    file=sys.stderr,
+                )
+                print(
+                    formatter_result.stderr.decode("utf-8").strip(),
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            reformatted = formatter_result.stdout
+            if not await is_interesting_do_work(
+                reformatted
+            ) and await is_interesting_do_work(initial):
+                print(
+                    "Formatting initial test case made it uninteresting. If this is expected, please run with --formatter=none.",
+                    file=sys.stderr,
+                )
+                print(
+                    formatter_result.stderr.decode("utf-8").strip(),
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+            initial = formatter_result.stdout
+
+            async def format_data(test_case: bytes) -> bytes:
+                result = await run_formatter_command(formatter_command, initial)
+                if result.returncode != 0:
+                    return None
+                return result.stdout
+
+        elif formatter.lower() == "none":
+
+            async def format_data(test_case: bytes) -> bytes:
+                await trio.lowlevel.checkpoint()
+                return test_case
+
+        else:
+
+            async def format_data(test_case: bytes) -> bytes:
+                await trio.lowlevel.checkpoint()
+                return default_reformat_data(test_case)
 
         async with trio.open_nursery() as nursery:
             send_test_cases: trio.MemorySendChannel[
@@ -611,13 +709,16 @@ def main(
                             break
                 return "\n".join(results)
 
-            can_format = reformat
+            can_format = True
 
             async def attempt_format(data: bytes) -> bytes:
                 nonlocal can_format
                 if not can_format:
                     return data
-                attempt = reformat_data(data)
+                attempt = await format_data(data)
+                if attempt is None:
+                    can_format = False
+                    return data
                 if attempt == data or await problem.is_interesting(attempt):
                     return attempt
                 else:
@@ -631,15 +732,15 @@ def main(
 
                 time_of_last_update = time.time()
                 while True:
-                    if problem.current_test_case.count(b"\n") <= 50:
-                        diff_to_display.set_text(problem.current_test_case)
-                        await trio.sleep(0.1)
-                        continue
-
                     if problem.current_test_case == prev_unformatted:
                         await trio.sleep(0.1)
                         continue
                     current = await attempt_format(problem.current_test_case)
+                    if current.count(b"\n") <= 50:
+                        diff_to_display.set_text(current)
+                        await trio.sleep(0.1)
+                        continue
+
                     if prev == current:
                         await trio.sleep(0.1)
                         continue
@@ -671,7 +772,8 @@ def main(
 
             cd_exec = None
             if (
-                os.path.splitext(filename)[1] in (".c", ".cpp", ".h", ".hpp")
+                os.path.splitext(filename)[1]
+                in (".c", ".cpp", ".h", ".hpp", ".cxx", ".cc")
                 and not no_clang_delta
             ):
                 nonlocal clang_delta
@@ -712,14 +814,13 @@ def main(
 
         formatting_increase = 0
         final_result = problem.current_test_case
-        if reformat:
-            reformatted = reformat_data(final_result)
-            if reformatted != final_result:
-                if await is_interesting_do_work(reformatted):
-                    async with await trio.open_file(filename, "wb") as o:
-                        await o.write(reformatted)
-                formatting_increase = max(0, len(reformatted) - len(final_result))
-                final_result = reformatted
+        reformatted = await format_data(final_result)
+        if reformatted != final_result and reformatted is not None:
+            if await is_interesting_do_work(reformatted):
+                async with await trio.open_file(filename, "wb") as o:
+                    await o.write(reformatted)
+            formatting_increase = max(0, len(reformatted) - len(final_result))
+            final_result = reformatted
 
         if len(problem.current_test_case) <= 1 and trivial_is_error:
             print(
@@ -748,7 +849,6 @@ def main(
             elif len(final_result) == len(initial):
                 print("Some changes were made but no bytes were deleted")
             else:
-                assert reformat
                 print(
                     f"Running reformatting resulted in an increase of {humanize.naturalsize(formatting_increase)}."
                 )

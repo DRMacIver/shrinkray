@@ -53,14 +53,15 @@ Variant test cases are passed to the interestingness test both on STDIN and as a
 
 Shrink Ray is fully generic in the sense that it will work with literally any file you give it in any format. However, some formats will work a lot better than others.
 
-It has a generic reduction algorithm that should work pretty well with any textual format, and an architecture that is designed to make it easy to add specialised support for specific formats as needed. Currently there are no formats special cased in this way.
-
-If you run into a test case and interestingness test that you care about that shrink ray handles badly please let me know and I'll likely see about improving its handling of that format.
+It has a generic reduction algorithm that should work pretty well with any textual format, and an architecture that is designed to make it easy to add specialised support for specific formats as needed.
 
 Additionally, Shrink Ray has special support for the following formats:
 
 * C and C++ (via `clang_delta`, which you will have if creduce is installed)
 * Python (Quite basic support, but easy to improve)
+
+It is fairly easy to add support for new formats as needed.
+If you run into a test case and interestingness test that you care about that shrink ray handles badly please let me know and I'll likely see about improving its handling of that format.
 
 ## Parallelism
 

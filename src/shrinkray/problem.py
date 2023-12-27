@@ -19,6 +19,9 @@ def shortlex(value: Any) -> Any:
     return (len(value), value)
 
 
+default_sort_key = shortlex
+
+
 def default_display(value: Any) -> str:
     r = repr(value)
     if len(r) < 50:
@@ -171,7 +174,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         initial: T,
         is_interesting: Callable[[T], Awaitable[bool]],
         work: WorkContext,
-        sort_key: Callable[[T], Any] = shortlex,
+        sort_key: Callable[[T], Any] = default_sort_key,
         size: Callable[[T], int] = default_size,
         display: Callable[[T], str] = default_display,
         stats: Optional[ReductionStats] = None,

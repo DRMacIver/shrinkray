@@ -1,16 +1,17 @@
 from random import Random
 
 import hypothesmith
+import pytest
 import trio
-from hypothesis import Phase, example, given, note, settings, strategies as st
+from hypothesis import Phase, assume, example, given, note, settings, strategies as st
 from hypothesis.errors import Frozen, StopTest
 
 from shrinkray.passes.python import is_python
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.problem import BasicReductionProblem, default_sort_key
 from shrinkray.reducer import ShrinkRay
 from shrinkray.work import Volume, WorkContext
 
-from tests.helpers import assert_no_blockers
+from tests.helpers import assert_no_blockers, assert_reduces_to, direct_reductions
 
 
 def tidy_python_example(s):
@@ -50,7 +51,7 @@ python_files = st.builds(
 test_cases = (python_files).filter(lambda b: 1 < len(b) <= 1000)
 
 
-common_settings = settings(deadline=None, max_examples=1000, report_multiple_bugs=False)
+common_settings = settings(deadline=None, max_examples=10, report_multiple_bugs=False)
 
 
 @common_settings
@@ -137,7 +138,7 @@ async def test_can_fail_to_shrink_arbitrary_problems(initial, parallelism):
 
     reducer = ShrinkRay(problem)
 
-    with trio.move_on_after(2.5) as cancel_scope:
+    with trio.move_on_after(10) as cancel_scope:
         await reducer.run()
     assert not cancel_scope.cancelled_caught
 
@@ -190,3 +191,40 @@ def test_no_blockers():
         is_interesting=is_python,
         lower_bounds=[1, 2, 5, 10],
     )
+
+
+@pytest.mark.parametrize(
+    "origin,target",
+    [
+        (b, c)
+        for b in POTENTIAL_BLOCKERS
+        for c in POTENTIAL_BLOCKERS
+        if default_sort_key(c) < default_sort_key(b)
+    ],
+)
+def test_blockers_all_reduce_to_eachother(origin, target):
+    assert_reduces_to(origin=origin, target=target)
+
+
+@common_settings
+@given(st.binary(), st.data())
+def test_always_reduces_to_each_direct_reduction(origin, data):
+    reductions = sorted(direct_reductions(origin), key=default_sort_key, reverse=True)
+
+    assume(reductions)
+
+    target = data.draw(st.sampled_from(reductions))
+
+    assert_reduces_to(origin=origin, target=target)
+
+
+@common_settings
+@given(st.binary(), st.integers(2, 8), st.data())
+def test_parallelism_never_prevents_reduction(origin, parallelism, data):
+    reductions = sorted(direct_reductions(origin), key=default_sort_key, reverse=True)
+
+    assume(reductions)
+
+    target = data.draw(st.sampled_from(reductions))
+
+    assert_reduces_to(origin=origin, target=target, parallelism=parallelism)

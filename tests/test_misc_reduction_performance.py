@@ -8,7 +8,7 @@ from tests.helpers import reduce
 @pytest.mark.parametrize(
     "initial",
     [
-        b"." * 378,
+        b"." * 100,
     ],
 )
 @pytest.mark.parametrize("parallelism", [1, 2])

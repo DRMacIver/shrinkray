@@ -4,7 +4,8 @@ from typing import Callable, Iterable, TypeVar
 import trio
 
 from shrinkray.passes.definitions import ReductionPass
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.passes.python import is_python
+from shrinkray.problem import BasicReductionProblem, default_sort_key
 from shrinkray.reducer import BasicReducer, ShrinkRay
 from shrinkray.work import WorkContext
 
@@ -125,3 +126,55 @@ def assert_no_blockers(
                 raise AssertionError(
                     f"With lower bound {lower_bound}, {result} does not reduce to {current_best}"
                 )
+
+
+def direct_reductions(origin: bytes, *, parallelism=1) -> set[bytes]:
+    children = set()
+
+    def is_interesting(b: bytes) -> bool:
+        if default_sort_key(b) < default_sort_key(origin):
+            children.add(b)
+        return b == origin
+
+    reduce(origin, is_interesting, parallelism=parallelism)
+
+    return children
+
+
+class Completed(Exception):
+    pass
+
+
+def assert_reduces_to(
+    *, origin: bytes, target: bytes, parallelism=1, language_restrictions=True
+):
+    if origin == target:
+        raise AssertionError("A value cannot reduce to itself")
+    if default_sort_key(origin) < default_sort_key(target):
+        raise AssertionError(
+            f"It is impossible for {origin} to reduce to {target} as it is more reduced."
+        )
+
+    if language_restrictions and is_python(origin):
+        require_python = True
+    else:
+        require_python = False
+
+    def is_interesting(value: bytes) -> bool:
+        if value == target:
+            raise Completed()
+        if require_python and not is_python(value):
+            return False
+        return default_sort_key(value) >= default_sort_key(target)
+
+    try:
+        best = reduce(origin, is_interesting, parallelism=parallelism)
+    except Completed:
+        return
+
+    if best == origin:
+        raise AssertionError(f"Unable to make any progress from {origin}")
+    if best == origin:
+        raise AssertionError(
+            f"Unable to reduce {origin} to {target}. Best achieve was {best}"
+        )

@@ -244,6 +244,16 @@ probably use that after reduction if you have one.
 """,
 )
 @click.option(
+    "--trivial-is-error/--trivial-is-not-error",
+    default=True,
+    help="""
+It's easy to write interestingness tests which accept too much, and one common way this
+happens is if they accept empty or otherwise trivial files. By default Shrink Ray will
+print an error message at the end of reduction and exit with non-zero status in this case.
+This behaviour can be disabled by passing --trivial-is-not-error.
+""",
+)
+@click.option(
     "--no-clang-delta",
     is_flag=True,
     default=False,
@@ -271,6 +281,7 @@ def main(
     reformat: bool,
     no_clang_delta: bool,
     clang_delta: str,
+    trivial_is_error: bool,
 ) -> None:
     if timeout <= 0:
         timeout = float("inf")
@@ -710,24 +721,37 @@ def main(
                 formatting_increase = max(0, len(reformatted) - len(final_result))
                 final_result = reformatted
 
-        print("Reduction completed!")
-        stats = problem.stats
-        if initial == final_result:
-            print("Test case was already maximally reduced.")
-        elif len(final_result) < len(initial):
+        if len(problem.current_test_case) <= 1 and trivial_is_error:
             print(
-                f"Deleted {humanize.naturalsize(stats.initial_test_case_size - len(final_result))} "
-                f"out of {humanize.naturalsize(stats.initial_test_case_size)} "
-                f"({(1.0 - len(final_result) / stats.initial_test_case_size) * 100:.2f}% reduction) "
-                f"in {humanize.precisedelta(timedelta(seconds=time.time() - stats.start_time))}"
+                f"Reduced to a trivial test case of size {len(problem.current_test_case)}"
             )
-        elif len(final_result) == len(initial):
-            print("Some changes were made but no bytes were deleted")
+            print(
+                "This probably wasn't what you intended. If so, please modify your interestingness test "
+                "to be more restrictive.\n"
+                "If you intended this behaviour, you can run with '--trivial-is-not-error' to "
+                "suppress this message."
+            )
+            sys.exit(1)
+
         else:
-            assert reformat
-            print(
-                f"Running reformatting resulted in an increase of {humanize.naturalsize(formatting_increase)}."
-            )
+            print("Reduction completed!")
+            stats = problem.stats
+            if initial == final_result:
+                print("Test case was already maximally reduced.")
+            elif len(final_result) < len(initial):
+                print(
+                    f"Deleted {humanize.naturalsize(stats.initial_test_case_size - len(final_result))} "
+                    f"out of {humanize.naturalsize(stats.initial_test_case_size)} "
+                    f"({(1.0 - len(final_result) / stats.initial_test_case_size) * 100:.2f}% reduction) "
+                    f"in {humanize.precisedelta(timedelta(seconds=time.time() - stats.start_time))}"
+                )
+            elif len(final_result) == len(initial):
+                print("Some changes were made but no bytes were deleted")
+            else:
+                assert reformat
+                print(
+                    f"Running reformatting resulted in an increase of {humanize.naturalsize(formatting_increase)}."
+                )
 
 
 if __name__ == "__main__":  # pragma: no cover

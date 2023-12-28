@@ -170,8 +170,8 @@ class ShrinkRay(Reducer[bytes]):
             replace_space_with_newlines,
             lower_bytes,
             simplify_brackets,
-            short_replacements,
-            sort_whitespace,
+            # short_replacements,
+            # sort_whitespace,
         ]
     )
 

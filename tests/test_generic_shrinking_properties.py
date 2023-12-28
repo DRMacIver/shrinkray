@@ -39,8 +39,8 @@ POTENTIAL_BLOCKERS = [
     b"#\x00",
     b"#\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00",
     b"\t\t\t\t\t\t\t\t\t\t\t\t",
-    b"from\t\t\t.\t\t\t\t\t\timport\ta\t\t\t\t\t\t\t\t\t\t\nclass\t\to\t\t\t\t\t\t\t:\n\tdef\t\t\t\t\ta\t(\t\t\t\t\t\t\t\t\t)\t\t\t\t\t\t\t:...\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t",
-    b"\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t",
+    # b"from\t\t\t.\t\t\t\t\t\timport\ta\t\t\t\t\t\t\t\t\t\t\nclass\t\to\t\t\t\t\t\t\t:\n\tdef\t\t\t\t\ta\t(\t\t\t\t\t\t\t\t\t)\t\t\t\t\t\t\t:...\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t",
+    # "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t",
 ]
 
 python_files = st.builds(

@@ -36,27 +36,90 @@ class Patches(Generic[PatchType, TargetType], ABC):
         ...
 
 
-class PatchApplicationSharedState(Generic[PatchType, TargetType]):
+class PatchApplier(Generic[PatchType, TargetType], ABC):
     def __init__(
         self,
+        patches: Patches[PatchType, TargetType],
         problem: ReductionProblem[TargetType],
-        patch_info: Patches[PatchType, TargetType],
-        patches: Iterable[PatchType],
     ):
-        self.base = problem.current_test_case
-        self.patches = list(patches)
-        self.patch_info = patch_info
-        self.problem = problem
+        self.__patches = patches
+        self.__problem = problem
 
-        self.current_patch = patch_info.empty
+        self.__is_merging = False
+        self.__merge_queue = []
+        self.__merge_lock = trio.Lock()
 
-        self.claimed: set[int] = set()
-        self.concurrent_merge_attempts = 0
-        self.inflight_patch_size = 0
+        self.__current_patch = self.__patches.empty
+        self.__initial_test_case = problem.current_test_case
 
-        self.pending_patches: list[PatchType] = []
-        self.running_tasks = 0
-        self.started_tasks = 0
+    async def try_apply_patch(self, patch: PatchType) -> bool:
+        initial_patch = self.__current_patch
+        try:
+            combined_patch = self.__patches.combine(initial_patch, patch)
+        except Conflict:
+            return False
+        if combined_patch == self.__current_patch:
+            return True
+        with_patch_applied = self.__patches.apply(
+            combined_patch, self.__initial_test_case
+        )
+        if not await self.__problem.is_interesting(with_patch_applied):
+            return False
+        send_merge_result, receive_merge_result = trio.open_memory_channel(1)
+        self.__merge_queue.append((patch, send_merge_result))
+
+        async with self.__merge_lock:
+            if (
+                self.__current_patch == initial_patch
+                and len(self.__merge_queue) == 1
+                and self.__merge_queue[0][0] == patch
+            ):
+                self.__current_patch = combined_patch
+                self.__merge_queue.clear()
+                return True
+
+            while self.__merge_queue:
+                base_patch = self.__current_patch
+                to_merge = len(self.__merge_queue)
+
+                async def can_merge(k):
+                    if k > to_merge:
+                        return False
+                    try:
+                        attempted_patch = self.__patches.combine(
+                            base_patch, *[p for p, _ in self.__merge_queue[:k]]
+                        )
+                    except Conflict:
+                        return False
+                    if attempted_patch == base_patch:
+                        return True
+                    with_patch_applied = self.__patches.apply(
+                        combined_patch, self.__initial_test_case
+                    )
+                    if await self.__problem.is_interesting(with_patch_applied):
+                        self.__current_patch = attempted_patch
+                        return True
+                    else:
+                        return False
+
+                if await can_merge(to_merge):
+                    merged = to_merge
+                else:
+                    merged = await self.__problem.work.find_large_integer(can_merge)
+
+                for _, send_result in self.__merge_queue[:merged]:
+                    send_result.send_nowait(True)
+
+                assert merged <= to_merge
+                if merged < to_merge:
+                    self.__merge_queue[merged][1].send_nowait(False)
+                    del self.__merge_queue[: merged + 1]
+                else:
+                    del self.__merge_queue[:to_merge]
+
+        # This should always have been populated during the previous merge,
+        # either by us or someone else merging.
+        return receive_merge_result.receive_nowait()
 
 
 class Direction(Enum):
@@ -68,194 +131,32 @@ class Completed(Exception):
     pass
 
 
-class PatchApplicationTask(Generic[PatchType, TargetType]):
-    def __init__(
-        self,
-        shared_state: PatchApplicationSharedState[PatchType, TargetType],
-    ):
-        self.shared_state = shared_state
-        self.sequential_failures = 0
-
-    async def run(self, patch_indices: Iterable[int]) -> None:
-        state = self.shared_state
-        state.running_tasks += 1
-        state.started_tasks += 1
-        try:
-            work = state.problem.work
-            for start in patch_indices:
-                if start in state.claimed:
-                    continue
-                if await self.try_apply_patch(state.patches[start]):
-                    end = start + 1
-                    end += await work.find_large_integer(
-                        lambda k: self.try_apply_range(start, end + k)
-                    )
-                    start -= await work.find_large_integer(
-                        lambda k: self.try_apply_range(start - k, end)
-                    )
-                    state.claimed.add(start - 1)
-                    state.claimed.add(end)
-        finally:
-            state.running_tasks -= 1
-
-    async def try_apply_range(self, start: int, end: int) -> bool:
-        if start < 0 or end > len(self.shared_state.patches):
-            return False
-
-        state = self.shared_state
-        all_patches = state.patches
-        patches = [all_patches[i] for i in range(start, end) if i not in state.claimed]
-
-        if not patches:
-            await trio.lowlevel.checkpoint()
-            return True
-
-        try:
-            patch = self.shared_state.patch_info.combine(
-                *patches,
-            )
-        except Conflict:
-            await trio.lowlevel.checkpoint()
-            return False
-
-        if await self.try_apply_patch(patch):
-            state.claimed.update(range(start, end))
-            return True
-
-        return False
-
-    async def try_apply_patch(self, patch: PatchType) -> bool:
-        state = self.shared_state
-        patch_info: Patches[PatchType, TargetType] = state.patch_info
-
-        await trio.lowlevel.checkpoint()
-        prev_patch = state.current_patch
-
-        try:
-            merged = patch_info.combine(prev_patch, patch)
-        except Conflict:
-            return False
-        if merged == state.current_patch:
-            return True
-        attempt = patch_info.apply(
-            merged,
-            state.base,
-        )
-
-        prob = state.problem
-
-        if prob.sort_key(attempt) >= prob.sort_key(prob.current_test_case):
-            return False
-
-        succeeded = await prob.is_interesting(attempt)
-
-        if not succeeded:
-            self.sequential_failures += 1
-            return False
-
-        self.sequential_failures = 0
-
-        if state.current_patch == prev_patch:
-            state.current_patch = merged
-            return True
-        else:
-            state.pending_patches.append(patch)
-            while state.pending_patches:
-                await trio.sleep(0.01)
-
-            try:
-                return (
-                    patch_info.combine(state.current_patch, patch)
-                    == state.current_patch
-                )
-            except Conflict:
-                return False
-
-
 async def apply_patches(
     problem: ReductionProblem[TargetType],
     patch_info: Patches[PatchType, TargetType],
     patches: Iterable[PatchType],
 ) -> None:
-    patches = sorted(patches, key=patch_info.size)
-    try:
-        full_patch = patch_info.combine(*patches)
-    except Conflict:
-        pass
-    else:
-        initial = problem.current_test_case
-        all_applied = patch_info.apply(full_patch, initial)
-        if all_applied == initial or await problem.is_interesting(all_applied):
-            return
+    applier = PatchApplier(patch_info, problem)
 
-    state = PatchApplicationSharedState(problem, patch_info, patches)
-    rnd = problem.work.random
+    send_patches, receive_patches = trio.open_memory_channel(float("inf"))
+
+    patches = list(patches)
+    problem.work.random.shuffle(patches)
+    for patch in patches:
+        send_patches.send_nowait(patch)
+    send_patches.close()
 
     async with trio.open_nursery() as nursery:
-        indices = range(len(patches))
-        long_order = sorted(
-            indices, key=lambda i: patch_info.size(patches[i]), reverse=True
-        )
+        for _ in range(problem.work.parallelism):
 
-        # It's in some sense clearly correct to always try the patches in order
-        # from largest to smallest. Instead we don't do that, we spend some of
-        # our time trying patches in random order. This is to avoid stalls. We
-        # will eventually want to try all the long patches, but it may well be
-        # the case that long patches mostly don't work, and if that happens we
-        # want to make sure we're trying some calls that do if there's a
-        # reasonable percentage of patches that would actually work.
-        for _ in range(2):
-            nursery.start_soon(
-                PatchApplicationTask(
-                    shared_state=state,
-                ).run,
-                lazy_shuffle(indices, rnd),
-            )
-
-        for _ in range(
-            min(problem.work.parallelism, max(2, problem.work.parallelism - 2))
-        ):
-            nursery.start_soon(
-                PatchApplicationTask(
-                    shared_state=state,
-                ).run,
-                long_order,
-            )
-
-        while state.started_tasks == 0:
-            await trio.sleep(0.01)
-
-        @nursery.start_soon
-        async def _() -> None:
-            while state.running_tasks > 0 or state.pending_patches:
-                if not state.pending_patches:
-                    await trio.sleep(0.01)
-                    continue
-
-                async def can_apply(k: int) -> bool:
-                    if k > len(state.pending_patches):
-                        return False
-
-                    patches_to_apply = state.pending_patches[:k]
-
-                    while True:
-                        prev_patch = state.current_patch
-                        try:
-                            combined = patch_info.combine(prev_patch, *patches_to_apply)
-                        except Conflict:
-                            return False
-                        attempt = patch_info.apply(combined, state.base)
-                        if await state.problem.is_interesting(attempt):
-                            if state.current_patch == prev_patch:
-                                state.current_patch = combined
-                                return True
-                            else:
-                                await trio.lowlevel.checkpoint()
-                        else:
-                            return False
-
-                k = await problem.work.find_large_integer(can_apply)
-                del state.pending_patches[: k + 1]
+            @nursery.start_soon
+            async def _():
+                while True:
+                    try:
+                        patch = await receive_patches.receive()
+                    except trio.EndOfChannel:
+                        break
+                    await applier.try_apply_patch(patch)
 
 
 class LazyMutableRange:

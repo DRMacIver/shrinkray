@@ -422,9 +422,6 @@ def main(
                 cwd=d,
             )
 
-    async def is_interesting_do_work(test_case: bytes, debug: bool = False) -> bool:
-        return await run_for_exit_code(test_case, debug=debug) == 0
-
     with open(filename, "rb") as reader:
         initial = reader.read()
 
@@ -489,6 +486,18 @@ def main(
     if isinstance(formatter_command, str):
         formatter_command = [formatter_command]
 
+    is_interesting_limiter = trio.CapacityLimiter(max(parallelism, 1))
+    parallel_tasks_running = 0
+
+    async def is_interesting(test_case: bytes) -> bool:
+        nonlocal parallel_tasks_running
+        async with is_interesting_limiter:
+            try:
+                parallel_tasks_running += 1
+                return await run_for_exit_code(test_case) == 0
+            finally:
+                parallel_tasks_running -= 1
+
     @trio.run
     async def _() -> None:
         nonlocal initial
@@ -512,9 +521,7 @@ def main(
                 )
                 sys.exit(1)
             reformatted = formatter_result.stdout
-            if not await is_interesting_do_work(
-                reformatted
-            ) and await is_interesting_do_work(initial):
+            if not await is_interesting(reformatted) and await is_interesting(initial):
                 print(
                     "Formatting initial test case made it uninteresting. If this is expected, please run with --formatter=none.",
                     file=sys.stderr,
@@ -555,33 +562,6 @@ def main(
             send_test_cases, receive_test_cases = trio.open_memory_channel(
                 max(100, 10 * max(parallelism, 1))
             )
-
-            parallel_tasks_running = 0
-
-            async def is_interesting_worker() -> None:
-                nonlocal parallel_tasks_running
-                try:
-                    while True:
-                        test_case, reply = await receive_test_cases.receive()
-                        parallel_tasks_running += 1
-                        result = await is_interesting_do_work(test_case)
-                        parallel_tasks_running -= 1
-                        await reply.send(result)
-                except trio.EndOfChannel:
-                    pass
-
-            for _i in range(max(parallelism, 1)):
-                nursery.start_soon(is_interesting_worker)
-
-            async def is_interesting(test_case: bytes) -> bool:
-                if first_call:
-                    return await is_interesting_do_work(test_case)
-
-                receive_result: trio.MemoryReceiveChannel[bool]
-                send_result: trio.MemorySendChannel[bool]
-                send_result, receive_result = trio.open_memory_channel(1)
-                await send_test_cases.send((test_case, send_result))
-                return await receive_result.receive()
 
             problem: BasicReductionProblem[bytes] = BasicReductionProblem(
                 is_interesting=is_interesting,
@@ -816,7 +796,7 @@ def main(
         final_result = problem.current_test_case
         reformatted = await format_data(final_result)
         if reformatted != final_result and reformatted is not None:
-            if await is_interesting_do_work(reformatted):
+            if await is_interesting(reformatted):
                 async with await trio.open_file(filename, "wb") as o:
                     await o.write(reformatted)
             formatting_increase = max(0, len(reformatted) - len(final_result))

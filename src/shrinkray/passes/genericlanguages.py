@@ -12,7 +12,7 @@ from attr import define
 
 from shrinkray.passes.bytes import ByteReplacement
 from shrinkray.passes.definitions import ReductionPass
-from shrinkray.passes.patching import apply_patches
+from shrinkray.passes.patching import apply_patches, Patches, PatchApplier
 from shrinkray.problem import (
     BasicReductionProblem,
     Format,
@@ -41,6 +41,45 @@ class Substring(Format[AnyStr, AnyStr]):
         return self.prefix + input + self.suffix
 
 
+class RegionReplacingPatches(Patches[dict[int, AnyStr], AnyStr]):
+    def __init__(self, regions):
+        assert regions
+        for (_, v), (u, _) in zip(regions, regions[1:]):
+            assert v <= u
+        self.regions = regions
+
+    @property
+    def empty(self):
+        return {}
+
+    def combine(self, *patches):
+        result = {}
+        for p in patches:
+            result.update(p)
+        return result
+
+    def apply(self, patch, target):
+        empty = target[:0]
+        parts = []
+        prev = 0
+        for j, (u, v) in enumerate(selfregions):
+            assert v <= len(target)
+            parts.append(initial[prev:u])
+            try:
+                parts.append(patch[j])
+            except KeyError:
+                parts.append(target[u:v])
+            prev = v
+        parts.append(initial[prev:])
+        return empty.join(parts)
+
+    def size(self, patch):
+        total = 0
+        for i, s in patch.items():
+            u, v = self.regions[i]
+            return v - u - len(s)
+
+
 def regex_pass(
     pattern: AnyStr | re.Pattern[AnyStr],
     flags: re.RegexFlag = 0,
@@ -52,6 +91,7 @@ def regex_pass(
         @wraps(fn)
         async def reduction_pass(problem: ReductionProblem[AnyStr]) -> None:
             matching_regions = []
+            initial_values_for_regions = []
 
             i = 0
             while i < len(problem.current_test_case):
@@ -61,6 +101,7 @@ def regex_pass(
 
                 u, v = search.span()
                 matching_regions.append((u, v))
+                initial_values_for_regions.append(problem.current_test_case[u:v])
 
                 i = v
 
@@ -68,69 +109,18 @@ def regex_pass(
                 return
 
             initial = problem.current_test_case
+            patches = RegionReplacingPatches(matching_regions)
 
-            replacements = [initial[u:v] for u, v in matching_regions]
-
-            def replace(i: int, s: AnyStr) -> AnyStr:
-                empty = initial[:0]
-
-                parts = []
-
-                prev = 0
-                for j, (u, v) in enumerate(matching_regions):
-                    parts.append(initial[prev:u])
-                    if j != i:
-                        parts.append(replacements[j])
-                    else:
-                        parts.append(s)
-                    prev = v
-
-                parts.append(initial[prev:])
-
-                return empty.join(parts)
+            patch_applier = PatchApplier(patches, problem)
 
             async with trio.open_nursery() as nursery:
-                current_merge_attempts = 0
 
                 async def reduce_region(i: int) -> None:
-                    async def is_interesting(s: AnyStr) -> bool:
-                        nonlocal current_merge_attempts
-                        is_merging = False
-                        retries = 0
-                        try:
-                            while True:
-                                # Other tasks may have updated the test case, so when we
-                                # check whether something is interesting but it doesn't update
-                                # the test case, this means something has changed. Given that
-                                # we found a promising reduction, it's likely to be worth trying
-                                # again. In theory an uninteresting test case could also become
-                                # interesting if the underlying test case changes, but that's
-                                # not likely enough to be worth checking.
-                                while not is_merging and current_merge_attempts > 0:
-                                    await trio.sleep(0.01)
-
-                                attempt = replace(i, s)
-                                if not await problem.is_interesting(attempt):
-                                    return False
-                                if replace(i, s) == attempt:
-                                    replacements[i] = s
-                                    return True
-                                if not is_merging:
-                                    is_merging = True
-                                    current_merge_attempts += 1
-
-                                retries += 1
-
-                                # If we've retried this many times then something has gone seriously
-                                # wrong with our concurrency approach and it's probably a bug.
-                                assert retries <= 100
-                        finally:
-                            if is_merging:
-                                current_merge_attempts -= 1
-                                assert current_merge_attempts >= 0
+                    async def is_interesting(s):
+                        return patch_applier.try_apply_patch({i: s})
 
                     subproblem = BasicReductionProblem(
-                        replacements[i],
+                        initial_values_for_regions[i],
                         is_interesting,
                         work=problem.work,
                     )

@@ -73,7 +73,7 @@ async def interrupt_wait_and_kill(sp: "trio.Process", delay: float = 0.1) -> Non
         with trio.move_on_after(delay):
             await sp.wait()
 
-        if sp.returncode is not None:
+        if sp.returncode is None:
             raise ValueError(
                 f"Could not kill subprocess with pid {sp.pid}. Something has gone seriously wrong."
             )

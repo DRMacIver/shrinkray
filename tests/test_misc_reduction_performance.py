@@ -1,4 +1,5 @@
 from time import time
+from warnings import catch_warnings, filterwarnings
 
 import pytest
 
@@ -35,7 +36,9 @@ def test_can_normalize_identifiers():
         output = []
         data = {"output": output}
         try:
-            exec(test_case, data, data)
+            with catch_warnings():
+                filterwarnings("ignore", category=SyntaxWarning)
+                exec(test_case, data, data)
         except BaseException:
             return False
         return output == [42]

@@ -146,7 +146,12 @@ class Completed(Exception):
 
 
 def assert_reduces_to(
-    *, origin: bytes, target: bytes, parallelism=1, language_restrictions=True
+    *,
+    origin: bytes,
+    target: bytes,
+    parallelism=1,
+    language_restrictions=True,
+    passes=None,
 ):
     if origin == target:
         raise AssertionError("A value cannot reduce to itself")
@@ -168,7 +173,10 @@ def assert_reduces_to(
         return default_sort_key(value) >= default_sort_key(target)
 
     try:
-        best = reduce(origin, is_interesting, parallelism=parallelism)
+        if passes is None:
+            best = reduce(origin, is_interesting, parallelism=parallelism)
+        else:
+            best = reduce_with(passes, origin, is_interesting, parallelism=parallelism)
     except Completed:
         return
 

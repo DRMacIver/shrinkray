@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
-from functools import wraps
 from time import time
 from typing import Generic, Iterable, Optional, TypeVar
 
@@ -24,7 +23,7 @@ from shrinkray.passes.bytes import (
     short_deletions,
 )
 from shrinkray.passes.clangdelta import ClangDelta, clang_delta_pumps
-from shrinkray.passes.definitions import ReductionPass, ReductionPump
+from shrinkray.passes.definitions import ReductionPass, ReductionPump, compose
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
     merge_adjacent_strings,
@@ -36,27 +35,10 @@ from shrinkray.passes.genericlanguages import (
 from shrinkray.passes.json import is_json
 from shrinkray.passes.python import PYTHON_PASSES, is_python
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
-from shrinkray.problem import Format, ParseError, ReductionProblem
+from shrinkray.problem import ReductionProblem
 
 S = TypeVar("S")
 T = TypeVar("T")
-
-
-def compose(format: Format[S, T], reduction_pass: ReductionPass[T]) -> ReductionPass[S]:
-    @wraps(reduction_pass)
-    async def wrapped_pass(problem: ReductionProblem[S]) -> None:
-        view = problem.view(format)
-
-        try:
-            view.current_test_case
-        except ParseError:
-            return
-
-        await reduction_pass(view)
-
-    wrapped_pass.__name__ = f"{format.name}/{reduction_pass.__name__}"
-
-    return wrapped_pass
 
 
 @define

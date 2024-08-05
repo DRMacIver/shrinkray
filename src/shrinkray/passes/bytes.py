@@ -3,8 +3,8 @@ from typing import Sequence
 
 from attrs import define
 
+from shrinkray.passes.definitions import Format, ReductionProblem
 from shrinkray.passes.patching import Cuts, Patches, apply_patches
-from shrinkray.problem import Format, ReductionProblem
 
 
 @define(frozen=True)

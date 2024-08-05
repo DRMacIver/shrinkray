@@ -1,10 +1,10 @@
 import os
-import sys
-import trio
 import subprocess
+import sys
+
+import trio
 
 from shrinkray.__main__ import interrupt_wait_and_kill
-
 
 
 async def test_kill_process():
@@ -15,13 +15,18 @@ async def test_kill_process():
             check=False,
             stdout=subprocess.PIPE,
         )
+
         def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
             # start a subprocess that will just ignore SIGINT signals
             return trio.run_process(
-                    [sys.executable,
-                     "-c",
-                     "import signal, sys, time; signal.signal(signal.SIGINT, lambda *a: 1); print(1); sys.stdout.flush(); time.sleep(1000)"],
-                    **kwargs, task_status=task_status)
+                [
+                    sys.executable,
+                    "-c",
+                    "import signal, sys, time; signal.signal(signal.SIGINT, lambda *a: 1); print(1); sys.stdout.flush(); time.sleep(1000)",
+                ],
+                **kwargs,
+                task_status=task_status,
+            )
 
         sp = await nursery.start(call_with_kwargs)
         line = await sp.stdout.receive_some(2)

@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from enum import Enum
 from random import Random
 from typing import Any, Generic, Iterable, Sequence, TypeVar, cast
@@ -19,21 +19,18 @@ class Conflict(Exception):
 
 
 class Patches(Generic[PatchType, TargetType], ABC):
-    @abstractproperty
-    def empty(self) -> PatchType:
-        ...
+    @property
+    @abstractmethod
+    def empty(self) -> PatchType: ...
 
     @abstractmethod
-    def combine(self, *patches: PatchType) -> PatchType:
-        ...
+    def combine(self, *patches: PatchType) -> PatchType: ...
 
     @abstractmethod
-    def apply(self, patch: PatchType, target: TargetType) -> TargetType:
-        ...
+    def apply(self, patch: PatchType, target: TargetType) -> TargetType: ...
 
     @abstractmethod
-    def size(self, patch: PatchType) -> int:
-        ...
+    def size(self, patch: PatchType) -> int: ...
 
 
 class PatchApplier(Generic[PatchType, TargetType], ABC):

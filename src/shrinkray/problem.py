@@ -257,22 +257,6 @@ class BasicReductionProblem(ReductionProblem[T]):
         return self.__current
 
 
-class ParseError(Exception):
-    pass
-
-
-class Format(Generic[S, T], ABC):
-    @property
-    def name(self) -> str:
-        return repr(self)
-
-    @abstractmethod
-    def parse(self, input: S) -> T: ...
-
-    @abstractmethod
-    def dumps(self, input: T) -> S: ...
-
-
 class View(ReductionProblem[T], Generic[S, T]):
     def __init__(
         self,

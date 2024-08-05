@@ -215,7 +215,7 @@ def test_always_reduces_to_each_direct_reduction(origin, data):
 
     target = data.draw(st.sampled_from(reductions))
 
-    assert_reduces_to(origin=origin, target=target)
+    assert_reduces_to(origin=origin, target=target, language_restrictions=False)
 
 
 @common_settings
@@ -227,4 +227,9 @@ def test_parallelism_never_prevents_reduction(origin, parallelism, data):
 
     target = data.draw(st.sampled_from(reductions))
 
-    assert_reduces_to(origin=origin, target=target, parallelism=parallelism)
+    assert_reduces_to(
+        origin=origin,
+        target=target,
+        parallelism=parallelism,
+        language_restrictions=False,
+    )

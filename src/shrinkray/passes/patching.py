@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 from random import Random
-from typing import Any, Generic, Iterable, Sequence, TypeVar, cast
+from typing import Any, Generic, Iterable, Sequence, TypeVar, cast, Callable
 
 import trio
 
@@ -31,6 +31,27 @@ class Patches(Generic[PatchType, TargetType], ABC):
 
     @abstractmethod
     def size(self, patch: PatchType) -> int: ...
+
+
+class SetPatches(Patches[frozenset[T], TargetType]):
+    def __init__(self, apply: Callable[[frozenset[T], TargetType], TargetType]):
+        self.__apply = apply
+
+    @property
+    def empty(self):
+        return frozenset()
+
+    def combine(self, *patches: frozenset[T]) -> frozenset[T]:
+        result = set()
+        for p in patches:
+            result.update(p)
+        return frozenset(result)
+
+    def apply(self, patch: frozenset[T], target: TargetType) -> TargetType:
+        return self.__apply(patch, target)
+
+    def size(self, patch: frozenset[T]) -> int:
+        return len(patch)
 
 
 class PatchApplier(Generic[PatchType, TargetType], ABC):

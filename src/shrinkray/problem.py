@@ -19,7 +19,11 @@ def shortlex(value: Any) -> Any:
     return (len(value), value)
 
 
-default_sort_key = shortlex
+def default_sort_key(value: Any):
+    if isinstance(value, (str, bytes)):
+        return shortlex(value)
+    else:
+        return shortlex(repr(value))
 
 
 def default_display(value: Any) -> str:

@@ -12,7 +12,7 @@ from attr import define
 
 from shrinkray.passes.bytes import ByteReplacement
 from shrinkray.passes.definitions import ReductionPass
-from shrinkray.passes.patching import apply_patches, Patches, PatchApplier
+from shrinkray.passes.patching import PatchApplier, Patches, apply_patches
 from shrinkray.problem import (
     BasicReductionProblem,
     Format,
@@ -62,15 +62,15 @@ class RegionReplacingPatches(Patches[dict[int, AnyStr], AnyStr]):
         empty = target[:0]
         parts = []
         prev = 0
-        for j, (u, v) in enumerate(selfregions):
+        for j, (u, v) in enumerate(self.regions):
             assert v <= len(target)
-            parts.append(initial[prev:u])
+            parts.append(target[prev:u])
             try:
                 parts.append(patch[j])
             except KeyError:
                 parts.append(target[u:v])
             prev = v
-        parts.append(initial[prev:])
+        parts.append(target[prev:])
         return empty.join(parts)
 
     def size(self, patch):
@@ -108,7 +108,6 @@ def regex_pass(
             if not matching_regions:
                 return
 
-            initial = problem.current_test_case
             patches = RegionReplacingPatches(matching_regions)
 
             patch_applier = PatchApplier(patches, problem)
@@ -117,7 +116,7 @@ def regex_pass(
 
                 async def reduce_region(i: int) -> None:
                     async def is_interesting(s):
-                        return patch_applier.try_apply_patch({i: s})
+                        return await patch_applier.try_apply_patch({i: s})
 
                     subproblem = BasicReductionProblem(
                         initial_values_for_regions[i],

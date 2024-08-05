@@ -4,13 +4,11 @@ Shrink Ray is a modern multiformat test-case reducer.
 
 It's designed to be highly parallel, and work with a very wide variety of formats, through a mix of good generic algorithms and format-specific reduction passes.
 
-## Disclaimers about quality
+Currently shrink ray is a "prerelease" version in the sense that there is no official release yet and you're expected to just run off main (don't worry this is easy to do), as it's a bit experimental.
 
-Currently shrink ray is in a very alpha quality state. I expect it to mostly work for most use cases, but also is probably super buggy in ways I've not discovered yet. I encourage people to try it out, but also please let me know when it inevitably breaks, or if it doesn't produce very good results for your use cases.
+That being said this probably doesn't matter that much for the question of whether to use it. It's in the nature of test-case reduction that it doesn't matter all that much if it's bad, because it's still going to do a bunch of work that you didn't have to do by hand. Try it out, see if it works. If it doesn't, please tell me and I'll make it work better.
 
-Additionally, this is a "prerelease" version in the sense that there is no official release yet and you're expected to just run off main (don't worry this is easy to do). Unfortunately that means I'll occasionally break things I didn't mean to. The goal is to have Shrink Ray on a more sensible release and development schedule by mid 2024 at the latest, but it's very much not there yet.
-
-All this being said this probably doesn't matter that much for the question of whether to give it a go. It's in the nature of test-case reduction that it doesn't matter all that much if it's bad, because it's still going to do a bunch of work that you didn't have to do by hand. Try it out, see if it works. If it doesn't, please tell me and I'll make it work better.
+If you find it useful, please [consider sponsoring my development of it](https://github.com/sponsors/DRMacIver).
 
 ## Installation
 

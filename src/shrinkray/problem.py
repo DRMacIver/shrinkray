@@ -77,15 +77,19 @@ class ReductionStats:
                 reduction_msg,
                 f"Total runtime: {precisedelta(timedelta(seconds=runtime))}",
                 (
-                    f"Calls to interestingness test: {self.calls} ({self.calls / runtime:.2f} calls / second, "
-                    f"{self.interesting_calls / self.calls * 100.0:.2f}% interesting, "
-                    f"{self.wasted_interesting_calls / self.calls * 100:.2f}% wasted)"
-                )
-                if self.calls > 0
-                else "Not yet called interestingness test",
-                f"Time since last reduction: {self.time_since_last_reduction():.2f}s ({self.reductions / runtime:.2f} reductions / second)"
-                if self.reductions
-                else "No reductions yet",
+                    (
+                        f"Calls to interestingness test: {self.calls} ({self.calls / runtime:.2f} calls / second, "
+                        f"{self.interesting_calls / self.calls * 100.0:.2f}% interesting, "
+                        f"{self.wasted_interesting_calls / self.calls * 100:.2f}% wasted)"
+                    )
+                    if self.calls > 0
+                    else "Not yet called interestingness test"
+                ),
+                (
+                    f"Time since last reduction: {self.time_since_last_reduction():.2f}s ({self.reductions / runtime:.2f} reductions / second)"
+                    if self.reductions
+                    else "No reductions yet"
+                ),
             ]
         )
 
@@ -120,16 +124,14 @@ class ReductionProblem(Generic[T], ABC):
         pass
 
     @abstractproperty
-    def current_test_case(self) -> T:
-        ...
+    def current_test_case(self) -> T: ...
 
     @abstractmethod
     async def is_interesting(self, test_case: T) -> bool:
         pass
 
     @abstractmethod
-    def sort_key(self, test_case: T) -> Any:
-        ...
+    def sort_key(self, test_case: T) -> Any: ...
 
     @abstractmethod
     def size(self, test_case: T) -> int:
@@ -140,8 +142,7 @@ class ReductionProblem(Generic[T], ABC):
         return self.size(self.current_test_case)
 
     @abstractmethod
-    def display(self, value: T) -> str:
-        ...
+    def display(self, value: T) -> str: ...
 
     def backtrack(self, new_test_case: T) -> "ReductionProblem[T]":
         return BasicReductionProblem(
@@ -266,12 +267,10 @@ class Format(Generic[S, T], ABC):
         return repr(self)
 
     @abstractmethod
-    def parse(self, input: S) -> T:
-        ...
+    def parse(self, input: S) -> T: ...
 
     @abstractmethod
-    def dumps(self, input: T) -> S:
-        ...
+    def dumps(self, input: T) -> S: ...
 
 
 class View(ReductionProblem[T], Generic[S, T]):

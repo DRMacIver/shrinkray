@@ -73,8 +73,7 @@ class Reducer(Generic[T], ABC):
             self.target = current
 
     @abstractmethod
-    async def run(self) -> None:
-        ...
+    async def run(self) -> None: ...
 
 
 @define

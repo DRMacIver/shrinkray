@@ -22,8 +22,6 @@ from shrinkray.passes.bytes import (
     remove_whitespace,
     replace_space_with_newlines,
     short_deletions,
-    short_replacements,
-    sort_whitespace,
 )
 from shrinkray.passes.clangdelta import ClangDelta, clang_delta_pumps
 from shrinkray.passes.definitions import ReductionPass, ReductionPump

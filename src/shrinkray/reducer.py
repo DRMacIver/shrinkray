@@ -35,6 +35,7 @@ from shrinkray.passes.genericlanguages import (
     replace_falsey_with_zero,
     simplify_brackets,
 )
+from shrinkray.passes.json import is_json
 from shrinkray.passes.python import PYTHON_PASSES, is_python
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
 from shrinkray.problem import Format, ParseError, ReductionProblem
@@ -178,6 +179,8 @@ class ShrinkRay(Reducer[bytes]):
     def __attrs_post_init__(self) -> None:
         if is_python(self.target.current_test_case):
             self.great_passes.extend(PYTHON_PASSES)
+        elif is_json(self.target.current_test_case):
+            self.great_passes.extend(JSON_PASSES)
 
     @property
     def pumps(self) -> Iterable[ReductionPump[bytes]]:

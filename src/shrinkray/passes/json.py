@@ -4,12 +4,12 @@ from typing import Any
 
 from attrs import define
 
-from shrinkray.passes.definitions import Format, ParseError, compose
+from shrinkray.passes.definitions import Format, ParseError, ReductionPass
 from shrinkray.passes.patching import Patches, apply_patches
 from shrinkray.problem import ReductionProblem
 
 
-def is_json(s: str) -> bool:
+def is_json(s: bytes) -> bool:
     try:
         json.loads(s)
         return True
@@ -29,7 +29,7 @@ class _JSON(Format[bytes, Any]):
     def parse(self, input: bytes) -> Any:
         try:
             return json.loads(input)
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             raise ParseError(*e.args)
 
     def dumps(self, input: Any) -> bytes:
@@ -88,4 +88,4 @@ async def delete_identifiers(problem: ReductionProblem[Any]):
     )
 
 
-JSON_PASSES = [compose(JSON, delete_identifiers)]
+JSON_PASSES: list[ReductionPass[Any]] = [delete_identifiers]

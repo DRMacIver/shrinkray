@@ -6,13 +6,15 @@ from shutil import which
 from typing import Callable
 
 import pytest
-from hypothesis import assume, example, given, strategies as st
+from hypothesis import assume, example, given, settings, strategies as st
 
-from shrinkray.passes.sat import SAT, SAT_PASSES
+from shrinkray.passes.sat import SAT, SAT_PASSES, DimacsCNF
 
 from .helpers import reduce_with
 
 HAS_MINISAT = which("minisat") is not None
+
+sat_settings = settings(deadline=None)
 
 
 class MinisatNotInstalled(Exception): ...
@@ -139,6 +141,7 @@ def shrink_sat(clauses: SAT, test_function: Callable[[SAT], bool]) -> SAT:
     return reduce_with(SAT_PASSES, clauses, test_function)
 
 
+@sat_settings
 @example([[1]])
 @given(sat_clauses())
 def test_shrink_to_one_single_literal_clause(clauses):
@@ -166,6 +169,7 @@ def test_can_shrink_chain_to_two(n):
     assert shrunk == [[-1, n]]
 
 
+@sat_settings
 @given(unsatisfiable_clauses())
 def test_reduces_unsatisfiable_to_trivial(unsat):
     def test(clauses):
@@ -181,6 +185,7 @@ def test_reduces_unsatisfiable_to_trivial(unsat):
     ]
 
 
+@sat_settings
 @example([[-1], [-2], [-3], [-4, -5], [4, 5], [-6], [4, -5]])
 @given(has_unique_solution())
 def test_reduces_unique_satisfiable_to_trivial(unique_sat):

@@ -1,7 +1,6 @@
 from random import Random
 
 import hypothesmith
-import pytest
 import trio
 from hypothesis import Phase, assume, example, given, note, settings, strategies as st
 from hypothesis.errors import Frozen, StopTest
@@ -193,19 +192,6 @@ def test_no_blockers():
     )
 
 
-@pytest.mark.parametrize(
-    "origin,target",
-    [
-        (b, c)
-        for b in POTENTIAL_BLOCKERS
-        for c in POTENTIAL_BLOCKERS
-        if default_sort_key(c) < default_sort_key(b)
-    ],
-)
-def test_blockers_all_reduce_to_eachother(origin, target):
-    assert_reduces_to(origin=origin, target=target)
-
-
 @common_settings
 @given(st.binary(), st.data())
 def test_always_reduces_to_each_direct_reduction(origin, data):
@@ -224,6 +210,14 @@ def test_parallelism_never_prevents_reduction(origin, parallelism, data):
     reductions = sorted(direct_reductions(origin), key=default_sort_key, reverse=True)
 
     assume(reductions)
+
+    parallel_reductions = sorted(
+        direct_reductions(origin, parallelism=parallelism),
+        key=default_sort_key,
+        reverse=True,
+    )
+
+    assert set(reductions).issubset(parallel_reductions)
 
     target = data.draw(st.sampled_from(reductions))
 

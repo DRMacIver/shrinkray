@@ -134,6 +134,13 @@ class ReductionProblem(Generic[T], ABC):
     async def is_interesting(self, test_case: T) -> bool:
         pass
 
+    async def is_reduction(self, test_case: T) -> bool:
+        if test_case == self.current_test_case:
+            return True
+        if self.sort_key(test_case) > self.sort_key(self.current_test_case):
+            return False
+        return await self.is_interesting(test_case)
+
     @abstractmethod
     def sort_key(self, test_case: T) -> Any: ...
 

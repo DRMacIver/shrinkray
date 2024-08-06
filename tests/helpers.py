@@ -160,29 +160,27 @@ def assert_reduces_to(
             f"It is impossible for {origin} to reduce to {target} as it is more reduced."
         )
 
-    if language_restrictions and is_python(origin):
+    if language_restrictions and is_python(origin) and is_python(target):
         require_python = True
     else:
         require_python = False
 
     def is_interesting(value: bytes) -> bool:
-        if value == target:
-            raise Completed()
+        print(value)
         if require_python and not is_python(value):
             return False
         return default_sort_key(value) >= default_sort_key(target)
 
-    try:
-        if passes is None:
-            best = reduce(origin, is_interesting, parallelism=parallelism)
-        else:
-            best = reduce_with(passes, origin, is_interesting, parallelism=parallelism)
-    except Completed:
+    if passes is None:
+        best = reduce(origin, is_interesting, parallelism=parallelism)
+    else:
+        best = reduce_with(passes, origin, is_interesting, parallelism=parallelism)
+
+    if best == target:
         return
 
     if best == origin:
         raise AssertionError(f"Unable to make any progress from {origin}")
-    if best == origin:
-        raise AssertionError(
-            f"Unable to reduce {origin} to {target}. Best achieve was {best}"
-        )
+    raise AssertionError(
+        f"Unable to reduce {origin} to {target}. Best achieve was {best}"
+    )

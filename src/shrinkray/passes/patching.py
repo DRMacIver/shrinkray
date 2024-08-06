@@ -54,6 +54,27 @@ class SetPatches(Patches[frozenset[T], TargetType]):
         return len(patch)
 
 
+class ListPatches(Patches[list[T], TargetType]):
+    def __init__(self, apply: Callable[[list[T], TargetType], TargetType]):
+        self.__apply = apply
+
+    @property
+    def empty(self):
+        return []
+
+    def combine(self, *patches: list[T]) -> list[T]:
+        result = []
+        for p in patches:
+            result.extend(p)
+        return result
+
+    def apply(self, patch: list[T], target: TargetType) -> TargetType:
+        return self.__apply(patch, target)
+
+    def size(self, patch: list[T]) -> int:
+        return len(patch)
+
+
 class PatchApplier(Generic[PatchType, TargetType], ABC):
     def __init__(
         self,
@@ -81,6 +102,8 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
         with_patch_applied = self.__patches.apply(
             combined_patch, self.__initial_test_case
         )
+        if with_patch_applied == self.__problem.current_test_case:
+            return True
         if not await self.__problem.is_interesting(with_patch_applied):
             return False
         send_merge_result, receive_merge_result = trio.open_memory_channel(1)
@@ -91,6 +114,8 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                 self.__current_patch == initial_patch
                 and len(self.__merge_queue) == 1
                 and self.__merge_queue[0][0] == patch
+                and self.__problem.sort_key(with_patch_applied)
+                <= self.__problem.sort_key(self.__problem.current_test_case)
             ):
                 self.__current_patch = combined_patch
                 self.__merge_queue.clear()
@@ -114,7 +139,7 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                     with_patch_applied = self.__patches.apply(
                         attempted_patch, self.__initial_test_case
                     )
-                    if await self.__problem.is_interesting(with_patch_applied):
+                    if await self.__problem.is_reduction(with_patch_applied):
                         self.__current_patch = attempted_patch
                         return True
                     else:
@@ -155,6 +180,7 @@ async def apply_patches(
     patches: Iterable[PatchType],
 ) -> None:
     applier = PatchApplier(patch_info, problem)
+    initial = problem.current_test_case
 
     send_patches, receive_patches = trio.open_memory_channel(float("inf"))
 

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 from random import Random
-from typing import Any, Generic, Iterable, Sequence, TypeVar, cast, Callable
+from typing import Any, Callable, Generic, Iterable, Sequence, TypeVar, cast
 
 import trio
 
@@ -112,7 +112,7 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                     if attempted_patch == base_patch:
                         return True
                     with_patch_applied = self.__patches.apply(
-                        combined_patch, self.__initial_test_case
+                        attempted_patch, self.__initial_test_case
                     )
                     if await self.__problem.is_interesting(with_patch_applied):
                         self.__current_patch = attempted_patch

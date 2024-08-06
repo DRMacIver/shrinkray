@@ -17,13 +17,15 @@ from shrinkray.passes.bytes import (
     lexeme_based_deletions,
     lift_braces,
     lower_bytes,
+    lower_individual_bytes,
     remove_indents,
     remove_whitespace,
     replace_space_with_newlines,
     short_deletions,
+    standard_substitutions,
 )
 from shrinkray.passes.clangdelta import ClangDelta, clang_delta_pumps
-from shrinkray.passes.definitions import ReductionPass, ReductionPump, compose
+from shrinkray.passes.definitions import Format, ReductionPass, ReductionPump, compose
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
     merge_adjacent_strings,
@@ -32,8 +34,9 @@ from shrinkray.passes.genericlanguages import (
     replace_falsey_with_zero,
     simplify_brackets,
 )
-from shrinkray.passes.json import is_json
+from shrinkray.passes.json import JSON, JSON_PASSES
 from shrinkray.passes.python import PYTHON_PASSES, is_python
+from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
 from shrinkray.problem import ReductionProblem
 
@@ -148,8 +151,11 @@ class ShrinkRay(Reducer[bytes]):
         lambda: [
             compose(Split(b"\n"), block_deletion(21, 100)),
             replace_space_with_newlines,
+            delete_byte_spans,
             lower_bytes,
+            lower_individual_bytes,
             simplify_brackets,
+            standard_substitutions,
             # short_replacements,
             # sort_whitespace,
         ]
@@ -158,8 +164,17 @@ class ShrinkRay(Reducer[bytes]):
     def __attrs_post_init__(self) -> None:
         if is_python(self.target.current_test_case):
             self.great_passes.extend(PYTHON_PASSES)
-        elif is_json(self.target.current_test_case):
-            self.great_passes.extend(JSON_PASSES)
+        self.register_format_specific_pass(JSON, JSON_PASSES)
+        self.register_format_specific_pass(
+            DimacsCNF,
+            SAT_PASSES,
+        )
+
+    def register_format_specific_pass(
+        self, format: Format[bytes, T], passes: Iterable[ReductionPass[T]]
+    ):
+        if format.is_valid(self.target.current_test_case):
+            self.great_passes.extend(compose(format, p) for p in passes)
 
     @property
     def pumps(self) -> Iterable[ReductionPump[bytes]]:

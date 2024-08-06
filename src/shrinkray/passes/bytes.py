@@ -391,6 +391,46 @@ async def lower_bytes(problem: ReductionProblem[bytes]) -> None:
     await apply_patches(problem, ByteReplacement(), patches)
 
 
+class IndividualByteReplacement(Patches[ReplacementPatch, bytes]):
+    @property
+    def empty(self) -> ReplacementPatch:
+        return {}
+
+    def combine(self, *patches: ReplacementPatch) -> ReplacementPatch:
+        result = {}
+        for p in patches:
+            for k, v in p.items():
+                if k not in result:
+                    result[k] = v
+                else:
+                    result[k] = min(result[k], v)
+        return result
+
+    def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
+        result = bytearray()
+        for i, c in enumerate(target):
+            result.append(patch.get(i, c))
+        return bytes(result)
+
+    def size(self, patch: ReplacementPatch) -> int:
+        return 0
+
+
+async def lower_individual_bytes(problem: ReductionProblem[bytes]) -> None:
+    initial = problem.current_test_case
+    patches = [
+        {i: r}
+        for i, c in enumerate(initial)
+        for r in sorted({0, 1, c // 2, c - 1} | set(b" \t\r\n"))
+        if r < c and r >= 0
+    ] + [
+        {i - 1: initial[i - 1] - 1, i: 255}
+        for i, c in enumerate(initial)
+        if i > 0 and initial[i - 1] > 0 and c == 0
+    ]
+    await apply_patches(problem, IndividualByteReplacement(), patches)
+
+
 RegionReplacementPatch = list[tuple[int, int, int]]
 
 
@@ -486,3 +526,22 @@ async def sort_whitespace(problem: ReductionProblem[bytes]) -> None:
     await problem.is_interesting(
         bytes(sorted(test_case[:whitespace_up_to])) + test_case[whitespace_up_to:]
     )
+
+
+# These are some cheat substitutions that are sometimes helpful, but mostly
+# for passing stupid tests.
+STANDARD_SUBSTITUTIONS = [(b"\0\0", b"\1"), (b"\0\0", b"\xff")]
+
+
+async def standard_substitutions(problem: ReductionProblem[bytes]):
+    i = 0
+    while i < len(problem.current_test_case):
+        for k, v in STANDARD_SUBSTITUTIONS:
+            x = problem.current_test_case
+            if i + len(k) <= len(x) and x[i : i + len(k)] == k:
+                attempt = x[:i] + v + x[i + len(k) :]
+                if await problem.is_interesting(attempt):
+                    assert problem.current_test_case == attempt
+                    break
+        else:
+            i += 1

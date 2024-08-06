@@ -24,6 +24,13 @@ class Format(Generic[S, T], ABC):
     @abstractmethod
     def parse(self, input: S) -> T: ...
 
+    def is_valid(self, input: S) -> bool:
+        try:
+            self.parse(input)
+            return True
+        except ParseError:
+            return False
+
     @abstractmethod
     def dumps(self, input: T) -> S: ...
 

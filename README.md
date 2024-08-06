@@ -60,9 +60,14 @@ It has a generic reduction algorithm that should work pretty well with any textu
 Additionally, Shrink Ray has special support for the following formats:
 
 * C and C++ (via `clang_delta`, which you will have if creduce is installed)
-* Python (Quite basic support, but easy to improve)
+* Python
+* JSON
+* Dimacs CNF format for SAT problems
 
-It is fairly easy to add support for new formats as needed.
+Most of this support is quite basic and is just designed to deal with specific cases that the generic logic is known
+not to handle well, but it's easy to extend with additional transformations.
+It is also fairly easy to add support for new formats as needed.
+
 If you run into a test case and interestingness test that you care about that shrink ray handles badly please let me know and I'll likely see about improving its handling of that format.
 
 ## Parallelism

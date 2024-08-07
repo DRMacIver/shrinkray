@@ -84,7 +84,7 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
         self.__patches = patches
         self.__problem = problem
 
-        self.__is_merging = False
+        self.__tick = 0
         self.__merge_queue = []
         self.__merge_lock = trio.Lock()
 
@@ -107,13 +107,17 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
         if not await self.__problem.is_interesting(with_patch_applied):
             return False
         send_merge_result, receive_merge_result = trio.open_memory_channel(1)
-        self.__merge_queue.append((patch, send_merge_result))
+
+        sort_key = (self.__tick, self.__problem.sort_key(with_patch_applied))
+        self.__tick += 1
+
+        self.__merge_queue.append((sort_key, patch, send_merge_result))
 
         async with self.__merge_lock:
             if (
                 self.__current_patch == initial_patch
                 and len(self.__merge_queue) == 1
-                and self.__merge_queue[0][0] == patch
+                and self.__merge_queue[0][1] == patch
                 and self.__problem.sort_key(with_patch_applied)
                 <= self.__problem.sort_key(self.__problem.current_test_case)
             ):
@@ -130,7 +134,7 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                         return False
                     try:
                         attempted_patch = self.__patches.combine(
-                            base_patch, *[p for p, _ in self.__merge_queue[:k]]
+                            base_patch, *[p for _, p, _ in self.__merge_queue[:k]]
                         )
                     except Conflict:
                         return False
@@ -150,12 +154,12 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                 else:
                     merged = await self.__problem.work.find_large_integer(can_merge)
 
-                for _, send_result in self.__merge_queue[:merged]:
+                for _, _, send_result in self.__merge_queue[:merged]:
                     send_result.send_nowait(True)
 
                 assert merged <= to_merge
                 if merged < to_merge:
-                    self.__merge_queue[merged][1].send_nowait(False)
+                    self.__merge_queue[merged][-1].send_nowait(False)
                     del self.__merge_queue[: merged + 1]
                 else:
                     del self.__merge_queue[:to_merge]
@@ -180,12 +184,12 @@ async def apply_patches(
     patches: Iterable[PatchType],
 ) -> None:
     applier = PatchApplier(patch_info, problem)
-    initial = problem.current_test_case
 
     send_patches, receive_patches = trio.open_memory_channel(float("inf"))
 
     patches = list(patches)
     problem.work.random.shuffle(patches)
+    patches.sort(key=patch_info.size, reverse=True)
     for patch in patches:
         send_patches.send_nowait(patch)
     send_patches.close()

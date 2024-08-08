@@ -12,7 +12,7 @@ def is_python(source: AnyStr) -> bool:
     try:
         libcst.parse_module(source)
         return True
-    except (SyntaxError, UnicodeDecodeError, libcst.ParserSyntaxError):
+    except (SyntaxError, UnicodeDecodeError, libcst.ParserSyntaxError, Exception):
         return False
 
 
@@ -48,7 +48,7 @@ async def libcst_transform(
 
     try:
         module = libcst.parse_module(problem.current_test_case)
-    except libcst.ParserSyntaxError:
+    except Exception:
         return
 
     context = codemod.CodemodContext()

@@ -2,6 +2,52 @@
 
 Shrink Ray is a modern multiformat test-case reducer.
 
+## What is test-case reduction?
+
+Test-case reduction is the process of automatically taking a *test case* and *reducing* it.
+
+That is, you have some file that has some interesting property (usually that it triggers a bug in your software),
+but it is large and complicated and as a result you can't figure out what about the file actually matters.
+You want to be able to trigger the bug with a small, simple, version of it that contains only the features of interest.
+
+For example, the following is some Python code that [triggered a bug in libcst](https://github.com/Instagram/LibCST/issues/1061):
+
+```python
+() if 0 else(lambda:())
+```
+
+This was extracted from a large Python file (probably several thousand lines of code) and systematically reduced down to this example.
+
+You would obtain this by running `shrinkray breakslibcst.py mytestcase.py`, where `breakslibcst.py` looks something like this:
+
+```python
+import libcst
+import sys
+
+if __name__  == '__main__':
+    try:
+        libcst.parse_module(sys.stdin.read())
+    except TypeError:
+        sys.exit(0)
+    sys.exit(1)
+```
+
+This script exits with 0 if the code passed to it on standard input triggers the relevant bug (that libcst raises a TypeError when parsing this code), and with a non-zero exit code otherwise.
+
+shrinkray (or any other test-case reducer) then systematically tries smaller and simpler variants of your original source file until it reduces it to something as small as it can manage.
+
+While it runs, you will see the following user interface:
+
+![Demo of shrink ray running](demo.png)
+
+When it finishes you will be left with the reduced test case in `mytestcase.py`.
+
+Test-case reducers are useful for any tools that handle files with complex formats that can trigger bugs in them. Historically this has been particularly useful for compilers and other programming tools, but in principle it can be used for anything.
+
+Most test-case reducers only work well on a few formats. Shrink Ray is designed to be able to support a wide variety of formats, including binary ones, although it's currently best tuned for "things that look like programming languages".
+
+## What makes Shrink Ray distinctive?
+
 It's designed to be highly parallel, and work with a very wide variety of formats, through a mix of good generic algorithms and format-specific reduction passes.
 
 Currently shrink ray is a "prerelease" version in the sense that there is no official release yet and you're expected to just run off main (don't worry this is easy to do), as it's a bit experimental.

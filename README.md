@@ -54,8 +54,6 @@ Currently shrink ray is a "prerelease" version in the sense that there is no off
 
 That being said this probably doesn't matter that much for the question of whether to use it. It's in the nature of test-case reduction that it doesn't matter all that much if it's bad, because it's still going to do a bunch of work that you didn't have to do by hand. Try it out, see if it works. If it doesn't, please tell me and I'll make it work better.
 
-If you find it useful, please [consider sponsoring my development of it](https://github.com/sponsors/DRMacIver).
-
 ## Installation
 
 Shrink Ray requires Python 3.12 or later, and can be installed using pip.
@@ -135,3 +133,10 @@ Shrink Ray is still pretty new and under-tested software, so it definitely has b
 As well as obvious bugs (crashes, etc) I'm also very interested in hearing about usability issues and cases where the reduced test case isn't very good.
 
 Requests for new features, new supported formats, etc. also welcome although I'm less likely to jump right on them.
+
+## Sponsorship
+
+Shrink Ray is something of a labour of love - I wanted to have a tool that actually put into practice many of my ideas about test-case reduction, as I think the previous state of the art was well behind where I'd like it to be.
+
+That being said, it is first and foremost designed to be a useful tool for practical engineering problems.
+If you find it useful as such, please [consider sponsoring my development of it](https://github.com/sponsors/DRMacIver).

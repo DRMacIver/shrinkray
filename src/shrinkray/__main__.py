@@ -10,7 +10,6 @@ import traceback
 from datetime import timedelta
 from difflib import unified_diff
 from enum import Enum, IntEnum
-from glob import glob
 from shutil import which
 from tempfile import TemporaryDirectory
 from typing import Any, Generic, Iterable, TypeVar
@@ -22,7 +21,7 @@ import trio
 import urwid
 import urwid.raw_display
 
-from shrinkray.passes.clangdelta import ClangDelta
+from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
 from shrinkray.problem import BasicReductionProblem, InvalidInitialExample
 from shrinkray.reducer import ShrinkRay
 from shrinkray.work import Volume, WorkContext
@@ -758,19 +757,14 @@ def main(
             ):
                 nonlocal clang_delta
                 if not clang_delta:
-                    clang_delta = which("clang_delta") or ""
+                    clang_delta = find_clang_delta()
                 if not clang_delta:
-                    possible_locations = glob(
-                        "/opt/homebrew//Cellar/creduce/*/libexec/clang_delta"
-                    ) + glob("/usr/libexec/clang_delta")
-                    if not possible_locations:
-                        raise click.UsageError(
-                            "Attempting to reduce a C or C++ file, but clang_delta is not installed. "
-                            "Please run with --no-clang-delta, or install creduce on your system. "
-                            "If creduce is already installed and you wish to use clang_delta, please "
-                            "pass its path with the --clang-delta argument."
-                        )
-                    clang_delta = max(possible_locations)
+                    raise click.UsageError(
+                        "Attempting to reduce a C or C++ file, but clang_delta is not installed. "
+                        "Please run with --no-clang-delta, or install creduce on your system. "
+                        "If creduce is already installed and you wish to use clang_delta, please "
+                        "pass its path with the --clang-delta argument."
+                    )
 
                 cd_exec = ClangDelta(clang_delta)
 

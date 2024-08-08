@@ -7,6 +7,20 @@ import trio
 from shrinkray.passes.definitions import ReductionPump
 from shrinkray.problem import ReductionProblem
 from shrinkray.work import NotFound
+from shutil import which
+from glob import glob
+
+
+def find_clang_delta():
+    clang_delta = which("clang_delta") or ""
+    if not clang_delta:
+        possible_locations = glob(
+            "/opt/homebrew//Cellar/creduce/*/libexec/clang_delta"
+        ) + glob("/usr/libexec/clang_delta")
+        if possible_locations:
+            clang_delta = max(possible_locations)
+    return clang_delta
+
 
 TRANSFORMATIONS: list[str] = [
     "aggregate-to-scalar",
@@ -194,7 +208,7 @@ def clang_delta_pump(
             except ClangDeltaError as e:
                 # Clang delta has a large number of internal assertions that you can trigger
                 # if you feed it bad enough C++. We solve this problem by ignoring it.
-                if "Assertion failed" in e.args[0]:
+                if b"Assertion failed" in e.args[0]:
                     return target
 
             target = await clang_delta.apply_transformation(transformation, i, target)

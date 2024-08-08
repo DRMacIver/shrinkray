@@ -4,9 +4,9 @@ Shrink Ray is a modern multiformat test-case reducer.
 
 ## What is test-case reduction?
 
-Test-case reduction is the process of automatically taking a *test case* and *reducing* it.
+Test-case reduction is the process of automatically taking a *test case* and *reducing* it to something close to a [minimal reproducible example](https://en.wikipedia.org/wiki/Minimal_reproducible_example).
 
-That is, you have some file that has some interesting property (usually that it triggers a bug in your software),
+That is, you have some file that has some interesting property (usually that it triggers a bug in some software),
 but it is large and complicated and as a result you can't figure out what about the file actually matters.
 You want to be able to trigger the bug with a small, simple, version of it that contains only the features of interest.
 

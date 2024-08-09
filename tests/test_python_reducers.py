@@ -1,5 +1,6 @@
 from shrinkray.passes.python import (
     lift_indented_constructs,
+    replace_bodies_with_ellipsis,
     replace_statements_with_pass,
     strip_annotations,
     PYTHON_PASSES,
@@ -46,3 +47,18 @@ def test_strip_annotations():
 def test_single_annotation():
     x = b"x:A\n"
     assert reduce_with(PYTHON_PASSES, x, lambda y: True).strip() == b""
+
+
+IF_BLOCK = """
+if True:
+    x = 1
+    y = 2
+    assert x + y
+"""
+
+
+def test_body_replacement():
+    assert (
+        reduce_with([replace_bodies_with_ellipsis], IF_BLOCK, lambda x: True).strip()
+        == b"if True:\n    ..."
+    )

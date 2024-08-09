@@ -124,6 +124,17 @@ async def replace_statements_with_pass(problem: ReductionProblem[bytes]) -> None
     )
 
 
+ELLIPSIS_STATEMENT = libcst.parse_statement("...")
+
+
+async def replace_bodies_with_ellipsis(problem: ReductionProblem[bytes]) -> None:
+    await libcst_transform(
+        problem,
+        m.IndentedBlock(),
+        lambda x: x.with_changes(body=[ELLIPSIS_STATEMENT]),  # type: ignore
+    )
+
+
 async def strip_annotations(problem: ReductionProblem[bytes]) -> None:
     await libcst_transform(
         problem,
@@ -151,6 +162,7 @@ async def strip_annotations(problem: ReductionProblem[bytes]) -> None:
 
 
 PYTHON_PASSES = [
+    replace_bodies_with_ellipsis,
     strip_annotations,
     lift_indented_constructs,
     delete_statements,

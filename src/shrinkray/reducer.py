@@ -28,6 +28,7 @@ from shrinkray.passes.clangdelta import ClangDelta, clang_delta_pumps
 from shrinkray.passes.definitions import Format, ReductionPass, ReductionPump, compose
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
+    cut_comment_like_things,
     merge_adjacent_strings,
     normalize_identifiers,
     reduce_integer_literals,
@@ -108,6 +109,7 @@ class ShrinkRay(Reducer[bytes]):
 
     initial_cuts: list[ReductionPass[bytes]] = attrs.Factory(
         lambda: [
+            cut_comment_like_things,
             hollow,
             compose(Split(b"\n"), delete_duplicates),
             compose(Split(b"\n"), block_deletion(10, 100)),
@@ -156,8 +158,9 @@ class ShrinkRay(Reducer[bytes]):
             lower_individual_bytes,
             simplify_brackets,
             standard_substitutions,
-            # short_replacements,
-            # sort_whitespace,
+            # This is in last ditch because it's probably not useful
+            # to run it more than once.
+            cut_comment_like_things,
         ]
     )
 

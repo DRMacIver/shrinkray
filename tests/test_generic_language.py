@@ -1,5 +1,6 @@
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
+    cut_comment_like_things,
     reduce_integer_literals,
 )
 
@@ -32,3 +33,19 @@ def test_can_combine_expressions_with_no_expressions() -> None:
         reduce_with([combine_expressions], b"hello world", lambda x: True)
         == b"hello world"
     )
+
+
+LOTS_OF_COMMENTS = b"""
+hello # this is a single line comment
+/* this
+is
+a
+multiline
+comment */ world // some extraneous garbage
+"""
+
+
+def test_comment_removal():
+    x = reduce_with([cut_comment_like_things], LOTS_OF_COMMENTS, lambda x: True)
+    lines = [line.strip() for line in x.splitlines() if line.strip()]
+    assert lines == [b"hello", b"world"]

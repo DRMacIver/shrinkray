@@ -10,7 +10,7 @@ from typing import AnyStr, Callable
 import trio
 from attr import define
 
-from shrinkray.passes.bytes import ByteReplacement
+from shrinkray.passes.bytes import ByteReplacement, delete_intervals
 from shrinkray.passes.definitions import Format, ParseError, ReductionPass
 from shrinkray.passes.patching import PatchApplier, Patches, apply_patches
 from shrinkray.problem import BasicReductionProblem, ReductionProblem
@@ -239,3 +239,48 @@ async def normalize_identifiers(problem: ReductionProblem[bytes]) -> None:
             await problem.work.find_first_value(replacements, can_replace)
         except NotFound:
             pass
+
+
+def iter_indices(s, substring):
+    try:
+        i = s.index(substring)
+        yield i
+        while True:
+            i = s.index(substring, i + 1)
+            yield i
+    except ValueError:
+        return
+
+
+async def cut_comment_like_things(problem: ReductionProblem[bytes]):
+    cuts = []
+    target = problem.current_test_case
+    # python comments
+    for i in iter_indices(target, b"#"):
+        try:
+            j = target.index(b"\n", i + 1)
+        except ValueError:
+            j = len(target)
+        cuts.append((i, j))
+    # python docstrings
+    for i in iter_indices(target, b'"""'):
+        try:
+            j = target.index(b'"""', i + 1)
+        except ValueError:
+            break
+        cuts.append((i, j + 3))
+    # C single-line comments
+    for i in iter_indices(target, b"//"):
+        try:
+            j = target.index(b"\n", i + 1)
+        except ValueError:
+            j = len(target)
+        cuts.append((i, j))
+    # C multi-line comments
+    for i in iter_indices(target, b"/*"):
+        try:
+            j = target.index(b"*/", i + 1)
+        except ValueError:
+            break
+        cuts.append((i, j + 2))
+    await delete_intervals(problem, cuts)

@@ -124,7 +124,30 @@ async def replace_statements_with_pass(problem: ReductionProblem[bytes]) -> None
     )
 
 
+async def strip_annotations(problem: ReductionProblem[bytes]) -> None:
+    await libcst_transform(
+        problem,
+        m.FunctionDef(),
+        lambda x: x.with_changes(returns=None),
+    )
+    await libcst_transform(
+        problem,
+        m.Param(),
+        lambda x: x.with_changes(annotation=None),
+    )
+    await libcst_transform(
+        problem,
+        m.AnnAssign(),
+        lambda x: libcst.Assign(
+            targets=[libcst.AssignTarget(target=x.target)],
+            value=x.value,
+            semicolon=x.semicolon,
+        ),
+    )
+
+
 PYTHON_PASSES = [
+    strip_annotations,
     lift_indented_constructs,
     delete_statements,
     replace_statements_with_pass,

@@ -252,35 +252,26 @@ def iter_indices(s, substring):
         return
 
 
-async def cut_comment_like_things(problem: ReductionProblem[bytes]):
+async def cut_comments(problem: ReductionProblem[bytes], start, end, include_end=True):
     cuts = []
     target = problem.current_test_case
     # python comments
-    for i in iter_indices(target, b"#"):
+    for i in iter_indices(target, start):
         try:
-            j = target.index(b"\n", i + 1)
+            j = target.index(end, i + 1)
         except ValueError:
+            if include_end:
+                continue
             j = len(target)
-        cuts.append((i, j))
-    # python docstrings
-    for i in iter_indices(target, b'"""'):
-        try:
-            j = target.index(b'"""', i + 1)
-        except ValueError:
-            break
-        cuts.append((i, j + 3))
-    # C single-line comments
-    for i in iter_indices(target, b"//"):
-        try:
-            j = target.index(b"\n", i + 1)
-        except ValueError:
-            j = len(target)
-        cuts.append((i, j))
-    # C multi-line comments
-    for i in iter_indices(target, b"/*"):
-        try:
-            j = target.index(b"*/", i + 1)
-        except ValueError:
-            break
-        cuts.append((i, j + 2))
+        if include_end:
+            cuts.append((i, j + len(end)))
+        else:
+            cuts.append((i, j))
     await delete_intervals(problem, cuts)
+
+
+async def cut_comment_like_things(problem: ReductionProblem[bytes]):
+    await cut_comments(problem, b"#", b"\n", include_end=False)
+    await cut_comments(problem, b"//", b"\n", include_end=False)
+    await cut_comments(problem, b'"""', b'"""')
+    await cut_comments(problem, b"/*", b"*/")

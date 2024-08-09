@@ -183,6 +183,11 @@ async def apply_patches(
     patch_info: Patches[PatchType, TargetType],
     patches: Iterable[PatchType],
 ) -> None:
+    if await problem.is_interesting(
+        patch_info.apply(patch_info.combine(*patches), problem.current_test_case)
+    ):
+        return
+
     applier = PatchApplier(patch_info, problem)
 
     send_patches, receive_patches = trio.open_memory_channel(float("inf"))

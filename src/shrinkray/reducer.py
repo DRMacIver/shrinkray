@@ -122,7 +122,6 @@ class ShrinkRay(Reducer[bytes]):
 
     great_passes: list[ReductionPass[bytes]] = attrs.Factory(
         lambda: [
-            debracket,
             compose(Split(b"\n"), delete_duplicates),
             compose(Split(b"\n"), block_deletion(1, 10)),
             compose(Split(b";"), block_deletion(1, 10)),
@@ -130,6 +129,7 @@ class ShrinkRay(Reducer[bytes]):
             hollow,
             lift_braces,
             delete_byte_spans,
+            debracket,
         ]
     )
 
@@ -166,7 +166,8 @@ class ShrinkRay(Reducer[bytes]):
 
     def __attrs_post_init__(self) -> None:
         if is_python(self.target.current_test_case):
-            self.great_passes.extend(PYTHON_PASSES)
+            self.great_passes[:0] = PYTHON_PASSES
+            self.initial_cuts[:0] = PYTHON_PASSES
         self.register_format_specific_pass(JSON, JSON_PASSES)
         self.register_format_specific_pass(
             DimacsCNF,
@@ -177,7 +178,9 @@ class ShrinkRay(Reducer[bytes]):
         self, format: Format[bytes, T], passes: Iterable[ReductionPass[T]]
     ):
         if format.is_valid(self.target.current_test_case):
-            self.great_passes.extend(compose(format, p) for p in passes)
+            composed = [compose(format, p) for p in passes]
+            self.great_passes[:0] = composed
+            self.initial_cuts[:0] = composed
 
     @property
     def pumps(self) -> Iterable[ReductionPump[bytes]]:
@@ -202,7 +205,6 @@ class ShrinkRay(Reducer[bytes]):
     async def run_pass(self, rp: ReductionPass[bytes]) -> None:
         try:
             assert self.current_reduction_pass is None
-            start = time()
             self.current_reduction_pass = rp
             await rp(self.target)
         finally:

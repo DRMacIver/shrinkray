@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
-from time import time
 from typing import Generic, Iterable, Optional, TypeVar
 
 import attrs

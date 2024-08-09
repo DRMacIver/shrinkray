@@ -1,5 +1,7 @@
 import os
 import subprocess
+from glob import glob
+from shutil import which
 from tempfile import NamedTemporaryFile
 
 import trio
@@ -7,8 +9,6 @@ import trio
 from shrinkray.passes.definitions import ReductionPump
 from shrinkray.problem import ReductionProblem
 from shrinkray.work import NotFound
-from shutil import which
-from glob import glob
 
 
 def find_clang_delta():

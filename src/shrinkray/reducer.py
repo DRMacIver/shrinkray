@@ -115,7 +115,6 @@ class ShrinkRay(Reducer[bytes]):
             lift_braces,
             remove_indents,
             remove_whitespace,
-            replace_space_with_newlines,
         ]
     )
 

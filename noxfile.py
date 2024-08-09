@@ -121,7 +121,11 @@ def precommit(session: Session) -> None:
     )
 
     session.run("flake8", "src", "tests")
-    session.run("flake8-trio", *glob("{src,tests}/**/*.py"))
+    session.run("flake8-trio", *PY_FILES)
+
+
+PY_FILES = glob("src/**/*.py", recursive=True) + glob("test/**/*.py", recursive=True)
+assert PY_FILES
 
 
 @session(python=python_versions[0])
@@ -129,7 +133,7 @@ def format(session: Session) -> None:
     session.install(
         "shed==2023.6.1",
     )
-    session.run("shed", "--refactor")
+    session.run("shed", "--refactor", *PY_FILES)
 
 
 @session(python=python_versions[0])

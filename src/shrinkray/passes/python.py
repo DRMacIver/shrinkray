@@ -138,10 +138,14 @@ async def strip_annotations(problem: ReductionProblem[bytes]) -> None:
     await libcst_transform(
         problem,
         m.AnnAssign(),
-        lambda x: libcst.Assign(
-            targets=[libcst.AssignTarget(target=x.target)],
-            value=x.value,
-            semicolon=x.semicolon,
+        lambda x: (
+            libcst.Assign(
+                targets=[libcst.AssignTarget(target=x.target)],
+                value=x.value,
+                semicolon=x.semicolon,
+            )
+            if x.value
+            else libcst.RemoveFromParent()
         ),
     )
 

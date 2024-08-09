@@ -2,6 +2,7 @@ from shrinkray.passes.python import (
     lift_indented_constructs,
     replace_statements_with_pass,
     strip_annotations,
+    PYTHON_PASSES,
 )
 
 from tests.helpers import reduce, reduce_with
@@ -40,3 +41,8 @@ def has_an_annotation(x):
 
 def test_strip_annotations():
     assert reduce_with([strip_annotations], ANNOTATED, lambda x: True) == DEANNOTATED
+
+
+def test_single_annotation():
+    x = b"x:A\n"
+    assert reduce_with(PYTHON_PASSES, x, lambda y: True).strip() == b""

@@ -75,7 +75,7 @@ async def libcst_transform(
         except libcst.CSTValidationError:
             return False
         except TypeError as e:
-            if "does not allow for it to be replaced" in e.args[0]:
+            if "does not allow for it" in e.args[0]:
                 return False
             raise
 
@@ -101,6 +101,12 @@ async def libcst_transform(
 
 
 async def lift_indented_constructs(problem: ReductionProblem[bytes]) -> None:
+    await libcst_transform(
+        problem,
+        m.OneOf(m.While(), m.If(), m.Try()),
+        lambda x: x.with_changes(orelse=None),
+    )
+
     await libcst_transform(
         problem,
         m.OneOf(m.While(), m.If(), m.Try(), m.With()),

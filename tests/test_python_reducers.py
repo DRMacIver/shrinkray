@@ -5,8 +5,10 @@ from shrinkray.passes.python import (
     strip_annotations,
     PYTHON_PASSES,
 )
-
+import os
 from tests.helpers import reduce, reduce_with
+from glob import glob
+import pytest
 
 
 def test_can_replace_blocks_with_body() -> None:
@@ -14,6 +16,37 @@ def test_can_replace_blocks_with_body() -> None:
         [lift_indented_constructs], b"if True:\n    x = 1", lambda t: b"x" in t
     )
     assert body == b"x = 1"
+
+
+ELIF_BLOCK = b"""
+if True:
+    x = 1
+elif True:
+    x = 2
+"""
+
+
+def test_lifts_bodies_of_elif():
+    assert (
+        reduce_with([lift_indented_constructs], ELIF_BLOCK, lambda x: True).strip()
+        == b"x = 1"
+    )
+
+
+def test_does_not_error_on_elif():
+    assert (
+        reduce_with([lift_indented_constructs], ELIF_BLOCK, lambda x: b"elif" in x)
+        == ELIF_BLOCK
+    )
+
+
+def test_lifts_bodies_of_with():
+    assert (
+        reduce_with(
+            [lift_indented_constructs], "with ...:\n    x = 1", lambda x: True
+        ).strip()
+        == b"x = 1"
+    )
 
 
 def test_can_replace_statements_with_pass() -> None:
@@ -57,8 +90,27 @@ if True:
 """
 
 
-def test_body_replacement():
+def test_body_replacement_of_if():
     assert (
         reduce_with([replace_bodies_with_ellipsis], IF_BLOCK, lambda x: True).strip()
         == b"if True:\n    ..."
     )
+
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
+
+
+PYTHON_FILES = glob(os.path.join(ROOT, "src", "**", "*.py"), recursive=True) + glob(
+    os.path.join(ROOT, "tests", "**", "*.py"), recursive=True
+)
+
+
+@pytest.mark.parametrize("pyfile", PYTHON_FILES)
+def test_reduce_all(pyfile):
+    with open(pyfile, "rb") as i:
+        code = i.read()
+
+    def is_interesting(x):
+        return True
+
+    reduce_with(PYTHON_PASSES, code, is_interesting)

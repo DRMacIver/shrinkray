@@ -534,7 +534,7 @@ def main(
             initial = formatter_result.stdout
 
             async def format_data(test_case: bytes) -> bytes:
-                result = await run_formatter_command(formatter_command, initial)
+                result = await run_formatter_command(formatter_command, test_case)
                 if result.returncode != 0:
                     return None
                 return result.stdout

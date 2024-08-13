@@ -10,6 +10,8 @@ from shrinkray.passes.definitions import ReductionPump
 from shrinkray.problem import ReductionProblem
 from shrinkray.work import NotFound
 
+C_FILE_EXTENSIONS = (".c", ".cpp", ".h", ".hpp", ".cxx", ".cc")
+
 
 def find_clang_delta():
     clang_delta = which("clang_delta") or ""

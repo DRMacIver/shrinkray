@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generic, Iterable, Optional, TypeVar
+from typing import Any, Generic, Iterable, Optional, TypeVar
 
 import attrs
 import trio
@@ -23,7 +23,7 @@ from shrinkray.passes.bytes import (
     short_deletions,
     standard_substitutions,
 )
-from shrinkray.passes.clangdelta import ClangDelta, clang_delta_pumps
+from shrinkray.passes.clangdelta import C_FILE_EXTENSIONS, ClangDelta, clang_delta_pumps
 from shrinkray.passes.definitions import Format, ReductionPass, ReductionPump, compose
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
@@ -35,10 +35,11 @@ from shrinkray.passes.genericlanguages import (
     simplify_brackets,
 )
 from shrinkray.passes.json import JSON, JSON_PASSES
+from shrinkray.passes.patching import PatchApplier, Patches
 from shrinkray.passes.python import PYTHON_PASSES, is_python
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
-from shrinkray.problem import ReductionProblem
+from shrinkray.problem import ReductionProblem, shortlex
 
 S = TypeVar("S")
 T = TypeVar("T")
@@ -328,3 +329,97 @@ class ShrinkRay(Reducer[bytes]):
                 await self.pump(pump)
             if self.target.current_test_case == prev:
                 break
+
+
+class UpdateKeys(Patches[dict[str, bytes], dict[str, bytes]]):
+    @property
+    def empty(self) -> dict[str, bytes]:
+        return {}
+
+    def combine(self, *patches: dict[str, bytes]) -> dict[str, bytes]:
+        result = {}
+        for p in patches:
+            for k, v in p.items():
+                result[k] = v
+        return result
+
+    def apply(
+        self, patch: dict[str, bytes], target: dict[str, bytes]
+    ) -> dict[str, bytes]:
+        result = target.copy()
+        result.update(patch)
+        return result
+
+    def size(self, patch: dict[str, bytes]) -> int:
+        return len(patch)
+
+
+class KeyProblem(ReductionProblem[bytes]):
+    def __init__(
+        self,
+        base_problem: ReductionProblem[dict[str, bytes]],
+        applier: PatchApplier[dict[str, bytes], dict[str, bytes]],
+        key: str,
+    ):
+        super().__init__(work=base_problem.work)
+        self.base_problem = base_problem
+        self.applier = applier
+        self.key = key
+
+    @property
+    def current_test_case(self) -> bytes:
+        return self.base_problem.current_test_case[self.key]
+
+    async def is_interesting(self, test_case: bytes) -> bool:
+        return await self.applier.try_apply_patch({self.key: test_case})
+
+    def size(self, test_case: bytes) -> int:
+        return len(test_case)
+
+    def sort_key(self, test_case: bytes) -> Any:
+        return shortlex(test_case)
+
+    def display(self, value: bytes) -> str:
+        return repr(value)
+
+
+class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
+    clang_delta: Optional[ClangDelta] = None
+
+    async def run(self):
+        prev = None
+        while prev != self.target.current_test_case:
+            prev = self.target.current_test_case
+            await self.delete_keys()
+            await self.shrink_values()
+
+    async def delete_keys(self):
+        target = self.target.current_test_case
+        keys = list(target.keys())
+        keys.sort(key=lambda k: (shortlex(target[k]), shortlex(k)), reverse=True)
+        for k in keys:
+            attempt = self.target.current_test_case.copy()
+            del attempt[k]
+            await self.target.is_interesting(attempt)
+
+    async def shrink_values(self):
+        async with trio.open_nursery() as nursery:
+            applier = PatchApplier(patches=UpdateKeys(), problem=self.target)
+            for k in self.target.current_test_case.keys():
+                key_problem = KeyProblem(
+                    base_problem=self.target,
+                    applier=applier,
+                    key=k,
+                )
+                if self.clang_delta is not None and any(
+                    k.endswith(s) for s in C_FILE_EXTENSIONS
+                ):
+                    clang_delta = self.clang_delta
+                else:
+                    clang_delta = None
+
+                key_shrinkray = ShrinkRay(
+                    clang_delta=clang_delta,
+                    target=key_problem,
+                )
+                nursery.start_soon(key_shrinkray.run)

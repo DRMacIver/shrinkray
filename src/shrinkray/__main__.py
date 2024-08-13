@@ -654,6 +654,55 @@ def determine_formatter_command(formatter: str, filename: str) -> list[str] | No
     return formatter_command
 
 
+async def run_shrink_ray(
+    state: ShrinkRayState,
+    volume: Volume,
+    seed: int | None,
+    clang_delta_executable: ClangDelta | None,
+):
+    work = WorkContext(
+        random=random.Random(seed),
+        volume=volume,
+        parallelism=state.parallelism,
+    )
+
+    problem: BasicReductionProblem[bytes] = BasicReductionProblem(
+        is_interesting=state.is_interesting,
+        initial=state.initial,
+        work=work,
+    )
+
+    async with trio.open_nursery() as nursery:
+        try:
+            await problem.setup()
+        except InvalidInitialExample as e:
+            await state.report_error(e)
+
+        ui = ShrinkRayUI(problem, state)
+
+        reducer = ShrinkRay(target=problem, clang_delta=clang_delta_executable)
+        ui.reducer = reducer
+
+        @problem.on_reduce
+        async def _(test_case: bytes) -> None:
+            async with await trio.open_file(state.filename, "wb") as o:
+                await o.write(test_case)
+
+        @nursery.start_soon
+        async def _() -> None:
+            await reducer.run()
+            nursery.cancel_scope.cancel()
+
+        ui.install_into_nursery(nursery)
+
+        with ui.loop.start():
+            await ui.event_loop.run_async()
+
+        nursery.cancel_scope.cancel()
+
+    await state.print_exit_message(problem)
+
+
 @click.command(
     help="""
 """.strip()
@@ -830,49 +879,14 @@ def main(
     with open(backup, "wb") as writer:
         writer.write(initial)
 
-    @trio.run
-    async def _() -> None:
-        work = WorkContext(
-            random=random.Random(seed),
+    trio.run(
+        lambda: run_shrink_ray(
+            state=state,
             volume=volume,
-            parallelism=parallelism,
+            seed=seed,
+            clang_delta_executable=clang_delta_executable,
         )
-
-        problem: BasicReductionProblem[bytes] = BasicReductionProblem(
-            is_interesting=state.is_interesting,
-            initial=initial,
-            work=work,
-        )
-
-        async with trio.open_nursery() as nursery:
-            try:
-                await problem.setup()
-            except InvalidInitialExample as e:
-                await state.report_error(e)
-
-            ui = ShrinkRayUI(problem, state)
-
-            reducer = ShrinkRay(target=problem, clang_delta=clang_delta_executable)
-            ui.reducer = reducer
-
-            @problem.on_reduce
-            async def _(test_case: bytes) -> None:
-                async with await trio.open_file(filename, "wb") as o:
-                    await o.write(test_case)
-
-            @nursery.start_soon
-            async def _() -> None:
-                await reducer.run()
-                nursery.cancel_scope.cancel()
-
-            ui.install_into_nursery(nursery)
-
-            with ui.loop.start():
-                await ui.event_loop.run_async()
-
-            nursery.cancel_scope.cancel()
-
-        await state.print_exit_message(problem)
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

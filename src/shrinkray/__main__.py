@@ -215,16 +215,51 @@ TestCase = TypeVar("TestCase")
 class ShrinkRayState:
     input_type: InputType
     test: list[str]
+    filename: str
     timeout: float
     base: str
     parallelism: int
+    initial: bytes
+    formatter: str
+    trivial_is_error: bool
 
     first_call: bool = True
     initial_exit_code: int | None = None
     parallel_tasks_running: int = 0
+    can_format: bool = True
+    formatter_command: list[str] | None = None
 
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
+
+        if self.formatter.lower() == "none":
+
+            async def format_data(test_case: bytes) -> bytes | None:
+                await trio.lowlevel.checkpoint()
+                return test_case
+
+            self.can_format = False
+
+        else:
+            formatter_command = determine_formatter_command(
+                self.formatter, self.filename
+            )
+            if formatter_command is not None:
+                self.formatter_command = formatter_command
+
+                async def format_data(test_case: bytes) -> bytes | None:
+                    result = await run_formatter_command(formatter_command, test_case)
+                    if result.returncode != 0:
+                        return None
+                    return result.stdout
+
+            else:
+
+                async def format_data(test_case: bytes) -> bytes | None:
+                    await trio.lowlevel.checkpoint()
+                    return default_reformat_data(test_case)
+
+        self.format_data = format_data
 
     async def run_script_on_file(
         self, working: str, cwd: str, test_case: bytes, debug: bool = False
@@ -302,6 +337,309 @@ class ShrinkRayState:
                 return await self.run_for_exit_code(test_case) == 0
             finally:
                 self.parallel_tasks_running -= 1
+
+    async def attempt_format(self, data: bytes) -> bytes:
+        if not self.can_format:
+            return data
+        attempt = await self.format_data(data)
+        if attempt is None:
+            self.can_format = False
+            return data
+        if attempt == data or await self.is_interesting(attempt):
+            return attempt
+        else:
+            self.can_format = False
+            return data
+
+    async def check_formatter(self):
+        if self.formatter_command is None:
+            return
+        formatter_result = await run_formatter_command(
+            self.formatter_command, self.initial
+        )
+
+        if formatter_result.returncode != 0:
+            print(
+                "Formatter exited unexpectedly on initial test case. If this is expected, please run with --formatter=none.",
+                file=sys.stderr,
+            )
+            print(
+                formatter_result.stderr.decode("utf-8").strip(),
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        reformatted = formatter_result.stdout
+        if not await self.is_interesting(reformatted) and await self.is_interesting(
+            self.initial
+        ):
+            print(
+                "Formatting initial test case made it uninteresting. If this is expected, please run with --formatter=none.",
+                file=sys.stderr,
+            )
+            print(
+                formatter_result.stderr.decode("utf-8").strip(),
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    async def report_error(self, e):
+        print(
+            "Shrink ray cannot proceed because the initial call of the interestingness test resulted in an uninteresting test case.",
+            file=sys.stderr,
+        )
+        if isinstance(e, TimeoutExceededOnInitial):
+            print(
+                f"This is because your initial test case took {e.runtime:.2f}s exceeding your timeout setting of {timeout}.",
+                file=sys.stderr,
+            )
+            print(
+                f"Try rerunning with --timeout={math.ceil(e.runtime * 2)}.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "Rerunning the initerestingness test for debugging purposes...",
+                file=sys.stderr,
+            )
+            exit_code = await self.run_for_exit_code(self.initial)
+            if exit_code != 0:
+                print(
+                    f"This exited with code {exit_code}, but the script should return 0 for interesting test cases.",
+                    file=sys.stderr,
+                )
+                local_exit_code = await self.run_script_on_file(
+                    working=self.filename,
+                    test_case=self.initial,
+                    debug=False,
+                    cwd=os.getcwd(),
+                )
+                if local_exit_code == 0:
+                    print(
+                        "Note that Shrink Ray runs your script on a copy of the file in a temporary directory. "
+                        "Here are the results of running it in the current directory directory...",
+                        file=sys.stderr,
+                    )
+                    other_exit_code = await self.run_script_on_file(
+                        working=self.filename,
+                        test_case=self.initial,
+                        debug=True,
+                        cwd=os.getcwd(),
+                    )
+                    if other_exit_code != local_exit_code:
+                        print(
+                            f"This interestingness is probably flaky as the first time we reran it locally it exited with {local_exit_code}, "
+                            f"but the second time it exited with {other_exit_code}. Please make sure your interestingness test is deterministic.",
+                            file=sys.stderr,
+                        )
+                    else:
+                        print(
+                            "This suggests that your script depends on being run from the current working directory. Please fix it to be directory independent.",
+                            file=sys.stderr,
+                        )
+            else:
+                assert self.initial_exit_code not in (None, 0)
+                print(
+                    f"This exited with code 0, but previously the script exited with {self.initial_exit_code}. "
+                    "This suggests your interestingness test exhibits nondeterministic behaviour.",
+                    file=sys.stderr,
+                )
+        sys.exit(1)
+
+    async def print_exit_message(self, problem):
+        formatting_increase = 0
+        final_result = problem.current_test_case
+        reformatted = await self.attempt_format(final_result)
+        if reformatted != final_result and reformatted is not None:
+            if await self.is_interesting(reformatted):
+                async with await trio.open_file(self.filename, "wb") as o:
+                    await o.write(reformatted)
+            formatting_increase = max(0, len(reformatted) - len(final_result))
+            final_result = reformatted
+
+        if len(problem.current_test_case) <= 1 and self.trivial_is_error:
+            print(
+                f"Reduced to a trivial test case of size {len(problem.current_test_case)}"
+            )
+            print(
+                "This probably wasn't what you intended. If so, please modify your interestingness test "
+                "to be more restrictive.\n"
+                "If you intended this behaviour, you can run with '--trivial-is-not-error' to "
+                "suppress this message."
+            )
+            sys.exit(1)
+
+        else:
+            print("Reduction completed!")
+            stats = problem.stats
+            if self.initial == final_result:
+                print("Test case was already maximally reduced.")
+            elif len(final_result) < len(self.initial):
+                print(
+                    f"Deleted {humanize.naturalsize(stats.initial_test_case_size - len(final_result))} "
+                    f"out of {humanize.naturalsize(stats.initial_test_case_size)} "
+                    f"({(1.0 - len(final_result) / stats.initial_test_case_size) * 100:.2f}% reduction) "
+                    f"in {humanize.precisedelta(timedelta(seconds=time.time() - stats.start_time))}"
+                )
+            elif len(final_result) == len(self.initial):
+                print("Some changes were made but no bytes were deleted")
+            else:
+                print(
+                    f"Running reformatting resulted in an increase of {humanize.naturalsize(formatting_increase)}."
+                )
+
+
+def to_lines(test_case: bytes) -> list[str]:
+    result = []
+    for line in test_case.split(b"\n"):
+        try:
+            result.append(line.decode("utf-8"))
+        except UnicodeDecodeError:
+            result.append(line.hex())
+    return result
+
+
+def format_diff(diff: Iterable[str]) -> str:
+    results = []
+    start_writing = False
+    for line in diff:
+        if not start_writing and line.startswith("@@"):
+            start_writing = True
+        if start_writing:
+            results.append(line)
+            if len(results) > 500:
+                results.append("...")
+                break
+    return "\n".join(results)
+
+
+class ShrinkRayUI:
+    def __init__(self, problem: BasicReductionProblem[bytes], state: ShrinkRayState):
+        self.problem = problem
+        self.state = state
+        self.reducer: ShrinkRay | None = None
+        text_header = "Shrink Ray. Press q to exit."
+        self.details_text = urwid.Text("")
+        self.reducer_status = urwid.Text("")
+        self.parallelism_status = urwid.Text("")
+        self.diff_to_display = urwid.Text("")
+        self.parallel_samples = 0
+        self.parallel_total = 0
+
+        initial = problem.current_test_case
+        try:
+            text = initial.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
+        else:
+            self.diff_to_display.set_text("\n".join(text.splitlines()[:1000]))
+        line = urwid.Divider("─")
+
+        listbox_content = [
+            line,
+            self.details_text,
+            self.reducer_status,
+            self.parallelism_status,
+            line,
+            self.diff_to_display,
+        ]
+
+        header = urwid.AttrMap(urwid.Text(text_header, align="center"), "header")
+        listbox = urwid.ListBox(urwid.SimpleListWalker(listbox_content))
+        frame = urwid.Frame(urwid.AttrMap(listbox, "body"), header=header)
+
+        screen = urwid.raw_display.Screen()
+
+        def unhandled(key: Any) -> bool:
+            if key == "q":
+                raise urwid.ExitMainLoop()
+            return False
+
+        self.event_loop = urwid.TrioEventLoop()
+
+        self.loop = urwid.MainLoop(
+            frame,
+            [],
+            screen,
+            unhandled_input=unhandled,
+            event_loop=self.event_loop,
+        )
+
+    async def update_diffs(self):
+        prev_unformatted = self.problem.current_test_case
+        prev = await self.state.attempt_format(prev_unformatted)
+
+        time_of_last_update = time.time()
+        while True:
+            if self.problem.current_test_case == prev_unformatted:
+                await trio.sleep(0.1)
+                continue
+            current = await self.state.attempt_format(self.problem.current_test_case)
+            if current.count(b"\n") <= 50:
+                self.diff_to_display.set_text(current)
+                await trio.sleep(0.1)
+                continue
+
+            if prev == current:
+                await trio.sleep(0.1)
+                continue
+            diff = format_diff(unified_diff(to_lines(prev), to_lines(current)))
+            # When running in parallel sometimes we can produce diffs that have
+            # a lot of insertions because we undo some work and then immediately
+            # redo it. this can be quite confusing when it happens in the UI
+            # (and makes Shrink Ray look bad), so when this happens we pause a
+            # little bit to try to get a better diff.
+            if (
+                diff.count("\n+") > 2 * diff.count("\n-")
+                and time.time() <= time_of_last_update + 10
+            ):
+                await trio.sleep(0.5)
+                continue
+            self.diff_to_display.set_text(diff)
+            prev = current
+            prev_unformatted = self.problem.current_test_case
+            time_of_last_update = time.time()
+            if self.state.can_format:
+                await trio.sleep(4)
+            else:
+                await trio.sleep(2)
+
+    async def update_reducer_stats(self) -> None:
+        while True:
+            await trio.sleep(0.1)
+
+            self.details_text.set_text(self.problem.stats.display_stats())
+
+            if self.reducer is not None:
+                self.reducer_status.set_text(f"Reducer status: {self.reducer.status}")
+
+    async def update_parallelism_stats(self) -> None:
+        while True:
+            await trio.sleep(random.expovariate(10.0))
+            self.parallel_samples += 1
+            self.parallel_total += self.state.parallel_tasks_running
+            stats = self.problem.stats
+            if stats.calls > 0:
+                wasteage = stats.wasted_interesting_calls / stats.calls
+            else:
+                wasteage = 0.0
+
+            average_parallelism = self.parallel_total / self.parallel_samples
+
+            self.parallelism_status.set_text(
+                f"Current parallel workers: {self.state.parallel_tasks_running} (Average {average_parallelism:.2f}) "
+                f"(effective parallelism: {average_parallelism * (1.0 - wasteage):.2f})"
+            )
+
+    async def regularly_clear_screen(self):
+        while True:
+            self.loop.screen.clear()
+            await trio.sleep(1)
+
+    def install_into_nursery(self, nursery: trio.Nursery):
+        nursery.start_soon(self.update_diffs)
+        nursery.start_soon(self.update_reducer_stats)
+        nursery.start_soon(self.update_parallelism_stats)
+        nursery.start_soon(self.regularly_clear_screen)
 
 
 def determine_formatter_command(formatter: str, filename: str) -> list[str] | None:
@@ -442,6 +780,20 @@ def main(
         )
         sys.exit(1)
 
+    clang_delta_executable: ClangDelta | None = None
+    if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:
+        if not clang_delta:
+            clang_delta = find_clang_delta()
+        if not clang_delta:
+            raise click.UsageError(
+                "Attempting to reduce a C or C++ file, but clang_delta is not installed. "
+                "Please run with --no-clang-delta, or install creduce on your system. "
+                "If creduce is already installed and you wish to use clang_delta, please "
+                "pass its path with the --clang-delta argument."
+            )
+
+        clang_delta_executable = ClangDelta(clang_delta)
+
     # This is a debugging option so that when the reducer seems to be taking
     # a long time you can Ctrl-\ to find out what it's up to. I have no idea
     # how to test it in a way that shows up in coverage.
@@ -458,391 +810,69 @@ def main(
     except FileNotFoundError:
         pass
 
+    with open(filename, "rb") as reader:
+        initial = reader.read()
+
     state = ShrinkRayState(
         input_type=input_type,
         test=test,
         timeout=timeout,
         base=os.path.basename(filename),
         parallelism=parallelism,
+        filename=filename,
+        formatter=formatter,
+        initial=initial,
+        trivial_is_error=trivial_is_error,
     )
 
-    with open(filename, "rb") as reader:
-        initial = reader.read()
+    trio.run(state.check_formatter)
 
     with open(backup, "wb") as writer:
         writer.write(initial)
 
-    text_header = "Shrink Ray. Press q to exit."
-
-    details_text = urwid.Text("")
-    reducer_status = urwid.Text("")
-    parallelism_status = urwid.Text("")
-    diff_to_display = urwid.Text("")
-
-    try:
-        text = initial.decode("utf-8")
-    except UnicodeDecodeError:
-        pass
-    else:
-        diff_to_display.set_text("\n".join(text.splitlines()[:1000]))
-
-    parallel_samples = 0
-    parallel_total = 0
-
-    line = urwid.Divider("─")
-
-    listbox_content = [
-        line,
-        details_text,
-        reducer_status,
-        parallelism_status,
-        line,
-        diff_to_display,
-    ]
-
-    header = urwid.AttrMap(urwid.Text(text_header, align="center"), "header")
-    listbox = urwid.ListBox(urwid.SimpleListWalker(listbox_content))
-    frame = urwid.Frame(urwid.AttrMap(listbox, "body"), header=header)
-
-    screen = urwid.raw_display.Screen()
-
-    def unhandled(key: Any) -> bool:
-        if key == "q":
-            raise urwid.ExitMainLoop()
-        return False
-
-    event_loop = urwid.TrioEventLoop()
-
-    ui_loop = urwid.MainLoop(
-        frame,
-        [],
-        screen,
-        unhandled_input=unhandled,
-        event_loop=event_loop,
-    )
-
     @trio.run
     async def _() -> None:
-        nonlocal initial
-
         work = WorkContext(
             random=random.Random(seed),
             volume=volume,
             parallelism=parallelism,
         )
 
-        formatter_command = determine_formatter_command(formatter, filename)
-
-        if formatter_command is not None:
-            formatter_result = await run_formatter_command(formatter_command, initial)
-            if formatter_result.returncode != 0:
-                print(
-                    "Formatter exited unexpectedly on initial test case. If this is expected, please run with --formatter=none.",
-                    file=sys.stderr,
-                )
-                print(
-                    formatter_result.stderr.decode("utf-8").strip(),
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-            reformatted = formatter_result.stdout
-            if not await state.is_interesting(
-                reformatted
-            ) and await state.is_interesting(initial):
-                print(
-                    "Formatting initial test case made it uninteresting. If this is expected, please run with --formatter=none.",
-                    file=sys.stderr,
-                )
-                print(
-                    formatter_result.stderr.decode("utf-8").strip(),
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-
-            initial = formatter_result.stdout
-
-            async def format_data(test_case: bytes) -> bytes:
-                result = await run_formatter_command(formatter_command, test_case)
-                if result.returncode != 0:
-                    return None
-                return result.stdout
-
-        elif formatter.lower() == "none":
-
-            async def format_data(test_case: bytes) -> bytes:
-                await trio.lowlevel.checkpoint()
-                return test_case
-
-        else:
-
-            async def format_data(test_case: bytes) -> bytes:
-                await trio.lowlevel.checkpoint()
-                return default_reformat_data(test_case)
+        problem: BasicReductionProblem[bytes] = BasicReductionProblem(
+            is_interesting=state.is_interesting,
+            initial=initial,
+            work=work,
+        )
 
         async with trio.open_nursery() as nursery:
-            problem: BasicReductionProblem[bytes] = BasicReductionProblem(
-                is_interesting=state.is_interesting,
-                initial=initial,
-                work=work,
-            )
-
-            reducer: ShrinkRay | None
-
             try:
                 await problem.setup()
             except InvalidInitialExample as e:
-                print(
-                    "Shrink ray cannot proceed because the initial call of the interestingness test resulted in an uninteresting test case.",
-                    file=sys.stderr,
-                )
-                if isinstance(e, TimeoutExceededOnInitial):
-                    print(
-                        f"This is because your initial test case took {e.runtime:.2f}s exceeding your timeout setting of {timeout}.",
-                        file=sys.stderr,
-                    )
-                    print(
-                        f"Try rerunning with --timeout={math.ceil(e.runtime * 2)}.",
-                        file=sys.stderr,
-                    )
-                else:
-                    print(
-                        "Rerunning the initerestingness test for debugging purposes...",
-                        file=sys.stderr,
-                    )
-                    exit_code = await run_for_exit_code(problem.current_test_case)
-                    if exit_code != 0:
-                        print(
-                            f"This exited with code {exit_code}, but the script should return 0 for interesting test cases.",
-                            file=sys.stderr,
-                        )
-                        local_exit_code = await run_script_on_file(
-                            working=filename,
-                            test_case=problem.current_test_case,
-                            debug=False,
-                            cwd=os.getcwd(),
-                        )
-                        if local_exit_code == 0:
-                            print(
-                                "Note that Shrink Ray runs your script on a copy of the file in a temporary directory. "
-                                "Here are the results of running it in the current directory directory...",
-                                file=sys.stderr,
-                            )
-                            other_exit_code = await run_script_on_file(
-                                working=filename,
-                                test_case=problem.current_test_case,
-                                debug=True,
-                                cwd=os.getcwd(),
-                            )
-                            if other_exit_code != local_exit_code:
-                                print(
-                                    f"This interestingness is probably flaky as the first time we reran it locally it exited with {local_exit_code}, "
-                                    f"but the second time it exited with {other_exit_code}. Please make sure your interestingness test is deterministic.",
-                                    file=sys.stderr,
-                                )
-                            else:
-                                print(
-                                    "This suggests that your script depends on being run from the current working directory. Please fix it to be directory independent.",
-                                    file=sys.stderr,
-                                )
-                    else:
-                        assert state.initial_exit_code not in (None, 0)
-                        print(
-                            f"This exited with code 0, but previously the script exited with {state.initial_exit_code}. "
-                            "This suggests your interestingness test exhibits nondeterministic behaviour.",
-                            file=sys.stderr,
-                        )
-                reducer = None
-                sys.exit(1)
+                await state.report_error(e)
 
-            @nursery.start_soon
-            async def _() -> None:
-                while True:
-                    await trio.sleep(0.1)
+            ui = ShrinkRayUI(problem, state)
 
-                    details_text.set_text(problem.stats.display_stats())
-
-                    if reducer is not None:
-                        reducer_status.set_text(f"Reducer status: {reducer.status}")
-
-            @nursery.start_soon
-            async def _() -> None:
-                while True:
-                    await trio.sleep(random.expovariate(10.0))
-                    nonlocal parallel_samples, parallel_total
-                    parallel_samples += 1
-                    parallel_total += state.parallel_tasks_running
-                    stats = problem.stats
-                    if stats.calls > 0:
-                        wasteage = stats.wasted_interesting_calls / stats.calls
-                    else:
-                        wasteage = 0.0
-
-                    average_parallelism = parallel_total / parallel_samples
-
-                    parallelism_status.set_text(
-                        f"Current parallel workers: {state.parallel_tasks_running} (Average {average_parallelism:.2f}) "
-                        f"(effective parallelism: {average_parallelism * (1.0 - wasteage):.2f})"
-                    )
-
-            def to_lines(test_case: bytes) -> list[str]:
-                result = []
-                for line in test_case.split(b"\n"):
-                    try:
-                        result.append(line.decode("utf-8"))
-                    except UnicodeDecodeError:
-                        result.append(line.hex())
-                return result
-
-            def format_diff(diff: Iterable[str]) -> str:
-                results = []
-                start_writing = False
-                for line in diff:
-                    if not start_writing and line.startswith("@@"):
-                        start_writing = True
-                    if start_writing:
-                        results.append(line)
-                        if len(results) > 500:
-                            results.append("...")
-                            break
-                return "\n".join(results)
-
-            can_format = True
-
-            async def attempt_format(data: bytes) -> bytes:
-                nonlocal can_format
-                if not can_format:
-                    return data
-                attempt = await format_data(data)
-                if attempt is None:
-                    can_format = False
-                    return data
-                if attempt == data or await problem.is_interesting(attempt):
-                    return attempt
-                else:
-                    can_format = False
-                    return data
-
-            @nursery.start_soon
-            async def _() -> None:
-                prev_unformatted = problem.current_test_case
-                prev = await attempt_format(prev_unformatted)
-
-                time_of_last_update = time.time()
-                while True:
-                    if problem.current_test_case == prev_unformatted:
-                        await trio.sleep(0.1)
-                        continue
-                    current = await attempt_format(problem.current_test_case)
-                    if current.count(b"\n") <= 50:
-                        diff_to_display.set_text(current)
-                        await trio.sleep(0.1)
-                        continue
-
-                    if prev == current:
-                        await trio.sleep(0.1)
-                        continue
-                    diff = format_diff(unified_diff(to_lines(prev), to_lines(current)))
-                    # When running in parallel sometimes we can produce diffs that have
-                    # a lot of insertions because we undo some work and then immediately
-                    # redo it. this can be quite confusing when it happens in the UI
-                    # (and makes Shrink Ray look bad), so when this happens we pause a
-                    # little bit to try to get a better diff.
-                    if (
-                        diff.count("\n+") > 2 * diff.count("\n-")
-                        and time.time() <= time_of_last_update + 10
-                    ):
-                        await trio.sleep(0.5)
-                        continue
-                    diff_to_display.set_text(diff)
-                    prev = current
-                    prev_unformatted = problem.current_test_case
-                    time_of_last_update = time.time()
-                    if can_format:
-                        await trio.sleep(4)
-                    else:
-                        await trio.sleep(2)
+            reducer = ShrinkRay(target=problem, clang_delta=clang_delta_executable)
+            ui.reducer = reducer
 
             @problem.on_reduce
             async def _(test_case: bytes) -> None:
                 async with await trio.open_file(filename, "wb") as o:
                     await o.write(test_case)
 
-            cd_exec = None
-            if (
-                os.path.splitext(filename)[1] in C_FILE_EXTENSIONS
-                and not no_clang_delta
-            ):
-                nonlocal clang_delta
-                if not clang_delta:
-                    clang_delta = find_clang_delta()
-                if not clang_delta:
-                    raise click.UsageError(
-                        "Attempting to reduce a C or C++ file, but clang_delta is not installed. "
-                        "Please run with --no-clang-delta, or install creduce on your system. "
-                        "If creduce is already installed and you wish to use clang_delta, please "
-                        "pass its path with the --clang-delta argument."
-                    )
-
-                cd_exec = ClangDelta(clang_delta)
-
-            reducer = ShrinkRay(target=problem, clang_delta=cd_exec)
-
             @nursery.start_soon
             async def _() -> None:
                 await reducer.run()
                 nursery.cancel_scope.cancel()
 
-            @nursery.start_soon
-            async def _() -> None:
-                while True:
-                    ui_loop.screen.clear()
-                    await trio.sleep(1)
+            ui.install_into_nursery(nursery)
 
-            with ui_loop.start():
-                await event_loop.run_async()
+            with ui.loop.start():
+                await ui.event_loop.run_async()
 
             nursery.cancel_scope.cancel()
 
-        formatting_increase = 0
-        final_result = problem.current_test_case
-        reformatted = await format_data(final_result)
-        if reformatted != final_result and reformatted is not None:
-            if await state.is_interesting(reformatted):
-                async with await trio.open_file(filename, "wb") as o:
-                    await o.write(reformatted)
-            formatting_increase = max(0, len(reformatted) - len(final_result))
-            final_result = reformatted
-
-        if len(problem.current_test_case) <= 1 and trivial_is_error:
-            print(
-                f"Reduced to a trivial test case of size {len(problem.current_test_case)}"
-            )
-            print(
-                "This probably wasn't what you intended. If so, please modify your interestingness test "
-                "to be more restrictive.\n"
-                "If you intended this behaviour, you can run with '--trivial-is-not-error' to "
-                "suppress this message."
-            )
-            sys.exit(1)
-
-        else:
-            print("Reduction completed!")
-            stats = problem.stats
-            if initial == final_result:
-                print("Test case was already maximally reduced.")
-            elif len(final_result) < len(initial):
-                print(
-                    f"Deleted {humanize.naturalsize(stats.initial_test_case_size - len(final_result))} "
-                    f"out of {humanize.naturalsize(stats.initial_test_case_size)} "
-                    f"({(1.0 - len(final_result) / stats.initial_test_case_size) * 100:.2f}% reduction) "
-                    f"in {humanize.precisedelta(timedelta(seconds=time.time() - stats.start_time))}"
-                )
-            elif len(final_result) == len(initial):
-                print("Some changes were made but no bytes were deleted")
-            else:
-                print(
-                    f"Running reformatting resulted in an increase of {humanize.naturalsize(formatting_increase)}."
-                )
+        await state.print_exit_message(problem)
 
 
 if __name__ == "__main__":  # pragma: no cover

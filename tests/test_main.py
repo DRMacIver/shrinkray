@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import pathlib
 
 import trio
 
@@ -35,3 +36,44 @@ async def test_kill_process():
         await interrupt_wait_and_kill(sp)
         assert sp.returncode is not None
         assert sp.returncode != 0
+
+
+def test_can_reduce_a_directory(tmp_path: pathlib.Path):
+    target = tmp_path / "foo"
+    target.mkdir()
+    a = target / "a.py"
+    a.write_text("x = 1\ny=2\nz=3\n")
+    (target / "b.py").write_text("y = 'hello world'")
+    c = target / "c.py"
+    c.write_text("from a import x\n\n...\nassert x == 2")
+
+    script = tmp_path / "test.py"
+    script.write_text(
+        """
+#!/usr/bin/env python
+import sys
+sys.path.append('.')
+
+try:
+    import c
+    sys.exit(1)
+except AssertionError:
+    sys.exit(0)
+    """.strip()
+    )
+    script.chmod(0x777)
+
+    subprocess.check_call(
+        [
+            sys.executable,
+            "-m",
+            "shrinkray",
+            str(script),
+            str(target),
+        ]
+    )
+
+    assert sorted(target.glob("*")) == ["a.py", "c.py"]
+
+    assert a.read_text().strip() == "x = 1"
+    assert c.read_text().strip() == "from a import x\nassert x == 2"

@@ -20,8 +20,9 @@ import humanize
 import trio
 import urwid
 import urwid.raw_display
+from attrs import define
 
-from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
+from shrinkray.passes.clangdelta import C_FILE_EXTENSIONS, ClangDelta, find_clang_delta
 from shrinkray.problem import BasicReductionProblem, InvalidInitialExample
 from shrinkray.reducer import ShrinkRay
 from shrinkray.work import Volume, WorkContext
@@ -207,6 +208,114 @@ def default_reformat_data(data: bytes) -> bytes:
     return output.encode(encoding)
 
 
+TestCase = TypeVar("TestCase")
+
+
+@define(slots=False)
+class ShrinkRayState:
+    input_type: InputType
+    test: list[str]
+    timeout: float
+    base: str
+    parallelism: int
+
+    first_call: bool = True
+    initial_exit_code: int | None = None
+    parallel_tasks_running: int = 0
+
+    def __attrs_post_init__(self):
+        self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
+
+    async def run_script_on_file(
+        self, working: str, cwd: str, test_case: bytes, debug: bool = False
+    ) -> int:
+        if self.input_type.enabled(InputType.arg):
+            command = self.test + [working]
+        else:
+            command = self.test
+
+        kwargs: dict[str, Any] = dict(
+            universal_newlines=False,
+            preexec_fn=os.setsid,
+            cwd=cwd,
+            check=False,
+        )
+        if self.input_type.enabled(InputType.stdin):
+            kwargs["stdin"] = test_case
+        else:
+            kwargs["stdin"] = b""
+
+        if not debug:
+            kwargs["stdout"] = subprocess.DEVNULL
+            kwargs["stderr"] = subprocess.DEVNULL
+
+        async with trio.open_nursery() as nursery:
+
+            def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
+                return trio.run_process(command, **kwargs, task_status=task_status)
+
+            start_time = time.time()
+            sp = await nursery.start(call_with_kwargs)
+
+            try:
+                with trio.move_on_after(
+                    self.timeout * 10 if self.first_call else self.timeout
+                ):
+                    await sp.wait()
+
+                runtime = time.time() - start_time
+
+                if sp.returncode is None:
+                    await interrupt_wait_and_kill(sp)
+
+                if runtime >= self.timeout and self.first_call:
+                    raise TimeoutExceededOnInitial(
+                        timeout=self.timeout,
+                        runtime=runtime,
+                    )
+            finally:
+                if self.first_call:
+                    self.initial_exit_code = sp.returncode
+                self.first_call = False
+
+            result: int | None = sp.returncode
+            assert result is not None
+            return result
+
+    async def run_for_exit_code(self, test_case: bytes, debug: bool = False) -> int:
+        with TemporaryDirectory() as d:
+            working = os.path.join(d, self.base)
+            async with await trio.open_file(working, "wb") as o:
+                await o.write(test_case)
+
+            return await self.run_script_on_file(
+                working=working,
+                test_case=test_case,
+                debug=debug,
+                cwd=d,
+            )
+
+    async def is_interesting(self, test_case: bytes) -> bool:
+        async with self.is_interesting_limiter:
+            try:
+                self.parallel_tasks_running += 1
+                return await self.run_for_exit_code(test_case) == 0
+            finally:
+                self.parallel_tasks_running -= 1
+
+
+def determine_formatter_command(formatter: str, filename: str) -> list[str] | None:
+    if formatter.lower() == "default":
+        formatter_command = default_formatter_command_for(filename)
+    elif formatter.lower() != "none":
+        formatter_command = formatter
+    else:
+        formatter_command = None
+    if isinstance(formatter_command, str):
+        formatter_command = [formatter_command]
+    return formatter_command
+
+
 @click.command(
     help="""
 """.strip()
@@ -307,7 +416,7 @@ This behaviour can be disabled by passing --trivial-is-not-error.
 @click.argument("test", callback=validate_command)
 @click.argument(
     "filename",
-    type=click.Path(exists=True, resolve_path=True, dir_okay=False, allow_dash=False),
+    type=click.Path(exists=True, resolve_path=True, dir_okay=True, allow_dash=False),
 )
 def main(
     input_type: InputType,
@@ -349,77 +458,13 @@ def main(
     except FileNotFoundError:
         pass
 
-    base = os.path.basename(filename)
-    first_call = True
-    initial_exit_code = None
-
-    async def run_script_on_file(
-        working: str, cwd: str, test_case: bytes, debug: bool = False
-    ) -> int:
-        nonlocal first_call, initial_exit_code
-        if input_type.enabled(InputType.arg):
-            command = test + [working]
-        else:
-            command = test
-
-        kwargs: dict[str, Any] = dict(
-            universal_newlines=False,
-            preexec_fn=os.setsid,
-            cwd=cwd,
-            check=False,
-        )
-        if input_type.enabled(InputType.stdin):
-            kwargs["stdin"] = test_case
-        else:
-            kwargs["stdin"] = b""
-
-        if not debug:
-            kwargs["stdout"] = subprocess.DEVNULL
-            kwargs["stderr"] = subprocess.DEVNULL
-
-        async with trio.open_nursery() as nursery:
-
-            def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
-                return trio.run_process(command, **kwargs, task_status=task_status)
-
-            start_time = time.time()
-            sp = await nursery.start(call_with_kwargs)
-
-            try:
-                with trio.move_on_after(timeout * 10 if first_call else timeout):
-                    await sp.wait()
-
-                runtime = time.time() - start_time
-
-                if sp.returncode is None:
-                    await interrupt_wait_and_kill(sp)
-
-                if runtime >= timeout and first_call:
-                    raise TimeoutExceededOnInitial(
-                        timeout=timeout,
-                        runtime=runtime,
-                    )
-            finally:
-                if first_call:
-                    initial_exit_code = sp.returncode
-                first_call = False
-
-            result: int | None = sp.returncode
-            assert result is not None
-            return result
-
-    async def run_for_exit_code(test_case: bytes, debug: bool = False) -> int:
-        with TemporaryDirectory() as d:
-            working = os.path.join(d, base)
-            async with await trio.open_file(working, "wb") as o:
-                await o.write(test_case)
-
-            return await run_script_on_file(
-                working=working,
-                test_case=test_case,
-                debug=debug,
-                cwd=d,
-            )
+    state = ShrinkRayState(
+        input_type=input_type,
+        test=test,
+        timeout=timeout,
+        base=os.path.basename(filename),
+        parallelism=parallelism,
+    )
 
     with open(filename, "rb") as reader:
         initial = reader.read()
@@ -476,27 +521,6 @@ def main(
         event_loop=event_loop,
     )
 
-    if formatter.lower() == "default":
-        formatter_command = default_formatter_command_for(filename)
-    elif formatter.lower() != "none":
-        formatter_command = formatter
-    else:
-        formatter_command = None
-    if isinstance(formatter_command, str):
-        formatter_command = [formatter_command]
-
-    is_interesting_limiter = trio.CapacityLimiter(max(parallelism, 1))
-    parallel_tasks_running = 0
-
-    async def is_interesting(test_case: bytes) -> bool:
-        nonlocal parallel_tasks_running
-        async with is_interesting_limiter:
-            try:
-                parallel_tasks_running += 1
-                return await run_for_exit_code(test_case) == 0
-            finally:
-                parallel_tasks_running -= 1
-
     @trio.run
     async def _() -> None:
         nonlocal initial
@@ -506,6 +530,8 @@ def main(
             volume=volume,
             parallelism=parallelism,
         )
+
+        formatter_command = determine_formatter_command(formatter, filename)
 
         if formatter_command is not None:
             formatter_result = await run_formatter_command(formatter_command, initial)
@@ -520,7 +546,9 @@ def main(
                 )
                 sys.exit(1)
             reformatted = formatter_result.stdout
-            if not await is_interesting(reformatted) and await is_interesting(initial):
+            if not await state.is_interesting(
+                reformatted
+            ) and await state.is_interesting(initial):
                 print(
                     "Formatting initial test case made it uninteresting. If this is expected, please run with --formatter=none.",
                     file=sys.stderr,
@@ -552,18 +580,8 @@ def main(
                 return default_reformat_data(test_case)
 
         async with trio.open_nursery() as nursery:
-            send_test_cases: trio.MemorySendChannel[
-                tuple[bytes, trio.MemorySendChannel[bool]]
-            ]
-            receive_test_cases: trio.MemoryReceiveChannel[
-                tuple[bytes, trio.MemorySendChannel[bool]]
-            ]
-            send_test_cases, receive_test_cases = trio.open_memory_channel(
-                max(100, 10 * max(parallelism, 1))
-            )
-
             problem: BasicReductionProblem[bytes] = BasicReductionProblem(
-                is_interesting=is_interesting,
+                is_interesting=state.is_interesting,
                 initial=initial,
                 work=work,
             )
@@ -627,9 +645,9 @@ def main(
                                     file=sys.stderr,
                                 )
                     else:
-                        assert initial_exit_code not in (None, 0)
+                        assert state.initial_exit_code not in (None, 0)
                         print(
-                            f"This exited with code 0, but previously the script exited with {initial_exit_code}. "
+                            f"This exited with code 0, but previously the script exited with {state.initial_exit_code}. "
                             "This suggests your interestingness test exhibits nondeterministic behaviour.",
                             file=sys.stderr,
                         )
@@ -652,7 +670,7 @@ def main(
                     await trio.sleep(random.expovariate(10.0))
                     nonlocal parallel_samples, parallel_total
                     parallel_samples += 1
-                    parallel_total += parallel_tasks_running
+                    parallel_total += state.parallel_tasks_running
                     stats = problem.stats
                     if stats.calls > 0:
                         wasteage = stats.wasted_interesting_calls / stats.calls
@@ -662,7 +680,7 @@ def main(
                     average_parallelism = parallel_total / parallel_samples
 
                     parallelism_status.set_text(
-                        f"Current parallel workers: {parallel_tasks_running} (Average {average_parallelism:.2f}) "
+                        f"Current parallel workers: {state.parallel_tasks_running} (Average {average_parallelism:.2f}) "
                         f"(effective parallelism: {average_parallelism * (1.0 - wasteage):.2f})"
                     )
 
@@ -751,8 +769,7 @@ def main(
 
             cd_exec = None
             if (
-                os.path.splitext(filename)[1]
-                in (".c", ".cpp", ".h", ".hpp", ".cxx", ".cc")
+                os.path.splitext(filename)[1] in C_FILE_EXTENSIONS
                 and not no_clang_delta
             ):
                 nonlocal clang_delta
@@ -790,7 +807,7 @@ def main(
         final_result = problem.current_test_case
         reformatted = await format_data(final_result)
         if reformatted != final_result and reformatted is not None:
-            if await is_interesting(reformatted):
+            if await state.is_interesting(reformatted):
                 async with await trio.open_file(filename, "wb") as o:
                     await o.write(reformatted)
             formatting_increase = max(0, len(reformatted) - len(final_result))

@@ -387,6 +387,7 @@ class KeyProblem(ReductionProblem[bytes]):
         return repr(value)
 
 
+@define
 class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     clang_delta: Optional[ClangDelta] = None
 

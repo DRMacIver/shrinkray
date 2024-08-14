@@ -2,6 +2,7 @@ import math
 import os
 import random
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -28,8 +29,9 @@ from shrinkray.problem import (
     BasicReductionProblem,
     InvalidInitialExample,
     ReductionProblem,
+    shortlex,
 )
-from shrinkray.reducer import Reducer, ShrinkRay
+from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
 
 
@@ -217,6 +219,7 @@ class ShrinkRayState(Generic[TestCase], ABC):
     trivial_is_error: bool
     seed: int
     volume: Volume
+    clang_delta_executable: ClangDelta | None
 
     first_call: bool = True
     initial_exit_code: int | None = None
@@ -224,12 +227,104 @@ class ShrinkRayState(Generic[TestCase], ABC):
     can_format: bool = True
     formatter_command: list[str] | None = None
 
+    first_call_time: float | None = None
+
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
         self.setup_formatter()
 
     @abstractmethod
     def setup_formatter(self): ...
+
+    @abstractmethod
+    def new_reducer(self, problem: ReductionProblem[TestCase]) -> Reducer[TestCase]: ...
+
+    @abstractmethod
+    async def write_test_case_to_file_impl(self, working: str, test_case: TestCase): ...
+
+    async def write_test_case_to_file(self, working: str, test_case: TestCase):
+        await self.write_test_case_to_file_impl(working, test_case)
+
+    async def run_script_on_file(
+        self, working: str, cwd: str, debug: bool = False
+    ) -> int:
+        if not os.path.exists(working):
+            raise ValueError(f"No such file {working}")
+        if self.input_type.enabled(InputType.arg):
+            command = self.test + [working]
+        else:
+            command = self.test
+
+        kwargs: dict[str, Any] = dict(
+            universal_newlines=False,
+            preexec_fn=os.setsid,
+            cwd=cwd,
+            check=False,
+        )
+        if self.input_type.enabled(InputType.stdin) and not os.path.isdir(working):
+            with open(working, "rb") as i:
+                kwargs["stdin"] = i.read()
+        else:
+            kwargs["stdin"] = b""
+
+        if not debug:
+            kwargs["stdout"] = subprocess.DEVNULL
+            kwargs["stderr"] = subprocess.DEVNULL
+
+        async with trio.open_nursery() as nursery:
+
+            def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
+                return trio.run_process(command, **kwargs, task_status=task_status)
+
+            start_time = time.time()
+            sp = await nursery.start(call_with_kwargs)
+
+            try:
+                with trio.move_on_after(
+                    self.timeout * 10 if self.first_call else self.timeout
+                ):
+                    await sp.wait()
+
+                runtime = time.time() - start_time
+
+                if sp.returncode is None:
+                    await interrupt_wait_and_kill(sp)
+
+                if runtime >= self.timeout and self.first_call:
+                    raise TimeoutExceededOnInitial(
+                        timeout=self.timeout,
+                        runtime=runtime,
+                    )
+            finally:
+                if self.first_call:
+                    self.initial_exit_code = sp.returncode
+                self.first_call = False
+
+            result: int | None = sp.returncode
+            assert result is not None
+            return result
+
+    async def run_for_exit_code(self, test_case: TestCase, debug: bool = False) -> int:
+        with TemporaryDirectory() as d:
+            working = os.path.join(d, self.base)
+            await self.write_test_case_to_file(working, test_case)
+
+            return await self.run_script_on_file(
+                working=working,
+                debug=debug,
+                cwd=d,
+            )
+
+    @abstractmethod
+    async def format_data(self, test_case: TestCase) -> TestCase | None: ...
+
+    @abstractmethod
+    async def run_formatter_command(
+        self, command: str | list[str], input: TestCase
+    ) -> subprocess.CompletedProcess: ...
+
+    @abstractmethod
+    async def print_exit_message(self, problem): ...
 
     @property
     def reducer(self):
@@ -248,32 +343,33 @@ class ShrinkRayState(Generic[TestCase], ABC):
             is_interesting=self.is_interesting,
             initial=self.initial,
             work=work,
+            **self.extra_problem_kwargs,
         )
+
+        # Writing the file back can't be guaranteed atomic, so we put a lock around
+        # writing successful reductions back to the original file so we don't
+        # write some confused combination of reductions.
+        write_lock = trio.Lock()
+
+        @problem.on_reduce
+        async def _(test_case: TestCase):
+            async with write_lock:
+                await self.write_test_case_to_file(self.filename, test_case)
 
         self.__reducer = self.new_reducer(problem)
         return self.__reducer
 
     @property
+    def extra_problem_kwargs(self):
+        return {}
+
+    @property
     def problem(self):
         return self.reducer.target
 
-    @abstractmethod
-    def new_reducer(self, problem: ReductionProblem[TestCase]) -> Reducer[TestCase]: ...
-
-    @abstractmethod
-    async def run_script_on_file(
-        self, working: str, cwd: str, test_case: TestCase, debug: bool = False
-    ) -> int: ...
-
-    @abstractmethod
-    async def run_for_exit_code(
-        self, test_case: TestCase, debug: bool = False
-    ) -> int: ...
-
-    @abstractmethod
-    async def format_data(self, test_case: TestCase) -> TestCase | None: ...
-
     async def is_interesting(self, test_case: TestCase) -> bool:
+        if self.first_call_time is None:
+            self.first_call_time = time.time()
         async with self.is_interesting_limiter:
             try:
                 self.parallel_tasks_running += 1
@@ -293,18 +389,6 @@ class ShrinkRayState(Generic[TestCase], ABC):
         else:
             self.can_format = False
             return data
-
-    @abstractmethod
-    async def run_formatter_command(
-        self, command: str | list[str], input: TestCase
-    ) -> subprocess.CompletedProcess:
-        return await trio.run_process(
-            command,
-            stdin=input,
-            capture_stdout=True,
-            capture_stderr=True,
-            check=False,
-        )
 
     async def check_formatter(self):
         if self.formatter_command is None:
@@ -364,7 +448,6 @@ class ShrinkRayState(Generic[TestCase], ABC):
                 )
                 local_exit_code = await self.run_script_on_file(
                     working=self.filename,
-                    test_case=self.initial,
                     debug=False,
                     cwd=os.getcwd(),
                 )
@@ -400,14 +483,11 @@ class ShrinkRayState(Generic[TestCase], ABC):
                 )
         sys.exit(1)
 
-    @abstractmethod
-    async def print_exit_message(self, problem): ...
-
 
 @define(slots=False)
 class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
     def new_reducer(self, problem: ReductionProblem[bytes]) -> Reducer[bytes]:
-        return ShrinkRay(problem)
+        return ShrinkRay(problem, clang_delta=self.clang_delta_executable)
 
     def setup_formatter(self):
         if self.formatter.lower() == "none":
@@ -442,7 +522,7 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
         self.__format_data = format_data
 
     async def format_data(self, test_case: bytes) -> bytes | None:
-        return await self.__format_data(format_data)
+        return await self.__format_data(test_case)
 
     async def run_formatter_command(
         self, command: str | list[str], input: bytes
@@ -455,74 +535,9 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
             check=False,
         )
 
-    async def run_script_on_file(
-        self, working: str, cwd: str, test_case: bytes, debug: bool = False
-    ) -> int:
-        if self.input_type.enabled(InputType.arg):
-            command = self.test + [working]
-        else:
-            command = self.test
-
-        kwargs: dict[str, Any] = dict(
-            universal_newlines=False,
-            preexec_fn=os.setsid,
-            cwd=cwd,
-            check=False,
-        )
-        if self.input_type.enabled(InputType.stdin):
-            kwargs["stdin"] = test_case
-        else:
-            kwargs["stdin"] = b""
-
-        if not debug:
-            kwargs["stdout"] = subprocess.DEVNULL
-            kwargs["stderr"] = subprocess.DEVNULL
-
-        async with trio.open_nursery() as nursery:
-
-            def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
-                return trio.run_process(command, **kwargs, task_status=task_status)
-
-            start_time = time.time()
-            sp = await nursery.start(call_with_kwargs)
-
-            try:
-                with trio.move_on_after(
-                    self.timeout * 10 if self.first_call else self.timeout
-                ):
-                    await sp.wait()
-
-                runtime = time.time() - start_time
-
-                if sp.returncode is None:
-                    await interrupt_wait_and_kill(sp)
-
-                if runtime >= self.timeout and self.first_call:
-                    raise TimeoutExceededOnInitial(
-                        timeout=self.timeout,
-                        runtime=runtime,
-                    )
-            finally:
-                if self.first_call:
-                    self.initial_exit_code = sp.returncode
-                self.first_call = False
-
-            result: int | None = sp.returncode
-            assert result is not None
-            return result
-
-    async def run_for_exit_code(self, test_case: bytes, debug: bool = False) -> int:
-        with TemporaryDirectory() as d:
-            working = os.path.join(d, self.base)
-            async with await trio.open_file(working, "wb") as o:
-                await o.write(test_case)
-
-            return await self.run_script_on_file(
-                working=working,
-                test_case=test_case,
-                debug=debug,
-                cwd=d,
-            )
+    async def write_test_case_to_file_impl(self, working: str, test_case: bytes):
+        async with await trio.open_file(working, "wb") as o:
+            await o.write(test_case)
 
     async def is_interesting(self, test_case: bytes) -> bool:
         async with self.is_interesting_limiter:
@@ -597,6 +612,57 @@ def format_diff(diff: Iterable[str]) -> str:
                 results.append("...")
                 break
     return "\n".join(results)
+
+
+class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
+    def setup_formatter(self): ...
+
+    @property
+    def extra_problem_kwargs(self):
+        def dict_size(test_case: dict[str, bytes]) -> int:
+            return sum(len(v) for v in test_case.values())
+
+        def dict_sort_key(test_case: dict[str, bytes]) -> Any:
+            return (
+                len(test_case),
+                dict_size(test_case),
+                sorted((k, shortlex(v)) for k, v in test_case.items()),
+            )
+
+        return dict(
+            sort_key=dict_sort_key,
+            size=dict_size,
+        )
+
+    def new_reducer(
+        self, problem: ReductionProblem[dict[str, bytes]]
+    ) -> Reducer[dict[str, bytes]]:
+        return DirectoryShrinkRay(
+            target=problem, clang_delta=self.clang_delta_executable
+        )
+
+    async def write_test_case_to_file_impl(
+        self, working: str, test_case: dict[str, bytes]
+    ):
+        shutil.rmtree(working, ignore_errors=True)
+        os.makedirs(working, exist_ok=True)
+        for k, v in test_case.items():
+            f = os.path.join(working, k)
+            os.makedirs(os.path.dirname(f), exist_ok=True)
+            async with await trio.open_file(f, "wb") as o:
+                await o.write(v)
+
+    async def format_data(self, test_case: dict[str, bytes]) -> dict[str, bytes] | None:
+        # TODO: Implement
+        return None
+
+    async def run_formatter_command(
+        self, command: str | list[str], input: TestCase
+    ) -> subprocess.CompletedProcess:
+        raise AssertionError
+
+    async def print_exit_message(self, problem):
+        print("All done!")
 
 
 @define
@@ -690,11 +756,58 @@ class ShrinkRayUI(Generic[TestCase], ABC):
         ]
 
         header = urwid.AttrMap(urwid.Text(text_header, align="center"), "header")
-        listbox = urwid.ListBox(urwid.SimpleListWalker(listbox_content))
+        listbox = urwid.ListBox(urwid.SimpleFocusListWalker(listbox_content))
         return urwid.Frame(urwid.AttrMap(listbox, "body"), header=header)
 
-    @abstractmethod
-    def create_main_ui_elements(self) -> list[Any]: ...
+    def create_main_ui_elements(self) -> list[Any]:
+        return []
+
+
+class ShrinkRayUIDirectory(ShrinkRayUI[dict[str, bytes]]):
+    def create_main_ui_elements(self) -> list[Any]:
+        self.col1 = urwid.Text("")
+        self.col2 = urwid.Text("")
+        self.col3 = urwid.Text("")
+
+        columns = urwid.Columns(
+            [
+                ("weight", 1, self.col1),
+                ("weight", 1, self.col2),
+                ("weight", 1, self.col3),
+            ]
+        )
+
+        return [columns]
+
+    async def update_file_list(self):
+        while True:
+            if self.state.first_call_time is None:
+                await trio.sleep(0.05)
+                continue
+            data = sorted(self.problem.current_test_case.items())
+
+            runtime = time.time() - self.state.first_call_time
+
+            col1_bits = []
+            col2_bits = []
+            col3_bits = []
+
+            for k, v in data:
+                col1_bits.append(k)
+                col2_bits.append(humanize.naturalsize(len(v)))
+                reduction_percentage = (1.0 - len(v) / len(self.state.initial[k])) * 100
+                reduction_rate = (len(self.state.initial[k]) - len(v)) / runtime
+                reduction_msg = f"{reduction_percentage:.2f}% reduction, {humanize.naturalsize(reduction_rate)} / second"
+                col3_bits.append(reduction_msg)
+
+            self.col1.set_text("\n".join(col1_bits))
+            self.col2.set_text("\n".join(col2_bits))
+            self.col3.set_text("\n".join(col3_bits))
+            await trio.sleep(0.5)
+
+    def install_into_nursery(self, nursery: trio.Nursery):
+        super().install_into_nursery(nursery)
+        nursery.start_soon(self.update_file_list)
 
 
 class ShrinkRayUISingleFile(ShrinkRayUI[bytes]):
@@ -703,9 +816,6 @@ class ShrinkRayUISingleFile(ShrinkRayUI[bytes]):
         return [self.diff_to_display]
 
     async def update_diffs(self):
-        while self.problem is None:
-            await trio.sleep(0.1)
-
         initial = self.problem.current_test_case
         try:
             text = initial.decode("utf-8")
@@ -771,9 +881,6 @@ def determine_formatter_command(formatter: str, filename: str) -> list[str] | No
 async def run_shrink_ray(
     state: ShrinkRayState[TestCase],
     ui: ShrinkRayUI[TestCase],
-    volume: Volume,
-    seed: int | None,
-    clang_delta_executable: ClangDelta | None,
 ):
     async with trio.open_nursery() as nursery:
         problem = state.problem
@@ -950,18 +1057,7 @@ def main(
     if not backup:
         backup = filename + os.extsep + "bak"
 
-    try:
-        os.remove(backup)
-    except FileNotFoundError:
-        pass
-
-    with open(filename, "rb") as reader:
-        initial = reader.read()
-
-    with open(backup, "wb") as writer:
-        writer.write(initial)
-
-    state = ShrinkRayStateSingleFile(
+    state_kwargs: dict[str, Any] = dict(
         input_type=input_type,
         test=test,
         timeout=timeout,
@@ -969,25 +1065,62 @@ def main(
         parallelism=parallelism,
         filename=filename,
         formatter=formatter,
-        initial=initial,
         trivial_is_error=trivial_is_error,
         seed=seed,
         volume=volume,
+        clang_delta_executable=clang_delta_executable,
     )
 
-    trio.run(state.check_formatter)
+    if os.path.isdir(filename):
+        if input_type == InputType.stdin:
+            raise click.UsageError("Cannot pass a directory input on stdin.")
 
-    ui = ShrinkRayUISingleFile(state)
+        shutil.rmtree(backup, ignore_errors=True)
+        shutil.copytree(filename, backup)
 
-    trio.run(
-        lambda: run_shrink_ray(
-            state=state,
-            volume=volume,
-            seed=seed,
-            ui=ui,
-            clang_delta_executable=clang_delta_executable,
+        files = [os.path.join(d, f) for d, _, fs in os.walk(filename) for f in fs]
+
+        initial = {}
+        for f in files:
+            with open(f, "rb") as i:
+                initial[os.path.relpath(f, filename)] = i.read()
+
+        state = ShrinkRayDirectoryState(initial=initial, **state_kwargs)
+
+        trio.run(state.check_formatter)
+
+        ui = ShrinkRayUIDirectory(state)
+
+        trio.run(
+            lambda: run_shrink_ray(
+                state=state,
+                ui=ui,
+            )
         )
-    )
+    else:
+        try:
+            os.remove(backup)
+        except FileNotFoundError:
+            pass
+
+        with open(filename, "rb") as reader:
+            initial = reader.read()
+
+        with open(backup, "wb") as writer:
+            writer.write(initial)
+
+        state = ShrinkRayStateSingleFile(initial=initial, **state_kwargs)
+
+        trio.run(state.check_formatter)
+
+        ui = ShrinkRayUISingleFile(state)
+
+        trio.run(
+            lambda: run_shrink_ray(
+                state=state,
+                ui=ui,
+            )
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

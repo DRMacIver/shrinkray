@@ -11,7 +11,7 @@ import traceback
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from difflib import unified_diff
-from enum import Enum, IntEnum
+from enum import Enum, IntEnum, auto
 from shutil import which
 from tempfile import TemporaryDirectory
 from typing import Any, Generic, Iterable, TypeVar
@@ -110,6 +110,11 @@ class InputType(IntEnum):
         if self == InputType.all:
             return True
         return self == value
+
+
+class UIType(Enum):
+    urwid = auto()
+    basic = auto()
 
 
 def try_decode(data: bytes) -> tuple[str | None, str]:
@@ -669,6 +674,41 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
 class ShrinkRayUI(Generic[TestCase], ABC):
     state: ShrinkRayState[TestCase]
 
+    @property
+    def reducer(self):
+        return self.state.reducer
+
+    @property
+    def problem(self) -> BasicReductionProblem:
+        return self.reducer.target  # type: ignore
+
+    def install_into_nursery(self, nursery: trio.Nursery): ...
+
+    async def run(self, nursery: trio.Nursery): ...
+
+
+class BasicUI(ShrinkRayUI[TestCase]):
+    async def run(self, nursery: trio.Nursery):
+        prev_reduction = 0
+        while True:
+            initial = self.state.initial
+            current = self.state.problem.current_test_case
+            size = self.state.problem.size
+            reduction = size(initial) - size(current)
+            if reduction > prev_reduction:
+                print(
+                    f"Reduced test case to {humanize.naturalsize(size(current))} "
+                    f"(deleted {humanize.naturalsize(reduction)}, "
+                    f"{humanize.naturalsize(reduction - prev_reduction)} since last time)"
+                )
+                prev_reduction = reduction
+                await trio.sleep(5)
+            else:
+                await trio.sleep(0.1)
+
+
+@define
+class UrwidUI(ShrinkRayUI[TestCase]):
     parallel_samples: int = 0
     parallel_total: int = 0
 
@@ -691,14 +731,6 @@ class ShrinkRayUI(Generic[TestCase], ABC):
             unhandled_input=unhandled,
             event_loop=self.event_loop,
         )
-
-    @property
-    def reducer(self):
-        return self.state.reducer
-
-    @property
-    def problem(self) -> BasicReductionProblem:
-        return self.reducer.target  # type: ignore
 
     async def regularly_clear_screen(self):
         while True:
@@ -737,6 +769,11 @@ class ShrinkRayUI(Generic[TestCase], ABC):
         nursery.start_soon(self.update_parallelism_stats)
         nursery.start_soon(self.update_reducer_stats)
 
+    async def run(self, nursery: trio.Nursery):
+        with self.loop.start():
+            await self.event_loop.run_async()
+        nursery.cancel_scope.cancel()
+
     def create_frame(self) -> urwid.Frame:
         text_header = "Shrink Ray. Press q to exit."
         self.parallelism_status = urwid.Text("")
@@ -763,7 +800,7 @@ class ShrinkRayUI(Generic[TestCase], ABC):
         return []
 
 
-class ShrinkRayUIDirectory(ShrinkRayUI[dict[str, bytes]]):
+class ShrinkRayUIDirectory(UrwidUI[dict[str, bytes]]):
     def create_main_ui_elements(self) -> list[Any]:
         self.col1 = urwid.Text("")
         self.col2 = urwid.Text("")
@@ -810,7 +847,7 @@ class ShrinkRayUIDirectory(ShrinkRayUI[dict[str, bytes]]):
         nursery.start_soon(self.update_file_list)
 
 
-class ShrinkRayUISingleFile(ShrinkRayUI[bytes]):
+class ShrinkRayUISingleFile(UrwidUI[bytes]):
     def create_main_ui_elements(self) -> list[Any]:
         self.diff_to_display = urwid.Text("")
         return [self.diff_to_display]
@@ -898,10 +935,7 @@ async def run_shrink_ray(
 
         ui.install_into_nursery(nursery)
 
-        with ui.loop.start():
-            await ui.event_loop.run_async()
-
-        nursery.cancel_scope.cancel()
+        await ui.run(nursery)
 
     await state.print_exit_message(problem)
 
@@ -964,6 +998,16 @@ How to pass input to the test function. Options are:
     """.strip(),
 )
 @click.option(
+    "--ui",
+    "ui_type",
+    default="urwid",
+    type=EnumChoice(UIType),
+    help="""
+By default shrinkray runs with a terminal UI based on urwid. If you want a more basic UI
+(e.g. for running in a script), you can specify --ui=basic instead.
+    """.strip(),
+)
+@click.option(
     "--formatter",
     default="default",
     help="""
@@ -1021,6 +1065,7 @@ def main(
     no_clang_delta: bool,
     clang_delta: str,
     trivial_is_error: bool,
+    ui_type: UIType,
 ) -> None:
     if timeout <= 0:
         timeout = float("inf")
@@ -1071,6 +1116,9 @@ def main(
         clang_delta_executable=clang_delta_executable,
     )
 
+    state: ShrinkRayState[Any]
+    ui: ShrinkRayUI[Any]
+
     if os.path.isdir(filename):
         if input_type == InputType.stdin:
             raise click.UsageError("Cannot pass a directory input on stdin.")
@@ -1091,12 +1139,6 @@ def main(
 
         ui = ShrinkRayUIDirectory(state)
 
-        trio.run(
-            lambda: run_shrink_ray(
-                state=state,
-                ui=ui,
-            )
-        )
     else:
         try:
             os.remove(backup)
@@ -1115,12 +1157,15 @@ def main(
 
         ui = ShrinkRayUISingleFile(state)
 
-        trio.run(
-            lambda: run_shrink_ray(
-                state=state,
-                ui=ui,
-            )
+    if ui_type == UIType.basic:
+        ui = BasicUI(state)
+
+    trio.run(
+        lambda: run_shrink_ray(
+            state=state,
+            ui=ui,
         )
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

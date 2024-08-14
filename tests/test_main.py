@@ -4,8 +4,12 @@ import sys
 import pathlib
 
 import trio
-
+import black
 from shrinkray.__main__ import interrupt_wait_and_kill
+
+
+def format(s):
+    return black.format_str(s, mode=black.Mode()).strip()
 
 
 async def test_kill_process():
@@ -43,7 +47,8 @@ def test_can_reduce_a_directory(tmp_path: pathlib.Path):
     target.mkdir()
     a = target / "a.py"
     a.write_text("x = 1\ny=2\nz=3\n")
-    (target / "b.py").write_text("y = 'hello world'")
+    b = target / "b.py"
+    b.write_text("y = 'hello world'")
     c = target / "c.py"
     c.write_text("from a import x\n\n...\nassert x == 2")
 
@@ -52,7 +57,7 @@ def test_can_reduce_a_directory(tmp_path: pathlib.Path):
         """
 #!/usr/bin/env python
 import sys
-sys.path.append('.')
+sys.path.append(sys.argv[1])
 
 try:
     import c
@@ -65,15 +70,20 @@ except AssertionError:
 
     subprocess.check_call(
         [
-            sys.executable,
-            "-m",
-            "shrinkray",
             str(script),
             str(target),
         ]
     )
 
-    assert sorted(target.glob("*")) == ["a.py", "c.py"]
+    subprocess.check_call(
+        [sys.executable, "-m", "shrinkray", str(script), str(target), "--ui=basic"],
+    )
 
-    assert a.read_text().strip() == "x = 1"
-    assert c.read_text().strip() == "from a import x\nassert x == 2"
+    assert a.exists()
+    assert not b.exists()
+    assert c.exists()
+
+    # TODO: Remove calls to format when formatting is implemented properly for
+    # directories.
+    assert format(a.read_text()) == "x = 0"
+    assert format(c.read_text()) == "from a import x\n\nassert x"

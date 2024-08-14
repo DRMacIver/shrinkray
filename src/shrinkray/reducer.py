@@ -61,6 +61,10 @@ class Reducer(Generic[T], ABC):
     @abstractmethod
     async def run(self) -> None: ...
 
+    @property
+    def status(self) -> str:
+        return ""
+
 
 @define
 class BasicReducer(Reducer[T]):

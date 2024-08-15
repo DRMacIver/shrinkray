@@ -41,33 +41,24 @@ algorithm:
 
 1. If the edit is redundant or conflicts[^4] with edits already successfully applied, skip it.
 2. Check if applying this edit on top of the already applied edits would lead to an interesting test case.
-      a. If it would not, then skip this edit.
-      b. If it *would* then check whether any other edits have been applied while we were checking. If they
-         have not, then add this edit to the list of successfully applied edits. Otherwise, try this edit again,
-         after sleeping briefly to give the other task that's working some time to proceed.
+      a. If it would not, then skip this edit and return False.
+      b. If it *would* then add it to the merge queue.
+      c. If nobody else is processing the merge queue, switch into merging mode. Otherwise wait until
+         this patch has either been merged or discarded and return true if it was merged.
 
-This approach means that you don't have to stop when you find an interesting variant - you just apply the edit
-and keep going. In the cases where successful variants are *very* common this will still not be fully parallel,
-because it needs to do retries that can result in wasted work, but this only occurs when two successful edits
-race with each other, rather than every successful edit immediately halting everything else. In the case where
-the probability of a successful edit is significantly under 1 / number of parallel threads, this should scale
-linearly with the amount of parallelism.
+Merging mode consists of:
 
-Strictly it doesn't need to do those retries, but it seems to be helpful. The idea of the retry is that edits
-that result in interesting test cases are likely (though not certain) to be independent,
-and are worth the effort of finding out if they are, so when there's evidence that a patch is likely to be good,
-we try it again in the hopes that it still is. The algorithm's correctness doesn't rely on this assumption - it
-would still provide the same guarantees (when run repeatedly to a fixed point) without it, but when the heuristic
-holds it is likely to be signfiicantly faster. When it doesn't, in theory it can produce arbitrary slowdowns in
-the case where the reducer produces many successful edits many of which block other edits, but this seems like a
-relatively unusual case.
+1. Looking at the current sequence of patches in the queue.
+2. Using an adaptive merge strategy to apply as many of them as possible.
+3. Update the current patch with the successfully applied patches.
 
-The sleeping wasn't in earlier versions, and it plays badly with the adaptive nature of a number of shrink ray
-passes, where once you start succeeding you find many other similar ways to delete. This means that you can
-potentially end up with very long retry loops as the other task keeps sniping the work out from under you.
-The sleep thus assumes that if you got sniped once you're likely to get sniped again and it's better to just
-back off and let the other task do its thing. Currently we sleep for an exponential variate with an average of
-1s. This is unlikely to be optimal but seems to work reasonable well.
+This happens under a lock, ensuring that only a single worker can update the current patch at once.
+
+In the cases where successful variants are *very* common this will still not be fully parallel,
+because it needs to wait on or perform the merge, but merges will tend to be relatively fast (if
+there are no conflicts, they require only one call to the interestingness test for the entire queue.
+If there area  lot of conflicts you may end up having a 50% slowdown as you have to call the interestingness
+test for every patch).
 
 ## Bounding the amount of parallelism
 

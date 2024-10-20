@@ -870,7 +870,11 @@ class ShrinkRayUISingleFile(UrwidUI[bytes]):
                 continue
             current = await self.state.attempt_format(self.problem.current_test_case)
             if current.count(b"\n") <= 50:
-                self.diff_to_display.set_text(current)
+                try:
+                    current.decode("utf-8")
+                    self.diff_to_display.set_text(current)
+                except UnicodeError:
+                    pass
                 await trio.sleep(0.1)
                 continue
 

@@ -440,7 +440,7 @@ class ShrinkRayState(Generic[TestCase], ABC):
         )
         if isinstance(e, TimeoutExceededOnInitial):
             print(
-                f"This is because your initial test case took {e.runtime:.2f}s exceeding your timeout setting of {timeout}.",
+                f"This is because your initial test case took {e.runtime:.2f}s exceeding your timeout setting of {self.timeout}.",
                 file=sys.stderr,
             )
             print(

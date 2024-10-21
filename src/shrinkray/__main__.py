@@ -877,12 +877,7 @@ class ShrinkRayUISingleFile(UrwidUI[bytes]):
 
     async def update_diffs(self):
         initial = self.problem.current_test_case
-        try:
-            text = initial.decode("utf-8")
-        except UnicodeDecodeError:
-            pass
-        else:
-            self.diff_to_display.set_text("\n".join(text.splitlines()[:1000]))
+        self.diff_to_display.set_text("\n".join(self.file_to_lines(initial)[:1000]))
         prev_unformatted = self.problem.current_test_case
         prev = await self.state.attempt_format(prev_unformatted)
 

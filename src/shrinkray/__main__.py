@@ -23,6 +23,7 @@ import trio
 import urwid
 import urwid.raw_display
 from attrs import define
+from binaryornot.check import is_binary_string
 
 from shrinkray.passes.clangdelta import C_FILE_EXTENSIONS, ClangDelta, find_clang_delta
 from shrinkray.problem import (
@@ -110,6 +111,12 @@ class InputType(IntEnum):
         if self == InputType.all:
             return True
         return self == value
+
+
+class DisplayMode(IntEnum):
+    auto = 0
+    text = 1
+    hex = 2
 
 
 class UIType(Enum):
@@ -598,11 +605,18 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
 def to_lines(test_case: bytes) -> list[str]:
     result = []
     for line in test_case.split(b"\n"):
-        try:
-            result.append(line.decode("utf-8"))
-        except UnicodeDecodeError:
+        if is_binary_string(line):
             result.append(line.hex())
+        else:
+            try:
+                result.append(line.decode("utf-8"))
+            except UnicodeDecodeError:
+                result.append(line.hex())
     return result
+
+
+def to_blocks(test_case: bytes) -> list[str]:
+    return [test_case[i : i + 80].hex() for i in range(0, len(test_case), 80)]
 
 
 def format_diff(diff: Iterable[str]) -> str:
@@ -670,7 +684,7 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
         print("All done!")
 
 
-@define
+@define(slots=False)
 class ShrinkRayUI(Generic[TestCase], ABC):
     state: ShrinkRayState[TestCase]
 
@@ -707,7 +721,7 @@ class BasicUI(ShrinkRayUI[TestCase]):
                 await trio.sleep(0.1)
 
 
-@define
+@define(slots=False)
 class UrwidUI(ShrinkRayUI[TestCase]):
     parallel_samples: int = 0
     parallel_total: int = 0
@@ -847,10 +861,19 @@ class ShrinkRayUIDirectory(UrwidUI[dict[str, bytes]]):
         nursery.start_soon(self.update_file_list)
 
 
+@define(slots=False)
 class ShrinkRayUISingleFile(UrwidUI[bytes]):
+    hex_mode: bool = False
+
     def create_main_ui_elements(self) -> list[Any]:
         self.diff_to_display = urwid.Text("")
         return [self.diff_to_display]
+
+    def file_to_lines(self, test_case: bytes) -> list[str]:
+        if self.hex_mode:
+            return to_blocks(test_case)
+        else:
+            return to_lines(test_case)
 
     async def update_diffs(self):
         initial = self.problem.current_test_case
@@ -869,19 +892,19 @@ class ShrinkRayUISingleFile(UrwidUI[bytes]):
                 await trio.sleep(0.1)
                 continue
             current = await self.state.attempt_format(self.problem.current_test_case)
-            if current.count(b"\n") <= 50:
-                try:
-                    current.decode("utf-8")
-                    self.diff_to_display.set_text(current)
-                except UnicodeError:
-                    pass
+            lines = self.file_to_lines(current)
+            if len(lines) <= 50:
+                display_text = "\n".join(lines)
+                self.diff_to_display.set_text(display_text)
                 await trio.sleep(0.1)
                 continue
 
             if prev == current:
                 await trio.sleep(0.1)
                 continue
-            diff = format_diff(unified_diff(to_lines(prev), to_lines(current)))
+            diff = format_diff(
+                unified_diff(self.file_to_lines(prev), self.file_to_lines(current))
+            )
             # When running in parallel sometimes we can produce diffs that have
             # a lot of insertions because we undo some work and then immediately
             # redo it. this can be quite confusing when it happens in the UI
@@ -986,6 +1009,12 @@ async def run_shrink_ray(
     help="Level of output to provide.",
 )
 @click.option(
+    "--display-mode",
+    default="auto",
+    type=EnumChoice(DisplayMode),
+    help="Determines whether ShrinkRay displays files as a textual or hex representation of binary data.",
+)
+@click.option(
     "--input-type",
     default="all",
     type=EnumChoice(InputType),
@@ -1058,6 +1087,7 @@ This behaviour can be disabled by passing --trivial-is-not-error.
 )
 def main(
     input_type: InputType,
+    display_mode: DisplayMode,
     backup: str,
     filename: str,
     test: list[str],
@@ -1155,11 +1185,16 @@ def main(
         with open(backup, "wb") as writer:
             writer.write(initial)
 
+        if display_mode == DisplayMode.auto:
+            hex_mode = is_binary_string(initial)
+        else:
+            hex_mode = display_mode == DisplayMode.hex
+
         state = ShrinkRayStateSingleFile(initial=initial, **state_kwargs)
 
         trio.run(state.check_formatter)
 
-        ui = ShrinkRayUISingleFile(state)
+        ui = ShrinkRayUISingleFile(state, hex_mode=hex_mode)
 
     if ui_type == UIType.basic:
         ui = BasicUI(state)

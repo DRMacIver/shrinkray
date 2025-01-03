@@ -1,9 +1,9 @@
 import heapq
-from contextlib import aclosing, asynccontextmanager
+from contextlib import asynccontextmanager
 from enum import IntEnum
 from itertools import islice
 from random import Random
-from typing import AsyncGenerator, Awaitable, Callable, Optional, Sequence, TypeVar
+from typing import Awaitable, Callable, Optional, Sequence, TypeVar
 
 import trio
 
@@ -37,9 +37,8 @@ class WorkContext:
         self.volume = volume
         self.last_ticked = float("-inf")
 
-    async def map(
-        self, ls: Sequence[T], f: Callable[[T], Awaitable[S]]
-    ) -> AsyncGenerator[S, None]:
+    @asynccontextmanager
+    async def map(self, ls: Sequence[T], f: Callable[[T], Awaitable[S]]):
         """Lazy parallel map.
 
         Does a reasonable amount of fine tuning so that it doesn't race
@@ -49,42 +48,60 @@ class WorkContext:
         which we want to avoid doing redundant work when there are lots of
         reduction opportunities.
         """
-        if self.parallelism > 1:
-            it = iter(ls)
 
-            for x in it:
-                yield await f(x)
-                break
-            else:
-                return
+        async with trio.open_nursery() as nursery:
+            send, receive = trio.open_memory_channel(self.parallelism + 1)
 
-            n = 2
-            while True:
-                values = list(islice(it, n))
-                if not values:
-                    return
+            @nursery.start_soon
+            async def do_map():
+                if self.parallelism > 1:
+                    it = iter(ls)
 
-                async with parallel_map(
-                    values, f, parallelism=min(self.parallelism, n)
-                ) as result:
-                    async for v in result:
-                        yield v
+                    for x in it:
+                        await send.send(await f(x))
+                        break
+                    else:
+                        return
 
-                n *= 2
-        else:
-            for x in ls:
-                yield await f(x)
+                    n = 2
+                    while True:
+                        values = list(islice(it, n))
+                        if not values:
+                            send.close()
+                            return
 
-    async def filter(
-        self, ls: Sequence[T], f: Callable[[T], Awaitable[bool]]
-    ) -> AsyncGenerator[T, None]:
+                        async with parallel_map(
+                            values, f, parallelism=min(self.parallelism, n)
+                        ) as result:
+                            async for v in result:
+                                await send.send(v)
+
+                        n *= 2
+                else:
+                    for x in ls:
+                        await send.send(await f(x))
+                    send.close()
+
+            yield receive
+
+    @asynccontextmanager
+    async def filter(self, ls: Sequence[T], f: Callable[[T], Awaitable[bool]]):
         async def apply(x: T) -> tuple[T, bool]:
             return (x, await f(x))
 
-        async with aclosing(self.map(ls, apply)) as results:
-            async for x, v in results:
-                if v:
-                    yield x
+        async with trio.open_nursery() as nursery:
+            send, receive = trio.open_memory_channel(float("inf"))
+
+            @nursery.start_soon
+            async def _():
+                async with self.map(ls, apply) as results:
+                    async for x, v in results:
+                        if v:
+                            await send.send(x)
+                    send.close()
+
+            yield receive
+            nursery.cancel_scope.cancel()
 
     async def find_first_value(
         self, ls: Sequence[T], f: Callable[[T], Awaitable[bool]]
@@ -94,7 +111,7 @@ class WorkContext:
 
         Will run in parallel if parallelism is enabled.
         """
-        async with aclosing(self.filter(ls, f)) as filtered:
+        async with self.filter(ls, f) as filtered:
             async for x in filtered:
                 return x
         raise NotFound()
@@ -156,66 +173,46 @@ class NotFound(Exception):
 
 @asynccontextmanager
 async def parallel_map(
-    ls: Sequence[T], f: Callable[[T], Awaitable[S]], parallelism: int
-) -> AsyncGenerator[trio.MemoryReceiveChannel[S], None]:
+    ls: Sequence[T],
+    f: Callable[[T], Awaitable[S]],
+    parallelism: int,
+):
+    send_out_values, receive_out_values = trio.open_memory_channel(parallelism)
+
+    work = list(enumerate(ls))
+    work.reverse()
+
+    result_heap = []
+
     async with trio.open_nursery() as nursery:
-        send_ls_values, receive_ls_values = trio.open_memory_channel(  # type: ignore
-            max_buffer_size=parallelism * 2
-        )
+        results_ready = trio.Event()
 
-        async def queue_producer() -> None:
-            for i, x in enumerate(ls):
-                await send_ls_values.send((i, x))
-            await send_ls_values.aclose()
+        for _ in range(parallelism):
 
-        nursery.start_soon(queue_producer)
+            @nursery.start_soon
+            async def do_work():
+                while work:
+                    i, x = work.pop()
+                    result = await f(x)
+                    heapq.heappush(result_heap, (i, result))
+                    results_ready.set()
 
-        send_computed_values, receive_computed_values = trio.open_memory_channel(  # type: ignore
-            max_buffer_size=parallelism * 2
-        )
-
-        async def worker(i: int) -> None:
-            while True:
-                try:
-                    i, x = await receive_ls_values.receive()
-                except trio.EndOfChannel:
-                    await send_computed_values.send(None)
-                    return
-                result = await f(x)
-                await send_computed_values.send((i, result))
-
-        for worker_n in range(parallelism):
-            nursery.start_soon(worker, worker_n)
-
-        send_out_values, receive_out_values = trio.open_memory_channel(parallelism * 2)  # type: ignore
-
+        @nursery.start_soon
         async def consolidate() -> None:
             i = 0
-            completed = 0
 
-            heap: list[tuple[int, S]] = []
+            while work or result_heap:
+                while not result_heap:
+                    await results_ready.wait()
+                assert result_heap
+                j, x = result_heap[0]
+                if j == i:
+                    await send_out_values.send(x)
+                    i = j + 1
+                    heapq.heappop(result_heap)
+                else:
+                    await results_ready.wait()
+            send_out_values.close()
 
-            while completed < parallelism:
-                value = await receive_computed_values.receive()
-                if value is None:
-                    completed += 1
-                    continue
-                heapq.heappush(heap, value)
-
-                while heap:
-                    j, x = heap[0]
-                    if j == i:
-                        try:
-                            await send_out_values.send(x)
-                        except trio.BrokenResourceError:
-                            return
-                        heapq.heappop(heap)
-                        i += 1
-                    else:
-                        break
-            await send_out_values.aclose()
-
-        nursery.start_soon(consolidate)
-
-        async with aclosing(receive_out_values):
-            yield receive_out_values
+        yield receive_out_values
+        nursery.cancel_scope.cancel()

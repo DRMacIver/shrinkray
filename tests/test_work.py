@@ -14,6 +14,7 @@ async def test_parallel_map(p: int) -> None:
     input = [1, 2, 3]
     async with parallel_map(input, identity, parallelism=p) as mapped:
         values = [x async for x in mapped]
+        print(values)
     assert values == input
 
 
@@ -24,7 +25,7 @@ async def test_worker_map(p: int) -> None:
     input = range(1000)
 
     i = 0
-    async with aclosing(work.map(input, identity)) as mapped:
+    async with work.map(input, identity) as mapped:
         async for x in mapped:
             assert input[i] == x
             i += 1

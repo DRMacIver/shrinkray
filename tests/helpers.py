@@ -166,7 +166,6 @@ def assert_reduces_to(
         require_python = False
 
     def is_interesting(value: bytes) -> bool:
-        print(value)
         if require_python and not is_python(value):
             return False
         return default_sort_key(value) >= default_sort_key(target)

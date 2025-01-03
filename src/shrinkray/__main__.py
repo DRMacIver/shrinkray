@@ -449,10 +449,10 @@ class ShrinkRayState(Generic[TestCase], ABC):
             )
         else:
             print(
-                "Rerunning the initerestingness test for debugging purposes...",
+                "Rerunning the interestingness test for debugging purposes...",
                 file=sys.stderr,
             )
-            exit_code = await self.run_for_exit_code(self.initial)
+            exit_code = await self.run_for_exit_code(self.initial, debug=True)
             if exit_code != 0:
                 print(
                     f"This exited with code {exit_code}, but the script should return 0 for interesting test cases.",
@@ -471,7 +471,6 @@ class ShrinkRayState(Generic[TestCase], ABC):
                     )
                     other_exit_code = await self.run_script_on_file(
                         working=self.filename,
-                        test_case=self.initial,
                         debug=True,
                         cwd=os.getcwd(),
                     )

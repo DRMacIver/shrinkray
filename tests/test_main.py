@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import pathlib
+import pytest
 
 import trio
 import black
@@ -87,3 +88,60 @@ except AssertionError:
     # directories.
     assert format(a.read_text()) == "x = 0"
     assert format(c.read_text()) == "from a import x\n\nassert x"
+
+
+def test_gives_informative_error_when_script_does_not_work_outside_current_directory(tmpdir):
+    target = (tmpdir / "hello.txt")
+    target.write_text("hello world", encoding='utf-8')
+    script = tmpdir / "test.py"
+    script.write_text(
+        f"""
+#!/usr/bin/env python
+import sys
+
+if sys.argv[1] != {repr(str(target))}:
+    sys.exit(1)
+    """.strip(), encoding='utf-8'
+    )
+    script.chmod(0x777)
+
+    subprocess.check_call([script, target])
+
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
+        subprocess.run(
+            [sys.executable, "-m", "shrinkray", str(script), str(target), "--ui=basic"],
+            check=True,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            universal_newlines=True,
+        )
+
+    assert 'your script depends' in excinfo.value.stderr
+
+
+def test_prints_the_output_on_an_initially_uninteresting_test_case(tmpdir):
+    target = (tmpdir / "hello.txt")
+    target.write_text("hello world", encoding='utf-8')
+    script = tmpdir / "test.py"
+    script.write_text(
+        f"""
+#!/usr/bin/env python
+import sys
+
+print("Hello world")
+
+sys.exit(1)
+    """.strip(), encoding='utf-8'
+    )
+    script.chmod(0x777)
+
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
+        subprocess.run(
+            [sys.executable, "-m", "shrinkray", str(script), str(target), "--ui=basic"],
+            check=True,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            universal_newlines=True,
+        )
+
+    assert 'Hello world' in excinfo.value.stdout

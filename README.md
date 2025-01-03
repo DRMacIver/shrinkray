@@ -73,9 +73,9 @@ Python installs.
 If you want to use it from the git repo directly, you can do the following:
 
 ```
-git checkout https://github.com/DRMacIver/shrinkray.git
+git clone https://github.com/DRMacIver/shrinkray.git
 cd shrinkray
-virtualenv .venv
+python -m venv .venv
 .venv/bin/pip install -e .
 ```
 

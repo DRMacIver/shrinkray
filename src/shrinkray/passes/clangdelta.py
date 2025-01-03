@@ -168,6 +168,8 @@ class ClangDelta:
                     == b"Error: No modification to the transformed program!"
                 ):
                     return data
+                elif b"Assertion failed" in e.stderr.strip():
+                    return data
                 else:
                     raise ClangDeltaError(e.stdout + e.stderr)
             finally:
@@ -175,7 +177,9 @@ class ClangDelta:
 
 
 class ClangDeltaError(Exception):
-    pass
+    def __init__(self, message):
+        assert b"Assertion failed" not in message, message
+        super().__init__(message)
 
 
 def clang_delta_pump(

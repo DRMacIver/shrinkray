@@ -55,8 +55,8 @@ def test_can_reduce_a_directory(tmp_path: pathlib.Path):
 
     script = tmp_path / "test.py"
     script.write_text(
-        """
-#!/usr/bin/env python
+        f"""
+#!/usr/bin/env {sys.executable}
 import sys
 sys.path.append(sys.argv[1])
 
@@ -125,7 +125,7 @@ def test_prints_the_output_on_an_initially_uninteresting_test_case(tmpdir):
     script = tmpdir / "test.py"
     script.write_text(
         f"""
-#!/usr/bin/env python
+#!/usr/bin/env {sys.executable}
 import sys
 
 print("Hello world")

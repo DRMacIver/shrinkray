@@ -55,8 +55,8 @@ def test_can_reduce_a_directory(tmp_path: pathlib.Path):
 
     script = tmp_path / "test.py"
     script.write_text(
-        """
-#!/usr/bin/env python
+        f"""
+#!/usr/bin/env {sys.executable}
 import sys
 sys.path.append(sys.argv[1])
 
@@ -67,7 +67,7 @@ except AssertionError:
     sys.exit(0)
     """.strip()
     )
-    script.chmod(0x777)
+    script.chmod(0o777)
 
     subprocess.check_call(
         [
@@ -96,14 +96,14 @@ def test_gives_informative_error_when_script_does_not_work_outside_current_direc
     script = tmpdir / "test.py"
     script.write_text(
         f"""
-#!/usr/bin/env python
+#!/usr/bin/env {sys.executable}
 import sys
 
 if sys.argv[1] != {repr(str(target))}:
     sys.exit(1)
     """.strip(), encoding='utf-8'
     )
-    script.chmod(0x777)
+    script.chmod(0o777)
 
     subprocess.check_call([script, target])
 
@@ -125,7 +125,7 @@ def test_prints_the_output_on_an_initially_uninteresting_test_case(tmpdir):
     script = tmpdir / "test.py"
     script.write_text(
         f"""
-#!/usr/bin/env python
+#!/usr/bin/env {sys.executable}
 import sys
 
 print("Hello world")
@@ -133,7 +133,7 @@ print("Hello world")
 sys.exit(1)
     """.strip(), encoding='utf-8'
     )
-    script.chmod(0x777)
+    script.chmod(0o777)
 
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
         subprocess.run(

@@ -169,8 +169,8 @@ class ShrinkRay(Reducer[bytes]):
 
     def __attrs_post_init__(self) -> None:
         if is_python(self.target.current_test_case):
-            self.great_passes[:0] = PYTHON_PASSES
-            self.initial_cuts[:0] = PYTHON_PASSES
+            self.great_passes = PYTHON_PASSES
+            self.initial_cuts = PYTHON_PASSES
         self.register_format_specific_pass(JSON, JSON_PASSES)
         self.register_format_specific_pass(
             DimacsCNF,
@@ -324,15 +324,15 @@ class ShrinkRay(Reducer[bytes]):
 
         await self.initial_cut()
 
-        while True:
-            prev = self.target.current_test_case
-            await self.run_some_passes()
-            if self.target.current_test_case != prev:
-                continue
-            for pump in self.pumps:
-                await self.pump(pump)
-            if self.target.current_test_case == prev:
-                break
+        # while True:
+        #     prev = self.target.current_test_case
+        #     await self.run_some_passes()
+        #     if self.target.current_test_case != prev:
+        #         continue
+        #     for pump in self.pumps:
+        #         await self.pump(pump)
+        #     if self.target.current_test_case == prev:
+        #         break
 
 
 class UpdateKeys(Patches[dict[str, bytes], dict[str, bytes]]):

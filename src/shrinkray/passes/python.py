@@ -17,6 +17,7 @@ def is_python(source: AnyStr) -> bool:
 
 
 Replacement = CSTNode | libcst.RemovalSentinel | libcst.FlattenSentinel[Any]
+called = 0
 
 
 async def libcst_transform(
@@ -28,76 +29,67 @@ async def libcst_transform(
     ],
 ) -> None:
     class CM(codemod.VisitorBasedCodemodCommand):
-        def __init__(self, context: codemod.CodemodContext, target_index: int):
+        def __init__(self, context: codemod.CodemodContext, target_indices: list[int]):
             super().__init__(context)
-            self.target_index = target_index
+            self.target_indices = set(target_indices)
             self.current_index = 0
-            self.fired = False
+            self.fired_indices = set()
 
-        # We have to have an ignore on the return type because if we don't LibCST
-        # will do some stupid bullshit with checking if the return type is correct
-        # and we use this generically in a way that makes it hard to type correctly.
         @m.leave(matcher)
-        def maybe_change_node(self, _, updated_node):  # type: ignore
-            if self.current_index == self.target_index:
-                self.fired = True
+        def maybe_change_node(self, _, updated_node):
+            global called
+            print(f"{called=}")
+            called += 1
+            if self.current_index in self.target_indices:
+                self.fired_indices.add(self.current_index)
                 return transformer(updated_node)
             else:
                 self.current_index += 1
                 return updated_node
 
-    try:
-        module = libcst.parse_module(problem.current_test_case)
-    except Exception:
-        return
-
     context = codemod.CodemodContext()
 
-    counting_mod = CM(context, -1)
-    counting_mod.transform_module(module)
-
-    n = counting_mod.current_index + 1
-
-    async def can_apply(i: int) -> bool:
-        nonlocal n
-        if i >= n:
-            return False
-        initial_test_case = problem.current_test_case
+    def get_node_count() -> int:
         try:
-            module = libcst.parse_module(initial_test_case)
+            module = libcst.parse_module(problem.current_test_case)
+            counting_mod = CM(context, [])
+            counting_mod.transform_module(module)
+            return counting_mod.current_index + 1
+        except Exception:
+            return 0
+
+    async def apply_transformation(i: int) -> bool:
+        try:
+            module = libcst.parse_module(problem.current_test_case)
         except libcst.ParserSyntaxError:
-            n = 0
             return False
 
-        codemod_i = CM(context, i)
+        codemod_i = CM(context, [i])
         try:
             transformed = codemod_i.transform_module(module)
-        except libcst.CSTValidationError:
+        except (libcst.CSTValidationError, TypeError):
             return False
-        except TypeError as e:
-            if "does not allow for it" in e.args[0]:
-                return False
-            raise
 
-        if not codemod_i.fired:
-            n = i
+        if not codemod_i.fired_indices:
             return False
 
         transformed_test_case = transformed.code.encode(transformed.encoding)
-
-        if problem.sort_key(transformed_test_case) >= problem.sort_key(
-            initial_test_case
-        ):
+        if problem.sort_key(transformed_test_case) >= problem.sort_key(problem.current_test_case):
             return False
 
-        return await problem.is_interesting(transformed_test_case)
+        if await problem.is_interesting(transformed_test_case):
+            problem.current_test_case = transformed_test_case
+            return True
+        return False
 
+    n = get_node_count()
     i = 0
     while i < n:
-        try:
-            i = await problem.work.find_first_value(range(i, n), can_apply)
-        except NotFound:
-            break
+        if await apply_transformation(i):
+            n = get_node_count()  # Recount nodes after successful transformation
+            i = 0  # Start over to catch new opportunities
+        else:
+            i += 1
 
 
 async def lift_indented_constructs(problem: ReductionProblem[bytes]) -> None:
@@ -169,8 +161,8 @@ async def strip_annotations(problem: ReductionProblem[bytes]) -> None:
 
 PYTHON_PASSES = [
     replace_bodies_with_ellipsis,
-    strip_annotations,
-    lift_indented_constructs,
-    delete_statements,
-    replace_statements_with_pass,
+    # strip_annotations,
+    # lift_indented_constructs,
+    # delete_statements,
+    # replace_statements_with_pass,
 ]

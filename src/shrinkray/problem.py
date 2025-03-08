@@ -267,6 +267,9 @@ class BasicReductionProblem(ReductionProblem[T]):
     def current_test_case(self) -> T:
         return self.__current
 
+    @current_test_case.setter
+    def current_test_case(self, value):
+        self.__current = value
 
 class View(ReductionProblem[T], Generic[S, T]):
     def __init__(

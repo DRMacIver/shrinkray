@@ -114,3 +114,41 @@ def test_reduce_all(pyfile):
         return True
 
     reduce_with(PYTHON_PASSES, code, is_interesting)
+
+
+ISSUE_12_INPUT = b"""
+import asyncio
+import _lsprof
+
+if True:
+    a = 1
+    b = 2
+    c = 3
+
+if True:
+    obj = _lsprof.Profiler()
+    obj.enable()
+    obj._pystart_callback(lambda: 0, 0)
+    obj = None
+    loop = asyncio.get_event_loop()
+"""
+
+ISSUE_12_OUTPUT = b"""
+import asyncio
+import _lsprof
+
+if True:
+    ...
+
+if True:
+    obj = _lsprof.Profiler()
+    obj.enable()
+    obj._pystart_callback(lambda: 0, 0)
+    obj = None
+    loop = asyncio.get_event_loop()
+"""
+
+
+def test_reduce_with_ellipsis_can_reduce_single_block():
+    reduced = reduce_with([replace_bodies_with_ellipsis], ISSUE_12_INPUT, lambda x: b"Profiler" in x, parallelism=1)
+    assert reduced == ISSUE_12_OUTPUT

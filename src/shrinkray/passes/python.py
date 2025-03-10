@@ -28,9 +28,12 @@ async def libcst_transform(
     ],
 ) -> None:
     class CM(codemod.VisitorBasedCodemodCommand):
-        def __init__(self, context: codemod.CodemodContext, target_index: int):
+        def __init__(
+            self, context: codemod.CodemodContext, start_index: int, end_index: int
+        ):
             super().__init__(context)
-            self.target_index = target_index
+            self.start_index = start_index
+            self.end_index = end_index
             self.current_index = 0
             self.fired = False
 
@@ -39,8 +42,9 @@ async def libcst_transform(
         # and we use this generically in a way that makes it hard to type correctly.
         @m.leave(matcher)
         def maybe_change_node(self, _, updated_node):  # type: ignore
-            if self.current_index == self.target_index:
+            if self.start_index <= self.current_index < self.end_index:
                 self.fired = True
+                self.current_index += 1
                 return transformer(updated_node)
             else:
                 self.current_index += 1
@@ -53,14 +57,14 @@ async def libcst_transform(
 
     context = codemod.CodemodContext()
 
-    counting_mod = CM(context, -1)
+    counting_mod = CM(context, -1, -1)
     counting_mod.transform_module(module)
 
     n = counting_mod.current_index + 1
 
-    async def can_apply(i: int) -> bool:
+    async def can_apply(start: int, end: int) -> bool:
         nonlocal n
-        if i >= n:
+        if start >= n:
             return False
         initial_test_case = problem.current_test_case
         try:
@@ -69,7 +73,7 @@ async def libcst_transform(
             n = 0
             return False
 
-        codemod_i = CM(context, i)
+        codemod_i = CM(context, start, end)
         try:
             transformed = codemod_i.transform_module(module)
         except libcst.CSTValidationError:
@@ -80,7 +84,7 @@ async def libcst_transform(
             raise
 
         if not codemod_i.fired:
-            n = i
+            n = start
             return False
 
         transformed_test_case = transformed.code.encode(transformed.encoding)
@@ -95,7 +99,11 @@ async def libcst_transform(
     i = 0
     while i < n:
         try:
-            i = await problem.work.find_first_value(range(i, n), can_apply)
+            i = await problem.work.find_first_value(
+                range(i, n), lambda i: can_apply(i, i + 1)
+            )
+            await problem.work.find_large_integer(lambda k: can_apply(i + 1, i + 1 + k))
+            i += 1
         except NotFound:
             break
 

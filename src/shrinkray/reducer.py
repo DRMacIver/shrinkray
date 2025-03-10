@@ -169,8 +169,8 @@ class ShrinkRay(Reducer[bytes]):
 
     def __attrs_post_init__(self) -> None:
         if is_python(self.target.current_test_case):
-            self.great_passes[:0] = PYTHON_PASSES
-            self.initial_cuts[:0] = PYTHON_PASSES
+            self.great_passes.extend(PYTHON_PASSES)
+            self.initial_cuts.extend(PYTHON_PASSES)
         self.register_format_specific_pass(JSON, JSON_PASSES)
         self.register_format_specific_pass(
             DimacsCNF,

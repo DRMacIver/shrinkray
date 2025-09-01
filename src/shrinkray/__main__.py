@@ -49,6 +49,7 @@ def validate_command(ctx: Any, param: Any, value: str) -> list[str]:
         command = os.path.abspath(what)
     return [command] + parts[1:]
 
+
 def signal_group(sp: "trio.Process", signal: int) -> None:
     gid = os.getpgid(sp.pid)
     assert gid != os.getgid()
@@ -342,7 +343,7 @@ class ShrinkRayState(Generic[TestCase], ABC):
                 )
             else:
                 base, ext = os.path.splitext(self.filename)
-                working = base + '-' + os.urandom(16).hex() + ext
+                working = base + "-" + os.urandom(16).hex() + ext
                 assert not os.path.exists(working)
                 try:
                     await self.write_test_case_to_file(working, test_case)
@@ -1273,9 +1274,9 @@ def main(
     # If you try to sys.exit from within an exception handler, trio will instead
     # put it in an exception group. I wish to register the complaint that this is
     # incredibly fucking stupid, but anyway this is a workaround for it.
-    except *SystemExit as eg:
+    except* SystemExit as eg:
         raise eg.exceptions[0]
-    except *KeyboardInterrupt as eg:
+    except* KeyboardInterrupt as eg:
         raise eg.exceptions[0]
 
 

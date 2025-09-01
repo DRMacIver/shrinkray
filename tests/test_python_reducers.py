@@ -150,5 +150,10 @@ if True:
 
 
 def test_reduce_with_ellipsis_can_reduce_single_block():
-    reduced = reduce_with([replace_bodies_with_ellipsis], ISSUE_12_INPUT, lambda x: b"Profiler" in x, parallelism=1)
+    reduced = reduce_with(
+        [replace_bodies_with_ellipsis],
+        ISSUE_12_INPUT,
+        lambda x: b"Profiler" in x,
+        parallelism=1,
+    )
     assert reduced == ISSUE_12_OUTPUT

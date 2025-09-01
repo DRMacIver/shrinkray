@@ -127,6 +127,16 @@ class UIType(Enum):
     basic = auto()
 
 
+def validate_ui(ctx, param, value) -> UIType:
+    if value is None:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            return UIType.urwid
+        else:
+            return UIType.basic
+    else:
+        return value
+
+
 def try_decode(data: bytes) -> tuple[str | None, str]:
     for guess in chardet.detect_all(data):
         try:
@@ -745,7 +755,8 @@ class BasicUI(ShrinkRayUI[TestCase]):
                 print(
                     f"Reduced test case to {humanize.naturalsize(size(current))} "
                     f"(deleted {humanize.naturalsize(reduction)}, "
-                    f"{humanize.naturalsize(reduction - prev_reduction)} since last time)"
+                    f"{humanize.naturalsize(reduction - prev_reduction)} since last time)",
+                    flush=True,
                 )
                 prev_reduction = reduction
                 await trio.sleep(5)
@@ -1074,12 +1085,12 @@ with any parallelism.
 @click.option(
     "--ui",
     "ui_type",
-    default="urwid",
     type=EnumChoice(UIType),
     help="""
 By default shrinkray runs with a terminal UI based on urwid. If you want a more basic UI
 (e.g. for running in a script), you can specify --ui=basic instead.
     """.strip(),
+    callback=validate_ui,
 )
 @click.option(
     "--formatter",

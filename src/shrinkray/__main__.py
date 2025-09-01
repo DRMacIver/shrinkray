@@ -224,6 +224,7 @@ TestCase = TypeVar("TestCase")
 @define(slots=False)
 class ShrinkRayState(Generic[TestCase], ABC):
     input_type: InputType
+    in_place: bool
     test: list[str]
     filename: str
     timeout: float
@@ -320,15 +321,44 @@ class ShrinkRayState(Generic[TestCase], ABC):
             return result
 
     async def run_for_exit_code(self, test_case: TestCase, debug: bool = False) -> int:
-        with TemporaryDirectory() as d:
-            working = os.path.join(d, self.base)
-            await self.write_test_case_to_file(working, test_case)
+        if self.in_place:
+            if self.input_type == InputType.basename:
+                working = self.filename
+                await self.write_test_case_to_file(working, test_case)
 
-            return await self.run_script_on_file(
-                working=working,
-                debug=debug,
-                cwd=d,
-            )
+                return await self.run_script_on_file(
+                    working=working,
+                    debug=debug,
+                    cwd=os.getcwd(),
+                )
+            else:
+                base, ext = os.path.splitext(self.filename)
+                working = base + '-' + os.urandom(16).hex() + ext
+                assert not os.path.exists(working)
+                try:
+                    await self.write_test_case_to_file(working, test_case)
+
+                    return await self.run_script_on_file(
+                        working=working,
+                        debug=debug,
+                        cwd=os.getcwd(),
+                    )
+                finally:
+                    if os.path.exists(working):
+                        if os.path.isdir(working):
+                            shutil.rmtree(working)
+                        else:
+                            os.unlink(working)
+        else:
+            with TemporaryDirectory() as d:
+                working = os.path.join(d, self.base)
+                await self.write_test_case_to_file(working, test_case)
+
+                return await self.run_script_on_file(
+                    working=working,
+                    debug=debug,
+                    cwd=d,
+                )
 
     @abstractmethod
     async def format_data(self, test_case: TestCase) -> TestCase | None: ...
@@ -994,12 +1024,6 @@ async def run_shrink_ray(
     help=("Random seed to use for any non-deterministic reductions."),
 )
 @click.option(
-    "--parallelism",
-    default=os.cpu_count(),
-    type=click.INT,
-    help="Number of tests to run in parallel.",
-)
-@click.option(
     "--volume",
     default="normal",
     type=EnumChoice(Volume),
@@ -1010,6 +1034,16 @@ async def run_shrink_ray(
     default="auto",
     type=EnumChoice(DisplayMode),
     help="Determines whether ShrinkRay displays files as a textual or hex representation of binary data.",
+)
+@click.option(
+    "--in-place/--not-in-place",
+    default=False,
+    help="""
+If `--in-place` is passed, shrinkray will run in the current working directory instead of
+creating a temporary subdirectory. Note that this requires you to either run with no
+parallelism or be very careful about files created in your interestingness
+test not conflicting with each other.
+""",
 )
 @click.option(
     "--input-type",
@@ -1025,7 +1059,17 @@ How to pass input to the test function. Options are:
 3. `stdin` passes its contents on stdin.
 
 4. `all` (the default) does all of the above.
+
+If --in-place is specified, all will not include basename by default, only arg and stdin.
+If you want basename with --in-place you may pass it explicitly, but note that this is incompatible
+with any parallelism.
     """.strip(),
+)
+@click.option(
+    "--parallelism",
+    type=click.INT,
+    help="Number of tests to run in parallel. If set to 0 will default to either 1 or number of cpus depending on other options.",
+    default=0,
 )
 @click.option(
     "--ui",
@@ -1089,6 +1133,7 @@ def main(
     filename: str,
     test: list[str],
     timeout: float,
+    in_place: bool,
     parallelism: int,
     seed: int,
     volume: Volume,
@@ -1107,6 +1152,17 @@ def main(
             file=sys.stderr,
         )
         sys.exit(1)
+
+    if in_place and input_type == InputType.basename and parallelism > 1:
+        raise click.BadParameter(
+            f"parallelism cannot be greater than 1 when --in-place and --input-type=basename (got {parallelism})"
+        )
+
+    if parallelism == 0:
+        if in_place and input_type == InputType.basename:
+            parallelism = 1
+        else:
+            parallelism = os.cpu_count()
 
     clang_delta_executable: ClangDelta | None = None
     if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:
@@ -1135,6 +1191,7 @@ def main(
 
     state_kwargs: dict[str, Any] = dict(
         input_type=input_type,
+        in_place=in_place,
         test=test,
         timeout=timeout,
         base=os.path.basename(filename),

@@ -6,7 +6,10 @@ import pytest
 
 import trio
 import black
-from shrinkray.__main__ import interrupt_wait_and_kill
+from shrinkray.__main__ import interrupt_wait_and_kill, main
+from click.testing import CliRunner
+from click import BadParameter
+from attrs import define
 
 
 def format(s):
@@ -43,7 +46,8 @@ async def test_kill_process():
         assert sp.returncode != 0
 
 
-def test_can_reduce_a_directory(tmp_path: pathlib.Path):
+@pytest.mark.parametrize('in_place', [False, True])
+def test_can_reduce_a_directory(tmp_path: pathlib.Path, in_place):
     target = tmp_path / "foo"
     target.mkdir()
     a = target / "a.py"
@@ -76,9 +80,14 @@ except AssertionError:
         ]
     )
 
-    subprocess.check_call(
-        [sys.executable, "-m", "shrinkray", str(script), str(target), "--ui=basic"],
-    )
+    if in_place:
+        subprocess.check_call(
+            [sys.executable, "-m", "shrinkray", '--in-place', str(script), str(target), "--ui=basic"],
+        )
+    else:
+        subprocess.check_call(
+            [sys.executable, "-m", "shrinkray", str(script), str(target), "--ui=basic"],
+        )
 
     assert a.exists()
     assert not b.exists()
@@ -119,6 +128,8 @@ if sys.argv[1] != {repr(str(target))}:
     assert 'your script depends' in excinfo.value.stderr
 
 
+
+
 def test_prints_the_output_on_an_initially_uninteresting_test_case(tmpdir):
     target = (tmpdir / "hello.txt")
     target.write_text("hello world", encoding='utf-8')
@@ -145,3 +156,76 @@ sys.exit(1)
         )
 
     assert 'Hello world' in excinfo.value.stdout
+
+
+@define
+class ShrinkTarget:
+    test_case: str
+    interestingness_test: str
+
+
+@pytest.fixture(scope='function')
+def basic_shrink_target(tmpdir):
+    target = (tmpdir / "hello.txt")
+    target.write_text("hello world", encoding='utf-8')
+    script = tmpdir / "test.sh"
+    script.write_text(
+        f"""
+#!/usr/bin/env bash
+
+set -e
+
+grep hello "$1"
+    """.strip(), encoding='utf-8'
+    )
+    script.chmod(0o777)
+
+    return ShrinkTarget(test_case=str(target), interestingness_test=str(script))
+
+
+@pytest.mark.parametrize('in_place', [False, True])
+@pytest.mark.parametrize('parallelism', (1, 2))
+def test_shrinks_basic_target(basic_shrink_target, in_place, parallelism):
+
+    runner = CliRunner(catch_exceptions=False)
+
+    args = [basic_shrink_target.interestingness_test, basic_shrink_target.test_case, '--ui=basic', f'--parallelism={parallelism}']
+    if in_place:
+        args.append('--in-place')
+
+    result = runner.invoke(
+        main, args
+    )
+
+    assert result.exit_code == 0
+
+    with open(basic_shrink_target.test_case) as i:
+        assert i.read().strip() == 'hello'
+
+
+def test_errors_on_bad_parallelism_when_in_place(tmpdir):
+    target = (tmpdir / "hello.txt")
+    target.write_text("hello world", encoding='utf-8')
+    script = tmpdir / "test.sh"
+    script.write_text(
+        f"""
+#!/usr/bin/env bash
+
+set -e
+
+grep hello {str(target)}
+    """.strip(), encoding='utf-8'
+    )
+    script.chmod(0o777)
+
+    runner = CliRunner(catch_exceptions=False)
+
+    result = runner.invoke(
+        main, [
+            str(script), str(target),
+            '--ui=basic',
+            '--in-place','--input-type=basename',  '--parallelism=2', 
+        ]
+    )
+    assert result.exit_code != 0
+    assert 'parallelism cannot' in result.stderr

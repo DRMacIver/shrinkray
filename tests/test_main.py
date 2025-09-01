@@ -8,7 +8,6 @@ import trio
 import black
 from shrinkray.__main__ import interrupt_wait_and_kill, main
 from click.testing import CliRunner
-from click import BadParameter
 from attrs import define
 
 
@@ -229,3 +228,28 @@ grep hello {str(target)}
     )
     assert result.exit_code != 0
     assert 'parallelism cannot' in result.stderr
+
+
+def test_gives_good_error_when_initial_test_case_invalid(tmpdir):
+    target = (tmpdir / "hello.txt")
+    target.write_text("hello world", encoding='utf-8')
+    script = tmpdir / "test.sh"
+    script.write_text(
+        f"""
+#!/usr/bin/env bash
+
+exit 1
+    """.strip(), encoding='utf-8'
+    )
+    script.chmod(0o777)
+
+    runner = CliRunner(catch_exceptions=False)
+
+    result = runner.invoke(
+        main, [
+            str(script), str(target),
+            '--ui=basic',
+        ]
+    )
+    assert result.exit_code != 0
+    assert 'uninteresting test case' in result.stderr

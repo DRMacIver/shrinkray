@@ -1253,12 +1253,18 @@ def main(
     if ui_type == UIType.basic:
         ui = BasicUI(state)
 
-    trio.run(
-        lambda: run_shrink_ray(
-            state=state,
-            ui=ui,
+    try:
+        trio.run(
+            lambda: run_shrink_ray(
+                state=state,
+                ui=ui,
+            )
         )
-    )
+    # If you try to sys.exit from within an exception handler, trio will instead
+    # put it in an exception group. I wish to register the complaint that this is
+    # incredibly fucking stupid, but anyway this is a workaround for it.
+    except *SystemExit as eg:
+        raise eg.exceptions[0]
 
 
 if __name__ == "__main__":  # pragma: no cover

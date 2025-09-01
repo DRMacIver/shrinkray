@@ -1,37 +1,45 @@
-[tool.poetry]
+[project]
 name = "shrinkray"
 version = "0.0.0"
 description = "Shrink Ray"
-authors = ["David R. MacIver <david@drmaciver.com>"]
-license = "MIT"
+authors = [
+    {name = "David R. MacIver", email = "david@drmaciver.com"}
+]
+license = {text = "MIT"}
 readme = "README.md"
-homepage = "https://github.com/DRMacIver/shrinkray"
-repository = "https://github.com/DRMacIver/shrinkray"
-documentation = "https://shrinkray.readthedocs.io"
 classifiers = [
     "Development Status :: 3 - Alpha",
 ]
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.0.1",
+    "chardet>=5.2.0",
+    "trio>=0.28.0",
+    "urwid>=2.2.3",
+    "humanize>=4.9.0",
+    "libcst>=1.1.0",
+    "exceptiongroup>=1.2.0",
+    "binaryornot>=0.4.4",
+]
 
-[tool.poetry.urls]
+[project.urls]
+Homepage = "https://github.com/DRMacIver/shrinkray"
+Repository = "https://github.com/DRMacIver/shrinkray"
+Documentation = "https://shrinkray.readthedocs.io"
 Changelog = "https://github.com/DRMacIver/shrinkray/releases"
 
-[tool.poetry.dependencies]
-python = ">=3.12, <4.0"
-click = ">=8.0.1"
-chardet = "^5.2.0"
-trio = "^0.28.0"
-urwid = "^2.2.3"
-humanize = "^4.9.0"
-libcst = "^1.1.0"
-exceptiongroup = "^1.2.0"
-binaryornot = "^0.4.4"
-
-[tool.poetry.scripts]
+[project.scripts]
 shrinkray = "shrinkray.__main__:main"
 
-[tool.poetry.group.dev.dependencies]
-hypothesis = "^6.92.1"
-hypothesmith = "^0.3.1"
+[project.optional-dependencies]
+dev = [
+    "hypothesis>=6.92.1",
+    "hypothesmith>=0.3.1",
+    "black",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.coverage.paths]
 source = ["src", "*/site-packages"]
@@ -58,7 +66,6 @@ show_column_numbers = true
 show_error_context = true
 disable_error_code = ["import-untyped"]
 
-
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"

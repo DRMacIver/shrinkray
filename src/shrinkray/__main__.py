@@ -76,7 +76,10 @@ async def interrupt_wait_and_kill(sp: "trio.Process", delay: float = 0.1) -> Non
             pass
 
         if sp.returncode is None:
-            signal_group(sp, signal.SIGKILL)
+            try:
+                signal_group(sp, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
         with trio.move_on_after(delay):
             await sp.wait()

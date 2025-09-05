@@ -71,7 +71,7 @@ def count_regions(b):
 def test_sorting_whitespace(initial):
     initial_count = count_whitespace(initial)
 
-    assume(initial_count) > 0
+    assume(initial_count > 0)
 
     def is_interesting(tc):
         assert count_whitespace(tc) == initial_count
@@ -188,7 +188,7 @@ def test_byte_reduction_example_3(parallelism):
 def lowering_problem(draw):
     initial = bytes(draw(st.lists(st.integers(0, 255), unique=True, min_size=1)))
     target = bytes([draw(st.integers(0, c)) for c in initial])
-    patches = draw(st.permutations([{c: d} for c, d in zip(initial, target)]))
+    patches = draw(st.permutations([{c: d} for c, d in zip(initial, target, strict=True)]))
 
     if len(initial) > 1:
         n_pair_patches = draw(st.integers(0, len(initial) * (len(initial) - 1)))

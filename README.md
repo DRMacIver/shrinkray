@@ -56,18 +56,20 @@ That being said this probably doesn't matter that much for the question of wheth
 
 ## Installation
 
-Shrink Ray requires Python 3.12 or later, and can be installed using pip.
+Shrink Ray requires Python 3.11 or later, and can be installed using pip.
 
-There is currently no official release for shrink ray, and I recommend running off main. You can install it as follows:
+Official releases for shrink ray are infrequent, and I recommend running off main. You can install it as follows:
 
 ```
+pipx install shrinkray
+# or
 pipx install git+https://github.com/DRMacIver/shrinkray.git
 ```
 
-(if you don't have or want [pipx](https://pypa.github.io/pipx/) you could also do this with pip and it would work fine)
+(if you don't have or want [pipx](https://pypa.github.io/pipx/) you could also do this with pip or `uv pip` and it would work fine)
 
-Shrink Ray requires Python 3.12 or later and won't work on earlier versions. If everything is working correctly, it should refuse to install
-on versions it's incompatible with. If you do not have Python 3.12 installed, I recommend [pyenv](https://github.com/pyenv/pyenv) for managing
+Shrink Ray requires Python 3.11 or later and won't work on earlier versions. If everything is working correctly, it should refuse to install
+on versions it's incompatible with. If you do not have Python 3.11 installed, I recommend [pyenv](https://github.com/pyenv/pyenv) for managing
 Python installs.
 
 If you want to use it from the git repo directly, you can do the following:

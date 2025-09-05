@@ -9,12 +9,13 @@ import sys
 import time
 import traceback
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from datetime import timedelta
 from difflib import unified_diff
 from enum import Enum, IntEnum, auto
 from shutil import which
 from tempfile import TemporaryDirectory
-from typing import Any, Generic, Iterable, TypeVar
+from typing import Any, Generic, TypeVar
 
 import chardet
 import click

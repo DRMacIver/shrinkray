@@ -15,7 +15,7 @@ from tests.helpers import reduce
 @pytest.mark.parametrize("parallelism", [1, 2])
 def test_failure_performance(initial, parallelism):
     start = time()
-    final = reduce(initial, lambda s: s == initial)
+    final = reduce(initial, lambda s: s == initial, parallelism=parallelism)
     assert final == initial
     runtime = time() - start
     assert runtime <= 2
@@ -39,7 +39,7 @@ def test_can_normalize_identifiers():
             with catch_warnings():
                 filterwarnings("ignore", category=SyntaxWarning)
                 exec(test_case, data, data)
-        except BaseException:
+        except Exception:
             return False
         return output == [42]
 

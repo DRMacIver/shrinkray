@@ -37,9 +37,9 @@ class Substring(Format[AnyStr, AnyStr]):
 
 
 class RegionReplacingPatches(Patches[dict[int, AnyStr], AnyStr]):
-    def __init__(self, regions):
+    def __init__(self, regions: list[tuple[int, int]]):
         assert regions
-        for (_, v), (u, _) in zip(regions, regions[1:]):
+        for (_, v), (u, _) in zip(regions, regions[1:], strict=False):
             assert v <= u
         self.regions = regions
 
@@ -69,15 +69,15 @@ class RegionReplacingPatches(Patches[dict[int, AnyStr], AnyStr]):
         return empty.join(parts)
 
     def size(self, patch):
-        total = 0
         for i, s in patch.items():
             u, v = self.regions[i]
             return v - u - len(s)
+        raise AssertionError(f"expected nonempty {patch=}")
 
 
 def regex_pass(
     pattern: AnyStr | re.Pattern[AnyStr],
-    flags: re.RegexFlag = 0,
+    flags: re.RegexFlag = re.RegexFlag.NOFLAG,
 ) -> Callable[[ReductionPass[AnyStr]], ReductionPass[AnyStr]]:
     if not isinstance(pattern, re.Pattern):
         pattern = re.compile(pattern, flags=flags)
@@ -195,7 +195,12 @@ async def replace_falsey_with_zero(problem: ReductionProblem[bytes]) -> None:
 async def simplify_brackets(problem: ReductionProblem[bytes]) -> None:
     bracket_types = [b"[]", b"{}", b"()"]
 
-    patches = [dict(zip(u, v)) for u in bracket_types for v in bracket_types if u > v]
+    patches = [
+        dict(zip(u, v, strict=True))
+        for u in bracket_types
+        for v in bracket_types
+        if u > v
+    ]
 
     await apply_patches(problem, ByteReplacement(), patches)
 

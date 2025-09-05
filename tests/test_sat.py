@@ -13,6 +13,7 @@ from shrinkray.passes.sat import SAT, SAT_PASSES, DimacsCNF
 from .helpers import reduce_with
 
 HAS_MINISAT = which("minisat") is not None
+pytestmark = pytest.mark.skipif(not HAS_MINISAT, reason="not installed")
 
 sat_settings = settings(deadline=None)
 

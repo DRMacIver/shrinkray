@@ -71,7 +71,7 @@ def reduce(
 def assert_no_blockers(
     is_interesting: Callable[[bytes], bool],
     potential_blockers: list[bytes],
-    lower_bounds=random.sample(range(1000), 12),
+    lower_bounds=random.sample(range(1000), 12),  # noqa: B008
 ):
     potential_blockers = sorted(set(potential_blockers), key=lambda s: (len(s), s))
 

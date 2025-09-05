@@ -115,7 +115,7 @@ async def lexeme_based_deletions(
     intervals_by_k: dict[int, set[tuple[int, int]]] = defaultdict(set)
 
     for k, endpoints in find_ngram_endpoints(problem.current_test_case):
-        intervals_by_k[k].update(zip(endpoints, endpoints[1:]))
+        intervals_by_k[k].update(zip(endpoints, endpoints[1:], strict=False))
 
     intervals_to_delete = [
         t
@@ -262,7 +262,7 @@ async def delete_byte_spans(problem: ReductionProblem[bytes]) -> None:
     for c, ix in sorted(indices.items()):
         if len(ix) > 1:
             spans.append((0, ix[0] + 1))
-            spans.extend(zip(ix, ix[1:]))
+            spans.extend(zip(ix, ix[1:], strict=False))
             spans.append((ix[-1], len(target)))
 
     await apply_patches(problem, Cuts(), [[s] for s in spans])

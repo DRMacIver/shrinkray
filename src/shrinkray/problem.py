@@ -2,7 +2,16 @@ import hashlib
 import time
 from abc import ABC, abstractmethod, abstractproperty
 from datetime import timedelta
-from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Generic,
+    Optional,
+    TypeVar,
+    cast,
+)
 
 import attrs
 import trio
@@ -10,6 +19,9 @@ from attrs import define
 from humanize import naturalsize, precisedelta
 
 from shrinkray.work import WorkContext
+
+if TYPE_CHECKING:
+    from shrinkray.passes.definitions import Format
 
 S = TypeVar("S")
 T = TypeVar("T")

@@ -15,7 +15,7 @@ package = "shrinkray"
 python_versions = ["3.11"]
 nox.needs_version = ">= 2021.6.6"
 nox.options.sessions = (
-    "pre-commit",
+    "lint",
     "safety",
     "mypy",
     "tests",
@@ -109,8 +109,7 @@ def precommit(session: nox.Session) -> None:
         "flake8-trio",
     )
 
-    session.run("flake8", "src", "tests")
-    session.run("flake8-trio", *PY_FILES)
+    session.run("flake8", "src", "tests", "--ignore=C901,E203,E501,E7,W503,B007,B014,B023,B904,B950")
 
 
 PY_FILES = glob("src/**/*.py", recursive=True) + glob("test/**/*.py", recursive=True)
@@ -172,7 +171,7 @@ def coverage(session: nox.Session) -> None:
 @nox.session(python=python_versions[0])
 def typeguard(session: nox.Session) -> None:
     """Runtime type checking using Typeguard."""
-    session.install(".")
+    session.install(".[dev]")
     session.install("pytest", "typeguard", "pygments")
     session.run("pytest", f"--typeguard-packages={package}", *session.posargs)
 

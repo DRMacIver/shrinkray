@@ -179,7 +179,7 @@ def basic_shrink_target(tmpdir):
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.sh"
     script.write_text(
-        f"""
+        """
 #!/usr/bin/env bash
 
 set -e
@@ -253,7 +253,7 @@ def test_gives_good_error_when_initial_test_case_invalid(tmpdir):
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.sh"
     script.write_text(
-        f"""
+        """
 #!/usr/bin/env bash
 
 exit 1

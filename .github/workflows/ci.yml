@@ -30,8 +30,9 @@ jobs:
     - name: Install Python dependencies
       run: |
         curl -LsSf https://astral.sh/uv/install.sh | sh
-        uv pip install -e .[dev]
-        python -m pytest tests/
+        uv venv .venv
+        .venv/bin/uv pip install -e .[dev]
+        .venv/bin/python -m pytest tests/
 
     - name: Run tests with nox
       run: |

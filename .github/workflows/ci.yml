@@ -33,7 +33,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y minisat creduce libllvm18
+        sudo apt-get install -y minisat
 
     - name: Cache pip dependencies
       uses: actions/cache@v3

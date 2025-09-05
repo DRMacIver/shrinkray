@@ -1,6 +1,6 @@
 [project]
 name = "shrinkray"
-version = "0.0.0"
+version = "25.9.1"
 description = "Shrink Ray"
 authors = [
     {name = "David R. MacIver", email = "david@drmaciver.com"}
@@ -8,7 +8,7 @@ authors = [
 license = {text = "MIT"}
 readme = "README.md"
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
 ]
 requires-python = ">=3.11"
 dependencies = [

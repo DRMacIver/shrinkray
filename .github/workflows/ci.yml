@@ -26,7 +26,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: /var/cache/apt
-        key: ${{ runner.os }}-apt-${{ hashFiles('**/pyproject.toml') }}
+        key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/ci.yml') }}
         restore-keys: |
           ${{ runner.os }}-apt-
 

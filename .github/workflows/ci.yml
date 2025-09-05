@@ -15,22 +15,45 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
-    
-    - name: Install dependencies
+        cache: 'pip'
+
+    - name: Cache apt packages
+      uses: actions/cache@v3
+      with:
+        path: /var/cache/apt
+        key: ${{ runner.os }}-apt-${{ hashFiles('**/pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-apt-
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y minisat creduce
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}-${{ hashFiles('**/noxfile.py') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-${{ hashFiles('**/pyproject.toml') }}-
+          ${{ runner.os }}-pip-
+
+    - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
         pip install nox
         pip install -e .[dev]
-    
+
     - name: Run tests with nox
       run: |
         nox -s tests
-    
+
     - name: Run linting
       run: |
         nox -s lint

@@ -31,8 +31,9 @@ jobs:
       run: |
         curl -LsSf https://astral.sh/uv/install.sh | sh
         uv venv .venv
-        .venv/bin/uv pip install -e .[dev]
-        .venv/bin/python -m pytest tests/
+        source .venv/bin/activate
+        uv pip install -e .[dev]
+        python -m pytest tests/
 
     - name: Run tests with nox
       run: |

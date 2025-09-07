@@ -36,6 +36,10 @@ dev = [
     "hypothesis>=6.92.1",
     "hypothesmith>=0.3.1",
     "black",
+    "pytest",
+    "pytest-trio",
+    "coverage[toml]",
+    "pygments",
 ]
 
 [tool.setuptools.packages.find]

@@ -17,7 +17,7 @@ CRASHER = b'namespace{\n    inline namespace __1{\n        template<class>struct
 
 
 @pytest.mark.parametrize("transformation", TRANSFORMATIONS)
-@pytest.mark.parametrize("source", [BAD_HELLO, CRASHER])
+@pytest.mark.parametrize("source", [BAD_HELLO, CRASHER], ids=["BAD_HELLO", "CRASHER"])
 async def test_can_apply_transformations(transformation, source):
     cd_exec = find_clang_delta()
     assert os.path.exists(cd_exec)

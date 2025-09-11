@@ -91,40 +91,12 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
         self.__current_patch = self.__patches.empty
         self.__initial_test_case = problem.current_test_case
 
-    async def try_apply_patch(self, patch: PatchType) -> bool:
-        initial_patch = self.__current_patch
+    async def __possibly_become_merge_master(self):
         try:
-            combined_patch = self.__patches.combine(initial_patch, patch)
-        except Conflict:
+            self.__merge_lock.acquire_nowait()
+        except trio.WouldBlock:
             return False
-        if combined_patch == self.__current_patch:
-            return True
-        with_patch_applied = self.__patches.apply(
-            combined_patch, self.__initial_test_case
-        )
-        if with_patch_applied == self.__problem.current_test_case:
-            return True
-        if not await self.__problem.is_interesting(with_patch_applied):
-            return False
-        send_merge_result, receive_merge_result = trio.open_memory_channel(1)
-
-        sort_key = (self.__tick, self.__problem.sort_key(with_patch_applied))
-        self.__tick += 1
-
-        self.__merge_queue.append((sort_key, patch, send_merge_result))
-
-        async with self.__merge_lock:
-            if (
-                self.__current_patch == initial_patch
-                and len(self.__merge_queue) == 1
-                and self.__merge_queue[0][1] == patch
-                and self.__problem.sort_key(with_patch_applied)
-                <= self.__problem.sort_key(self.__problem.current_test_case)
-            ):
-                self.__current_patch = combined_patch
-                self.__merge_queue.clear()
-                return True
-
+        try:
             while self.__merge_queue:
                 base_patch = self.__current_patch
                 to_merge = len(self.__merge_queue)
@@ -163,10 +135,56 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                     del self.__merge_queue[: merged + 1]
                 else:
                     del self.__merge_queue[:to_merge]
+        finally:
+            self.__merge_lock.release()
 
-        # This should always have been populated during the previous merge,
-        # either by us or someone else merging.
-        return receive_merge_result.receive_nowait()
+        return True
+
+    async def try_apply_patch(self, patch: PatchType) -> bool:
+        initial_patch = self.__current_patch
+        try:
+            combined_patch = self.__patches.combine(initial_patch, patch)
+        except Conflict:
+            return False
+        if combined_patch == self.__current_patch:
+            return True
+        with_patch_applied = self.__patches.apply(
+            combined_patch, self.__initial_test_case
+        )
+        if with_patch_applied == self.__problem.current_test_case:
+            return True
+        if not await self.__problem.is_interesting(with_patch_applied):
+            return False
+        send_merge_result, receive_merge_result = trio.open_memory_channel(1)
+
+        sort_key = (self.__tick, self.__problem.sort_key(with_patch_applied))
+        self.__tick += 1
+
+        # If there is no merge currently going on and nothing has changed under
+        # us, we apply a fast path where we just update the patch immediately.
+        if not self.__merge_lock.locked() and (
+            self.__current_patch == initial_patch
+            and len(self.__merge_queue) == 1
+            and self.__merge_queue[0][1] == patch
+            and self.__problem.sort_key(with_patch_applied)
+            <= self.__problem.sort_key(self.__problem.current_test_case)
+        ):
+            self.__current_patch = combined_patch
+            return True
+
+        self.__merge_queue.append((sort_key, patch, send_merge_result))
+
+        # If nobody else is merging the queue, that's our job now. This will
+        # run until the queue is fully cleared, including the job we just
+        # put on it.
+        if await self.__possibly_become_merge_master():
+            # This should always have been populated during the merge step we just
+            # performed, so we use a nowait here to ensure it doesn't hang on a
+            # bug.
+            return receive_merge_result.receive_nowait()
+        else:
+            # Wait to clear to merge queue.
+            return await receive_merge_result.receive()
 
 
 class Direction(Enum):

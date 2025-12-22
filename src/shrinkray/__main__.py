@@ -1281,5 +1281,12 @@ def main(
         raise eg.exceptions[0]
 
 
+def worker_main() -> None:
+    """Entry point for the worker subprocess."""
+    from shrinkray.subprocess.worker import main as worker_entry
+
+    worker_entry()
+
+
 if __name__ == "__main__":  # pragma: no cover
     main(prog_name="shrinkray")

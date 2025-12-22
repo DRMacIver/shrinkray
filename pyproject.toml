@@ -30,6 +30,7 @@ Changelog = "https://github.com/DRMacIver/shrinkray/releases"
 
 [project.scripts]
 shrinkray = "shrinkray.__main__:main"
+shrinkray-worker = "shrinkray.__main__:worker_main"
 
 [project.optional-dependencies]
 dev = [

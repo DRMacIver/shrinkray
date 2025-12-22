@@ -509,9 +509,10 @@ class UnitPropagator:
             if not neg_units.isdisjoint(clause):
                 clause = tuple(sorted(set(clause) - neg_units))
             results.add(clause)
-        return [[literal] for literal in self.units] + sorted(
-            results, key=lambda c: (len(c), list(map(abs, c)), c)
-        )
+        return [[literal] for literal in self.units] + [
+            list(c)
+            for c in sorted(results, key=lambda c: (len(c), list(map(abs, c)), c))
+        ]
 
 
 async def unitize(problem: ReductionProblem[SAT]):
@@ -531,7 +532,11 @@ async def unitize(problem: ReductionProblem[SAT]):
 
 
 async def unit_propagate(problem: ReductionProblem[SAT]):
-    propagated = UnitPropagator(problem.current_test_case).propagated_clauses()
+    try:
+        propagated = UnitPropagator(problem.current_test_case).propagated_clauses()
+    except Inconsistent:
+        # Clauses are unsatisfiable, nothing to propagate
+        return
     if not await problem.is_interesting([c for c in propagated if len(c) > 1]):
         await problem.is_interesting(propagated)
 

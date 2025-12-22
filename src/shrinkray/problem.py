@@ -14,14 +14,12 @@ the details of caching, parallelism, and state management.
 import hashlib
 import time
 from abc import ABC, abstractmethod, abstractproperty
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
-    Awaitable,
-    Callable,
     Generic,
-    Optional,
     TypeVar,
     cast,
 )
@@ -32,6 +30,7 @@ from attrs import define
 from humanize import naturalsize, precisedelta
 
 from shrinkray.work import WorkContext
+
 
 if TYPE_CHECKING:
     from shrinkray.passes.definitions import Format
@@ -307,7 +306,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         sort_key: Callable[[T], Any] = default_sort_key,
         size: Callable[[T], int] = default_size,
         display: Callable[[T], str] = default_display,
-        stats: Optional[ReductionStats] = None,
+        stats: ReductionStats | None = None,
         cache_key: Callable[[Any], str] = default_cache_key,
     ):
         super().__init__(work=work)
@@ -410,8 +409,8 @@ class View(ReductionProblem[T], Generic[S, T]):
         problem: ReductionProblem[S],
         parse: Callable[[S], T],
         dump: Callable[[T], S],
-        work: Optional[WorkContext] = None,
-        sort_key: Optional[Callable[[T], Any]] = None,
+        work: WorkContext | None = None,
+        sort_key: Callable[[T], Any] | None = None,
     ):
         super().__init__(work=work or problem.work)
         self.__problem = problem

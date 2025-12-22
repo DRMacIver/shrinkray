@@ -6,6 +6,7 @@ from shrinkray.problem import (
     BasicReductionProblem,
     InvalidInitialExample,
     ReductionStats,
+    View,
     default_cache_key,
     default_display,
     default_size,
@@ -173,7 +174,9 @@ def test_reduction_stats_display_with_reductions():
     stats.calls = 10
     stats.interesting_calls = 5
     stats.wasted_interesting_calls = 1
-    stats.start_time = time.time() - 10  # Set start time 10 seconds ago to avoid division by zero
+    stats.start_time = (
+        time.time() - 10
+    )  # Set start time 10 seconds ago to avoid division by zero
     display = stats.display_stats()
     assert "50.00% reduction" in display
 
@@ -413,11 +416,9 @@ def test_basic_problem_display():
 # =============================================================================
 
 
-from shrinkray.problem import View
-
-
 def test_view_current_test_case():
     """Test View parses underlying test case."""
+
     async def is_interesting(x):
         return True
 
@@ -437,6 +438,7 @@ def test_view_current_test_case():
 
 async def test_view_is_interesting_delegates():
     """Test View delegates is_interesting to underlying problem."""
+
     async def is_interesting(x):
         return x == b"hello"
 
@@ -486,6 +488,7 @@ async def test_view_is_interesting_handles_dump_error():
 
 def test_view_stats_delegates():
     """Test View returns underlying problem's stats."""
+
     async def is_interesting(x):
         return True
 
@@ -506,6 +509,7 @@ def test_view_stats_delegates():
 
 def test_view_size_delegates():
     """Test View delegates size to underlying problem."""
+
     async def is_interesting(x):
         return True
 
@@ -526,6 +530,7 @@ def test_view_size_delegates():
 
 def test_view_sort_key_with_custom():
     """Test View uses custom sort_key when provided."""
+
     async def is_interesting(x):
         return True
 
@@ -548,6 +553,7 @@ def test_view_sort_key_with_custom():
 
 def test_view_sort_key_without_custom():
     """Test View delegates sort_key to underlying problem when not provided."""
+
     async def is_interesting(x):
         return True
 
@@ -569,6 +575,7 @@ def test_view_sort_key_without_custom():
 
 def test_view_display():
     """Test View uses default_display for display."""
+
     async def is_interesting(x):
         return True
 
@@ -636,6 +643,7 @@ async def test_view_caches_parsed_value():
 
 async def test_view_only_accepts_smaller_parse_results():
     """Test View only updates cached value if new value is smaller."""
+
     async def is_interesting(x):
         return True
 

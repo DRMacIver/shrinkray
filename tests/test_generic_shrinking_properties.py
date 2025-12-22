@@ -3,14 +3,14 @@ from random import Random
 import hypothesmith
 import pytest
 import trio
-from hypothesis import Phase, assume, example, given, note, settings, strategies as st
+from hypothesis import Phase, assume, example, given, note, settings
+from hypothesis import strategies as st
 from hypothesis.errors import Frozen, StopTest
 
 from shrinkray.passes.python import is_python
 from shrinkray.problem import BasicReductionProblem, default_sort_key
 from shrinkray.reducer import ShrinkRay
 from shrinkray.work import Volume, WorkContext
-
 from tests.helpers import assert_no_blockers, assert_reduces_to, direct_reductions
 
 
@@ -193,7 +193,9 @@ def test_no_blockers():
     )
 
 
-@pytest.mark.skip(reason="Known issue: reducer doesn't consistently find same reductions")
+@pytest.mark.skip(
+    reason="Known issue: reducer doesn't consistently find same reductions"
+)
 @common_settings
 @given(st.binary(), st.data())
 def test_always_reduces_to_each_direct_reduction(origin, data):

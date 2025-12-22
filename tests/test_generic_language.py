@@ -3,7 +3,6 @@ from shrinkray.passes.genericlanguages import (
     cut_comment_like_things,
     reduce_integer_literals,
 )
-
 from tests.helpers import reduce_with
 
 

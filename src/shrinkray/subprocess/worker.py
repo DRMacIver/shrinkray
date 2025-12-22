@@ -89,15 +89,14 @@ class ReducerWorker:
         """Initialize and start the reduction."""
         # Import here to avoid circular imports
         from shrinkray.__main__ import (
-            ShrinkRayStateSingleFile,
-            ShrinkRayDirectoryState,
-            InputType,
-            ClangDelta,
-            find_clang_delta,
             C_FILE_EXTENSIONS,
+            ClangDelta,
+            InputType,
+            ShrinkRayDirectoryState,
+            ShrinkRayStateSingleFile,
+            find_clang_delta,
         )
         from shrinkray.work import Volume
-        import shutil
 
         filename = params["file_path"]
         test = params["test"]
@@ -192,14 +191,16 @@ class ReducerWorker:
             return "\n".join(lines[:50]), False
 
         # Handle single file mode
-        hex_mode = is_binary_string(test_case[:1024] if len(test_case) > 1024 else test_case)
+        hex_mode = is_binary_string(
+            test_case[:1024] if len(test_case) > 1024 else test_case
+        )
 
         if hex_mode:
             # Show hex dump for binary files
             preview_bytes = test_case[:512]
             lines = []
             for i in range(0, len(preview_bytes), 16):
-                chunk = preview_bytes[i:i+16]
+                chunk = preview_bytes[i : i + 16]
                 hex_part = " ".join(f"{b:02x}" for b in chunk)
                 ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
                 lines.append(f"{i:08x}  {hex_part:<48}  {ascii_part}")
@@ -238,7 +239,11 @@ class ReducerWorker:
             effective_parallelism = 0.0
             if self._parallel_samples > 0:
                 average_parallelism = self._parallel_total / self._parallel_samples
-                wasteage = stats.wasted_interesting_calls / stats.calls if stats.calls > 0 else 0.0
+                wasteage = (
+                    stats.wasted_interesting_calls / stats.calls
+                    if stats.calls > 0
+                    else 0.0
+                )
                 effective_parallelism = average_parallelism * (1.0 - wasteage)
 
             update = ProgressUpdate(

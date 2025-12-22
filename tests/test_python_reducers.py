@@ -1,14 +1,16 @@
+import os
+from glob import glob
+
+import pytest
+
 from shrinkray.passes.python import (
+    PYTHON_PASSES,
     lift_indented_constructs,
     replace_bodies_with_ellipsis,
     replace_statements_with_pass,
     strip_annotations,
-    PYTHON_PASSES,
 )
-import os
 from tests.helpers import reduce, reduce_with
-from glob import glob
-import pytest
 
 
 def test_can_replace_blocks_with_body() -> None:

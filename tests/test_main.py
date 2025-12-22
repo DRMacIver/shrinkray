@@ -1,14 +1,15 @@
 import os
+import pathlib
 import subprocess
 import sys
-import pathlib
-import pytest
 
-import trio
 import black
-from shrinkray.__main__ import interrupt_wait_and_kill, main
-from click.testing import CliRunner
+import pytest
+import trio
 from attrs import define
+from click.testing import CliRunner
+
+from shrinkray.__main__ import interrupt_wait_and_kill, main
 
 
 def format(s):
@@ -134,7 +135,7 @@ if sys.argv[1] != {repr(str(target))}:
             check=True,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            universal_newlines=True,
+            text=True,
         )
 
     assert "your script depends" in excinfo.value.stderr
@@ -163,7 +164,7 @@ sys.exit(1)
             check=True,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            universal_newlines=True,
+            text=True,
         )
 
     assert "Hello world" in excinfo.value.stdout

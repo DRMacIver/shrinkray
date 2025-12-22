@@ -20,7 +20,7 @@ Formats:
 """
 
 from collections import defaultdict, deque
-from typing import Sequence
+from collections.abc import Sequence
 
 from attrs import define
 
@@ -31,6 +31,7 @@ from shrinkray.passes.patching import Cuts, Patches, apply_patches
 @define(frozen=True)
 class Encoding(Format[bytes, str]):
     """Format that decodes/encodes bytes using a character encoding."""
+
     encoding: str
 
     def __repr__(self) -> str:

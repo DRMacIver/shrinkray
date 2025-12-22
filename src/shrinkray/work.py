@@ -12,11 +12,12 @@ Key concepts:
 """
 
 import heapq
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from enum import IntEnum
 from itertools import islice
 from random import Random
-from typing import Awaitable, Callable, Optional, Sequence, TypeVar
+from typing import TypeVar
 
 import trio
 
@@ -58,7 +59,7 @@ class WorkContext:
 
     def __init__(
         self,
-        random: Optional[Random] = None,
+        random: Random | None = None,
         parallelism: int = 1,
         volume: Volume = Volume.normal,
     ):

@@ -157,11 +157,9 @@ class SubprocessClient:
         """Yield progress updates as they arrive."""
         while not self._completed:
             try:
-                update = await asyncio.wait_for(
-                    self._progress_queue.get(), timeout=0.5
-                )
+                update = await asyncio.wait_for(self._progress_queue.get(), timeout=0.5)
                 yield update
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     @property
@@ -189,7 +187,7 @@ class SubprocessClient:
                 try:
                     self._process.terminate()
                     await asyncio.wait_for(self._process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     self._process.kill()
                     await self._process.wait()
                 except ProcessLookupError:

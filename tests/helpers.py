@@ -1,5 +1,6 @@
 import random
-from typing import Callable, Iterable, TypeVar
+from collections.abc import Callable, Iterable
+from typing import TypeVar
 
 import trio
 
@@ -8,6 +9,7 @@ from shrinkray.passes.python import is_python
 from shrinkray.problem import BasicReductionProblem, default_sort_key
 from shrinkray.reducer import BasicReducer, ShrinkRay
 from shrinkray.work import WorkContext
+
 
 T = TypeVar("T")
 

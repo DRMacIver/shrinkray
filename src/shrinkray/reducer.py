@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
-from typing import Any, Generic, Iterable, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 import attrs
 import trio
@@ -50,6 +50,7 @@ from shrinkray.passes.python import PYTHON_PASSES, is_python
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
 from shrinkray.problem import ReductionProblem, shortlex
+
 
 S = TypeVar("S")
 T = TypeVar("T")
@@ -114,10 +115,10 @@ class RestartPass(Exception):
 
 @define
 class ShrinkRay(Reducer[bytes]):
-    clang_delta: Optional[ClangDelta] = None
+    clang_delta: ClangDelta | None = None
 
-    current_reduction_pass: Optional[ReductionPass[bytes]] = None
-    current_pump: Optional[ReductionPump[bytes]] = None
+    current_reduction_pass: ReductionPass[bytes] | None = None
+    current_pump: ReductionPump[bytes] | None = None
 
     unlocked_ok_passes: bool = False
 
@@ -278,10 +279,7 @@ class ShrinkRay(Reducer[bytes]):
     async def run_some_passes(self) -> None:
         prev = self.target.current_test_case
         await self.run_great_passes()
-        if (
-            prev != self.target.current_test_case
-            and not self.unlocked_ok_passes
-        ):
+        if prev != self.target.current_test_case and not self.unlocked_ok_passes:
             return
         self.unlocked_ok_passes = True
         await self.run_ok_passes()
@@ -419,7 +417,7 @@ class KeyProblem(ReductionProblem[bytes]):
 
 @define
 class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
-    clang_delta: Optional[ClangDelta] = None
+    clang_delta: ClangDelta | None = None
 
     async def run(self):
         prev = None
@@ -431,9 +429,7 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     async def delete_keys(self):
         target = self.target.current_test_case
         keys = list(target.keys())
-        keys.sort(
-            key=lambda k: (shortlex(target[k]), shortlex(k)), reverse=True
-        )
+        keys.sort(key=lambda k: (shortlex(target[k]), shortlex(k)), reverse=True)
         for k in keys:
             attempt = self.target.current_test_case.copy()
             del attempt[k]

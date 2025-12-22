@@ -26,7 +26,7 @@ def test_is_json_valid_object():
 
 
 def test_is_json_valid_array():
-    assert is_json(b'[1, 2, 3]')
+    assert is_json(b"[1, 2, 3]")
 
 
 def test_is_json_valid_string():
@@ -34,20 +34,20 @@ def test_is_json_valid_string():
 
 
 def test_is_json_valid_number():
-    assert is_json(b'42')
+    assert is_json(b"42")
 
 
 def test_is_json_valid_boolean():
-    assert is_json(b'true')
-    assert is_json(b'false')
+    assert is_json(b"true")
+    assert is_json(b"false")
 
 
 def test_is_json_valid_null():
-    assert is_json(b'null')
+    assert is_json(b"null")
 
 
 def test_is_json_invalid():
-    assert not is_json(b'not json')
+    assert not is_json(b"not json")
 
 
 def test_is_json_invalid_incomplete():
@@ -55,7 +55,7 @@ def test_is_json_invalid_incomplete():
 
 
 def test_is_json_empty():
-    assert not is_json(b'')
+    assert not is_json(b"")
 
 
 # =============================================================================
@@ -77,7 +77,7 @@ def test_json_format_parse_object():
 
 
 def test_json_format_parse_array():
-    result = JSON.parse(b'[1, 2, 3]')
+    result = JSON.parse(b"[1, 2, 3]")
     assert result == [1, 2, 3]
 
 
@@ -88,12 +88,12 @@ def test_json_format_parse_nested():
 
 def test_json_format_parse_invalid():
     with pytest.raises(ParseError):
-        JSON.parse(b'not json')
+        JSON.parse(b"not json")
 
 
 def test_json_format_parse_invalid_unicode():
     with pytest.raises(ParseError):
-        JSON.parse(b'\xff\xfe')
+        JSON.parse(b"\xff\xfe")
 
 
 def test_json_format_dumps_object():

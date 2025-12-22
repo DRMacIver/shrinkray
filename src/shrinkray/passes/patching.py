@@ -1,11 +1,13 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from random import Random
-from typing import Any, Callable, Generic, Iterable, Sequence, TypeVar, cast
+from typing import Any, Generic, TypeVar, cast
 
 import trio
 
 from shrinkray.problem import ReductionProblem
+
 
 Seq = TypeVar("Seq", bound=Sequence[Any])
 T = TypeVar("T")

@@ -4,12 +4,11 @@ import asyncio
 import os
 import tempfile
 from collections.abc import AsyncIterator
-from typing import Any
 
 import pytest
 
 from shrinkray.subprocess.protocol import ProgressUpdate, Response
-from shrinkray.tui import ContentPreview, ReductionClientProtocol, ShrinkRayApp, StatsDisplay
+from shrinkray.tui import ContentPreview, ShrinkRayApp, StatsDisplay
 
 
 class FakeReductionClient:
@@ -191,6 +190,7 @@ class TestContentPreview:
     def test_content_diff_shown_for_large_files(self):
         """Test that diff is shown when content changes in large files."""
         import time
+
         widget = ContentPreview()
 
         # Set up initial large content
@@ -212,7 +212,6 @@ class TestContentPreview:
 
     def test_content_update_throttled(self):
         """Test that content updates are throttled."""
-        import time
         widget = ContentPreview()
 
         # First update should go through
@@ -296,7 +295,7 @@ class TestShrinkRayAppWithFakeClient:
                 client=fake_client,
             )
 
-            async with app.run_test() as pilot:
+            async with app.run_test():
                 # Check that key widgets exist
                 assert app.query_one("#status-label")
                 assert app.query_one("#stats-display")
@@ -314,7 +313,7 @@ class TestShrinkRayAppWithFakeClient:
                 client=fake_client,
             )
 
-            async with app.run_test() as pilot:
+            async with app.run_test():
                 label = app.query_one("#status-label")
                 # Check that the label widget exists and has content
                 assert label is not None
@@ -338,8 +337,6 @@ class TestShrinkRayAppWithFakeClient:
                 await asyncio.sleep(0.1)
                 await pilot.pause()
 
-                # Check that stats display was updated
-                stats = app.query_one("#stats-display", StatsDisplay)
                 # Should have received at least one update
                 assert fake_client._started
 
@@ -474,7 +471,7 @@ class TestShrinkRayAppWithFakeClient:
                 client=fake_client,
             )
 
-            async with app.run_test() as pilot:
+            async with app.run_test():
                 assert app.title == "Shrink Ray"
                 assert app.sub_title == "/tmp/my_test_file.txt"
 
@@ -525,7 +522,7 @@ class TestShrinkRayAppWithFakeClient:
                 client=fake_client,
             )
 
-            async with app.run_test() as pilot:
+            async with app.run_test():
                 assert app._parallelism == 4
                 assert app._timeout == 5.0
                 assert app._seed == 42
@@ -550,9 +547,7 @@ class TestAppWithoutClient:
             mock_client.close = AsyncMock()
             mock_client.is_completed = True
 
-            with patch(
-                "shrinkray.tui.SubprocessClient", return_value=mock_client
-            ):
+            with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
                 app = ShrinkRayApp(
                     file_path="/tmp/test.txt",
                     test=["./test.sh"],
@@ -579,9 +574,7 @@ class TestAppWithoutClient:
             mock_client.close = AsyncMock()
             mock_client.is_completed = False
 
-            with patch(
-                "shrinkray.tui.SubprocessClient", return_value=mock_client
-            ):
+            with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
                 app = ShrinkRayApp(
                     file_path="/tmp/test.txt",
                     test=["./test.sh"],
@@ -604,9 +597,7 @@ class TestEndToEnd:
     @pytest.fixture
     def temp_test_file(self):
         """Create a temporary test file for reduction."""
-        with tempfile.NamedTemporaryFile(
-            mode="wb", suffix=".txt", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".txt", delete=False) as f:
             f.write(b"Hello, World! This is some test content to reduce.")
             temp_path = f.name
         yield temp_path
@@ -724,6 +715,7 @@ class TestThemeDetection:
     def test_detect_macos_terminal_dark(self, monkeypatch):
         """Test macOS Terminal.app dark mode detection."""
         from unittest.mock import MagicMock, patch
+
         from shrinkray.tui import detect_terminal_theme
 
         monkeypatch.delenv("COLORFGBG", raising=False)
@@ -740,6 +732,7 @@ class TestThemeDetection:
     def test_detect_macos_terminal_light(self, monkeypatch):
         """Test macOS Terminal.app light mode detection."""
         from unittest.mock import MagicMock, patch
+
         from shrinkray.tui import detect_terminal_theme
 
         monkeypatch.delenv("COLORFGBG", raising=False)
@@ -756,6 +749,7 @@ class TestThemeDetection:
     def test_detect_macos_iterm_dark(self, monkeypatch):
         """Test iTerm.app dark mode detection."""
         from unittest.mock import MagicMock, patch
+
         from shrinkray.tui import detect_terminal_theme
 
         monkeypatch.delenv("COLORFGBG", raising=False)
@@ -772,6 +766,7 @@ class TestThemeDetection:
     def test_detect_macos_subprocess_exception(self, monkeypatch):
         """Test macOS detection handles subprocess exceptions."""
         from unittest.mock import patch
+
         from shrinkray.tui import detect_terminal_theme
 
         monkeypatch.delenv("COLORFGBG", raising=False)
@@ -809,7 +804,7 @@ class TestThemeSettings:
                 theme="dark",
             )
 
-            async with app.run_test() as pilot:
+            async with app.run_test():
                 assert app.theme == "shrinkray-dark"
 
         run_async(run_test())
@@ -826,7 +821,7 @@ class TestThemeSettings:
                 theme="light",
             )
 
-            async with app.run_test() as pilot:
+            async with app.run_test():
                 assert app.theme == "shrinkray-light"
 
         run_async(run_test())
@@ -846,7 +841,7 @@ class TestThemeSettings:
                 theme="auto",
             )
 
-            async with app.run_test() as pilot:
+            async with app.run_test():
                 assert app.theme == "shrinkray-light"
 
         run_async(run_test())

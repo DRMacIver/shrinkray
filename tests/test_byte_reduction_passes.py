@@ -2,7 +2,8 @@ import ast
 from collections import Counter
 
 import pytest
-from hypothesis import assume, example, given, strategies as st
+from hypothesis import assume, example, given
+from hypothesis import strategies as st
 
 from shrinkray.passes.bytes import (
     WHITESPACE,
@@ -18,7 +19,6 @@ from shrinkray.passes.patching import apply_patches
 from shrinkray.passes.python import is_python
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.work import WorkContext
-
 from tests.helpers import assert_reduces_to, reduce_with
 
 

@@ -13,10 +13,12 @@ JSON arrays, or any other sequence-like type.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from functools import wraps
-from typing import Awaitable, Callable, Generic, TypeVar
+from typing import Generic, TypeVar
 
 from shrinkray.problem import ReductionProblem
+
 
 S = TypeVar("S")
 T = TypeVar("T")

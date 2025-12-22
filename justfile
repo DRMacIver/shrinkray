@@ -17,12 +17,13 @@ test-quick *args:
 
 # Lint and type-check
 lint:
-    uv run flake8 src tests --ignore=C901,E203,E501,E7,W503,B007,B014,B023,B904,B950
+    uv run ruff check src tests
     uv run basedpyright src tests
 
-# Format code with shed
+# Format code with ruff
 format:
-    uv run shed --refactor src/ tests/
+    uv run ruff format src tests
+    uv run ruff check --fix src tests
 
 # Check dependencies for security issues
 safety:

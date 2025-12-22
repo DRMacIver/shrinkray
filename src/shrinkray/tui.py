@@ -8,14 +8,14 @@ from typing import Literal, Protocol
 import humanize
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical, VerticalScroll
+from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
-from textual.widgets import Footer, Header, Label, Static
-
 from textual.theme import Theme
+from textual.widgets import Footer, Header, Label, Static
 
 from shrinkray.subprocess.client import SubprocessClient
 from shrinkray.subprocess.protocol import ProgressUpdate, Response
+
 
 ThemeMode = Literal["auto", "dark", "light"]
 
@@ -67,6 +67,7 @@ def detect_terminal_theme() -> bool:
         if not apple_interface:
             try:
                 import subprocess
+
                 result = subprocess.run(
                     ["defaults", "read", "-g", "AppleInterfaceStyle"],
                     capture_output=True,
@@ -87,6 +88,7 @@ class ReductionClientProtocol(Protocol):
     """Protocol for reduction client - allows mocking for tests."""
 
     async def start(self) -> None: ...
+
     async def start_reduction(
         self,
         file_path: str,
@@ -159,7 +161,9 @@ class StatsDisplay(Static):
                 f"({reduction_pct:.2f}% reduction, {humanize.naturalsize(reduction_rate)} / second)"
             )
         else:
-            lines.append(f"Current test case size: {humanize.naturalsize(self.current_size)}")
+            lines.append(
+                f"Current test case size: {humanize.naturalsize(self.current_size)}"
+            )
 
         # Runtime
         if self.runtime > 0:
@@ -240,7 +244,11 @@ class ContentPreview(Static):
         """Get the number of lines available for display based on container size."""
         try:
             # Try to get the parent container's size (the VerticalScroll viewport)
-            if self.parent and hasattr(self.parent, 'size') and self.parent.size.height > 0:
+            if (
+                self.parent
+                and hasattr(self.parent, "size")
+                and self.parent.size.height > 0
+            ):
                 return max(10, self.parent.size.height - 2)
             # Fall back to app screen size
             if self.app and self.app.size.height > 0:
@@ -267,8 +275,12 @@ class ContentPreview(Static):
             return self.content
 
         # For larger files, show diff if we have previous displayed content
-        if self._last_displayed_content and self._last_displayed_content != self.content:
+        if (
+            self._last_displayed_content
+            and self._last_displayed_content != self.content
+        ):
             from difflib import unified_diff
+
             prev_lines = self._last_displayed_content.split("\n")
             curr_lines = self.content.split("\n")
             diff = list(unified_diff(prev_lines, curr_lines, lineterm=""))
@@ -277,7 +289,10 @@ class ContentPreview(Static):
                 return "\n".join(diff[:available_lines])
 
         # No diff available, show truncated content
-        return "\n".join(lines[:available_lines]) + f"\n\n... ({len(lines) - available_lines} more lines)"
+        return (
+            "\n".join(lines[:available_lines])
+            + f"\n\n... ({len(lines) - available_lines} more lines)"
+        )
 
 
 class ShrinkRayApp(App[None]):
@@ -364,7 +379,9 @@ class ShrinkRayApp(App[None]):
         elif self._theme == "light":
             self.theme = "shrinkray-light"
         else:  # auto
-            self.theme = "shrinkray-dark" if detect_terminal_theme() else "shrinkray-light"
+            self.theme = (
+                "shrinkray-dark" if detect_terminal_theme() else "shrinkray-light"
+            )
 
         self.title = "Shrink Ray"
         self.sub_title = self._file_path

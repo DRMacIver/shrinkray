@@ -3,7 +3,7 @@
 import pytest
 
 from shrinkray.problem import BasicReductionProblem
-from shrinkray.reducer import BasicReducer, Reducer, RestartPass, UpdateKeys, KeyProblem
+from shrinkray.reducer import BasicReducer, KeyProblem, Reducer, RestartPass, UpdateKeys
 from shrinkray.work import WorkContext
 
 
@@ -14,6 +14,7 @@ from shrinkray.work import WorkContext
 
 def test_reducer_backtrack_context():
     """Test Reducer.backtrack temporarily changes target."""
+
     async def is_interesting(x):
         return True
 
@@ -38,6 +39,7 @@ def test_reducer_backtrack_context():
 
 def test_reducer_status_default():
     """Test Reducer.status default is empty string."""
+
     async def is_interesting(x):
         return True
 
@@ -137,7 +139,9 @@ async def test_basic_reducer_loops_on_progress():
     # Should have reduced from 5 chars down to 1
     assert problem.current_test_case == b"x"
     # Pass should have been called multiple times as progress was made
-    assert pass_call_count[0] >= 4  # At least: 5->4->3->2->1, plus final no-progress run
+    assert (
+        pass_call_count[0] >= 4
+    )  # At least: 5->4->3->2->1, plus final no-progress run
 
 
 async def test_basic_reducer_status_updates():
@@ -202,6 +206,7 @@ async def test_basic_reducer_with_pumps():
 
 async def test_basic_reducer_pump_backtrack():
     """Test BasicReducer properly backtracks after pump."""
+
     async def is_interesting(x):
         return True
 

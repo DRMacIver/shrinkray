@@ -2,15 +2,17 @@ import operator
 import os
 import subprocess
 import tempfile
+from collections.abc import Callable
 from shutil import which
-from typing import Callable
 
 import pytest
-from hypothesis import assume, example, given, settings, strategies as st
+from hypothesis import assume, example, given, settings
+from hypothesis import strategies as st
 
 from shrinkray.passes.sat import SAT, SAT_PASSES, DimacsCNF
 
 from .helpers import reduce_with
+
 
 HAS_MINISAT = which("minisat") is not None
 pytestmark = pytest.mark.skipif(not HAS_MINISAT, reason="not installed")

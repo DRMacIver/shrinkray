@@ -53,7 +53,9 @@ async def test_worker_map_empty(p: int) -> None:
         pytest.param(0, id="zero"),  # Edge case: f(0) assumed true, f(1) false
         pytest.param(2, id="small"),  # Small value within linear scan (< 4)
         pytest.param(4, id="boundary"),  # Boundary where linear scan ends
-        pytest.param(5, id="just_past_boundary"),  # First value requiring exponential probe
+        pytest.param(
+            5, id="just_past_boundary"
+        ),  # First value requiring exponential probe
         pytest.param(64, id="power_of_two"),  # Power of 2, tests binary search
         pytest.param(100, id="large"),  # Larger value requiring binary search
     ],

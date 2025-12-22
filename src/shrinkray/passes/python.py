@@ -1,4 +1,5 @@
-from typing import Any, AnyStr, Callable
+from collections.abc import Callable
+from typing import Any, AnyStr
 
 import libcst
 import libcst.matchers as m

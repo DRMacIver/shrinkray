@@ -1,6 +1,6 @@
 from collections import Counter, defaultdict
-from copy import copy, deepcopy
-from typing import Iterable
+from collections.abc import Iterable
+from copy import copy
 
 from shrinkray.passes.definitions import (
     DumpError,
@@ -11,6 +11,7 @@ from shrinkray.passes.definitions import (
 from shrinkray.passes.patching import Conflict, SetPatches, apply_patches
 from shrinkray.passes.sequences import delete_elements
 from shrinkray.problem import ReductionProblem
+
 
 Clause = list[int]
 SAT = list[Clause]
@@ -202,7 +203,7 @@ async def renumber_variables(problem: ReductionProblem[SAT]):
     await unit_propagate(problem)
 
 
-class UnionFind(object):
+class UnionFind:
     def __init__(self, initial_merges=(), key=None):
         self.table = {}
         self.key = key
@@ -312,7 +313,7 @@ class BooleanEquivalence(UnionFind):
         UnionFind.merge(self, a, b)
 
 
-class NegatingMap(object):
+class NegatingMap:
     def __init__(self):
         self.__data = {}
 
@@ -357,8 +358,6 @@ class NegatingMap(object):
 
 
 async def merge_literals(problem: ReductionProblem[SAT]):
-    variables = {abs(lit) for clause in problem.current_test_case for lit in clause}
-
     def apply_merges(terms: frozenset[tuple[int, int]], sat: SAT) -> SAT:
         uf = BooleanEquivalence()
         try:
@@ -545,12 +544,6 @@ async def delete_units(problem: ReductionProblem[SAT]):
     await problem.is_interesting([c for c in problem.current_test_case if len(c) > 1])
 
 
-async def flip_signs(problem: ReductionProblem[SAT]):
-    await problem.is_interesting(
-        [[-lit for lit in clause] for clause in problem.current_test_case]
-    )
-
-
 async def force_literals(problem: ReductionProblem[SAT]):
     literals = literals_in(problem.current_test_case)
     for lit in literals:
@@ -599,16 +592,15 @@ async def combine_clauses(problem: ReductionProblem[SAT]):
 
 
 SAT_PASSES: list[ReductionPass[SAT]] = [
-    combine_clauses,
+    sort_clauses,
     force_literals,
-    flip_signs,
-    renumber_variables,
     pass_to_component,
     unit_propagate,
     delete_literals,
     delete_single_terms,
-    sort_clauses,
     delete_elements,
     flip_literal_signs,
+    combine_clauses,
     merge_literals,
+    renumber_variables,
 ]

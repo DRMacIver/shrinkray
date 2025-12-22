@@ -19,10 +19,12 @@ class FakeReductionClientForSnapshots:
 
     async def start_reduction(self, **kwargs):
         from shrinkray.subprocess.protocol import Response
+
         return Response(id="start", result={"status": "started"})
 
     async def cancel(self):
         from shrinkray.subprocess.protocol import Response
+
         self._completed = True
         return Response(id="cancel", result={"status": "cancelled"})
 

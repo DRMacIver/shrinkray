@@ -1016,7 +1016,6 @@ def test_format_is_valid_false():
 
 async def test_compose_with_changing_format():
     """Test compose handles cases where format becomes invalid during reduction."""
-    import trio
     from shrinkray.passes.sequences import delete_elements
     from shrinkray.problem import BasicReductionProblem
     from shrinkray.work import WorkContext

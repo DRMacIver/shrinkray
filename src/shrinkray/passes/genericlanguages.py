@@ -3,9 +3,10 @@ Module of reduction passes designed for "things that look like programming langu
 """
 
 import re
+from collections.abc import Callable
 from functools import wraps
 from string import ascii_lowercase, ascii_uppercase
-from typing import AnyStr, Callable
+from typing import AnyStr
 
 import trio
 from attr import define

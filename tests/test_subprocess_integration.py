@@ -1,12 +1,7 @@
 """Integration tests for subprocess communication."""
 
-import asyncio
-import os
 import subprocess
 import sys
-import tempfile
-
-import pytest
 
 
 class TestWorkerModule:
@@ -39,7 +34,10 @@ class TestWorkerModule:
         if ready:
             response = proc.stdout.readline()
             assert b'"id":"test-1"' in response
-            assert b'"running":false' in response.lower() or b'"running": false' in response.lower()
+            assert (
+                b'"running":false' in response.lower()
+                or b'"running": false' in response.lower()
+            )
 
         # Clean up
         proc.terminate()
@@ -106,7 +104,7 @@ class TestProtocolWithWorker:
         )
 
         # Send malformed JSON
-        command = b'not valid json\n'
+        command = b"not valid json\n"
         proc.stdin.write(command)
         proc.stdin.flush()
 

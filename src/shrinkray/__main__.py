@@ -11,7 +11,6 @@ import traceback
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from datetime import timedelta
-from difflib import unified_diff
 from enum import Enum, IntEnum, auto
 from shutil import which
 from tempfile import TemporaryDirectory

@@ -43,10 +43,7 @@ dev = [
     "coverage[toml]",
     "pygments",
     "basedpyright",
-    "flake8",
-    "flake8-bugbear",
-    "flake8-trio",
-    "black",
+    "ruff",
 ]
 
 [tool.setuptools.packages.find]
@@ -64,10 +61,27 @@ source = ["shrinkray", "tests"]
 show_missing = true
 fail_under = 100
 
-[tool.isort]
-profile = "black"
-force_single_line = false
-lines_after_imports = 2
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "C4", "UP"]
+ignore = [
+    "E501",  # line too long - handled by formatter
+    "B007",  # unused loop variable
+    "B023",  # function definition in loop
+    "B904",  # raise without from - intentional in some exception handling
+    "C408",  # unnecessary dict() call - sometimes more readable
+    "UP031", # use format specifiers - % format is fine
+    "B018",  # useless expression - sometimes intentional for side effects
+    "C403",  # unnecessary list comprehension - sometimes more readable
+    "UP022", # prefer capture_output - explicit is fine
+]
+
+[tool.ruff.lint.isort]
+force-single-line = false
+lines-after-imports = 2
 
 [tool.basedpyright]
 typeCheckingMode = "strict"

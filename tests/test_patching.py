@@ -1,7 +1,8 @@
 """Unit tests for patching module."""
 
-import pytest
 from random import Random
+
+import pytest
 
 from shrinkray.passes.patching import (
     Conflict,
@@ -9,8 +10,11 @@ from shrinkray.passes.patching import (
     LazyMutableRange,
     ListPatches,
     SetPatches,
+    apply_patches,
     lazy_shuffle,
 )
+from shrinkray.problem import BasicReductionProblem
+from shrinkray.work import WorkContext
 
 
 # =============================================================================
@@ -294,13 +298,10 @@ def test_conflict_exception():
 # apply_patches async function tests
 # =============================================================================
 
-from shrinkray.passes.patching import apply_patches
-from shrinkray.problem import BasicReductionProblem
-from shrinkray.work import WorkContext
-
 
 async def test_apply_patches_all_applicable():
     """Test apply_patches when all patches can be applied."""
+
     async def is_interesting(x):
         return True
 
@@ -320,6 +321,7 @@ async def test_apply_patches_all_applicable():
 
 async def test_apply_patches_some_not_applicable():
     """Test apply_patches when some patches fail interestingness."""
+
     async def is_interesting(x):
         # Only interesting if starts with 'a'
         return len(x) > 0 and x[0:1] == b"a"
@@ -340,6 +342,7 @@ async def test_apply_patches_some_not_applicable():
 
 async def test_apply_patches_empty():
     """Test apply_patches with no patches."""
+
     async def is_interesting(x):
         return True
 
@@ -356,6 +359,7 @@ async def test_apply_patches_empty():
 
 async def test_apply_patches_all_at_once():
     """Test when all patches can be combined at once."""
+
     async def is_interesting(x):
         return True
 
@@ -389,7 +393,7 @@ async def test_apply_patches_with_parallelism():
     )
 
     cuts = Cuts()
-    patches = [[(i, i+1)] for i in range(0, 10, 2)]  # Delete every other char
+    patches = [[(i, i + 1)] for i in range(0, 10, 2)]  # Delete every other char
 
     await apply_patches(problem, cuts, patches)
     assert len(problem.current_test_case) < 10

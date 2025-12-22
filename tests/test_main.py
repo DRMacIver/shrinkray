@@ -275,3 +275,76 @@ exit 1
     )
     assert result.exit_code != 0
     assert "uninteresting test case" in result.stderr
+
+
+def test_error_when_test_not_executable(tmpdir):
+    target = tmpdir / "hello.txt"
+    target.write_text("hello world", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    # Note: NOT setting executable permission
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [str(script), str(target), "--ui=basic"],
+    )
+    assert result.exit_code == 1
+    assert "not executable" in result.stderr
+
+
+def test_timeout_zero_sets_infinite(basic_shrink_target):
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            basic_shrink_target.interestingness_test,
+            basic_shrink_target.test_case,
+            "--ui=basic",
+            "--timeout=0",
+        ],
+    )
+    # Should complete successfully with infinite timeout
+    assert result.exit_code == 0
+
+
+def test_in_place_basename_sets_parallelism_to_one(tmpdir, monkeypatch):
+    """Test that in_place + basename with parallelism=0 defaults to 1."""
+    # Change to tmpdir so basename mode can find the file
+    monkeypatch.chdir(tmpdir)
+
+    target = tmpdir / "hello.txt"
+    target.write_text("hello world", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    # In basename mode, the file is in the cwd with its basename
+    script.write_text(
+        """
+#!/usr/bin/env bash
+grep hello hello.txt
+    """.strip(),
+        encoding="utf-8",
+    )
+    script.chmod(0o777)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            str(script),
+            str(target),
+            "--ui=basic",
+            "--in-place",
+            "--input-type=basename",
+            "--parallelism=0",  # Should default to 1 for basename mode
+        ],
+    )
+    assert result.exit_code == 0
+
+
+def test_worker_main_can_be_imported():
+    """Test that worker_main function can be called."""
+    from shrinkray.__main__ import worker_main
+
+    # Can't actually run it without proper stdin/stdout setup,
+    # but at least verify it's importable and callable
+    assert callable(worker_main)

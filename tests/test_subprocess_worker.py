@@ -4,7 +4,9 @@ import io
 import sys
 from unittest.mock import MagicMock, patch
 
-from shrinkray.subprocess.protocol import ProgressUpdate, Request, Response
+import trio
+
+from shrinkray.subprocess.protocol import ProgressUpdate, Request, Response, serialize
 from shrinkray.subprocess.worker import ReducerWorker
 
 
@@ -25,13 +27,13 @@ def test_worker_initial_state():
 # === emit tests ===
 
 
-def test_worker_emit_writes_to_stdout():
+async def test_worker_emit_writes_to_stdout():
     worker = ReducerWorker()
     output = io.StringIO()
 
     with patch.object(sys, "stdout", output):
         response = Response(id="test-123", result={"status": "ok"})
-        worker.emit(response)
+        await worker.emit(response)
 
     written = output.getvalue()
     assert "test-123" in written
@@ -39,7 +41,7 @@ def test_worker_emit_writes_to_stdout():
     assert written.endswith("\n")
 
 
-def test_worker_emit_progress_update():
+async def test_worker_emit_progress_update():
     worker = ReducerWorker()
     output = io.StringIO()
 
@@ -60,7 +62,7 @@ def test_worker_emit_progress_update():
             content_preview="test",
             hex_mode=False,
         )
-        worker.emit(update)
+        await worker.emit(update)
 
     written = output.getvalue()
     assert "progress" in written
@@ -312,3 +314,148 @@ async def test_worker_run_reducer_with_mock_reducer():
 
     assert worker.running is False
     assert worker._cancel_scope is None
+
+
+# === Injectable stream tests ===
+
+
+class MemoryInputStream:
+    """An in-memory input stream for testing."""
+
+    def __init__(self, data: bytes):
+        self.data = data
+        self.pos = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self.pos >= len(self.data):
+            raise StopAsyncIteration
+        # Return data in small chunks to simulate streaming
+        chunk_size = min(64, len(self.data) - self.pos)
+        chunk = self.data[self.pos : self.pos + chunk_size]
+        self.pos += chunk_size
+        return chunk
+
+
+class MemoryOutputStream:
+    """An in-memory output stream for testing."""
+
+    def __init__(self):
+        self.data = b""
+
+    async def send(self, data: bytes) -> None:
+        self.data += data
+
+
+async def test_worker_emit_with_injected_output_stream():
+    """Test emit writes to injected output stream."""
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    response = Response(id="test-123", result={"status": "ok"})
+    await worker.emit(response)
+
+    assert b"test-123" in output.data
+    assert b"ok" in output.data
+    assert output.data.endswith(b"\n")
+
+
+async def test_worker_read_commands_with_injected_input_stream():
+    """Test read_commands reads from injected input stream."""
+    # Create a status request
+    request = Request(id="req-1", command="status", params={})
+    input_data = serialize(request) + "\n"
+
+    output = MemoryOutputStream()
+    input_stream = MemoryInputStream(input_data.encode("utf-8"))
+
+    worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+    # Run read_commands with a timeout
+    with trio.move_on_after(1):
+        await worker.read_commands()
+
+    # Verify response was written
+    assert b"req-1" in output.data
+    assert b"running" in output.data
+
+
+async def test_worker_read_commands_with_stream_parameter():
+    """Test read_commands accepts stream as parameter."""
+    request = Request(id="req-2", command="cancel", params={})
+    input_data = serialize(request) + "\n"
+
+    output = MemoryOutputStream()
+    input_stream = MemoryInputStream(input_data.encode("utf-8"))
+
+    worker = ReducerWorker(output_stream=output)
+
+    with trio.move_on_after(1):
+        await worker.read_commands(input_stream=input_stream)
+
+    assert b"req-2" in output.data
+    assert b"cancelled" in output.data
+
+
+async def test_worker_read_commands_handles_multiple_commands():
+    """Test read_commands processes multiple commands."""
+    req1 = Request(id="a", command="status", params={})
+    req2 = Request(id="b", command="cancel", params={})
+    input_data = serialize(req1) + "\n" + serialize(req2) + "\n"
+
+    output = MemoryOutputStream()
+    input_stream = MemoryInputStream(input_data.encode("utf-8"))
+
+    worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+    with trio.move_on_after(1):
+        await worker.read_commands()
+
+    # Both responses should be in output
+    assert output.data.count(b'"id"') >= 2
+
+
+async def test_worker_emit_progress_updates_loop():
+    """Test emit_progress_updates emits updates while running."""
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+    worker.running = True
+
+    # Mock the problem and state
+    mock_stats = MagicMock()
+    mock_stats.current_test_case_size = 100
+    mock_stats.initial_test_case_size = 200
+    mock_stats.calls = 10
+    mock_stats.reductions = 5
+    mock_stats.interesting_calls = 8
+    mock_stats.wasted_interesting_calls = 2
+    mock_stats.start_time = 0
+    mock_stats.time_since_last_reduction.return_value = 0.5
+
+    mock_problem = MagicMock()
+    mock_problem.stats = mock_stats
+    mock_problem.current_test_case = b"test content"
+    worker.problem = mock_problem
+
+    mock_reducer = MagicMock()
+    mock_reducer.status = "Testing"
+    worker.reducer = mock_reducer
+
+    mock_state = MagicMock()
+    mock_state.parallel_tasks_running = 2
+    worker.state = mock_state
+
+    # Run for a short time then stop
+    async def stop_after_delay():
+        await trio.sleep(0.25)
+        worker.running = False
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(worker.emit_progress_updates)
+        nursery.start_soon(stop_after_delay)
+
+    # Should have emitted at least one progress update
+    assert b"progress" in output.data
+    assert b"Testing" in output.data

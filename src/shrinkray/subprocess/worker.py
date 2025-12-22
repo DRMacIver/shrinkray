@@ -3,7 +3,7 @@
 import os
 import sys
 import time
-from typing import Any
+from typing import Any, Protocol
 
 import trio
 from binaryornot.helpers import is_binary_string
@@ -17,10 +17,35 @@ from shrinkray.subprocess.protocol import (
 )
 
 
+class InputStream(Protocol):
+    """Protocol for async input streams."""
+
+    def __aiter__(self) -> "InputStream": ...
+    async def __anext__(self) -> bytes | bytearray: ...
+
+
+class OutputStream(Protocol):
+    """Protocol for output streams."""
+
+    async def send(self, data: bytes) -> None: ...
+
+
+class StdoutStream:
+    """Wrapper around sys.stdout for the OutputStream protocol."""
+
+    async def send(self, data: bytes) -> None:
+        sys.stdout.write(data.decode("utf-8"))
+        sys.stdout.flush()
+
+
 class ReducerWorker:
     """Runs the reducer in a subprocess with JSON protocol communication."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        input_stream: InputStream | None = None,
+        output_stream: OutputStream | None = None,
+    ):
         self.running = False
         self.reducer = None
         self.problem = None
@@ -29,19 +54,38 @@ class ReducerWorker:
         # Parallelism tracking
         self._parallel_samples = 0
         self._parallel_total = 0
+        # I/O streams - None means use stdin/stdout
+        self._input_stream = input_stream
+        self._output_stream = output_stream
 
-    def emit(self, msg: Response | ProgressUpdate) -> None:
-        """Write a message to stdout."""
+    async def emit(self, msg: Response | ProgressUpdate) -> None:
+        """Write a message to the output stream."""
         line = serialize(msg) + "\n"
-        sys.stdout.write(line)
-        sys.stdout.flush()
+        if self._output_stream is not None:
+            await self._output_stream.send(line.encode("utf-8"))
+        else:
+            sys.stdout.write(line)
+            sys.stdout.flush()
 
-    async def read_commands(self, task_status=trio.TASK_STATUS_IGNORED) -> None:
-        """Read commands from stdin and dispatch them."""
+    async def read_commands(
+        self,
+        input_stream: InputStream | None = None,
+        task_status: trio.TaskStatus[None] = trio.TASK_STATUS_IGNORED,
+    ) -> None:
+        """Read commands from input stream and dispatch them."""
         task_status.started()
-        stdin = trio.lowlevel.FdStream(os.dup(sys.stdin.fileno()))
+
+        # Use provided stream, or instance stream, or default to stdin
+        stream: InputStream
+        if input_stream is not None:
+            stream = input_stream
+        elif self._input_stream is not None:
+            stream = self._input_stream
+        else:
+            stream = trio.lowlevel.FdStream(os.dup(sys.stdin.fileno()))
+
         buffer = b""
-        async for chunk in stdin:
+        async for chunk in stream:
             buffer += chunk
             while b"\n" in buffer:
                 line, buffer = buffer.split(b"\n", 1)
@@ -53,12 +97,12 @@ class ReducerWorker:
         try:
             request = deserialize(line)
             if not isinstance(request, Request):
-                self.emit(Response(id="", error="Expected a request"))
+                await self.emit(Response(id="", error="Expected a request"))
                 return
             response = await self.handle_command(request)
-            self.emit(response)
+            await self.emit(response)
         except Exception as e:
-            self.emit(Response(id="", error=str(e)))
+            await self.emit(Response(id="", error=str(e)))
 
     async def handle_command(self, request: Request) -> Response:
         """Handle a command request and return a response."""
@@ -258,7 +302,7 @@ class ReducerWorker:
                 content_preview=content_preview,
                 hex_mode=hex_mode,
             )
-            self.emit(update)
+            await self.emit(update)
 
     async def run_reducer(self) -> None:
         """Run the reducer."""
@@ -287,7 +331,7 @@ class ReducerWorker:
             await self.run_reducer()
 
             # Signal completion
-            self.emit(Response(id="", result={"status": "completed"}))
+            await self.emit(Response(id="", result={"status": "completed"}))
             nursery.cancel_scope.cancel()
 
 

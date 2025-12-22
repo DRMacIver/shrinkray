@@ -5,7 +5,9 @@ import pytest
 from shrinkray.passes.clangdelta import (
     TRANSFORMATIONS,
     ClangDelta,
+    ClangDeltaError,
     clang_delta_pump,
+    clang_delta_pumps,
     find_clang_delta,
 )
 from shrinkray.problem import BasicReductionProblem, WorkContext
@@ -32,3 +34,47 @@ async def test_can_apply_transformations(transformation, source):
     )
 
     await pump(problem)
+
+
+# =============================================================================
+# Error handling tests
+# =============================================================================
+
+
+def test_clang_delta_error_without_assertion():
+    """Test ClangDeltaError can be raised with normal message."""
+    with pytest.raises(ClangDeltaError):
+        raise ClangDeltaError(b"Some error message")
+
+
+def test_clang_delta_error_with_assertion_fails():
+    """Test ClangDeltaError raises AssertionError if message contains 'Assertion failed'."""
+    with pytest.raises(AssertionError):
+        raise ClangDeltaError(b"Assertion failed: something went wrong")
+
+
+async def test_invalid_transformation():
+    """Test that invalid transformation raises ValueError."""
+    cd = ClangDelta(find_clang_delta())
+    with pytest.raises(ValueError, match="Invalid transformation"):
+        await cd.query_instances("not-a-real-transformation", b"int main() {}")
+
+
+async def test_query_instances_returns_count():
+    """Test query_instances returns the number of transformation instances."""
+    cd = ClangDelta(find_clang_delta())
+    # Use the BAD_HELLO source which has known transformable instances
+    count = await cd.query_instances("rename-var", BAD_HELLO)
+    assert isinstance(count, int)
+    assert count >= 0
+
+
+def test_clang_delta_pumps():
+    """Test clang_delta_pumps returns list of pumps for all transformations."""
+    cd = ClangDelta(find_clang_delta())
+    pumps = clang_delta_pumps(cd)
+    assert len(pumps) == len(TRANSFORMATIONS)
+    # Each pump should be a callable with a name
+    for pump in pumps:
+        assert callable(pump)
+        assert "clang_delta(" in pump.__name__

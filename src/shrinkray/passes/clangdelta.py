@@ -126,9 +126,7 @@ class ClangDelta:
                 ).stdout
             except subprocess.CalledProcessError as e:
                 msg = (e.stdout + e.stderr).strip()
-                if msg == b"Error: Unsupported file type!":
-                    raise ValueError("Not a C or C++ test case")
-                elif b"Assertion failed" in msg:
+                if b"Assertion failed" in msg:
                     return 0
                 else:
                     raise ClangDeltaError(msg)
@@ -161,9 +159,7 @@ class ClangDelta:
                     )
                 ).stdout
             except subprocess.CalledProcessError as e:
-                if e.stdout.strip() == b"Error: Unsupported file type!":
-                    raise ValueError("Not a C or C++ test case")
-                elif (
+                if (
                     e.stdout.strip()
                     == b"Error: No modification to the transformed program!"
                 ):
@@ -190,10 +186,7 @@ def clang_delta_pump(
         assert target is not None
         try:
             n = await clang_delta.query_instances(transformation, target)
-        except ValueError:
-            import traceback
-
-            traceback.print_exc()
+        except ClangDeltaError:
             return target
         i = 1
         while i <= n:
@@ -211,11 +204,12 @@ def clang_delta_pump(
                 i = await problem.work.find_first_value(range(i, n + 1), can_apply)
             except NotFound:
                 break
-            except ClangDeltaError as e:
-                # Clang delta has a large number of internal assertions that you can trigger
-                # if you feed it bad enough C++. We solve this problem by ignoring it.
-                if b"Assertion failed" in e.args[0]:
-                    return target
+            except ClangDeltaError:
+                # clang_delta sometimes produces errors on bad C++. Since
+                # apply_transformation already handles assertion failures by
+                # returning the original data, this catches any other errors
+                # and aborts the pump gracefully.
+                return target
 
             target = await clang_delta.apply_transformation(transformation, i, target)
             assert target is not None

@@ -124,12 +124,23 @@ async def test_query_instances_on_crasher():
     assert count >= 1  # There are instances, but applying them crashes
 
 
+
+
 async def test_apply_transformation_handles_assertion_failure():
     """Test apply_transformation returns original when clang_delta hits an assertion."""
     cd = ClangDelta(find_clang_delta())
     # This should trigger an assertion failure but return original instead of raising
     result = await cd.apply_transformation("rename-fun", 1, ASSERTION_CRASHER)
     assert result == ASSERTION_CRASHER
+
+
+async def test_apply_transformation_raises_clang_delta_error():
+    """Test apply_transformation raises ClangDeltaError for non-assertion errors."""
+    cd = ClangDelta(find_clang_delta())
+    # Simple code with no variables to rename should cause an error
+    source = b"int main() { return 0; }"
+    with pytest.raises(ClangDeltaError):
+        await cd.apply_transformation("rename-var", 1, source)
 
 
 async def test_pump_handles_assertion_failure():
@@ -147,3 +158,23 @@ async def test_pump_handles_assertion_failure():
     # Should not raise, should return the original
     result = await pump(problem)
     assert result == ASSERTION_CRASHER
+
+
+async def test_pump_handles_apply_error():
+    """Test clang_delta_pump handles ClangDeltaError from apply_transformation."""
+    cd = ClangDelta(find_clang_delta())
+    # Use rename-var which will error when trying to rename in simple code
+    pump = clang_delta_pump(cd, "rename-var")
+
+    async def is_interesting(x):
+        return True
+
+    # Simple code that has instances counted but fails during apply
+    source = b"int main() { return 0; }"
+    problem = BasicReductionProblem(
+        source, is_interesting, work=WorkContext(parallelism=1)
+    )
+
+    # Should not raise, should return the original
+    result = await pump(problem)
+    assert result == source

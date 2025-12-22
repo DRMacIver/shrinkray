@@ -23,6 +23,7 @@ The goal is to achieve software quality beyond what a single person working part
 - Make small, logically self-contained commits
 - Each commit should ideally be lint-clean and pass tests
 - Commits are a good checkpoint for self-review
+- Just commit when ready - don't ask for permission
 - Use the `/checkpoint` skill to ensure consistent quality at each commit
 
 ### CLAUDE.md as Source of Truth

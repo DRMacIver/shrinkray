@@ -214,3 +214,163 @@ async def test_attempt_format_returns_data_when_cannot_format(tmp_path):
     assert state.can_format is False
     result = await state.attempt_format(b"test")
     assert result == b"test"
+
+
+# === run_for_exit_code tests ===
+
+
+async def test_run_for_exit_code_returns_script_exit_code(tmp_path):
+    """Test that run_for_exit_code returns the script's exit code."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 42")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    exit_code = await state.run_for_exit_code(b"hello")
+    assert exit_code == 42
+
+
+async def test_run_for_exit_code_with_stdin_input_type(tmp_path):
+    """Test that stdin input type pipes data correctly."""
+    # Script that exits 0 if stdin contains 'magic'
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\ngrep -q magic && exit 0 || exit 1")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("magic word")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.stdin,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"magic word",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Should exit 0 because stdin contains 'magic'
+    exit_code = await state.run_for_exit_code(b"magic word")
+    assert exit_code == 0
+
+    # Should exit 1 because stdin doesn't contain 'magic'
+    exit_code = await state.run_for_exit_code(b"other word")
+    assert exit_code == 1
+
+
+async def test_run_for_exit_code_in_place_mode(tmp_path):
+    """Test in_place mode writes to original file location."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\ncat \"$1\" | grep -q hello && exit 0 || exit 1")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=True,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Should exit 0 because file contains 'hello'
+    exit_code = await state.run_for_exit_code(b"hello there")
+    assert exit_code == 0
+
+
+# === is_interesting tests ===
+
+
+async def test_is_interesting_returns_true_for_exit_zero(tmp_path):
+    """Test that is_interesting returns True when script exits 0."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    result = await state.is_interesting(b"hello")
+    assert result is True
+    # Also verify parallel tasks tracking worked
+    assert state.parallel_tasks_running == 0
+
+
+async def test_is_interesting_returns_false_for_non_zero_exit(tmp_path):
+    """Test that is_interesting returns False when script exits non-zero."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 1")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    result = await state.is_interesting(b"hello")
+    assert result is False

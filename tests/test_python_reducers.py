@@ -105,6 +105,7 @@ PYTHON_FILES = glob(os.path.join(ROOT, "src", "**", "*.py"), recursive=True) + g
 )
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("pyfile", PYTHON_FILES)
 def test_reduce_all(pyfile):
     with open(pyfile, "rb") as i:

@@ -15,6 +15,7 @@ def format(s):
     return black.format_str(s, mode=black.Mode()).strip()
 
 
+@pytest.mark.slow
 async def test_kill_process():
     async with trio.open_nursery() as nursery:
         kwargs = dict(
@@ -45,6 +46,7 @@ async def test_kill_process():
         assert sp.returncode != 0
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("in_place", [False, True])
 def test_can_reduce_a_directory(tmp_path: pathlib.Path, in_place):
     target = tmp_path / "foo"

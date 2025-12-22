@@ -6,18 +6,14 @@ default:
 install:
     uv sync --extra dev
 
-# Run all tests
+# Run tests with coverage enforcement (skips slow tests when no args given)
 test *args:
+    uv run coverage run -m pytest tests/ {{ if args == "" { "-m 'not slow'" } else { args } }}
+    {{ if args == "" { "uv run coverage report" } else { "" } }}
+
+# Run tests without coverage (faster for development)
+test-quick *args:
     uv run python -m pytest tests/ {{ args }}
-
-# Run tests with coverage
-test-cov *args:
-    uv run coverage run --parallel -m pytest tests/ {{ args }}
-
-# Produce coverage report
-coverage *args='report':
-    uv run coverage combine || true
-    uv run coverage {{ args }}
 
 # Lint and type-check
 lint:

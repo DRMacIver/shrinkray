@@ -170,6 +170,7 @@ def test_can_shrink_chain_to_two(n):
     assert shrunk == [[-1, n]]
 
 
+@pytest.mark.slow
 @sat_settings
 @given(unsatisfiable_clauses())
 def test_reduces_unsatisfiable_to_trivial(unsat):
@@ -186,6 +187,7 @@ def test_reduces_unsatisfiable_to_trivial(unsat):
     ]
 
 
+@pytest.mark.slow
 @sat_settings
 @example([[-1], [-2], [-3], [-4, -5], [4, 5], [-6], [4, -5]])
 @given(has_unique_solution())

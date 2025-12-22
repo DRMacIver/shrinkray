@@ -52,11 +52,10 @@ where = ["src"]
 
 [tool.coverage.paths]
 source = ["src", "*/site-packages"]
-tests = ["tests", "*/tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["shrinkray", "tests"]
+source = ["shrinkray"]
 
 [tool.coverage.report]
 show_missing = true

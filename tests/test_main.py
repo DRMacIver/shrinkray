@@ -9,7 +9,8 @@ import trio
 from attrs import define
 from click.testing import CliRunner
 
-from shrinkray.__main__ import interrupt_wait_and_kill, main
+from shrinkray.__main__ import main
+from shrinkray.process import interrupt_wait_and_kill
 
 
 def format(s: str) -> str:

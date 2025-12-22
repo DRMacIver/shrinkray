@@ -87,15 +87,13 @@ class ReducerWorker:
 
     async def _start_reduction(self, params: dict) -> None:
         """Initialize and start the reduction."""
-        # Import here to avoid circular imports
-        from shrinkray.__main__ import (
+        from shrinkray.cli import InputType
+        from shrinkray.passes.clangdelta import (
             C_FILE_EXTENSIONS,
             ClangDelta,
-            InputType,
-            ShrinkRayDirectoryState,
-            ShrinkRayStateSingleFile,
             find_clang_delta,
         )
+        from shrinkray.state import ShrinkRayDirectoryState, ShrinkRayStateSingleFile
         from shrinkray.work import Volume
 
         filename = params["file_path"]

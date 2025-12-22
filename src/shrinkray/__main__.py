@@ -880,6 +880,18 @@ When not specified, defaults to 'textual' for interactive terminals, 'basic' oth
     callback=validate_ui,
 )
 @click.option(
+    "--theme",
+    type=click.Choice(["auto", "dark", "light"]),
+    default="auto",
+    help="""
+Theme mode for the textual UI. Options are:
+
+* 'auto' (default): Detect terminal's color scheme automatically.
+* 'dark': Use dark theme.
+* 'light': Use light theme.
+    """.strip(),
+)
+@click.option(
     "--formatter",
     default="default",
     help="""
@@ -939,6 +951,7 @@ def main(
     clang_delta: str,
     trivial_is_error: bool,
     ui_type: UIType,
+    theme: str,
 ) -> None:
     if timeout <= 0:
         timeout = float("inf")
@@ -1053,6 +1066,7 @@ def main(
             volume=volume.name,
             no_clang_delta=no_clang_delta,
             clang_delta=clang_delta,
+            theme=theme,  # type: ignore[arg-type]
         )
         return
 

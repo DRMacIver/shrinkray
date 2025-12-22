@@ -1,8 +1,9 @@
 """Textual-based TUI for Shrink Ray."""
 
+import os
 from collections.abc import AsyncIterator
 from datetime import timedelta
-from typing import Protocol
+from typing import Literal, Protocol
 
 import humanize
 from textual import work
@@ -11,8 +12,75 @@ from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.widgets import Footer, Header, Label, Static
 
+from textual.theme import Theme
+
 from shrinkray.subprocess.client import SubprocessClient
 from shrinkray.subprocess.protocol import ProgressUpdate, Response
+
+ThemeMode = Literal["auto", "dark", "light"]
+
+# Custom themes with true white/black backgrounds
+SHRINKRAY_LIGHT_THEME = Theme(
+    name="shrinkray-light",
+    primary="#0066cc",
+    secondary="#6c757d",
+    accent="#007acc",
+    background="#ffffff",  # Pure white
+    surface="#ffffff",
+    panel="#f8f9fa",
+    dark=False,
+)
+
+SHRINKRAY_DARK_THEME = Theme(
+    name="shrinkray-dark",
+    primary="#4da6ff",
+    secondary="#adb5bd",
+    accent="#4dc3ff",
+    background="#000000",  # Pure black
+    surface="#000000",
+    panel="#1a1a1a",
+    dark=True,
+)
+
+
+def detect_terminal_theme() -> bool:
+    """Detect if terminal is in dark mode. Returns True for dark, False for light."""
+    # Check COLORFGBG environment variable (format: "fg;bg" where higher bg = light)
+    colorfgbg = os.environ.get("COLORFGBG", "")
+    if colorfgbg:
+        try:
+            parts = colorfgbg.split(";")
+            if len(parts) >= 2:
+                bg = int(parts[-1])
+                # Background values 0-6 are typically dark, 7+ are light
+                # Common: 0=black, 15=white, 7=light gray
+                return bg < 7
+        except (ValueError, IndexError):
+            pass
+
+    # Check for macOS Terminal.app / iTerm2 light mode indicators
+    term_program = os.environ.get("TERM_PROGRAM", "")
+    if term_program in ("Apple_Terminal", "iTerm.app"):
+        # Check if system is in light mode via defaults (macOS)
+        # This is a heuristic - AppleInterfaceStyle is absent in light mode
+        apple_interface = os.environ.get("__CFBundleIdentifier", "")
+        if not apple_interface:
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["defaults", "read", "-g", "AppleInterfaceStyle"],
+                    capture_output=True,
+                    text=True,
+                    timeout=1,
+                )
+                # If this succeeds and returns "Dark", we're in dark mode
+                # If it fails (exit code 1), we're in light mode
+                return result.returncode == 0 and "Dark" in result.stdout
+            except Exception:
+                pass
+
+    # Default to dark mode (textual's default)
+    return True
 
 
 class ReductionClientProtocol(Protocol):
@@ -257,6 +325,7 @@ class ShrinkRayApp(App[None]):
         no_clang_delta: bool = False,
         clang_delta: str = "",
         client: ReductionClientProtocol | None = None,
+        theme: ThemeMode = "auto",
     ) -> None:
         super().__init__()
         self._file_path = file_path
@@ -273,6 +342,7 @@ class ShrinkRayApp(App[None]):
         self._client: ReductionClientProtocol | None = client
         self._owns_client = client is None
         self._completed = False
+        self._theme = theme
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -285,6 +355,17 @@ class ShrinkRayApp(App[None]):
         yield Footer()
 
     async def on_mount(self) -> None:
+        # Register and apply custom themes
+        self.register_theme(SHRINKRAY_LIGHT_THEME)
+        self.register_theme(SHRINKRAY_DARK_THEME)
+
+        if self._theme == "dark":
+            self.theme = "shrinkray-dark"
+        elif self._theme == "light":
+            self.theme = "shrinkray-light"
+        else:  # auto
+            self.theme = "shrinkray-dark" if detect_terminal_theme() else "shrinkray-light"
+
         self.title = "Shrink Ray"
         self.sub_title = self._file_path
         self.run_reduction()
@@ -372,6 +453,7 @@ def run_textual_ui(
     volume: str = "normal",
     no_clang_delta: bool = False,
     clang_delta: str = "",
+    theme: ThemeMode = "auto",
 ) -> None:
     """Run the textual TUI."""
     app = ShrinkRayApp(
@@ -386,5 +468,6 @@ def run_textual_ui(
         volume=volume,
         no_clang_delta=no_clang_delta,
         clang_delta=clang_delta,
+        theme=theme,
     )
     app.run()

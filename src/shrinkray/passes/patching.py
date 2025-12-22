@@ -106,7 +106,8 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                         return False
                     try:
                         attempted_patch = self.__patches.combine(
-                            base_patch, *[p for _, p, _ in self.__merge_queue[:k]]
+                            base_patch,
+                            *[p for _, p, _ in self.__merge_queue[:k]],
                         )
                     except Conflict:
                         return False
@@ -201,10 +202,13 @@ async def apply_patches(
     patch_info: Patches[PatchType, TargetType],
     patches: Iterable[PatchType],
 ) -> None:
-    if await problem.is_interesting(
-        patch_info.apply(patch_info.combine(*patches), problem.current_test_case)
-    ):
-        return
+    try:
+        if await problem.is_interesting(
+            patch_info.apply(patch_info.combine(*patches), problem.current_test_case)
+        ):
+            return
+    except Conflict:
+        pass
 
     applier = PatchApplier(patch_info, problem)
 

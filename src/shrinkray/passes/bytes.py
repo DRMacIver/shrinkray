@@ -545,3 +545,24 @@ async def standard_substitutions(problem: ReductionProblem[bytes]):
                     break
         else:
             i += 1
+
+
+async def line_sorter(problem: ReductionProblem[bytes]):
+    lines = problem.current_test_case.split(b"\n")
+    i = 1
+    while i < len(lines):
+        j = i
+        while j > 0:
+            u = lines[j - 1]
+            v = lines[j]
+            if v + u < u + v:
+                attempt = list(lines)
+                attempt[j - 1], attempt[j] = attempt[j], attempt[j - 1]
+                if not await problem.is_interesting(b"\n".join(attempt)):
+                    break
+                else:
+                    j -= 1
+                    lines = attempt
+            else:
+                break
+        i += 1

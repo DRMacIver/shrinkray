@@ -319,7 +319,12 @@ class View(ReductionProblem[T], Generic[S, T]):
         return self.__current
 
     async def is_interesting(self, test_case: T) -> bool:
-        return await self.__problem.is_interesting(self.__dump(test_case))
+        from shrinkray.passes.definitions import DumpError
+
+        try:
+            return await self.__problem.is_interesting(self.__dump(test_case))
+        except DumpError:
+            return False
 
     def sort_key(self, test_case: T) -> Any:
         if self.__sort_key is not None:

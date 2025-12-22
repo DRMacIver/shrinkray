@@ -16,6 +16,10 @@ class ParseError(Exception):
     pass
 
 
+class DumpError(Exception):
+    pass
+
+
 class Format(Generic[S, T], ABC):
     @property
     def name(self) -> str:

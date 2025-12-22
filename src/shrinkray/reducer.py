@@ -15,6 +15,7 @@ from shrinkray.passes.bytes import (
     hollow,
     lexeme_based_deletions,
     lift_braces,
+    line_sorter,
     lower_bytes,
     lower_individual_bytes,
     remove_indents,
@@ -23,8 +24,17 @@ from shrinkray.passes.bytes import (
     short_deletions,
     standard_substitutions,
 )
-from shrinkray.passes.clangdelta import C_FILE_EXTENSIONS, ClangDelta, clang_delta_pumps
-from shrinkray.passes.definitions import Format, ReductionPass, ReductionPump, compose
+from shrinkray.passes.clangdelta import (
+    C_FILE_EXTENSIONS,
+    ClangDelta,
+    clang_delta_pumps,
+)
+from shrinkray.passes.definitions import (
+    Format,
+    ReductionPass,
+    ReductionPump,
+    compose,
+)
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
     cut_comment_like_things,
@@ -149,6 +159,7 @@ class ShrinkRay(Reducer[bytes]):
             lexeme_based_deletions,
             short_deletions,
             normalize_identifiers,
+            line_sorter,
         ]
     )
 
@@ -237,8 +248,24 @@ class ShrinkRay(Reducer[bytes]):
             self.current_pump = None
 
     async def run_great_passes(self) -> None:
-        for rp in self.great_passes:
-            await self.run_pass(rp)
+        current = self.great_passes
+        while True:
+            prev = self.target.current_test_case
+            successful = []
+            for rp in current:
+                size = self.target.current_size
+                await self.run_pass(rp)
+                if self.target.current_size < size:
+                    successful.append(rp)
+            if self.target.current_test_case == prev:
+                if len(current) == len(self.great_passes):
+                    break
+                else:
+                    current = self.great_passes
+            elif not successful:
+                current = self.great_passes
+            else:
+                current = successful
 
     async def run_ok_passes(self) -> None:
         for rp in self.ok_passes:
@@ -251,7 +278,10 @@ class ShrinkRay(Reducer[bytes]):
     async def run_some_passes(self) -> None:
         prev = self.target.current_test_case
         await self.run_great_passes()
-        if prev != self.target.current_test_case and not self.unlocked_ok_passes:
+        if (
+            prev != self.target.current_test_case
+            and not self.unlocked_ok_passes
+        ):
             return
         self.unlocked_ok_passes = True
         await self.run_ok_passes()
@@ -322,7 +352,7 @@ class ShrinkRay(Reducer[bytes]):
                         break
                 return
 
-        await self.initial_cut()
+        # await self.initial_cut()
 
         while True:
             prev = self.target.current_test_case
@@ -401,7 +431,9 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     async def delete_keys(self):
         target = self.target.current_test_case
         keys = list(target.keys())
-        keys.sort(key=lambda k: (shortlex(target[k]), shortlex(k)), reverse=True)
+        keys.sort(
+            key=lambda k: (shortlex(target[k]), shortlex(k)), reverse=True
+        )
         for k in keys:
             attempt = self.target.current_test_case.copy()
             del attempt[k]

@@ -288,3 +288,128 @@ def test_lazy_shuffle_preserves_original():
 def test_conflict_exception():
     with pytest.raises(Conflict):
         raise Conflict("test conflict")
+
+
+# =============================================================================
+# apply_patches async function tests
+# =============================================================================
+
+import trio
+
+from shrinkray.passes.patching import apply_patches
+from shrinkray.problem import BasicReductionProblem
+from shrinkray.work import WorkContext
+
+
+async def test_apply_patches_all_applicable():
+    """Test apply_patches when all patches can be applied."""
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"abcdef",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    cuts = Cuts()
+    patches = [[(1, 2)], [(3, 4)]]  # Delete 'b' and 'd'
+
+    await apply_patches(problem, cuts, patches)
+    # Should have applied some cuts
+    assert len(problem.current_test_case) < 6
+
+
+async def test_apply_patches_some_not_applicable():
+    """Test apply_patches when some patches fail interestingness."""
+    async def is_interesting(x):
+        # Only interesting if starts with 'a'
+        return len(x) > 0 and x[0:1] == b"a"
+
+    problem = BasicReductionProblem(
+        initial=b"abcdef",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    cuts = Cuts()
+    patches = [[(0, 1)], [(2, 3)]]  # Try to delete 'a' (will fail) and 'c'
+
+    await apply_patches(problem, cuts, patches)
+    # 'a' should still be there
+    assert problem.current_test_case[0:1] == b"a"
+
+
+async def test_apply_patches_empty():
+    """Test apply_patches with no patches."""
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    cuts = Cuts()
+    await apply_patches(problem, cuts, [])
+    assert problem.current_test_case == b"hello"
+
+
+async def test_apply_patches_all_at_once():
+    """Test when all patches can be combined at once."""
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"abcdefgh",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    cuts = Cuts()
+    # All small non-overlapping cuts
+    patches = [[(1, 2)], [(3, 4)], [(5, 6)]]
+
+    await apply_patches(problem, cuts, patches)
+    # All should be applied
+    assert len(problem.current_test_case) <= 5
+
+
+async def test_apply_patches_with_parallelism():
+    """Test apply_patches with parallelism > 1."""
+    async def is_interesting(x):
+        await trio.sleep(0)  # Yield to allow parallelism
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"abcdefghij",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=2),
+    )
+
+    cuts = Cuts()
+    patches = [[(i, i+1)] for i in range(0, 10, 2)]  # Delete every other char
+
+    await apply_patches(problem, cuts, patches)
+    assert len(problem.current_test_case) < 10
+
+
+def test_wrapper_apply_patches_all_applicable():
+    trio.run(test_apply_patches_all_applicable)
+
+
+def test_wrapper_apply_patches_some_not_applicable():
+    trio.run(test_apply_patches_some_not_applicable)
+
+
+def test_wrapper_apply_patches_empty():
+    trio.run(test_apply_patches_empty)
+
+
+def test_wrapper_apply_patches_all_at_once():
+    trio.run(test_apply_patches_all_at_once)
+
+
+def test_wrapper_apply_patches_with_parallelism():
+    trio.run(test_apply_patches_with_parallelism)

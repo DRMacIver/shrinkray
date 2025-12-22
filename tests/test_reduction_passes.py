@@ -995,3 +995,58 @@ def test_normalize_identifiers_pattern_not_found(parallelism):
     )
     # Verify it ran
     assert b" " in result
+
+
+# =============================================================================
+# Format class tests - definitions.py coverage
+# =============================================================================
+
+
+def test_format_is_valid_true():
+    """Test Format.is_valid returns True for valid input."""
+    fmt = Substring(b"<", b">")
+    assert fmt.is_valid(b"<hello>") is True
+
+
+def test_format_is_valid_false():
+    """Test Format.is_valid returns False for invalid input."""
+    fmt = Substring(b"<", b">")
+    assert fmt.is_valid(b"hello") is False
+
+
+async def test_compose_with_changing_format():
+    """Test compose handles cases where format becomes invalid during reduction."""
+    import trio
+    from shrinkray.passes.sequences import delete_elements
+    from shrinkray.problem import BasicReductionProblem
+    from shrinkray.work import WorkContext
+
+    # Start with valid format
+    fmt = Substring(b"<", b">")
+
+    async def pass_that_changes_format(problem):
+        # Try to delete elements, which will access current_test_case
+        await delete_elements(problem)
+
+    composed = compose(fmt, pass_that_changes_format)
+
+    call_count = [0]
+
+    async def is_interesting(x):
+        call_count[0] += 1
+        # Always interesting
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"<abc>",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    # This should work since initial input is parseable
+    await composed(problem)
+
+
+def test_wrapper_compose_with_changing_format():
+    import trio
+    trio.run(test_compose_with_changing_format)

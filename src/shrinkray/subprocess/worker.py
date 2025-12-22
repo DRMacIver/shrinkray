@@ -2,9 +2,11 @@
 
 import os
 import sys
+import time
 from typing import Any
 
 import trio
+from binaryornot.helpers import is_binary_string
 
 from shrinkray.subprocess.protocol import (
     ProgressUpdate,
@@ -24,6 +26,9 @@ class ReducerWorker:
         self.problem = None
         self.state = None
         self._cancel_scope: trio.CancelScope | None = None
+        # Parallelism tracking
+        self._parallel_samples = 0
+        self._parallel_total = 0
 
     def emit(self, msg: Response | ProgressUpdate) -> None:
         """Write a message to stdout."""
@@ -169,6 +174,49 @@ class ReducerWorker:
         self.running = False
         return Response(id=request_id, result={"status": "cancelled"})
 
+    def _get_content_preview(self) -> tuple[str, bool]:
+        """Get a preview of the current test case content."""
+        if self.problem is None:
+            return "", False
+
+        test_case = self.problem.current_test_case
+        if test_case is None:
+            return "", False
+
+        # Handle directory mode
+        if isinstance(test_case, dict):
+            lines = []
+            for name, content in sorted(test_case.items()):
+                size = len(content)
+                lines.append(f"{name}: {size} bytes")
+            return "\n".join(lines[:50]), False
+
+        # Handle single file mode
+        hex_mode = is_binary_string(test_case[:1024] if len(test_case) > 1024 else test_case)
+
+        if hex_mode:
+            # Show hex dump for binary files
+            preview_bytes = test_case[:512]
+            lines = []
+            for i in range(0, len(preview_bytes), 16):
+                chunk = preview_bytes[i:i+16]
+                hex_part = " ".join(f"{b:02x}" for b in chunk)
+                ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
+                lines.append(f"{i:08x}  {hex_part:<48}  {ascii_part}")
+            return "\n".join(lines), True
+        else:
+            # Show text for text files
+            # Send up to 100KB of content - the TUI will handle display truncation
+            try:
+                text = test_case.decode("utf-8", errors="replace")
+                # Truncate by character count to handle files with very long lines
+                max_chars = 100_000
+                if len(text) > max_chars:
+                    text = text[:max_chars]
+                return text, False
+            except Exception:
+                return "", True
+
     async def emit_progress_updates(self) -> None:
         """Periodically emit progress updates."""
         while self.running:
@@ -176,12 +224,38 @@ class ReducerWorker:
             if self.problem is None:
                 continue
             stats = self.problem.stats
+            content_preview, hex_mode = self._get_content_preview()
+
+            # Get parallel workers count and track average
+            parallel_workers = 0
+            if self.state is not None and hasattr(self.state, "parallel_tasks_running"):
+                parallel_workers = self.state.parallel_tasks_running
+                self._parallel_samples += 1
+                self._parallel_total += parallel_workers
+
+            # Calculate parallelism stats
+            average_parallelism = 0.0
+            effective_parallelism = 0.0
+            if self._parallel_samples > 0:
+                average_parallelism = self._parallel_total / self._parallel_samples
+                wasteage = stats.wasted_interesting_calls / stats.calls if stats.calls > 0 else 0.0
+                effective_parallelism = average_parallelism * (1.0 - wasteage)
+
             update = ProgressUpdate(
                 status=self.reducer.status if self.reducer else "",
                 size=stats.current_test_case_size,
                 original_size=stats.initial_test_case_size,
                 calls=stats.calls,
                 reductions=stats.reductions,
+                interesting_calls=stats.interesting_calls,
+                wasted_calls=stats.wasted_interesting_calls,
+                runtime=time.time() - stats.start_time,
+                parallel_workers=parallel_workers,
+                average_parallelism=average_parallelism,
+                effective_parallelism=effective_parallelism,
+                time_since_last_reduction=stats.time_since_last_reduction(),
+                content_preview=content_preview,
+                hex_mode=hex_mode,
             )
             self.emit(update)
 

@@ -28,11 +28,28 @@ class Response:
 class ProgressUpdate:
     """An unsolicited progress update from the worker subprocess."""
 
+    # Current reducer pass/pump status
     status: str
+    # Size information
     size: int
     original_size: int
+    # Call statistics
     calls: int
     reductions: int
+    interesting_calls: int = 0
+    wasted_calls: int = 0
+    # Runtime in seconds
+    runtime: float = 0.0
+    # Parallelism stats
+    parallel_workers: int = 0
+    average_parallelism: float = 0.0
+    effective_parallelism: float = 0.0
+    # Time since last reduction
+    time_since_last_reduction: float = 0.0
+    # Content preview (truncated for large files)
+    content_preview: str = ""
+    # Whether content is hex mode
+    hex_mode: bool = False
 
 
 def serialize(msg: Request | Response | ProgressUpdate) -> str:
@@ -58,6 +75,15 @@ def serialize(msg: Request | Response | ProgressUpdate) -> str:
                 "original_size": msg.original_size,
                 "calls": msg.calls,
                 "reductions": msg.reductions,
+                "interesting_calls": msg.interesting_calls,
+                "wasted_calls": msg.wasted_calls,
+                "runtime": msg.runtime,
+                "parallel_workers": msg.parallel_workers,
+                "average_parallelism": msg.average_parallelism,
+                "effective_parallelism": msg.effective_parallelism,
+                "time_since_last_reduction": msg.time_since_last_reduction,
+                "content_preview": msg.content_preview,
+                "hex_mode": msg.hex_mode,
             },
         }
     else:
@@ -78,6 +104,15 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
             original_size=d["original_size"],
             calls=d["calls"],
             reductions=d["reductions"],
+            interesting_calls=d.get("interesting_calls", 0),
+            wasted_calls=d.get("wasted_calls", 0),
+            runtime=d.get("runtime", 0.0),
+            parallel_workers=d.get("parallel_workers", 0),
+            average_parallelism=d.get("average_parallelism", 0.0),
+            effective_parallelism=d.get("effective_parallelism", 0.0),
+            time_since_last_reduction=d.get("time_since_last_reduction", 0.0),
+            content_preview=d.get("content_preview", ""),
+            hex_mode=d.get("hex_mode", False),
         )
 
     # Check for response (has "result" or "error" field)

@@ -144,7 +144,14 @@ class SubprocessClient:
 
     async def cancel(self) -> Response:
         """Cancel the reduction."""
-        return await self.send_command("cancel")
+        if self._completed:
+            return Response(id="", result={"status": "already_completed"})
+        if self._process is None or self._process.returncode is not None:
+            return Response(id="", result={"status": "process_exited"})
+        try:
+            return await self.send_command("cancel")
+        except Exception:
+            return Response(id="", result={"status": "cancelled"})
 
     async def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]:
         """Yield progress updates as they arrive."""
@@ -173,13 +180,20 @@ class SubprocessClient:
 
         if self._process is not None:
             if self._process.stdin is not None:
-                self._process.stdin.close()
-            self._process.terminate()
-            try:
-                await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                self._process.kill()
-                await self._process.wait()
+                try:
+                    self._process.stdin.close()
+                except Exception:
+                    pass
+            # Only terminate if still running
+            if self._process.returncode is None:
+                try:
+                    self._process.terminate()
+                    await asyncio.wait_for(self._process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    self._process.kill()
+                    await self._process.wait()
+                except ProcessLookupError:
+                    pass  # Process already exited
 
     async def __aenter__(self) -> "SubprocessClient":
         await self.start()

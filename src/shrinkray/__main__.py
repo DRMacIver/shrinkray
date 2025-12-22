@@ -126,12 +126,13 @@ class DisplayMode(IntEnum):
 class UIType(Enum):
     urwid = auto()
     basic = auto()
+    textual = auto()
 
 
 def validate_ui(ctx, param, value) -> UIType:
     if value is None:
         if sys.stdin.isatty() and sys.stdout.isatty():
-            return UIType.urwid
+            return UIType.textual
         else:
             return UIType.basic
     else:
@@ -1088,8 +1089,13 @@ with any parallelism.
     "ui_type",
     type=EnumChoice(UIType),
     help="""
-By default shrinkray runs with a terminal UI based on urwid. If you want a more basic UI
-(e.g. for running in a script), you can specify --ui=basic instead.
+UI mode to use. Options are:
+
+* 'textual' (default): Modern terminal UI using the textual library.
+* 'urwid': Legacy terminal UI using the urwid library.
+* 'basic': Simple text output, suitable for scripts or non-interactive use.
+
+When not specified, defaults to 'textual' for interactive terminals, 'basic' otherwise.
     """.strip(),
     callback=validate_ui,
 )
@@ -1136,7 +1142,7 @@ This behaviour can be disabled by passing --trivial-is-not-error.
 @click.argument("test", callback=validate_command)
 @click.argument(
     "filename",
-    type=click.Path(exists=True, resolve_path=True, dir_okay=True, allow_dash=False),
+    type=click.Path(exists=True, resolve_path=False, dir_okay=True, allow_dash=False),
 )
 def main(
     input_type: InputType,
@@ -1261,6 +1267,24 @@ def main(
         trio.run(state.check_formatter)
 
         ui = ShrinkRayUISingleFile(state, hex_mode=hex_mode)
+
+    if ui_type == UIType.textual:
+        from shrinkray.tui import run_textual_ui
+
+        run_textual_ui(
+            file_path=filename,
+            test=test,
+            parallelism=parallelism,
+            timeout=timeout,
+            seed=seed,
+            input_type=input_type.name,
+            in_place=in_place,
+            formatter=formatter,
+            volume=volume.name,
+            no_clang_delta=no_clang_delta,
+            clang_delta=clang_delta,
+        )
+        return
 
     if ui_type == UIType.basic:
         ui = BasicUI(state)

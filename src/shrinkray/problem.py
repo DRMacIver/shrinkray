@@ -13,7 +13,7 @@ the details of caching, parallelism, and state management.
 
 import hashlib
 import time
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import (
@@ -60,7 +60,7 @@ def shortlex(value: Any) -> Any:
 
 
 def default_sort_key(value: Any):
-    if isinstance(value, (str, bytes)):
+    if isinstance(value, str | bytes):
         return shortlex(value)
     else:
         return shortlex(repr(value))
@@ -207,8 +207,13 @@ class ReductionProblem(Generic[T], ABC):
     async def setup(self) -> None:
         pass
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def current_test_case(self) -> T: ...
+
+    @property
+    @abstractmethod
+    def stats(self) -> ReductionStats: ...
 
     @abstractmethod
     async def is_interesting(self, test_case: T) -> bool:
@@ -315,11 +320,11 @@ class BasicReductionProblem(ReductionProblem[T]):
         self.__size = size
         self.__display = display
         if stats is None:
-            self.stats = ReductionStats()
-            self.stats.initial_test_case_size = self.size(initial)
-            self.stats.current_test_case_size = self.size(initial)
+            self._stats = ReductionStats()
+            self._stats.initial_test_case_size = self.size(initial)
+            self._stats.current_test_case_size = self.size(initial)
         else:
-            self.stats = stats
+            self._stats = stats
 
         self.__is_interesting_cache: dict[str, bool] = {}
         self.__cache_key = cache_key
@@ -340,6 +345,10 @@ class BasicReductionProblem(ReductionProblem[T]):
     def display(self, value: T) -> str:
         return self.__display(value)
 
+    @property
+    def stats(self) -> ReductionStats:
+        return self._stats
+
     def sort_key(self, test_case: T) -> Any:
         return self.__sort_key(test_case)
 
@@ -351,31 +360,31 @@ class BasicReductionProblem(ReductionProblem[T]):
         call `fn` with the new value. Note that these are called outside the lock."""
         self.__on_reduce_callbacks.append(callback)
 
-    async def is_interesting(self, value: T) -> bool:
-        """Returns true if this value is interesting."""
+    async def is_interesting(self, test_case: T) -> bool:
+        """Returns true if this test_case is interesting."""
         await trio.lowlevel.checkpoint()
-        if value == self.current_test_case:
+        if test_case == self.current_test_case:
             return True
-        cache_key = self.__cache_key(value)
+        cache_key = self.__cache_key(test_case)
         try:
             return self.__is_interesting_cache[cache_key]
         except KeyError:
             pass
-        result = await self.__is_interesting(value)
+        result = await self.__is_interesting(test_case)
         self.__is_interesting_cache[cache_key] = result
         self.stats.failed_reductions += 1
         self.stats.calls += 1
         if result:
             self.stats.interesting_calls += 1
-            if self.sort_key(value) < self.sort_key(self.current_test_case):
+            if self.sort_key(test_case) < self.sort_key(self.current_test_case):
                 self.__is_interesting_cache.clear()
                 self.stats.failed_reductions -= 1
                 self.stats.reductions += 1
                 self.stats.time_of_last_reduction = time.time()
-                self.stats.current_test_case_size = self.size(value)
-                self.__current = value
+                self.stats.current_test_case_size = self.size(test_case)
+                self.__current = test_case
                 for f in self.__on_reduce_callbacks:
-                    await f(value)
+                    await f(test_case)
             else:
                 self.stats.wasted_interesting_calls += 1
         return result
@@ -427,7 +436,7 @@ class View(ReductionProblem[T], Generic[S, T]):
 
     @property
     def stats(self) -> ReductionStats:
-        return self.__problem.stats  # type: ignore
+        return self.__problem.stats
 
     @property
     def current_test_case(self) -> T:

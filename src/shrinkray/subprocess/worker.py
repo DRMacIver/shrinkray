@@ -179,8 +179,6 @@ class ReducerWorker:
             return "", False
 
         test_case = self.problem.current_test_case
-        if test_case is None:
-            return "", False
 
         # Handle directory mode
         if isinstance(test_case, dict):

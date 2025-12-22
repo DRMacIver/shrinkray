@@ -224,10 +224,10 @@ async def apply_patches(
     send_patches.close()
 
     async with trio.open_nursery() as nursery:
-        for _ in range(problem.work.parallelism):
+        for _i in range(problem.work.parallelism):
 
             @nursery.start_soon
-            async def _():
+            async def worker() -> None:
                 while True:
                     try:
                         patch = await receive_patches.receive()

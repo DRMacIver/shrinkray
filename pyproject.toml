@@ -20,6 +20,7 @@ dependencies = [
     "libcst>=1.1.0",
     "exceptiongroup>=1.2.0",
     "binaryornot>=0.4.4",
+    "black",
 ]
 
 [project.urls]
@@ -84,8 +85,23 @@ force-single-line = false
 lines-after-imports = 2
 
 [tool.basedpyright]
+include = ["src", "tests"]
+exclude = ["build", "bugs", ".venv", ".venv2"]
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
+# These are too noisy with third-party libraries that lack type stubs
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownParameterType = false
+reportMissingParameterType = false
+reportUnknownArgumentType = false
+reportUnknownLambdaType = false
+# These are often false positives or stylistic
+reportUnusedFunction = false
+reportMissingTypeArgument = false
+reportPrivateUsage = false  # Tests need to access private attributes
+reportIncompatibleMethodOverride = false  # Often false positives with textual
+reportUnnecessaryIsInstance = false  # Needed for runtime type checking of untrusted input
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

@@ -17,7 +17,20 @@ class FakeReductionClientForSnapshots:
     async def start(self) -> None:
         pass
 
-    async def start_reduction(self, **kwargs):
+    async def start_reduction(
+        self,
+        file_path: str,
+        test: list[str],
+        parallelism: int | None = None,
+        timeout: float = 1.0,
+        seed: int = 0,
+        input_type: str = "all",
+        in_place: bool = False,
+        formatter: str = "default",
+        volume: str = "normal",
+        no_clang_delta: bool = False,
+        clang_delta: str = "",
+    ):
         from shrinkray.subprocess.protocol import Response
 
         return Response(id="start", result={"status": "started"})

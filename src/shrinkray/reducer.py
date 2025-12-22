@@ -49,7 +49,7 @@ from shrinkray.passes.patching import PatchApplier, Patches
 from shrinkray.passes.python import PYTHON_PASSES, is_python
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
-from shrinkray.problem import ReductionProblem, shortlex
+from shrinkray.problem import ReductionProblem, ReductionStats, shortlex
 
 
 S = TypeVar("S")
@@ -401,6 +401,10 @@ class KeyProblem(ReductionProblem[bytes]):
     @property
     def current_test_case(self) -> bytes:
         return self.base_problem.current_test_case[self.key]
+
+    @property
+    def stats(self) -> ReductionStats:
+        return self.base_problem.stats
 
     async def is_interesting(self, test_case: bytes) -> bool:
         return await self.applier.try_apply_patch({self.key: test_case})

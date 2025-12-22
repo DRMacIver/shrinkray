@@ -21,7 +21,7 @@ import click
 import humanize
 import trio
 from attrs import define
-from binaryornot.check import is_binary_string
+from binaryornot.check import is_binary_string  # type: ignore[import-not-found]
 
 from shrinkray.passes.clangdelta import C_FILE_EXTENSIONS, ClangDelta, find_clang_delta
 from shrinkray.problem import (
@@ -597,7 +597,7 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
         formatting_increase = 0
         final_result = problem.current_test_case
         reformatted = await self.attempt_format(final_result)
-        if reformatted != final_result and reformatted is not None:
+        if reformatted != final_result:
             if await self.is_interesting(reformatted):
                 async with await trio.open_file(self.filename, "wb") as o:
                     await o.write(reformatted)
@@ -710,7 +710,7 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
         return None
 
     async def run_formatter_command(
-        self, command: str | list[str], input: TestCase
+        self, command: str | list[str], input: dict[str, bytes]
     ) -> subprocess.CompletedProcess:
         raise AssertionError
 
@@ -769,9 +769,9 @@ def determine_formatter_command(formatter: str, filename: str) -> list[str] | No
 
 
 async def run_shrink_ray(
-    state: ShrinkRayState[TestCase],
-    ui: ShrinkRayUI[TestCase],
-):
+    state: ShrinkRayState[Any],
+    ui: ShrinkRayUI[Any],
+) -> None:
     async with trio.open_nursery() as nursery:
         problem = state.problem
         try:
@@ -971,7 +971,7 @@ def main(
         if in_place and input_type == InputType.basename:
             parallelism = 1
         else:
-            parallelism = os.cpu_count()
+            parallelism = os.cpu_count() or 1
 
     clang_delta_executable: ClangDelta | None = None
     if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:

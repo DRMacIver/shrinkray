@@ -12,29 +12,26 @@ from click.testing import CliRunner
 from shrinkray.__main__ import interrupt_wait_and_kill, main
 
 
-def format(s):
+def format(s: str) -> str:
     return black.format_str(s, mode=black.Mode()).strip()
 
 
 @pytest.mark.slow
 async def test_kill_process():
     async with trio.open_nursery() as nursery:
-        kwargs = dict(
-            universal_newlines=False,
-            preexec_fn=os.setsid,
-            check=False,
-            stdout=subprocess.PIPE,
-        )
 
-        def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
+        async def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
             # start a subprocess that will just ignore SIGINT signals
-            return trio.run_process(
+            return await trio.run_process(  # type: ignore[call-overload]
                 [
                     sys.executable,
                     "-c",
                     "import signal, sys, time; signal.signal(signal.SIGINT, lambda *a: 1); print(1); sys.stdout.flush(); time.sleep(1000)",
                 ],
-                **kwargs,
+                universal_newlines=False,
+                preexec_fn=os.setsid,
+                check=False,
+                stdout=subprocess.PIPE,
                 task_status=task_status,
             )
 

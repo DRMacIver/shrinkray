@@ -45,7 +45,7 @@ def test_does_not_error_on_elif():
 def test_lifts_bodies_of_with():
     assert (
         reduce_with(
-            [lift_indented_constructs], "with ...:\n    x = 1", lambda x: True
+            [lift_indented_constructs], b"with ...:\n    x = 1", lambda x: True
         ).strip()
         == b"x = 1"
     )
@@ -84,7 +84,7 @@ def test_single_annotation():
     assert reduce_with(PYTHON_PASSES, x, lambda y: True).strip() == b""
 
 
-IF_BLOCK = """
+IF_BLOCK = b"""
 if True:
     x = 1
     y = 2

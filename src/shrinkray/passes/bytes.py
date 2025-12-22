@@ -555,18 +555,18 @@ async def lower_individual_bytes(problem: ReductionProblem[bytes]) -> None:
 RegionReplacementPatch = list[tuple[int, int, int]]
 
 
-class RegionReplacement(Patches[ReplacementPatch, bytes]):
+class RegionReplacement(Patches[RegionReplacementPatch, bytes]):
     @property
-    def empty(self) -> ReplacementPatch:
+    def empty(self) -> RegionReplacementPatch:
         return []
 
-    def combine(self, *patches: ReplacementPatch) -> ReplacementPatch:
-        result = []
+    def combine(self, *patches: RegionReplacementPatch) -> RegionReplacementPatch:
+        result: RegionReplacementPatch = []
         for p in patches:
             result.extend(p)
         return result
 
-    def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
+    def apply(self, patch: RegionReplacementPatch, target: bytes) -> bytes:
         result = bytearray(target)
         for i, j, d in patch:
             if d < result[i]:
@@ -574,7 +574,7 @@ class RegionReplacement(Patches[ReplacementPatch, bytes]):
                     result[k] = d
         return bytes(result)
 
-    def size(self, patch: ReplacementPatch) -> int:
+    def size(self, patch: RegionReplacementPatch) -> int:
         return 0
 
 
@@ -626,7 +626,7 @@ async def sort_whitespace(problem: ReductionProblem[bytes]) -> None:
             i += 1
             continue
 
-        async def can_move_to_whitespace(k):
+        async def can_move_to_whitespace(k: int) -> bool:
             if i + k > len(problem.current_test_case):
                 return False
 

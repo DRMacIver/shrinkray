@@ -1,6 +1,7 @@
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Iterator
 from copy import copy
+from typing import Generic, Self, TypeVar
 
 from shrinkray.passes.definitions import (
     DumpError,
@@ -16,6 +17,8 @@ from shrinkray.problem import ReductionProblem
 Clause = list[int]
 SAT = list[Clause]
 
+T = TypeVar("T")
+
 
 class _DimacsCNF(Format[bytes, SAT]):
     @property
@@ -27,7 +30,7 @@ class _DimacsCNF(Format[bytes, SAT]):
             contents = input.decode("utf-8")
         except UnicodeDecodeError as e:
             raise ParseError(*e.args)
-        clauses = []
+        clauses: SAT = []
         for line in contents.splitlines():
             line = line.strip()
             if line.startswith("c"):
@@ -37,7 +40,7 @@ class _DimacsCNF(Format[bytes, SAT]):
             if not line.strip():
                 continue
             try:
-                clause = list(map(int, line.strip().split()))
+                clause: Clause = list(map(int, line.strip().split()))
             except ValueError as e:
                 raise ParseError(*e.args)
             if clause[-1] != 0:
@@ -84,9 +87,9 @@ async def flip_literal_signs(problem: ReductionProblem[SAT]):
     await unit_propagate(problem)
 
 
-async def remove_redundant_clauses(problem: ReductionProblem[SAT]):
-    attempt = []
-    seen = set()
+async def remove_redundant_clauses(problem: ReductionProblem[SAT]) -> None:
+    attempt: SAT = []
+    seen: set[tuple[int, ...]] = set()
     for clause in problem.current_test_case:
         if len(set(map(abs, clause))) < len(set(clause)):
             continue
@@ -102,11 +105,11 @@ def literals_in(sat: SAT) -> frozenset[int]:
     return frozenset({literal for clause in sat for literal in clause})
 
 
-async def delete_literals(problem: ReductionProblem[SAT]):
+async def delete_literals(problem: ReductionProblem[SAT]) -> None:
     def remove_literals(literals: frozenset[int], sat: SAT) -> SAT:
-        result = []
+        result: SAT = []
         for clause in sat:
-            new_clause = [v for v in clause if v not in literals]
+            new_clause: Clause = [v for v in clause if v not in literals]
             if new_clause:
                 result.append(new_clause)
         return result
@@ -118,10 +121,10 @@ async def delete_literals(problem: ReductionProblem[SAT]):
     )
 
 
-async def delete_single_terms(problem: ReductionProblem[SAT]):
+async def delete_single_terms(problem: ReductionProblem[SAT]) -> None:
     def remove_terms(terms: frozenset[tuple[int, int]], sat: SAT) -> SAT:
-        result = list(map(list, sat))
-        grouped = defaultdict(set)
+        result: list[list[int]] = [list(c) for c in sat]
+        grouped: defaultdict[int, set[int]] = defaultdict(set)
         for i, j in terms:
             grouped[i].add(j)
         for i, js in grouped.items():
@@ -141,19 +144,19 @@ async def delete_single_terms(problem: ReductionProblem[SAT]):
     await unit_propagate(problem)
 
 
-async def renumber_variables(problem: ReductionProblem[SAT]):
+async def renumber_variables(problem: ReductionProblem[SAT]) -> None:
     variables = sorted(
         {abs(lit) for clause in problem.current_test_case for lit in clause}
     )
 
     def renumber(terms: frozenset[tuple[int, int]], sat: SAT) -> SAT:
-        renumbering = {}
+        renumbering: dict[int, int] = {}
         for i, j in sorted(terms):
             if j not in renumbering:
                 renumbering[j] = i
-        result = []
+        result: SAT = []
         for clause in sat:
-            new_clause = sorted(
+            new_clause: Clause = sorted(
                 set(
                     [
                         (renumbering[lit] if lit > 0 else -renumbering[-lit])
@@ -167,8 +170,8 @@ async def renumber_variables(problem: ReductionProblem[SAT]):
                 result.append(new_clause)
         return result
 
-    ideal_number = {v: i for i, v in enumerate(variables, 1)}
-    backup_number = {}
+    ideal_number: dict[int, int] = {v: i for i, v in enumerate(variables, 1)}
+    backup_number: dict[int, int] = {}
     used = set(variables)
     i = 1
     for v in variables:
@@ -203,8 +206,17 @@ async def renumber_variables(problem: ReductionProblem[SAT]):
     await unit_propagate(problem)
 
 
-class UnionFind:
-    def __init__(self, initial_merges=(), key=None):
+class UnionFind(Generic[T]):
+    table: dict[T, T]
+    key: Callable[[T], object] | None
+    generation: int
+    representatives: int
+
+    def __init__(
+        self,
+        initial_merges: Iterable[tuple[T, T]] = (),
+        key: Callable[[T], object] | None = None,
+    ) -> None:
         self.table = {}
         self.key = key
         self.generation = 0
@@ -212,7 +224,7 @@ class UnionFind:
         for k, v in initial_merges:
             self.merge(k, v)
 
-    def __copy__(self):
+    def __copy__(self) -> Self:
         result = type(self).__new__(type(self))
         result.table = copy(self.table)
         result.key = self.key
@@ -220,26 +232,26 @@ class UnionFind:
         result.representatives = self.representatives
         return result
 
-    def clone(self):
+    def clone(self) -> Self:
         return self.__copy__()
 
-    def mapping(self):
+    def mapping(self) -> dict[T, T]:
         sources = [k for k, k2 in self.table.items() if k != k2]
         return {k: self.find(k) for k in sources}
 
-    def components(self):
-        groupings = defaultdict(list)
+    def components(self) -> list[list[T]]:
+        groupings: defaultdict[T, list[T]] = defaultdict(list)
         for k in list(self.table):
             groupings[self.find(k)].append(k)
         return list(groupings.values())
 
-    def extend(self, other):
+    def extend(self, other: Self) -> None:
         if other is self:
             return
         for k, v in other.table.items():
             self.merge(k, v)
 
-    def find(self, value):
+    def find(self, value: T) -> T:
         try:
             if self.table[value] == value:
                 return value
@@ -248,7 +260,7 @@ class UnionFind:
             self.table[value] = value
             return value
 
-        trail = []
+        trail: list[T] = []
         while value != self.table[value]:
             trail.append(value)
             value = self.table[value]
@@ -256,7 +268,7 @@ class UnionFind:
             self.table[t] = value
         return value
 
-    def merge(self, left, right):
+    def merge(self, left: T, right: T) -> None:
         if left == right:
             return
         left = self.find(left)
@@ -265,17 +277,18 @@ class UnionFind:
             return
         self.representatives -= 1
         self.generation += 1
-        left, right = sorted((left, right), key=self.key)
+        left, right = sorted((left, right), key=self.key)  # type: ignore[arg-type]
         self.table[right] = left
 
-    def merge_all(self, values):
+    def merge_all(self, values: list[T]) -> None:
         if len(values) > 1:
-            a, *rest = sorted(values, key=self.key)
-            for b in rest:
-                self.merge(a, b)
+            sorted_values: list[T] = sorted(values, key=self.key)  # type: ignore[arg-type]
+            a: T = sorted_values[0]  # type: ignore[reportUnknownVariableType]
+            for b in sorted_values[1:]:  # type: ignore[reportUnknownVariableType]
+                self.merge(a, b)  # type: ignore[reportUnknownArgumentType]
 
-    def __repr__(self):
-        classes = {}
+    def __repr__(self) -> str:
+        classes: dict[T, set[T]] = {}
         for k in self.table:
             trail = [k]
             v = k
@@ -289,75 +302,79 @@ class UnionFind:
         )
 
 
-class BooleanEquivalence(UnionFind):
-    def __init__(self, initial_merges=()):
-        UnionFind.__init__(self, initial_merges, key=abs)
-        self.table = NegatingMap()
+class BooleanEquivalence(UnionFind[int]):
+    table: "NegatingMap"  # type: ignore[reportIncompatibleVariableOverride]
 
-    def find(self, a):
-        if not a:
-            raise ValueError("Invalid variable %r" % (a,))
-        return UnionFind.find(self, a)
+    def __init__(self, initial_merges: Iterable[tuple[int, int]] = ()) -> None:
+        super().__init__(initial_merges, key=abs)
+        self.table = NegatingMap()  # pyright: ignore[reportIncompatibleVariableOverride]
 
-    def merge(self, a, b):
-        if a == b:
+    def find(self, value: int) -> int:
+        if not value:
+            raise ValueError("Invalid variable %r" % (value,))
+        return super().find(value)
+
+    def merge(self, left: int, right: int) -> None:
+        if left == right:
             return
-        a2 = self.find(a)
-        b2 = self.find(b)
-        if a2 == b2:
+        left2 = self.find(left)
+        right2 = self.find(right)
+        if left2 == right2:
             return
-        if a2 == -b2:
+        if left2 == -right2:
             raise Inconsistent(
-                "Attempted to merge %d (=%d) with %d (=%d)" % (a, a2, b, b2)
+                "Attempted to merge %d (=%d) with %d (=%d)" % (left, left2, right, right2)
             )
-        UnionFind.merge(self, a, b)
+        super().merge(left, right)
 
 
 class NegatingMap:
-    def __init__(self):
-        self.__data = {}
+    _data: dict[int, int]
 
-    def __copy__(self):
+    def __init__(self) -> None:
+        self._data = {}
+
+    def __copy__(self) -> "NegatingMap":
         result = NegatingMap.__new__(NegatingMap)
-        result.__data = dict(self.__data)
+        result._data = dict(self._data)
         return result
 
-    def __repr__(self):
-        m = {}
-        for k, v in self.__data.items():
+    def __repr__(self) -> str:
+        m: dict[int, int] = {}
+        for k, v in self._data.items():
             m[k] = v
             m[-k] = -v
         return repr(m)
 
-    def positive_keys(self):
-        return self.__data.keys()
+    def positive_keys(self) -> Iterable[int]:
+        return self._data.keys()
 
-    def __iter__(self):
-        yield from self.__data.keys()
-        for k in self.__data.keys():
+    def __iter__(self) -> Iterator[int]:
+        yield from self._data.keys()
+        for k in self._data.keys():
             yield -k
 
-    def items(self):
+    def items(self) -> Iterator[tuple[int, int]]:
         for k in self:
             yield (k, self[k])
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: int) -> int:
         assert key != 0
         if key < 0:
-            return -self.__data[-key]
+            return -self._data[-key]
         else:
-            return self.__data[key]
+            return self._data[key]
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: int, value: int) -> None:
         assert key != 0
         assert value != 0
         if key < 0:
-            self.__data[-key] = -value
+            self._data[-key] = -value
         else:
-            self.__data[key] = value
+            self._data[key] = value
 
 
-async def merge_literals(problem: ReductionProblem[SAT]):
+async def merge_literals(problem: ReductionProblem[SAT]) -> None:
     def apply_merges(terms: frozenset[tuple[int, int]], sat: SAT) -> SAT:
         uf = BooleanEquivalence()
         try:
@@ -366,7 +383,7 @@ async def merge_literals(problem: ReductionProblem[SAT]):
         except Inconsistent:
             raise Conflict()
 
-        result = set()
+        result: set[frozenset[int]] = set()
         for clause in sat:
             new_clause = frozenset(map(uf.find, clause))
             result.add(new_clause)
@@ -386,12 +403,12 @@ async def merge_literals(problem: ReductionProblem[SAT]):
     await unit_propagate(problem)
 
 
-async def pass_to_component(problem: ReductionProblem[SAT]):
-    groups = UnionFind()
+async def pass_to_component(problem: ReductionProblem[SAT]) -> None:
+    groups: UnionFind[int] = UnionFind()
     clauses = problem.current_test_case
     for clause in clauses:
         groups.merge_all(list(map(abs, clause)))
-    partitions = defaultdict(list)
+    partitions: defaultdict[int, SAT] = defaultdict(list)
     for clause in clauses:
         partitions[groups.find(abs(clause[0]))].append(clause)
     if len(partitions) > 1:
@@ -399,7 +416,7 @@ async def pass_to_component(problem: ReductionProblem[SAT]):
             await problem.is_interesting(p)
 
 
-async def sort_clauses(problem: ReductionProblem[SAT]):
+async def sort_clauses(problem: ReductionProblem[SAT]) -> None:
     await problem.is_interesting(sorted(map(sorted, problem.current_test_case)))
 
 
@@ -408,8 +425,17 @@ class Inconsistent(Exception):
 
 
 class UnitPropagator:
-    def __init__(self, clauses):
-        self.__clauses = list(map(tuple, clauses))
+    __clauses: list[tuple[int, ...]]
+    __clause_counts: Counter[int]
+    __watches: defaultdict[int, frozenset[int]]
+    __watched_by: list[frozenset[int]]
+    units: set[int]
+    forced_variables: set[int]
+    __dirty: set[int]
+    __frozen: bool
+
+    def __init__(self, clauses: Iterable[Iterable[int]]) -> None:
+        self.__clauses = [tuple(c) for c in clauses]
         self.__clause_counts = Counter()
         for clause in self.__clauses:
             for literal in clause:
@@ -419,20 +445,20 @@ class UnitPropagator:
 
         self.units = set()
         self.forced_variables = set()
-        self.__dirty = set(range(len(clauses)))
+        self.__dirty = set(range(len(self.__clauses)))
         self.__clean_dirty_clauses()
         self.__frozen = False
 
-    def freeze(self):
+    def freeze(self) -> None:
         self.__frozen = True
 
-    def add_clauses(self, clauses):
+    def add_clauses(self, clauses: Iterable[Iterable[int]]) -> None:
         if self.__frozen:
             raise ValueError("Frozen")
         i = len(self.__clauses)
-        self.__clauses.extend(map(tuple, clauses))
+        self.__clauses.extend(tuple(c) for c in clauses)
         while len(self.__watched_by) < len(self.__clauses):
-            self.__watched_by.append(set())
+            self.__watched_by.append(frozenset())
         self.__dirty.update(range(i, len(self.__clauses)))
         self.__clean_dirty_clauses()
 
@@ -447,13 +473,13 @@ class UnitPropagator:
     def add_unit(self, unit: int) -> None:
         self.add_units((unit,))
 
-    def clause_count(self, variable):
+    def clause_count(self, variable: int) -> int:
         if variable in self.forced_variables:
             return 1
         else:
             return self.__clause_counts[variable]
 
-    def __enqueue_unit(self, unit):
+    def __enqueue_unit(self, unit: int) -> None:
         if unit not in self.units:
             if -unit in self.units:
                 raise Inconsistent(
@@ -463,7 +489,7 @@ class UnitPropagator:
             self.forced_variables.add(abs(unit))
             self.__dirty.update(self.__watches.pop(-unit, ()))
 
-    def __clean_dirty_clauses(self):
+    def __clean_dirty_clauses(self) -> None:
         iters = 0
         while self.__dirty:
             iters += 1
@@ -499,8 +525,8 @@ class UnitPropagator:
                     elif len(self.__watched_by[i]) == 1:
                         self.__enqueue_unit(*self.__watched_by[i])
 
-    def propagated_clauses(self):
-        results = set()
+    def propagated_clauses(self) -> SAT:
+        results: set[tuple[int, ...]] = set()
         neg_units = {-v for v in self.units}
         for clause in self.__clauses:
             if any(literal in self.units for literal in clause):
@@ -514,7 +540,7 @@ class UnitPropagator:
         ]
 
 
-async def unitize(problem: ReductionProblem[SAT]):
+async def unitize(problem: ReductionProblem[SAT]) -> None:
     clauses = list(problem.current_test_case)
     problem.work.random.shuffle(clauses)
     clauses.sort(key=len)
@@ -530,7 +556,7 @@ async def unitize(problem: ReductionProblem[SAT]):
         i += 1
 
 
-async def unit_propagate(problem: ReductionProblem[SAT]):
+async def unit_propagate(problem: ReductionProblem[SAT]) -> None:
     try:
         propagated = UnitPropagator(problem.current_test_case).propagated_clauses()
     except Inconsistent:
@@ -540,11 +566,11 @@ async def unit_propagate(problem: ReductionProblem[SAT]):
         await problem.is_interesting(propagated)
 
 
-async def delete_units(problem: ReductionProblem[SAT]):
+async def delete_units(problem: ReductionProblem[SAT]) -> None:
     await problem.is_interesting([c for c in problem.current_test_case if len(c) > 1])
 
 
-async def force_literals(problem: ReductionProblem[SAT]):
+async def force_literals(problem: ReductionProblem[SAT]) -> None:
     literals = literals_in(problem.current_test_case)
     for lit in literals:
         try:
@@ -555,23 +581,23 @@ async def force_literals(problem: ReductionProblem[SAT]):
             pass
 
 
-async def combine_clauses(problem: ReductionProblem[SAT]):
+async def combine_clauses(problem: ReductionProblem[SAT]) -> None:
     def apply_merges(terms: frozenset[tuple[int, int]], sat: SAT) -> SAT:
-        uf = UnionFind()
+        uf: UnionFind[int] = UnionFind()
         for u, v in terms:
             uf.merge(u, v)
 
-        result = list(map(list, sat))
+        result: list[Clause | None] = [list(c) for c in sat]
         for c in uf.components():
             if len(c) > 1:
-                combined = sorted({lit for i in c for lit in sat[i]}, key=abs)
+                combined: Clause = sorted({lit for i in c for lit in sat[i]}, key=abs)
                 for i in c:
                     result[i] = None
                 if len(combined) == len(set(map(abs, combined))):
                     result.append(combined)
         return [clause for clause in result if clause is not None]
 
-    by_literal = defaultdict(list)
+    by_literal: defaultdict[int, list[int]] = defaultdict(list)
     for i, clause in enumerate(problem.current_test_case):
         for lit in clause:
             by_literal[lit].append(i)

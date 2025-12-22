@@ -24,6 +24,8 @@ class TestWorkerModule:
 
         # Send a status command
         command = b'{"id":"test-1","command":"status","params":{}}\n'
+        assert proc.stdin is not None
+        assert proc.stdout is not None
         proc.stdin.write(command)
         proc.stdin.flush()
 
@@ -77,6 +79,8 @@ class TestProtocolWithWorker:
 
         # Send an unknown command
         command = b'{"id":"test-2","command":"unknown_command","params":{}}\n'
+        assert proc.stdin is not None
+        assert proc.stdout is not None
         proc.stdin.write(command)
         proc.stdin.flush()
 
@@ -105,6 +109,8 @@ class TestProtocolWithWorker:
 
         # Send malformed JSON
         command = b"not valid json\n"
+        assert proc.stdin is not None
+        assert proc.stdout is not None
         proc.stdin.write(command)
         proc.stdin.flush()
 

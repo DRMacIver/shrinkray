@@ -210,8 +210,8 @@ class StatsDisplay(Static):
 class ContentPreview(Static):
     """Widget to display the current test case content preview."""
 
-    content = reactive("")
-    hex_mode = reactive(False)
+    content: str = reactive("")  # type: ignore[assignment]
+    hex_mode: bool = reactive(False)  # type: ignore[assignment]
     _last_displayed_content: str = ""
     _last_display_time: float = 0.0
     _pending_content: str = ""
@@ -234,7 +234,7 @@ class ContentPreview(Static):
 
         # Track last displayed content for diffs
         if self.content and self.content != content:
-            self._last_displayed_content = self.content
+            self._last_displayed_content = str(self.content)
 
         self.content = content
         self.hex_mode = hex_mode
@@ -244,12 +244,11 @@ class ContentPreview(Static):
         """Get the number of lines available for display based on container size."""
         try:
             # Try to get the parent container's size (the VerticalScroll viewport)
-            if (
-                self.parent
-                and hasattr(self.parent, "size")
-                and self.parent.size.height > 0
-            ):
-                return max(10, self.parent.size.height - 2)
+            parent = self.parent
+            if parent and hasattr(parent, "size"):
+                parent_size = parent.size  # type: ignore[union-attr]
+                if parent_size.height > 0:
+                    return max(10, parent_size.height - 2)
             # Fall back to app screen size
             if self.app and self.app.size.height > 0:
                 # Estimate available space (screen minus header, footer, stats, etc.)

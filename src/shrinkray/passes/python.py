@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any, AnyStr
+from typing import Any, AnyStr, cast
 
 import libcst
 import libcst.matchers as m
@@ -161,19 +161,18 @@ async def strip_annotations(problem: ReductionProblem[bytes]) -> None:
         m.Param(),
         lambda x: x.with_changes(annotation=None),
     )
-    await libcst_transform(
-        problem,
-        m.AnnAssign(),
-        lambda x: (
-            libcst.Assign(
-                targets=[libcst.AssignTarget(target=x.target)],
-                value=x.value,
-                semicolon=x.semicolon,
+    def ann_assign_to_assign(x: libcst.CSTNode) -> Replacement:
+        ann = cast(libcst.AnnAssign, x)
+        if ann.value is not None:
+            return libcst.Assign(
+                targets=[libcst.AssignTarget(target=ann.target)],
+                value=ann.value,
+                semicolon=ann.semicolon,
             )
-            if x.value
-            else libcst.RemoveFromParent()
-        ),
-    )
+        else:
+            return libcst.RemoveFromParent()
+
+    await libcst_transform(problem, m.AnnAssign(), ann_assign_to_assign)
 
 
 PYTHON_PASSES = [

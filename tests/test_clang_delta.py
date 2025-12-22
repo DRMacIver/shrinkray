@@ -78,3 +78,72 @@ def test_clang_delta_pumps():
     for pump in pumps:
         assert callable(pump)
         assert "clang_delta(" in pump.__name__
+
+
+# =============================================================================
+# Assertion failure handling tests
+# =============================================================================
+
+# This C++ code triggers an assertion failure in clang_delta's rename-fun pass
+ASSERTION_CRASHER = b'''namespace{
+    inline namespace __1{
+        template<class>struct __attribute(())char_traits;
+        template<class _C,class=char_traits<_C>>class __attribute(())C;
+    }
+}
+namespace{
+    namespace __1{
+        class __attribute(())ios_base{
+            public:~ios_base();
+        }
+        ;
+        template<class,class>class __attribute(())D:ios_base{}
+        ;
+        template<class _C,class _s>class __attribute(())C:D<_C,_s>{
+            public:void operator<<(C&(C&));
+        }
+        ;
+        template<class _C,class _s>__attribute(())C<int>operator<<(C<_s>,_C){}
+        template<class _C,class _s>C<_C>&endl(C<_s>&);
+    }
+}
+namespace{
+    extern __attribute(())C<char>cout;
+}
+int main(){
+    cout<<""<<endl;
+}
+'''
+
+
+async def test_query_instances_on_crasher():
+    """Test query_instances works on code that will crash during apply."""
+    cd = ClangDelta(find_clang_delta())
+    # query_instances succeeds (returns instance count), but applying will crash
+    count = await cd.query_instances("rename-fun", ASSERTION_CRASHER)
+    assert count >= 1  # There are instances, but applying them crashes
+
+
+async def test_apply_transformation_handles_assertion_failure():
+    """Test apply_transformation returns original when clang_delta hits an assertion."""
+    cd = ClangDelta(find_clang_delta())
+    # This should trigger an assertion failure but return original instead of raising
+    result = await cd.apply_transformation("rename-fun", 1, ASSERTION_CRASHER)
+    assert result == ASSERTION_CRASHER
+
+
+async def test_pump_handles_assertion_failure():
+    """Test clang_delta_pump handles assertion failures gracefully."""
+    cd = ClangDelta(find_clang_delta())
+    pump = clang_delta_pump(cd, "rename-fun")
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        ASSERTION_CRASHER, is_interesting, work=WorkContext(parallelism=1)
+    )
+
+    # Should not raise, should return the original
+    result = await pump(problem)
+    assert result == ASSERTION_CRASHER

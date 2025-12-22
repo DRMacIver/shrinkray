@@ -91,6 +91,7 @@ class WorkContext:
                         await send.send(await f(x))
                         break
                     else:
+                        send.close()
                         return
 
                     n = 2

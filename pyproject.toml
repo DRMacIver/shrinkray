@@ -43,6 +43,7 @@ dev = [
     "flake8",
     "flake8-bugbear",
     "flake8-trio",
+    "black",
 ]
 
 [tool.setuptools.packages.find]

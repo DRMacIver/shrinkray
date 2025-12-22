@@ -294,8 +294,6 @@ def test_conflict_exception():
 # apply_patches async function tests
 # =============================================================================
 
-import trio
-
 from shrinkray.passes.patching import apply_patches
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.work import WorkContext
@@ -378,6 +376,8 @@ async def test_apply_patches_all_at_once():
 
 async def test_apply_patches_with_parallelism():
     """Test apply_patches with parallelism > 1."""
+    import trio
+
     async def is_interesting(x):
         await trio.sleep(0)  # Yield to allow parallelism
         return True
@@ -393,23 +393,3 @@ async def test_apply_patches_with_parallelism():
 
     await apply_patches(problem, cuts, patches)
     assert len(problem.current_test_case) < 10
-
-
-def test_wrapper_apply_patches_all_applicable():
-    trio.run(test_apply_patches_all_applicable)
-
-
-def test_wrapper_apply_patches_some_not_applicable():
-    trio.run(test_apply_patches_some_not_applicable)
-
-
-def test_wrapper_apply_patches_empty():
-    trio.run(test_apply_patches_empty)
-
-
-def test_wrapper_apply_patches_all_at_once():
-    trio.run(test_apply_patches_all_at_once)
-
-
-def test_wrapper_apply_patches_with_parallelism():
-    trio.run(test_apply_patches_with_parallelism)

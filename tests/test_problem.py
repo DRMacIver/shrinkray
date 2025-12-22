@@ -1,7 +1,6 @@
 """Unit tests for problem module utilities and classes."""
 
 import pytest
-import trio
 
 from shrinkray.problem import (
     BasicReductionProblem,
@@ -404,56 +403,3 @@ def test_basic_problem_display():
     )
     display = problem.display(b"hi")
     assert "b'hi'" in display
-
-
-# Run async tests with trio
-def test_wrapper_basic_problem_current_test_case():
-    trio.run(test_basic_problem_current_test_case)
-
-
-def test_wrapper_basic_problem_is_interesting_same_value():
-    trio.run(test_basic_problem_is_interesting_same_value)
-
-
-def test_wrapper_basic_problem_is_interesting_reduces():
-    trio.run(test_basic_problem_is_interesting_reduces)
-
-
-def test_wrapper_basic_problem_is_interesting_not_reduction():
-    trio.run(test_basic_problem_is_interesting_not_reduction)
-
-
-def test_wrapper_basic_problem_is_interesting_not_interesting():
-    trio.run(test_basic_problem_is_interesting_not_interesting)
-
-
-def test_wrapper_basic_problem_caching():
-    trio.run(test_basic_problem_caching)
-
-
-def test_wrapper_basic_problem_setup_invalid():
-    trio.run(test_basic_problem_setup_invalid)
-
-
-def test_wrapper_basic_problem_setup_valid():
-    trio.run(test_basic_problem_setup_valid)
-
-
-def test_wrapper_basic_problem_is_reduction():
-    trio.run(test_basic_problem_is_reduction)
-
-
-def test_wrapper_basic_problem_is_reduction_larger():
-    trio.run(test_basic_problem_is_reduction_larger)
-
-
-def test_wrapper_basic_problem_on_reduce_callback():
-    trio.run(test_basic_problem_on_reduce_callback)
-
-
-def test_wrapper_basic_problem_stats_updated():
-    trio.run(test_basic_problem_stats_updated)
-
-
-def test_wrapper_basic_problem_backtrack():
-    trio.run(test_basic_problem_backtrack)

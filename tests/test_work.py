@@ -29,176 +29,6 @@ async def test_worker_map(p: int) -> None:
             i += 1
 
 
-# =============================================================================
-# find_large_integer tests
-# =============================================================================
-
-
-async def test_find_large_integer_zero():
-    """Test find_large_integer when result is 0."""
-    work = WorkContext(parallelism=1)
-
-    async def f(n):
-        return n == 0
-
-    # f(0) is assumed True, f(1) is False, so result is 0
-    result = await work.find_large_integer(f)
-    assert result == 0
-
-
-async def test_find_large_integer_small():
-    """Test find_large_integer with small result (1-3)."""
-    work = WorkContext(parallelism=1)
-
-    async def f(n):
-        return n <= 2
-
-    result = await work.find_large_integer(f)
-    assert result == 2
-
-
-async def test_find_large_integer_at_boundary():
-    """Test find_large_integer at boundary of linear scan (4)."""
-    work = WorkContext(parallelism=1)
-
-    async def f(n):
-        return n <= 4
-
-    result = await work.find_large_integer(f)
-    assert result == 4
-
-
-async def test_find_large_integer_large():
-    """Test find_large_integer with large result (requires binary search)."""
-    work = WorkContext(parallelism=1)
-
-    async def f(n):
-        return n <= 100
-
-    result = await work.find_large_integer(f)
-    assert result == 100
-
-
-async def test_find_large_integer_very_large():
-    """Test find_large_integer with very large result."""
-    work = WorkContext(parallelism=1)
-
-    async def f(n):
-        return n <= 1000
-
-    result = await work.find_large_integer(f)
-    assert result == 1000
-
-
-async def test_find_large_integer_power_of_two():
-    """Test find_large_integer with power of 2 result."""
-    work = WorkContext(parallelism=1)
-
-    async def f(n):
-        return n <= 64
-
-    result = await work.find_large_integer(f)
-    assert result == 64
-
-
-# =============================================================================
-# find_first_value tests
-# =============================================================================
-
-
-async def test_find_first_value_found():
-    """Test find_first_value when value is found."""
-    work = WorkContext(parallelism=1)
-
-    async def is_even(n):
-        return n % 2 == 0
-
-    result = await work.find_first_value([1, 3, 4, 5, 6], is_even)
-    assert result == 4
-
-
-async def test_find_first_value_not_found():
-    """Test find_first_value raises NotFound when no match."""
-    work = WorkContext(parallelism=1)
-
-    async def always_false(n):
-        return False
-
-    with pytest.raises(NotFound):
-        await work.find_first_value([1, 2, 3], always_false)
-
-
-async def test_find_first_value_empty():
-    """Test find_first_value raises NotFound for empty list."""
-    work = WorkContext(parallelism=1)
-
-    async def always_true(n):
-        return True
-
-    with pytest.raises(NotFound):
-        await work.find_first_value([], always_true)
-
-
-async def test_find_first_value_parallel():
-    """Test find_first_value with parallelism."""
-    work = WorkContext(parallelism=2)
-
-    async def is_big(n):
-        return n > 5
-
-    result = await work.find_first_value(list(range(10)), is_big)
-    assert result == 6
-
-
-# =============================================================================
-# filter tests
-# =============================================================================
-
-
-async def test_filter_basic():
-    """Test filter returns matching items."""
-    work = WorkContext(parallelism=1)
-
-    async def is_even(n):
-        return n % 2 == 0
-
-    async with work.filter([1, 2, 3, 4, 5], is_even) as filtered:
-        results = [x async for x in filtered]
-
-    assert results == [2, 4]
-
-
-async def test_filter_none_match():
-    """Test filter with no matching items."""
-    work = WorkContext(parallelism=1)
-
-    async def always_false(n):
-        return False
-
-    async with work.filter([1, 2, 3], always_false) as filtered:
-        results = [x async for x in filtered]
-
-    assert results == []
-
-
-async def test_filter_parallel():
-    """Test filter with parallelism."""
-    work = WorkContext(parallelism=2)
-
-    async def is_odd(n):
-        return n % 2 == 1
-
-    async with work.filter(list(range(10)), is_odd) as filtered:
-        results = [x async for x in filtered]
-
-    assert results == [1, 3, 5, 7, 9]
-
-
-# =============================================================================
-# map empty sequence test
-# =============================================================================
-
-
 @pytest.mark.parametrize("p", [1, 2])
 async def test_worker_map_empty(p: int) -> None:
     """Test map with empty sequence."""
@@ -213,20 +43,113 @@ async def test_worker_map_empty(p: int) -> None:
 
 
 # =============================================================================
+# find_large_integer tests
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        pytest.param(0, id="zero"),  # Edge case: f(0) assumed true, f(1) false
+        pytest.param(2, id="small"),  # Small value within linear scan (< 4)
+        pytest.param(4, id="boundary"),  # Boundary where linear scan ends
+        pytest.param(5, id="just_past_boundary"),  # First value requiring exponential probe
+        pytest.param(64, id="power_of_two"),  # Power of 2, tests binary search
+        pytest.param(100, id="large"),  # Larger value requiring binary search
+    ],
+)
+async def test_find_large_integer(target: int) -> None:
+    """Test find_large_integer finds the correct boundary value."""
+    work = WorkContext(parallelism=1)
+
+    async def f(n: int) -> bool:
+        return n <= target
+
+    result = await work.find_large_integer(f)
+    assert result == target
+
+
+# =============================================================================
+# find_first_value tests
+# =============================================================================
+
+
+@pytest.mark.parametrize("p", [1, 2])
+async def test_find_first_value_found(p: int) -> None:
+    """Test find_first_value when value is found."""
+    work = WorkContext(parallelism=p)
+
+    async def is_even(n: int) -> bool:
+        return n % 2 == 0
+
+    result = await work.find_first_value([1, 3, 4, 5, 6], is_even)
+    assert result == 4
+
+
+@pytest.mark.parametrize("p", [1, 2])
+async def test_find_first_value_not_found(p: int) -> None:
+    """Test find_first_value raises NotFound when no match."""
+    work = WorkContext(parallelism=p)
+
+    async def always_false(n: int) -> bool:
+        return False
+
+    with pytest.raises(NotFound):
+        await work.find_first_value([1, 2, 3], always_false)
+
+
+@pytest.mark.parametrize("p", [1, 2])
+async def test_find_first_value_empty(p: int) -> None:
+    """Test find_first_value raises NotFound for empty list."""
+    work = WorkContext(parallelism=p)
+
+    async def always_true(n: int) -> bool:
+        return True
+
+    with pytest.raises(NotFound):
+        await work.find_first_value([], always_true)
+
+
+# =============================================================================
+# filter tests
+# =============================================================================
+
+
+@pytest.mark.parametrize("p", [1, 2])
+async def test_filter_basic(p: int) -> None:
+    """Test filter returns matching items."""
+    work = WorkContext(parallelism=p)
+
+    async def is_even(n: int) -> bool:
+        return n % 2 == 0
+
+    async with work.filter([1, 2, 3, 4, 5], is_even) as filtered:
+        results = [x async for x in filtered]
+
+    assert results == [2, 4]
+
+
+@pytest.mark.parametrize("p", [1, 2])
+async def test_filter_none_match(p: int) -> None:
+    """Test filter with no matching items."""
+    work = WorkContext(parallelism=p)
+
+    async def always_false(n: int) -> bool:
+        return False
+
+    async with work.filter([1, 2, 3], always_false) as filtered:
+        results = [x async for x in filtered]
+
+    assert results == []
+
+
+# =============================================================================
 # Volume enum tests
 # =============================================================================
 
 
-def test_volume_values():
-    """Test Volume enum has expected values."""
-    assert Volume.quiet == 0
-    assert Volume.normal == 1
-    assert Volume.verbose == 2
-    assert Volume.debug == 3
-
-
 def test_volume_ordering():
-    """Test Volume enum ordering."""
+    """Test Volume enum ordering for comparison operations."""
     assert Volume.quiet < Volume.normal < Volume.verbose < Volume.debug
 
 
@@ -236,20 +159,19 @@ def test_volume_ordering():
 
 
 def test_warn():
-    """Test warn method calls report."""
+    """Test warn method calls report without raising."""
     work = WorkContext()
-    # warn is a no-op in base implementation but should not raise
     work.warn("test warning")
 
 
 def test_note():
-    """Test note method calls report."""
+    """Test note method calls report without raising."""
     work = WorkContext()
     work.note("test note")
 
 
 def test_debug():
-    """Test debug method calls report."""
+    """Test debug method calls report without raising."""
     work = WorkContext()
     work.debug("test debug")
 
@@ -276,6 +198,7 @@ def test_workcontext_defaults():
 def test_workcontext_custom_random():
     """Test WorkContext with custom random."""
     from random import Random
+
     rnd = Random(42)
     work = WorkContext(random=rnd)
     assert work.random is rnd

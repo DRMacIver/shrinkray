@@ -1045,8 +1045,3 @@ async def test_compose_with_changing_format():
 
     # This should work since initial input is parseable
     await composed(problem)
-
-
-def test_wrapper_compose_with_changing_format():
-    import trio
-    trio.run(test_compose_with_changing_format)

@@ -526,3 +526,92 @@ def test_shrinkray_pumps_without_clang_delta():
 
     reducer = ShrinkRay(target=problem, clang_delta=None)
     assert list(reducer.pumps) == []
+
+
+# =============================================================================
+# DirectoryShrinkRay tests
+# =============================================================================
+
+
+async def test_directory_shrinkray_delete_keys():
+    """Test DirectoryShrinkRay.delete_keys removes deletable keys."""
+    from shrinkray.reducer import DirectoryShrinkRay
+
+    # Track which files are required
+    required_files = {"a.txt", "c.txt"}
+
+    async def is_interesting(x):
+        # Interesting if all required files are present
+        return all(f in x for f in required_files)
+
+    problem = BasicReductionProblem(
+        initial={"a.txt": b"content a", "b.txt": b"content b", "c.txt": b"content c"},
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = DirectoryShrinkRay(target=problem)
+    await reducer.delete_keys()
+
+    # b.txt should be deleted since it's not required
+    assert "a.txt" in problem.current_test_case
+    assert "b.txt" not in problem.current_test_case
+    assert "c.txt" in problem.current_test_case
+
+
+async def test_directory_shrinkray_delete_keys_priority():
+    """Test DirectoryShrinkRay.delete_keys deletes larger files first."""
+    from shrinkray.reducer import DirectoryShrinkRay
+
+    deletion_order = []
+
+    async def is_interesting(x):
+        # Track what's being tested by recording deletions
+        current_keys = set(x.keys())
+        for key in ["a.txt", "b.txt", "c.txt"]:
+            if key not in current_keys and key not in deletion_order:
+                deletion_order.append(key)
+        # Always keep all files
+        return True
+
+    problem = BasicReductionProblem(
+        initial={
+            "a.txt": b"small",  # 5 bytes
+            "b.txt": b"medium content",  # 14 bytes
+            "c.txt": b"large content here",  # 18 bytes
+        },
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = DirectoryShrinkRay(target=problem)
+    await reducer.delete_keys()
+
+    # Larger files should be tried first (they're sorted by size descending)
+    # c.txt (18 bytes) should be tried before b.txt (14 bytes) before a.txt (5 bytes)
+    assert deletion_order == ["c.txt", "b.txt", "a.txt"]
+
+
+async def test_directory_shrinkray_run_reduces_directory():
+    """Test DirectoryShrinkRay.run reduces directory contents."""
+    from shrinkray.reducer import DirectoryShrinkRay
+
+    async def is_interesting(x):
+        # Interesting if a.txt exists and contains 'x'
+        return "a.txt" in x and b"x" in x.get("a.txt", b"")
+
+    problem = BasicReductionProblem(
+        initial={"a.txt": b"xxxyyy", "b.txt": b"deleteme"},
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = DirectoryShrinkRay(target=problem)
+    await reducer.run()
+
+    # b.txt should be deleted, a.txt should be reduced
+    assert "b.txt" not in problem.current_test_case
+    assert "a.txt" in problem.current_test_case
+    # a.txt should be reduced to minimal form containing 'x'
+    assert b"x" in problem.current_test_case["a.txt"]
+    assert len(problem.current_test_case["a.txt"]) < 6

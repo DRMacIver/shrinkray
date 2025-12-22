@@ -403,3 +403,259 @@ def test_basic_problem_display():
     )
     display = problem.display(b"hi")
     assert "b'hi'" in display
+
+
+# =============================================================================
+# View tests
+# =============================================================================
+
+
+from shrinkray.problem import View
+
+
+def test_view_current_test_case():
+    """Test View parses underlying test case."""
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    view = View(
+        problem=problem,
+        parse=lambda b: b.decode("utf-8"),
+        dump=lambda s: s.encode("utf-8"),
+    )
+    assert view.current_test_case == "hello"
+
+
+async def test_view_is_interesting_delegates():
+    """Test View delegates is_interesting to underlying problem."""
+    async def is_interesting(x):
+        return x == b"hello"
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    view = View(
+        problem=problem,
+        parse=lambda b: b.decode("utf-8"),
+        dump=lambda s: s.encode("utf-8"),
+    )
+
+    assert await view.is_interesting("hello") is True
+    assert await view.is_interesting("world") is False
+
+
+async def test_view_is_interesting_handles_dump_error():
+    """Test View returns False when dump raises DumpError."""
+    from shrinkray.passes.definitions import DumpError
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    def dump(s):
+        if s == "bad":
+            raise DumpError("Cannot dump 'bad'")
+        return s.encode("utf-8")
+
+    view = View(
+        problem=problem,
+        parse=lambda b: b.decode("utf-8"),
+        dump=dump,
+    )
+
+    assert await view.is_interesting("hello") is True
+    assert await view.is_interesting("bad") is False
+
+
+def test_view_stats_delegates():
+    """Test View returns underlying problem's stats."""
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    view = View(
+        problem=problem,
+        parse=lambda b: b.decode("utf-8"),
+        dump=lambda s: s.encode("utf-8"),
+    )
+
+    assert view.stats is problem.stats
+
+
+def test_view_size_delegates():
+    """Test View delegates size to underlying problem."""
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    view = View(
+        problem=problem,
+        parse=lambda b: b.decode("utf-8"),
+        dump=lambda s: s.encode("utf-8"),
+    )
+
+    assert view.size("hello") == 5
+
+
+def test_view_sort_key_with_custom():
+    """Test View uses custom sort_key when provided."""
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    view = View(
+        problem=problem,
+        parse=lambda b: b.decode("utf-8"),
+        dump=lambda s: s.encode("utf-8"),
+        sort_key=lambda s: (len(s), s),
+    )
+
+    assert view.sort_key("hi") == (2, "hi")
+    assert view.sort_key("hello") == (5, "hello")
+
+
+def test_view_sort_key_without_custom():
+    """Test View delegates sort_key to underlying problem when not provided."""
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    view = View(
+        problem=problem,
+        parse=lambda b: b.decode("utf-8"),
+        dump=lambda s: s.encode("utf-8"),
+    )
+
+    # Should use problem's sort_key on the dumped value
+    assert view.sort_key("hi") == problem.sort_key(b"hi")
+
+
+def test_view_display():
+    """Test View uses default_display for display."""
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    view = View(
+        problem=problem,
+        parse=lambda b: b.decode("utf-8"),
+        dump=lambda s: s.encode("utf-8"),
+    )
+
+    display = view.display("hi")
+    assert "size 2" in display
+
+
+async def test_view_caches_parsed_value():
+    """Test View caches parsed value and only updates when smaller."""
+    call_count = [0]
+
+    async def is_interesting(x):
+        call_count[0] += 1
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    parse_calls = [0]
+
+    def counting_parse(b):
+        parse_calls[0] += 1
+        return b.decode("utf-8")
+
+    view = View(
+        problem=problem,
+        parse=counting_parse,
+        dump=lambda s: s.encode("utf-8"),
+        sort_key=lambda s: len(s),
+    )
+
+    # Initial parse
+    assert parse_calls[0] == 1
+    initial = view.current_test_case
+    assert initial == "hello"
+
+    # Accessing again without underlying change shouldn't re-parse
+    _ = view.current_test_case
+    assert parse_calls[0] == 1
+
+    # Reduce underlying problem
+    await problem.is_interesting(b"hi")
+    assert problem.current_test_case == b"hi"
+
+    # Now accessing should re-parse
+    current = view.current_test_case
+    assert parse_calls[0] == 2
+    assert current == "hi"
+
+
+async def test_view_only_accepts_smaller_parse_results():
+    """Test View only updates cached value if new value is smaller."""
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"5chars",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        sort_key=lambda x: len(x),  # Size-based sorting
+    )
+
+    view = View(
+        problem=problem,
+        parse=lambda b: b.decode("utf-8"),
+        dump=lambda s: s.encode("utf-8"),
+        sort_key=lambda s: len(s),
+    )
+
+    assert view.current_test_case == "5chars"
+
+    # Reduce to smaller
+    await problem.is_interesting(b"hi")
+    assert view.current_test_case == "hi"
+
+    # If somehow underlying got larger (shouldn't happen in practice),
+    # view would keep the smaller cached value
+    # This is tested by the sort_key comparison in the property

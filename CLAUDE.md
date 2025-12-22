@@ -94,3 +94,25 @@ Passes work by generating patches (typically `Cuts` for deletions), applying the
 2. **Cache clearing on reduction**: When a smaller test case is found, old cached results are no longer useful (derived from old test case)
 3. **View caching**: `problem.view(format)` caches parsed views to avoid redundant parsing
 4. **Speculative parallelism**: Multiple candidates tested concurrently; first success wins, others are "wasted" but harmless
+
+## Testing Best Practices
+
+### Async Tests
+- **Use pytest-trio** - This project uses pytest-trio, so async test functions work directly. Do NOT create sync wrapper functions that call `trio.run(async_test)`. Simply define `async def test_something():` and pytest-trio will run it.
+
+### Test Parametrization
+- **Parametrize similar tests** - If multiple tests differ only in a single value (e.g., testing with values 0, 2, 4, 64, 100), use `@pytest.mark.parametrize` instead of duplicating the test function.
+- **Use meaningful IDs** - Use `pytest.param(value, id="name")` with comments explaining why each value was chosen:
+  ```python
+  @pytest.mark.parametrize("target", [
+      pytest.param(0, id="zero"),       # Edge case: boundary condition
+      pytest.param(4, id="boundary"),   # Where linear scan ends
+      pytest.param(64, id="power_of_two"),  # Tests binary search
+  ])
+  ```
+- **Parametrize by parallelism** - Tests that involve WorkContext should typically be parametrized by parallelism `[1, 2]` to catch bugs that only manifest in parallel execution.
+
+### Test Organization
+- Group related tests with section comments (e.g., `# === View tests ===`)
+- Keep tests fast (< 5 seconds each, ideally much less)
+- Test edge cases explicitly with meaningful test names

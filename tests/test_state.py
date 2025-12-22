@@ -374,3 +374,158 @@ async def test_is_interesting_returns_false_for_non_zero_exit(tmp_path):
 
     result = await state.is_interesting(b"hello")
     assert result is False
+
+
+# === attempt_format additional tests ===
+
+
+async def test_attempt_format_with_working_formatter(tmp_path):
+    """Test attempt_format returns formatted data when formatter works."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        # Use cat as formatter (just returns input)
+        formatter="cat",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Formatter should work and return data
+    result = await state.attempt_format(b"hello")
+    assert result == b"hello"
+
+
+async def test_attempt_format_disables_on_failure(tmp_path):
+    """Test attempt_format disables formatting when formatter fails."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        # Use a formatter that will fail
+        formatter="false",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Initially can_format is True
+    assert state.can_format is True
+
+    # After format failure, should return original data and disable
+    result = await state.attempt_format(b"test data")
+    assert result == b"test data"
+    assert state.can_format is False
+
+
+# === parallel task tracking tests ===
+
+
+async def test_is_interesting_tracks_parallel_tasks(tmp_path):
+    """Test that is_interesting properly tracks parallel task count."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nsleep 0.1\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=2,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    import trio
+
+    # Run two tasks in parallel
+    results = []
+
+    async def check_parallel():
+        # Record the parallel count during execution
+        results.append(await state.is_interesting(b"test"))
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(check_parallel)
+        nursery.start_soon(check_parallel)
+
+    # Both should succeed
+    assert results == [True, True]
+    # After completion, parallel count should be 0
+    assert state.parallel_tasks_running == 0
+
+
+# === first_call tracking tests ===
+
+
+async def test_first_call_flag_is_cleared(tmp_path):
+    """Test that first_call flag is cleared after first run_for_exit_code call."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # First call flag should be True initially
+    assert state.first_call is True
+
+    await state.run_for_exit_code(b"hello")
+
+    # First call flag should be cleared after first call
+    assert state.first_call is False
+    # Initial exit code should be recorded
+    assert state.initial_exit_code == 0

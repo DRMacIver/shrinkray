@@ -80,7 +80,7 @@ class StatsDisplay(Static):
         reduction_pct = (1.0 - self.current_size / self.original_size) * 100
         deleted = self.original_size - self.current_size
 
-        # Build stats display similar to urwid UI
+        # Build stats display
         lines = []
 
         # Size and reduction info

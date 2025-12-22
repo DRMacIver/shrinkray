@@ -15,7 +15,6 @@ dependencies = [
     "click>=8.0.1",
     "chardet>=5.2.0",
     "trio>=0.28.0",
-    "urwid>=2.2.3",
     "textual>=0.47.0",
     "humanize>=4.9.0",
     "libcst>=1.1.0",

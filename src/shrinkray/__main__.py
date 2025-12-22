@@ -21,8 +21,6 @@ import chardet
 import click
 import humanize
 import trio
-import urwid
-import urwid.raw_display
 from attrs import define
 from binaryornot.check import is_binary_string
 
@@ -117,14 +115,7 @@ class InputType(IntEnum):
         return self == value
 
 
-class DisplayMode(IntEnum):
-    auto = 0
-    text = 1
-    hex = 2
-
-
 class UIType(Enum):
-    urwid = auto()
     basic = auto()
     textual = auto()
 
@@ -766,210 +757,6 @@ class BasicUI(ShrinkRayUI[TestCase]):
                 await trio.sleep(0.1)
 
 
-@define(slots=False)
-class UrwidUI(ShrinkRayUI[TestCase]):
-    parallel_samples: int = 0
-    parallel_total: int = 0
-
-    def __attrs_post_init__(self):
-        frame = self.create_frame()
-
-        screen = urwid.raw_display.Screen()
-
-        def unhandled(key: Any) -> bool:
-            if key == "q":
-                raise urwid.ExitMainLoop()
-            return False
-
-        self.event_loop = urwid.TrioEventLoop()
-
-        self.loop = urwid.MainLoop(
-            frame,
-            [],
-            screen,
-            unhandled_input=unhandled,
-            event_loop=self.event_loop,
-        )
-
-    async def regularly_clear_screen(self):
-        while True:
-            self.loop.screen.clear()
-            await trio.sleep(1)
-
-    async def update_parallelism_stats(self) -> None:
-        while True:
-            await trio.sleep(random.expovariate(10.0))
-            self.parallel_samples += 1
-            self.parallel_total += self.state.parallel_tasks_running
-            stats = self.problem.stats
-            if stats.calls > 0:
-                wasteage = stats.wasted_interesting_calls / stats.calls
-            else:
-                wasteage = 0.0
-
-            average_parallelism = self.parallel_total / self.parallel_samples
-
-            self.parallelism_status.set_text(
-                f"Current parallel workers: {self.state.parallel_tasks_running} (Average {average_parallelism:.2f}) "
-                f"(effective parallelism: {average_parallelism * (1.0 - wasteage):.2f})"
-            )
-
-    async def update_reducer_stats(self) -> None:
-        while True:
-            await trio.sleep(0.1)
-            if self.problem is None:
-                continue
-
-            self.details_text.set_text(self.problem.stats.display_stats())
-            self.reducer_status.set_text(f"Reducer status: {self.reducer.status}")
-
-    def install_into_nursery(self, nursery: trio.Nursery):
-        nursery.start_soon(self.regularly_clear_screen)
-        nursery.start_soon(self.update_parallelism_stats)
-        nursery.start_soon(self.update_reducer_stats)
-
-    async def run(self, nursery: trio.Nursery):
-        with self.loop.start():
-            await self.event_loop.run_async()
-        nursery.cancel_scope.cancel()
-
-    def create_frame(self) -> urwid.Frame:
-        text_header = "Shrink Ray. Press q to exit."
-        self.parallelism_status = urwid.Text("")
-
-        self.details_text = urwid.Text("")
-        self.reducer_status = urwid.Text("")
-
-        line = urwid.Divider("─")
-
-        listbox_content = [
-            line,
-            self.details_text,
-            self.reducer_status,
-            self.parallelism_status,
-            line,
-            *self.create_main_ui_elements(),
-        ]
-
-        header = urwid.AttrMap(urwid.Text(text_header, align="center"), "header")
-        listbox = urwid.ListBox(urwid.SimpleFocusListWalker(listbox_content))
-        return urwid.Frame(urwid.AttrMap(listbox, "body"), header=header)
-
-    def create_main_ui_elements(self) -> list[Any]:
-        return []
-
-
-class ShrinkRayUIDirectory(UrwidUI[dict[str, bytes]]):
-    def create_main_ui_elements(self) -> list[Any]:
-        self.col1 = urwid.Text("")
-        self.col2 = urwid.Text("")
-        self.col3 = urwid.Text("")
-
-        columns = urwid.Columns(
-            [
-                ("weight", 1, self.col1),
-                ("weight", 1, self.col2),
-                ("weight", 1, self.col3),
-            ]
-        )
-
-        return [columns]
-
-    async def update_file_list(self):
-        while True:
-            if self.state.first_call_time is None:
-                await trio.sleep(0.05)
-                continue
-            data = sorted(self.problem.current_test_case.items())
-
-            runtime = time.time() - self.state.first_call_time
-
-            col1_bits = []
-            col2_bits = []
-            col3_bits = []
-
-            for k, v in data:
-                col1_bits.append(k)
-                col2_bits.append(humanize.naturalsize(len(v)))
-                reduction_percentage = (1.0 - len(v) / len(self.state.initial[k])) * 100
-                reduction_rate = (len(self.state.initial[k]) - len(v)) / runtime
-                reduction_msg = f"{reduction_percentage:.2f}% reduction, {humanize.naturalsize(reduction_rate)} / second"
-                col3_bits.append(reduction_msg)
-
-            self.col1.set_text("\n".join(col1_bits))
-            self.col2.set_text("\n".join(col2_bits))
-            self.col3.set_text("\n".join(col3_bits))
-            await trio.sleep(0.5)
-
-    def install_into_nursery(self, nursery: trio.Nursery):
-        super().install_into_nursery(nursery)
-        nursery.start_soon(self.update_file_list)
-
-
-@define(slots=False)
-class ShrinkRayUISingleFile(UrwidUI[bytes]):
-    hex_mode: bool = False
-
-    def create_main_ui_elements(self) -> list[Any]:
-        self.diff_to_display = urwid.Text("")
-        return [self.diff_to_display]
-
-    def file_to_lines(self, test_case: bytes) -> list[str]:
-        if self.hex_mode:
-            return to_blocks(test_case)
-        else:
-            return to_lines(test_case)
-
-    async def update_diffs(self):
-        initial = self.problem.current_test_case
-        self.diff_to_display.set_text("\n".join(self.file_to_lines(initial)[:1000]))
-        prev_unformatted = self.problem.current_test_case
-        prev = await self.state.attempt_format(prev_unformatted)
-
-        time_of_last_update = time.time()
-        while True:
-            if self.problem.current_test_case == prev_unformatted:
-                await trio.sleep(0.1)
-                continue
-            current = await self.state.attempt_format(self.problem.current_test_case)
-            lines = self.file_to_lines(current)
-            if len(lines) <= 50:
-                display_text = "\n".join(lines)
-                self.diff_to_display.set_text(display_text)
-                await trio.sleep(0.1)
-                continue
-
-            if prev == current:
-                await trio.sleep(0.1)
-                continue
-            diff = format_diff(
-                unified_diff(self.file_to_lines(prev), self.file_to_lines(current))
-            )
-            # When running in parallel sometimes we can produce diffs that have
-            # a lot of insertions because we undo some work and then immediately
-            # redo it. this can be quite confusing when it happens in the UI
-            # (and makes Shrink Ray look bad), so when this happens we pause a
-            # little bit to try to get a better diff.
-            if (
-                diff.count("\n+") > 2 * diff.count("\n-")
-                and time.time() <= time_of_last_update + 10
-            ):
-                await trio.sleep(0.5)
-                continue
-            self.diff_to_display.set_text(diff)
-            prev = current
-            prev_unformatted = self.problem.current_test_case
-            time_of_last_update = time.time()
-            if self.state.can_format:
-                await trio.sleep(4)
-            else:
-                await trio.sleep(2)
-
-    def install_into_nursery(self, nursery: trio.Nursery):
-        super().install_into_nursery(nursery)
-        nursery.start_soon(self.update_diffs)
-
-
 def determine_formatter_command(formatter: str, filename: str) -> list[str] | None:
     if formatter.lower() == "default":
         formatter_command = default_formatter_command_for(filename)
@@ -1043,12 +830,6 @@ async def run_shrink_ray(
     help="Level of output to provide.",
 )
 @click.option(
-    "--display-mode",
-    default="auto",
-    type=EnumChoice(DisplayMode),
-    help="Determines whether ShrinkRay displays files as a textual or hex representation of binary data.",
-)
-@click.option(
     "--in-place/--not-in-place",
     default=False,
     help="""
@@ -1092,7 +873,6 @@ with any parallelism.
 UI mode to use. Options are:
 
 * 'textual' (default): Modern terminal UI using the textual library.
-* 'urwid': Legacy terminal UI using the urwid library.
 * 'basic': Simple text output, suitable for scripts or non-interactive use.
 
 When not specified, defaults to 'textual' for interactive terminals, 'basic' otherwise.
@@ -1146,7 +926,6 @@ This behaviour can be disabled by passing --trivial-is-not-error.
 )
 def main(
     input_type: InputType,
-    display_mode: DisplayMode,
     backup: str,
     filename: str,
     test: list[str],
@@ -1243,8 +1022,6 @@ def main(
 
         trio.run(state.check_formatter)
 
-        ui = ShrinkRayUIDirectory(state)
-
     else:
         try:
             os.remove(backup)
@@ -1257,16 +1034,9 @@ def main(
         with open(backup, "wb") as writer:
             writer.write(initial)
 
-        if display_mode == DisplayMode.auto:
-            hex_mode = is_binary_string(initial)
-        else:
-            hex_mode = display_mode == DisplayMode.hex
-
         state = ShrinkRayStateSingleFile(initial=initial, **state_kwargs)
 
         trio.run(state.check_formatter)
-
-        ui = ShrinkRayUISingleFile(state, hex_mode=hex_mode)
 
     if ui_type == UIType.textual:
         from shrinkray.tui import run_textual_ui

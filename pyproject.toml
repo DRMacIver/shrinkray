@@ -35,11 +35,14 @@ shrinkray = "shrinkray.__main__:main"
 dev = [
     "hypothesis>=6.92.1",
     "hypothesmith>=0.3.1",
-    "black",
     "pytest",
     "pytest-trio",
     "coverage[toml]",
     "pygments",
+    "basedpyright",
+    "flake8",
+    "flake8-bugbear",
+    "flake8-trio",
 ]
 
 [tool.setuptools.packages.find]
@@ -62,13 +65,9 @@ profile = "black"
 force_single_line = false
 lines_after_imports = 2
 
-[tool.mypy]
-strict = true
-warn_unreachable = true
-pretty = true
-show_column_numbers = true
-show_error_context = true
-disable_error_code = ["import-untyped"]
+[tool.basedpyright]
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

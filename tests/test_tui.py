@@ -177,6 +177,56 @@ class TestContentPreview:
         assert "[Hex mode]" in rendered
         assert "48 65 6c 6c 6f" in rendered
 
+    def test_large_content_truncated(self):
+        """Test that large content is truncated."""
+        widget = ContentPreview()
+        # Create content with more lines than would fit
+        lines = [f"Line {i}" for i in range(100)]
+        large_content = "\n".join(lines)
+        widget.update_content(large_content, False)
+        rendered = widget.render()
+        # Should show truncation message
+        assert "more lines" in rendered
+
+    def test_content_diff_shown_for_large_files(self):
+        """Test that diff is shown when content changes in large files."""
+        import time
+        widget = ContentPreview()
+
+        # Set up initial large content
+        initial_lines = [f"Line {i}" for i in range(100)]
+        initial_content = "\n".join(initial_lines)
+        widget._last_display_time = 0  # Reset throttle
+        widget.update_content(initial_content, False)
+
+        # Force the time to allow update
+        widget._last_display_time = time.time() - 2
+
+        # Change content
+        new_lines = [f"Line {i}" for i in range(90)]  # Fewer lines
+        new_content = "\n".join(new_lines)
+        widget.update_content(new_content, False)
+
+        # The widget should have tracked the previous content
+        assert widget._last_displayed_content == initial_content
+
+    def test_content_update_throttled(self):
+        """Test that content updates are throttled."""
+        import time
+        widget = ContentPreview()
+
+        # First update should go through
+        widget.update_content("First", False)
+        assert widget.content == "First"
+
+        # Immediate second update should be throttled
+        widget.update_content("Second", False)
+        # Content should still be "First" due to throttling
+        assert widget.content == "First"
+
+        # But pending content should be stored
+        assert widget._pending_content == "Second"
+
 
 class TestShrinkRayAppWithFakeClient:
     """Tests for ShrinkRayApp using a fake client."""
@@ -483,6 +533,71 @@ class TestShrinkRayAppWithFakeClient:
         run_async(run_test())
 
 
+class TestAppWithoutClient:
+    """Tests for ShrinkRayApp without providing a client."""
+
+    def test_app_creates_own_client(self):
+        """Test that app creates its own client when none provided."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        async def run_test():
+            # Mock SubprocessClient to avoid actually spawning subprocess
+            mock_client = MagicMock()
+            mock_client.start = AsyncMock()
+            mock_client.start_reduction = AsyncMock(
+                return_value=Response(id="start", error="Test error")
+            )
+            mock_client.close = AsyncMock()
+            mock_client.is_completed = True
+
+            with patch(
+                "shrinkray.tui.SubprocessClient", return_value=mock_client
+            ):
+                app = ShrinkRayApp(
+                    file_path="/tmp/test.txt",
+                    test=["./test.sh"],
+                    # No client provided - app should create one
+                )
+
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    await asyncio.sleep(0.1)
+                    await pilot.pause()
+
+                    # Client should have been created and used
+                    mock_client.start.assert_called_once()
+
+        run_async(run_test())
+
+    def test_app_handles_exception_in_run_reduction(self):
+        """Test that app handles exceptions during reduction."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        async def run_test():
+            mock_client = MagicMock()
+            mock_client.start = AsyncMock(side_effect=Exception("Connection failed"))
+            mock_client.close = AsyncMock()
+            mock_client.is_completed = False
+
+            with patch(
+                "shrinkray.tui.SubprocessClient", return_value=mock_client
+            ):
+                app = ShrinkRayApp(
+                    file_path="/tmp/test.txt",
+                    test=["./test.sh"],
+                )
+
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    await asyncio.sleep(0.1)
+                    await pilot.pause()
+
+                    # App should have handled the error
+                    mock_client.start.assert_called_once()
+
+        run_async(run_test())
+
+
 class TestEndToEnd:
     """End-to-end tests that use a real subprocess."""
 
@@ -542,6 +657,201 @@ class TestEndToEnd:
         run_async(run_test())
 
 
+class TestThemeDetection:
+    """Tests for terminal theme detection."""
+
+    def test_detect_dark_from_colorfgbg_dark(self, monkeypatch):
+        """Test that COLORFGBG with dark background returns True."""
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.setenv("COLORFGBG", "15;0")  # white on black
+        assert detect_terminal_theme() is True
+
+    def test_detect_light_from_colorfgbg_light(self, monkeypatch):
+        """Test that COLORFGBG with light background returns False."""
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.setenv("COLORFGBG", "0;15")  # black on white
+        assert detect_terminal_theme() is False
+
+    def test_detect_light_from_colorfgbg_gray(self, monkeypatch):
+        """Test that COLORFGBG with gray background (7+) returns False."""
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.setenv("COLORFGBG", "0;7")  # black on light gray
+        assert detect_terminal_theme() is False
+
+    def test_detect_dark_colorfgbg_boundary(self, monkeypatch):
+        """Test that COLORFGBG with value 6 returns True (dark)."""
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.setenv("COLORFGBG", "15;6")
+        assert detect_terminal_theme() is True
+
+    def test_detect_invalid_colorfgbg_falls_through(self, monkeypatch):
+        """Test that invalid COLORFGBG falls through to default."""
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.setenv("COLORFGBG", "invalid")
+        monkeypatch.delenv("TERM_PROGRAM", raising=False)
+        # Should fall through to default (True = dark)
+        assert detect_terminal_theme() is True
+
+    def test_detect_colorfgbg_non_numeric(self, monkeypatch):
+        """Test that non-numeric COLORFGBG values are handled."""
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.setenv("COLORFGBG", "foo;bar")
+        monkeypatch.delenv("TERM_PROGRAM", raising=False)
+        assert detect_terminal_theme() is True
+
+    def test_detect_empty_colorfgbg(self, monkeypatch):
+        """Test that empty COLORFGBG falls through."""
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.setenv("COLORFGBG", "")
+        monkeypatch.delenv("TERM_PROGRAM", raising=False)
+        assert detect_terminal_theme() is True
+
+    def test_detect_no_env_vars_defaults_dark(self, monkeypatch):
+        """Test that no environment variables defaults to dark."""
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.delenv("COLORFGBG", raising=False)
+        monkeypatch.delenv("TERM_PROGRAM", raising=False)
+        assert detect_terminal_theme() is True
+
+    def test_detect_macos_terminal_dark(self, monkeypatch):
+        """Test macOS Terminal.app dark mode detection."""
+        from unittest.mock import MagicMock, patch
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.delenv("COLORFGBG", raising=False)
+        monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
+        monkeypatch.delenv("__CFBundleIdentifier", raising=False)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "Dark"
+
+        with patch("subprocess.run", return_value=mock_result):
+            assert detect_terminal_theme() is True
+
+    def test_detect_macos_terminal_light(self, monkeypatch):
+        """Test macOS Terminal.app light mode detection."""
+        from unittest.mock import MagicMock, patch
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.delenv("COLORFGBG", raising=False)
+        monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
+        monkeypatch.delenv("__CFBundleIdentifier", raising=False)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1  # Fails when in light mode
+        mock_result.stdout = ""
+
+        with patch("subprocess.run", return_value=mock_result):
+            assert detect_terminal_theme() is False
+
+    def test_detect_macos_iterm_dark(self, monkeypatch):
+        """Test iTerm.app dark mode detection."""
+        from unittest.mock import MagicMock, patch
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.delenv("COLORFGBG", raising=False)
+        monkeypatch.setenv("TERM_PROGRAM", "iTerm.app")
+        monkeypatch.delenv("__CFBundleIdentifier", raising=False)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "Dark"
+
+        with patch("subprocess.run", return_value=mock_result):
+            assert detect_terminal_theme() is True
+
+    def test_detect_macos_subprocess_exception(self, monkeypatch):
+        """Test macOS detection handles subprocess exceptions."""
+        from unittest.mock import patch
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.delenv("COLORFGBG", raising=False)
+        monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
+        monkeypatch.delenv("__CFBundleIdentifier", raising=False)
+
+        with patch("subprocess.run", side_effect=Exception("timeout")):
+            # Should fall through to default (True = dark)
+            assert detect_terminal_theme() is True
+
+    def test_detect_macos_with_cf_bundle_identifier(self, monkeypatch):
+        """Test macOS detection skips subprocess when __CFBundleIdentifier is set."""
+        from shrinkray.tui import detect_terminal_theme
+
+        monkeypatch.delenv("COLORFGBG", raising=False)
+        monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
+        monkeypatch.setenv("__CFBundleIdentifier", "com.apple.Terminal")
+
+        # Should fall through to default without calling subprocess
+        assert detect_terminal_theme() is True
+
+
+class TestThemeSettings:
+    """Tests for theme settings in ShrinkRayApp."""
+
+    def test_app_with_dark_theme(self):
+        """Test that dark theme is applied correctly."""
+
+        async def run_test():
+            fake_client = FakeReductionClient(updates=[])
+            app = ShrinkRayApp(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                client=fake_client,
+                theme="dark",
+            )
+
+            async with app.run_test() as pilot:
+                assert app.theme == "shrinkray-dark"
+
+        run_async(run_test())
+
+    def test_app_with_light_theme(self):
+        """Test that light theme is applied correctly."""
+
+        async def run_test():
+            fake_client = FakeReductionClient(updates=[])
+            app = ShrinkRayApp(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                client=fake_client,
+                theme="light",
+            )
+
+            async with app.run_test() as pilot:
+                assert app.theme == "shrinkray-light"
+
+        run_async(run_test())
+
+    def test_app_with_auto_theme(self, monkeypatch):
+        """Test that auto theme uses detection."""
+
+        async def run_test():
+            # Force light mode detection
+            monkeypatch.setenv("COLORFGBG", "0;15")
+
+            fake_client = FakeReductionClient(updates=[])
+            app = ShrinkRayApp(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                client=fake_client,
+                theme="auto",
+            )
+
+            async with app.run_test() as pilot:
+                assert app.theme == "shrinkray-light"
+
+        run_async(run_test())
+
+
 class TestModuleInterface:
     """Tests for the module-level interface."""
 
@@ -582,6 +892,7 @@ class TestModuleInterface:
         assert "volume" in params
         assert "no_clang_delta" in params
         assert "clang_delta" in params
+        assert "theme" in params
 
     def test_fake_client_implements_protocol(self):
         """Test that FakeReductionClient implements the protocol."""

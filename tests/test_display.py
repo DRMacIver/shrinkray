@@ -120,7 +120,8 @@ def test_format_diff_truncates_long_diff():
     diff_lines = ["@@ -1,1 +1,1 @@"] + [f"line{i}" for i in range(600)]
     result = format_diff(diff_lines)
     lines = result.split("\n")
-    assert len(lines) == 502  # 501 lines + "..."
+    # format_diff stops after 501 lines and appends "..."
+    assert len(lines) == 502
     assert lines[-1] == "..."
 
 

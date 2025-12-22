@@ -63,8 +63,9 @@ def test_try_decode_utf8():
 def test_try_decode_latin1():
     data = "héllo wörld".encode("latin-1")
     encoding, decoded = try_decode(data)
-    assert encoding is not None
-    assert "hello" in decoded.lower() or "h" in decoded
+    # chardet detects latin-1 as ISO-8859-1 (which is the same encoding)
+    assert encoding == "ISO-8859-1"
+    assert decoded == "héllo wörld"
 
 
 def test_try_decode_returns_none_for_undecodable():

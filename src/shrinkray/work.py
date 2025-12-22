@@ -1,3 +1,16 @@
+"""Parallelism coordination and work management.
+
+This module provides WorkContext, which manages parallel execution of
+reduction work using Trio. The key insight is that test-case reduction
+benefits from parallelism even though results are sequential: we can
+speculatively test multiple candidates and keep the first success.
+
+Key concepts:
+- Lazy evaluation: Don't compute results until needed
+- Backpressure: Limit in-flight work to avoid memory exhaustion
+- Order preservation: Results come out in input order for reproducibility
+"""
+
 import heapq
 from contextlib import asynccontextmanager
 from enum import IntEnum
@@ -9,6 +22,8 @@ import trio
 
 
 class Volume(IntEnum):
+    """Logging verbosity levels."""
+
     quiet = 0
     normal = 1
     verbose = 2
@@ -19,12 +34,27 @@ S = TypeVar("S")
 T = TypeVar("T")
 
 
+# Legacy constant, kept for compatibility but no longer actively used.
+# Was previously used for progress tick intervals.
 TICK_FREQUENCY = 0.05
 
 
 class WorkContext:
-    """A grab bag of useful tools for 'doing work'. Manages randomness,
-    logging, concurrency."""
+    """Coordinates parallel work execution for reduction.
+
+    WorkContext provides methods for parallel map, filter, and search
+    operations that are tailored for test-case reduction:
+
+    - map(): Lazy parallel map with backpressure
+    - filter(): Parallel filter, yielding matching items
+    - find_first_value(): Find first item satisfying a predicate
+    - find_large_integer(): Binary search for largest valid integer
+
+    The parallelism is speculative: multiple candidates are tested
+    concurrently, but only one result "wins". This trades CPU for
+    wall-clock time, which is usually worthwhile when interestingness
+    tests are slow.
+    """
 
     def __init__(
         self,

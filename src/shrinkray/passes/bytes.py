@@ -1,3 +1,24 @@
+"""Byte-level reduction passes.
+
+This module provides reduction passes that operate on raw bytes.
+These are the foundation of Shrink Ray's reduction strategy, as
+all file formats ultimately reduce to bytes.
+
+Key passes:
+- hollow: Keeps only start/end of bracketed regions
+- lift_braces: Replaces {...} with its content
+- debracket: Removes matching bracket pairs
+- delete_byte_spans: Deletes contiguous byte ranges
+- short_deletions: Deletes small (1-10 byte) sequences
+- remove_indents/remove_whitespace: Whitespace normalization
+- lower_bytes: Reduces byte values toward 0
+- lexeme_based_deletions: Deletes between repeated patterns
+
+Formats:
+- Split(delimiter): Parses bytes into list of segments
+- Tokenize(): Parses bytes into tokens (identifiers, numbers, etc.)
+"""
+
 from collections import defaultdict, deque
 from typing import Sequence
 
@@ -9,6 +30,7 @@ from shrinkray.passes.patching import Cuts, Patches, apply_patches
 
 @define(frozen=True)
 class Encoding(Format[bytes, str]):
+    """Format that decodes/encodes bytes using a character encoding."""
     encoding: str
 
     def __repr__(self) -> str:
@@ -27,6 +49,18 @@ class Encoding(Format[bytes, str]):
 
 @define(frozen=True)
 class Split(Format[bytes, list[bytes]]):
+    """Format that splits bytes by a delimiter.
+
+    This enables sequence-based passes to work on lines, statements, etc.
+
+    Example:
+        # Delete duplicate lines
+        compose(Split(b"\\n"), delete_duplicates)
+
+        # Delete blocks of 1-10 semicolon-separated statements
+        compose(Split(b";"), block_deletion(1, 10))
+    """
+
     splitter: bytes
 
     def __repr__(self) -> str:
@@ -44,6 +78,16 @@ class Split(Format[bytes, list[bytes]]):
 
 
 def find_ngram_endpoints(value: bytes) -> list[tuple[int, list[int]]]:
+    """Find repeated byte patterns and their positions.
+
+    This is used by lexeme_based_deletions to identify regions between
+    repeated patterns that might be deletable. For example, in code like:
+        print("hello"); print("world"); print("test")
+    The repeated "print" patterns suggest the semicolon-separated regions
+    might be independently deletable.
+
+    Returns a list of (ngram_length, [positions]) tuples.
+    """
     if len(set(value)) <= 1:
         return []
     queue: deque[tuple[int, Sequence[int]]] = deque([(0, range(len(value)))])
@@ -80,12 +124,24 @@ def find_ngram_endpoints(value: bytes) -> list[tuple[int, list[int]]]:
 
 
 def tokenize(text: bytes) -> list[bytes]:
+    """Split bytes into tokens: identifiers, numbers, and other characters.
+
+    This is a simple tokenizer that groups:
+    - Identifiers: [A-Za-z][A-Za-z0-9_]*
+    - Numbers: [0-9]+ (with optional decimal point)
+    - Spaces: runs of spaces
+    - Everything else: individual characters
+
+    Example:
+        tokenize(b"foo = 123") -> [b"foo", b" ", b"=", b" ", b"123"]
+    """
     result: list[bytes] = []
     i = 0
     while i < len(text):
         c = bytes([text[i]])
         j = i + 1
         if b"A" <= c <= b"z":
+            # Identifier: consume alphanumeric and underscore
             while j < len(text) and (
                 b"A"[0] <= text[j] <= b"z"[0]
                 or text[j] == b"_"[0]
@@ -93,11 +149,13 @@ def tokenize(text: bytes) -> list[bytes]:
             ):
                 j += 1
         elif b"0" <= c <= b"9":
+            # Number: consume digits and decimal point
             while j < len(text) and (
                 text[j] == b"."[0] or b"0"[0] <= text[j] <= b"9"[0]
             ):
                 j += 1
         elif c == b" ":
+            # Space run: consume consecutive spaces
             while j < len(text) and (text[j] == b" "[0]):
                 j += 1
         result.append(text[i:j])
@@ -112,11 +170,25 @@ MAX_DELETE_INTERVAL = 8
 async def lexeme_based_deletions(
     problem: ReductionProblem[bytes], min_size: int = 8
 ) -> None:
+    """Delete regions between repeated byte patterns.
+
+    This pass finds repeated patterns (like repeated keywords or punctuation)
+    and tries to delete the regions between them. For code like:
+
+        print("a"); print("b"); print("c")
+
+    The repeated "print(" pattern suggests each print statement might be
+    independently deletable. This pass identifies such regions and tries
+    to delete them.
+
+    Only regions >= min_size bytes are considered to avoid tiny deletions.
+    """
     intervals_by_k: dict[int, set[tuple[int, int]]] = defaultdict(set)
 
     for k, endpoints in find_ngram_endpoints(problem.current_test_case):
         intervals_by_k[k].update(zip(endpoints, endpoints[1:], strict=False))
 
+    # Sort by ngram length (longer patterns first) then by interval size
     intervals_to_delete = [
         t
         for _, intervals in sorted(intervals_by_k.items(), reverse=True)
@@ -151,6 +223,16 @@ def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:
 
 
 async def debracket(problem: ReductionProblem[bytes]) -> None:
+    """Remove matching bracket pairs, keeping their content.
+
+    Example transformations:
+        "(x + y)" -> "x + y"
+        "[1, 2]" -> "1, 2"
+        "{foo}" -> "foo"
+
+    This is useful when brackets become unnecessary after other reductions,
+    e.g., if a function call was simplified to just its first argument.
+    """
     cuts = [
         [(u - 1, u), (v, v + 1)]
         for brackets in [b"{}", b"()", b"[]"]
@@ -178,6 +260,20 @@ def quote_intervals(target: bytes) -> list[tuple[int, int]]:
 
 
 async def hollow(problem: ReductionProblem[bytes]) -> None:
+    """Delete the contents of bracketed and quoted regions.
+
+    Example transformations:
+        '{"lots": "of json"}' -> '{}'
+        "[1, 2, 3, 4, 5]" -> "[]"
+        '"long string here"' -> '""'
+
+    This is one of the most effective early passes: it quickly removes
+    large chunks of content from structured data, keeping only the
+    "skeleton" of brackets and quotes.
+
+    Intervals are sorted by size (smallest first) to maximize the chance
+    of finding independent deletions that can be combined.
+    """
     target = problem.current_test_case
     intervals: list[tuple[int, int]] = []
     for b in [
@@ -194,6 +290,15 @@ async def hollow(problem: ReductionProblem[bytes]) -> None:
 
 
 async def short_deletions(problem: ReductionProblem[bytes]) -> None:
+    """Try deleting every small (1-10 byte) substring.
+
+    This is a brute-force pass that tries all possible small deletions.
+    It's expensive but effective for cleaning up small syntax elements
+    that other passes miss.
+
+    Example: After other passes simplify "foo(x, y)" to "foo(x)", this
+    pass might find that deleting ", y" or "x, " works.
+    """
     target = problem.current_test_case
     await delete_intervals(
         problem,
@@ -206,6 +311,19 @@ async def short_deletions(problem: ReductionProblem[bytes]) -> None:
 
 
 async def lift_braces(problem: ReductionProblem[bytes]) -> None:
+    """Replace outer braces with inner braces' content.
+
+    For nested braces like {A{B}C}, this tries to replace the outer
+    braces with just the inner content: {A{B}C} -> {B}
+
+    Example transformations:
+        "if (x) { if (y) { z } }" -> "if (x) { z }"
+        "{ outer { inner } more }" -> "{ inner }"
+
+    This is useful for eliminating wrapper blocks while keeping the
+    essential nested structure. It complements debracket (which removes
+    brackets entirely) and hollow (which empties brackets).
+    """
     target = problem.current_test_case
 
     open_brace, close_brace = b"{}"
@@ -214,6 +332,7 @@ async def lift_braces(problem: ReductionProblem[bytes]) -> None:
 
     results: list[tuple[int, int, list[tuple[int, int]]]] = []
 
+    # Track brace nesting and record parent-child relationships
     for i, c in enumerate(target):
         if c == open_brace:
             start_stack.append(i)
@@ -227,6 +346,7 @@ async def lift_braces(problem: ReductionProblem[bytes]) -> None:
             if end > start:
                 results.append((start, end, children))
 
+    # For each parent-child pair, try deleting parent content around child
     cuts: list[list[tuple[int, int]]] = []
     for start, end, children in results:
         for child_start, child_end in children:

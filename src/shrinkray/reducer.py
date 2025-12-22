@@ -352,7 +352,7 @@ class ShrinkRay(Reducer[bytes]):
                         break
                 return
 
-        # await self.initial_cut()
+        await self.initial_cut()
 
         while True:
             prev = self.target.current_test_case

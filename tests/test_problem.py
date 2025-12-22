@@ -164,6 +164,8 @@ def test_reduction_stats_display_no_reductions():
 
 
 def test_reduction_stats_display_with_reductions():
+    import time
+
     stats = ReductionStats()
     stats.initial_test_case_size = 1000
     stats.current_test_case_size = 500
@@ -171,6 +173,7 @@ def test_reduction_stats_display_with_reductions():
     stats.calls = 10
     stats.interesting_calls = 5
     stats.wasted_interesting_calls = 1
+    stats.start_time = time.time() - 10  # Set start time 10 seconds ago to avoid division by zero
     display = stats.display_stats()
     assert "50.00% reduction" in display
 

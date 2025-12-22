@@ -459,3 +459,129 @@ async def test_worker_emit_progress_updates_loop():
     # Should have emitted at least one progress update
     assert b"progress" in output.data
     assert b"Testing" in output.data
+
+
+# === Integration tests with real files ===
+
+
+async def test_worker_start_reduction_single_file(tmp_path):
+    """Test _start_reduction with a real single file."""
+    # Create a test file
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a test script
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+    }
+
+    await worker._start_reduction(params)
+
+    assert worker.running is True
+    assert worker.state is not None
+    assert worker.problem is not None
+    assert worker.reducer is not None
+    assert worker.problem.current_test_case == b"hello world"
+
+
+async def test_worker_start_reduction_directory(tmp_path):
+    """Test _start_reduction with a directory."""
+    # Create a test directory with files
+    target = tmp_path / "testdir"
+    target.mkdir()
+    (target / "a.txt").write_text("file a")
+    (target / "b.txt").write_text("file b")
+
+    # Create a test script
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "seed": 0,
+        "input_type": "arg",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+    }
+
+    await worker._start_reduction(params)
+
+    assert worker.running is True
+    assert worker.state is not None
+    assert worker.problem is not None
+    # Directory mode returns a dict
+    test_case = worker.problem.current_test_case
+    assert isinstance(test_case, dict)
+    assert "a.txt" in test_case
+    assert "b.txt" in test_case
+
+
+async def test_worker_handle_start_success(tmp_path):
+    """Test _handle_start successfully starts reduction."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "no_clang_delta": True,
+        "formatter": "none",
+        "volume": "quiet",
+    }
+
+    response = await worker._handle_start("req-123", params)
+
+    assert response.id == "req-123"
+    assert response.error is None
+    assert response.result == {"status": "started"}
+    assert worker.running is True
+
+
+async def test_worker_handle_start_error(tmp_path):
+    """Test _handle_start returns error on failure."""
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    # Invalid params - missing file
+    params = {
+        "file_path": "/nonexistent/file.txt",
+        "test": ["/bin/true"],
+    }
+
+    response = await worker._handle_start("req-456", params)
+
+    assert response.id == "req-456"
+    assert response.error is not None
+    assert worker.running is False

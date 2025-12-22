@@ -141,6 +141,7 @@ Main Process (asyncio/textual)     Subprocess (trio)
 - **Parametrize by parallelism** - Tests that involve WorkContext should typically be parametrized by parallelism `[1, 2]` to catch bugs that only manifest in parallel execution.
 
 ### Test Organization
+- **Use module-level functions, not classes** - Write tests as `def test_something():` at module level, not inside `class TestSomething:`. Group related tests using section comments instead of classes.
 - Group related tests with section comments (e.g., `# === View tests ===`)
 - Keep tests fast (< 5 seconds each, ideally much less)
 - Test edge cases explicitly with meaningful test names

@@ -378,3 +378,151 @@ def test_key_problem_display():
     kp = KeyProblem(base_problem=base, applier=applier, key="file1")
 
     assert kp.display(b"hello") == "b'hello'"
+
+
+def test_key_problem_stats_delegates_to_base():
+    """Test KeyProblem.stats returns base problem's stats."""
+    from shrinkray.passes.patching import PatchApplier
+
+    async def is_interesting(x):
+        return True
+
+    base = BasicReductionProblem(
+        initial={"file1": b"hello"},
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    applier = PatchApplier(patches=UpdateKeys(), problem=base)
+    kp = KeyProblem(base_problem=base, applier=applier, key="file1")
+
+    # stats should be the same object as base's stats
+    assert kp.stats is base.stats
+
+
+async def test_key_problem_is_interesting():
+    """Test KeyProblem.is_interesting applies patch correctly."""
+    from shrinkray.passes.patching import PatchApplier
+
+    async def is_interesting(x):
+        # Only accept if file1 contains 'hi'
+        return x.get("file1", b"") == b"hi"
+
+    base = BasicReductionProblem(
+        initial={"file1": b"hello", "file2": b"world"},
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    applier = PatchApplier(patches=UpdateKeys(), problem=base)
+    kp = KeyProblem(base_problem=base, applier=applier, key="file1")
+
+    # Should return True because patching file1 to b"hi" makes it interesting
+    result = await kp.is_interesting(b"hi")
+    assert result is True
+
+
+# =============================================================================
+# ShrinkRay status tests
+# =============================================================================
+
+
+def test_shrinkray_status_with_pump_no_pass():
+    """Test ShrinkRay status when pump is set but pass is not."""
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+
+    # Simulate pump running without pass
+    async def mock_pump(p):
+        return p.current_test_case
+
+    mock_pump.__name__ = "test_pump"
+    reducer.current_pump = mock_pump
+    reducer.current_reduction_pass = None
+
+    status = reducer.status
+    assert "test_pump" in status
+    assert "reduction pump" in status
+
+
+def test_shrinkray_status_with_pump_and_pass():
+    """Test ShrinkRay status when both pump and pass are set."""
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+
+    # Simulate both pump and pass running
+    async def mock_pump(p):
+        return p.current_test_case
+
+    mock_pump.__name__ = "test_pump"
+
+    async def mock_pass(p):
+        pass
+
+    mock_pass.__name__ = "test_pass"
+
+    reducer.current_pump = mock_pump
+    reducer.current_reduction_pass = mock_pass
+
+    status = reducer.status
+    assert "test_pass" in status
+    assert "test_pump" in status
+    assert "under pump" in status
+
+
+def test_shrinkray_status_no_pump_no_pass():
+    """Test ShrinkRay status when neither pump nor pass is set."""
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    reducer.current_pump = None
+    reducer.current_reduction_pass = None
+
+    status = reducer.status
+    assert status == "Selecting reduction pass"
+
+
+def test_shrinkray_pumps_without_clang_delta():
+    """Test ShrinkRay.pumps returns empty when no clang_delta."""
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem, clang_delta=None)
+    assert list(reducer.pumps) == []

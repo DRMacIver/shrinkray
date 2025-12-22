@@ -2,6 +2,36 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Context
+
+Shrink Ray is the best test-case reducer in the world. It's a personal hobby/research project, but it's important that it be high-quality, robust, and user-friendly software so it can be widely used. C-Reduce is the only comparable tool, and Shrink Ray has surpassed it.
+
+Because this is a hobby project worked on haphazardly, there's accumulated technical debt and the codebase quality is uneven. Don't assume existing code patterns are correct just because they exist - much of it reflects partial refactors or rushed work.
+
+## Claude's Role and Quality Expectations
+
+The goal is to achieve software quality beyond what a single person working part-time can accomplish. This means taking on maintenance work (fixing type errors, improving test coverage, refactoring) and doing it *well*.
+
+### Be Meticulous, Not Sloppy
+
+- **Fix problems properly** - Don't just suppress errors or use workarounds. If there's a type error, understand why and fix the underlying issue. If a test is hard to write, think about what would make the code more testable.
+- **Don't give up on hard things** - When something seems difficult (like covering certain code paths), get creative. Refactor for testability, use Hypothesis for property-based testing, run subprocesses and gather coverage, write generators to produce edge-case inputs. Persistence matters more than speed.
+- **Self-review before presenting work** - Before committing or presenting code, review it critically: "Is this sloppy? Did I take shortcuts? If I were reviewing someone else's PR with this code, what would I flag?" This catches many issues before they waste the maintainer's time.
+
+### Commits
+
+- Make small, logically self-contained commits
+- Each commit should ideally be lint-clean and pass tests
+- Commits are a good checkpoint for self-review
+- Use the `/checkpoint` skill to ensure consistent quality at each commit
+
+### CLAUDE.md as Source of Truth
+
+This file is the source of truth for project conventions. However:
+- Update it based on feedback from the maintainer
+- Update it based on your own judgment about what would improve the project
+- Ask about specific style decisions you notice and record them here
+
 ## Build and Development Commands
 
 ```bash
@@ -126,7 +156,16 @@ Main Process (asyncio/textual)     Subprocess (trio)
 ## Testing Best Practices
 
 ### Async Tests
-- **Use pytest-trio** - This project uses pytest-trio, so async test functions work directly. Do NOT create sync wrapper functions that call `trio.run(async_test)`. Simply define `async def test_something():` and pytest-trio will run it.
+- **Use pytest-trio for most async tests** - This project uses pytest-trio, so async test functions work directly. Simply define `async def test_something():` and pytest-trio will run it.
+- **Exception: SubprocessClient tests use asyncio** - The `SubprocessClient` class uses asyncio (for textual TUI compatibility), so tests for it must use `asyncio.run()` wrappers:
+  ```python
+  def test_subprocess_client_something():
+      async def run():
+          client = SubprocessClient()
+          # ... test logic ...
+      asyncio.run(run())
+  ```
+  This isolates asyncio tests from the trio event loop.
 
 ### Test Parametrization
 - **Parametrize similar tests** - If multiple tests differ only in a single value (e.g., testing with values 0, 2, 4, 64, 100), use `@pytest.mark.parametrize` instead of duplicating the test function.

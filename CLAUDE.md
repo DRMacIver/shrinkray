@@ -88,6 +88,34 @@ CLI → ShrinkRayState → ReductionProblem → Reducer → Passes → Patches �
 
 Passes work by generating patches (typically `Cuts` for deletions), applying them in parallel, and updating the problem state when reductions succeed.
 
+### TUI Architecture (src/shrinkray/tui.py, src/shrinkray/subprocess/)
+
+The interactive TUI uses **textual** (not urwid) and runs in a subprocess architecture:
+
+```
+Main Process (asyncio/textual)     Subprocess (trio)
+┌─────────────────────────────┐    ┌─────────────────────────────┐
+│  ShrinkRayApp (textual)     │    │  ReducerWorker              │
+│  - StatsDisplay widget      │◄───│  - Runs actual reduction    │
+│  - ContentPreview widget    │    │  - Emits ProgressUpdate     │
+│  - SubprocessClient         │───►│  - Handles start/cancel     │
+└─────────────────────────────┘    └─────────────────────────────┘
+         stdin/stdout JSON protocol
+```
+
+**Why subprocess?** Textual requires asyncio, but the reducer uses trio. They're incompatible in the same process.
+
+**Protocol** (`subprocess/protocol.py`):
+- `Request`: Commands sent to worker (start, cancel, status)
+- `Response`: Command acknowledgments with results
+- `ProgressUpdate`: Periodic stats (size, calls, reductions, parallelism, content preview)
+
+**Key files**:
+- `tui.py` - Textual app with StatsDisplay and ContentPreview widgets
+- `subprocess/worker.py` - Entry point for reducer subprocess (`shrinkray-worker`)
+- `subprocess/client.py` - SubprocessClient manages communication
+- `subprocess/protocol.py` - Message dataclasses and JSON serialization
+
 ### Key Design Decisions
 
 1. **Shortlex ordering**: Ensures reproducibility - same minimal result regardless of reduction path
@@ -116,3 +144,10 @@ Passes work by generating patches (typically `Cuts` for deletions), applying the
 - Group related tests with section comments (e.g., `# === View tests ===`)
 - Keep tests fast (< 5 seconds each, ideally much less)
 - Test edge cases explicitly with meaningful test names
+
+### TUI Testing
+- **Snapshot tests** (`tests/test_tui_snapshots.py`) use `pytest-textual-snapshot` for visual regression testing
+- Run `just test tests/test_tui_snapshots.py --snapshot-update` to update snapshots after intentional UI changes
+- View snapshot gallery: `uv run pytest tests/test_tui_snapshots.py --snapshot-report` then open `snapshot_report.html`
+- **Unit tests** (`tests/test_tui.py`) use `FakeSubprocessClient` to test TUI logic without spawning subprocesses
+- Textual's `refresh(layout=True)` is needed when updating reactive properties that affect widget height

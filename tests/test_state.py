@@ -179,7 +179,7 @@ async def test_directory_state_format_data_returns_none(directory_state):
 
 
 async def test_directory_state_run_formatter_command_raises(directory_state):
-    with pytest.raises(AssertionError):
+    with pytest.raises(NotImplementedError):
         await directory_state.run_formatter_command(["cat"], {"a.txt": b"test"})
 
 

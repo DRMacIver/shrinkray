@@ -519,13 +519,14 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
                 await o.write(v)
 
     async def format_data(self, test_case: dict[str, bytes]) -> dict[str, bytes] | None:
-        # TODO: Implement
+        # Formatting not supported for directory reduction
         return None
 
     async def run_formatter_command(
         self, command: str | list[str], input: dict[str, bytes]
     ) -> subprocess.CompletedProcess:
-        raise AssertionError
+        # Formatting not supported for directory reduction
+        raise NotImplementedError("Directory formatting not supported")
 
     async def print_exit_message(self, problem):
         print("All done!")

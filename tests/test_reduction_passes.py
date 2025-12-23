@@ -498,32 +498,7 @@ def test_encoding_repr():
     assert repr(enc) == "Encoding('utf-8')"
 
 
-def test_substring_parse_valid():
-    fmt = Substring(b"<", b">")
-    assert fmt.parse(b"<hello>") == b"hello"
-
-
-def test_substring_parse_invalid_prefix():
-    fmt = Substring(b"<", b">")
-    with pytest.raises(ParseError):
-        fmt.parse(b"hello>")
-
-
-def test_substring_parse_invalid_suffix():
-    fmt = Substring(b"<", b">")
-    with pytest.raises(ParseError):
-        fmt.parse(b"<hello")
-
-
-def test_substring_dumps():
-    fmt = Substring(b"<", b">")
-    assert fmt.dumps(b"hello") == b"<hello>"
-
-
-def test_substring_name():
-    fmt = Substring(b"<<", b">>")
-    assert fmt.name == "Substring(2, 2)"
-
+# Note: Substring tests are in test_generic_language.py
 
 # =============================================================================
 # Sequence Passes - sequences.py

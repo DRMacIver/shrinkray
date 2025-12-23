@@ -216,12 +216,12 @@ class TestContentPreview:
 
         # First update should go through
         widget.update_content("First", False)
-        assert widget.content == "First"
+        assert widget.preview_content == "First"
 
         # Immediate second update should be throttled
         widget.update_content("Second", False)
         # Content should still be "First" due to throttling
-        assert widget.content == "First"
+        assert widget.preview_content == "First"
 
         # But pending content should be stored
         assert widget._pending_content == "Second"
@@ -235,13 +235,13 @@ class TestContentPreview:
         initial_content = "\n".join(initial_lines)
 
         # Set the initial content and last displayed content
-        widget.content = initial_content
+        widget.preview_content = initial_content
         widget._last_displayed_content = initial_content
 
         # Now change the content
         new_lines = [f"Line {i}" for i in range(45)]  # Remove 5 lines
         new_content = "\n".join(new_lines)
-        widget.content = new_content
+        widget.preview_content = new_content
 
         # Mock _get_available_lines to return a small number
         original_method = widget._get_available_lines
@@ -261,7 +261,7 @@ class TestContentPreview:
         # Set content larger than available lines
         lines = [f"Line {i}" for i in range(50)]
         content = "\n".join(lines)
-        widget.content = content
+        widget.preview_content = content
         # No _last_displayed_content set
 
         # Mock _get_available_lines to return a small number
@@ -975,7 +975,7 @@ class TestContentPreviewEdgeCases:
         # Set up large content
         lines = [f"Line {i}" for i in range(50)]
         content = "\n".join(lines)
-        widget.content = content
+        widget.preview_content = content
         widget._last_displayed_content = content  # Same content
 
         # Mock _get_available_lines
@@ -1135,7 +1135,7 @@ class TestCoverageEdgeCases:
         )  # Slightly different
 
         widget._last_displayed_content = large_content_old
-        widget.content = large_content_new
+        widget.preview_content = large_content_new
         widget.hex_mode = False
 
         # Mock unified_diff to return empty list

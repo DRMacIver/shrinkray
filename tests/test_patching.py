@@ -383,7 +383,7 @@ async def test_apply_patches_with_parallelism():
     import trio
 
     async def is_interesting(x):
-        await trio.sleep(0)  # Yield to allow parallelism
+        await trio.lowlevel.checkpoint()  # Yield to allow parallelism
         return True
 
     problem = BasicReductionProblem(
@@ -664,7 +664,7 @@ async def test_merge_with_conflict_in_queue():
             return len(patch)
 
     async def is_interesting(x):
-        await trio.sleep(0)
+        await trio.lowlevel.checkpoint()
         return len(x) > 0
 
     problem = BasicReductionProblem(
@@ -718,7 +718,7 @@ async def test_is_reduction_fails_in_merge():
     from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
-        await trio.sleep(0)
+        await trio.lowlevel.checkpoint()
         # Only interesting if starts with 'a'
         return len(x) > 0 and x[0:1] == b"a"
 

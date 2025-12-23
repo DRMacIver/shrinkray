@@ -210,8 +210,8 @@ class StatsDisplay(Static):
 class ContentPreview(Static):
     """Widget to display the current test case content preview."""
 
-    content: str = reactive("")  # type: ignore[assignment]
-    hex_mode: bool = reactive(False)  # type: ignore[assignment]
+    preview_content = reactive("")
+    hex_mode = reactive(False)
     _last_displayed_content: str = ""
     _last_display_time: float = 0.0
     _pending_content: str = ""
@@ -233,10 +233,10 @@ class ContentPreview(Static):
         self._last_display_time = now
 
         # Track last displayed content for diffs
-        if self.content and self.content != content:
-            self._last_displayed_content = str(self.content)
+        if self.preview_content and self.preview_content != content:
+            self._last_displayed_content = str(self.preview_content)
 
-        self.content = content
+        self.preview_content = content
         self.hex_mode = hex_mode
         self.refresh(layout=True)
 
@@ -259,29 +259,29 @@ class ContentPreview(Static):
         return 30
 
     def render(self) -> str:
-        if not self.content:
+        if not self.preview_content:
             return "Loading..."
 
         available_lines = self._get_available_lines()
 
         if self.hex_mode:
-            return f"[Hex mode]\n{self.content}"
+            return f"[Hex mode]\n{self.preview_content}"
 
-        lines = self.content.split("\n")
+        lines = self.preview_content.split("\n")
 
         # For small files that fit, show full content
         if len(lines) <= available_lines:
-            return self.content
+            return self.preview_content
 
         # For larger files, show diff if we have previous displayed content
         if (
             self._last_displayed_content
-            and self._last_displayed_content != self.content
+            and self._last_displayed_content != self.preview_content
         ):
             from difflib import unified_diff
 
             prev_lines = self._last_displayed_content.split("\n")
-            curr_lines = self.content.split("\n")
+            curr_lines = self.preview_content.split("\n")
             diff = list(unified_diff(prev_lines, curr_lines, lineterm=""))
             if diff:
                 # Show as much diff as fits

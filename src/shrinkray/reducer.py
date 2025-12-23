@@ -81,10 +81,18 @@ class Reducer(Generic[T], ABC):
 class BasicReducer(Reducer[T]):
     reduction_passes: Iterable[ReductionPass[T]]
     pumps: Iterable[ReductionPump[T]] = ()
-    status: str = "Starting up"
+    _status: str = "Starting up"
 
     def __attrs_post_init__(self) -> None:
         self.reduction_passes = list(self.reduction_passes)
+
+    @property
+    def status(self) -> str:
+        return self._status
+
+    @status.setter
+    def status(self, value: str) -> None:
+        self._status = value
 
     async def run_pass(self, rp: ReductionPass[T]) -> None:
         await rp(self.target)

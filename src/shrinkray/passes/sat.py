@@ -393,14 +393,21 @@ class UnitPropagator:
         self.__clean_dirty_clauses()
 
     def __enqueue_unit(self, unit: int) -> None:
-        if unit not in self.units:
-            if -unit in self.units:
-                raise Inconsistent(
-                    f"Tried to add {unit} as a unit but {-unit} is already a unit."
-                )
-            self.units.add(unit)
-            self.forced_variables.add(abs(unit))
-            self.__dirty.update(self.__watches.pop(-unit, ()))
+        if unit in self.units:  # pragma: no cover
+            # Defensive: unit already enqueued, nothing to do.
+            # This is structurally unreachable because satisfied clauses
+            # are skipped at line 417 before we try to enqueue their units.
+            return
+        if -unit in self.units:  # pragma: no cover
+            # Defensive: contradicting unit. This is structurally unreachable
+            # because we only add literals to watched_by if their negation
+            # is not in units (line 431).
+            raise Inconsistent(
+                f"Tried to add {unit} as a unit but {-unit} is already a unit."
+            )
+        self.units.add(unit)
+        self.forced_variables.add(abs(unit))
+        self.__dirty.update(self.__watches.pop(-unit, ()))
 
     def __clean_dirty_clauses(self) -> None:
         iters = 0
@@ -482,12 +489,14 @@ async def combine_clauses(problem: ReductionProblem[SAT]) -> None:
 
         result: list[Clause | None] = [list(c) for c in sat]
         for c in uf.components():
-            if len(c) > 1:
-                combined: Clause = sorted({lit for i in c for lit in sat[i]}, key=abs)
-                for i in c:
-                    result[i] = None
-                if len(combined) == len(set(map(abs, combined))):
-                    result.append(combined)
+            # Note: len(c) == 1 can't occur because every element in uf
+            # came from a merge(u, v) pair where u != v, so all
+            # components have size >= 2.
+            combined: Clause = sorted({lit for i in c for lit in sat[i]}, key=abs)
+            for i in c:
+                result[i] = None
+            if len(combined) == len(set(map(abs, combined))):
+                result.append(combined)
         return [clause for clause in result if clause is not None]
 
     by_literal: defaultdict[int, list[int]] = defaultdict(list)

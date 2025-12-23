@@ -1255,11 +1255,9 @@ async def test_shrinkray_main_loop_with_pumps():
     assert loop_iterations[0] >= 2
 
 
+@pytest.mark.slow
 async def test_directory_shrinkray_with_c_files():
-    """Test DirectoryShrinkRay uses clang_delta for C files.
-
-    This covers line 457 (clang_delta for C files in DirectoryShrinkRay).
-    """
+    """Test DirectoryShrinkRay uses clang_delta for C files."""
     from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
     from shrinkray.reducer import DirectoryShrinkRay
 

@@ -56,6 +56,7 @@ async def test_interrupt_wait_and_kill_does_nothing_if_already_exited():
     await interrupt_wait_and_kill(sp)
 
 
+@pytest.mark.slow
 async def test_interrupt_wait_and_kill_kills_process_ignoring_sigint():
     # Start a process that ignores SIGINT
     sp = await trio.lowlevel.open_process(

@@ -195,6 +195,7 @@ grep hello "$1"
     return ShrinkTarget(test_case=str(target), interestingness_test=str(script))
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("in_place", [False, True])
 @pytest.mark.parametrize("parallelism", (1, 2))
 def test_shrinks_basic_target(basic_shrink_target, in_place, parallelism):
@@ -309,6 +310,7 @@ def test_timeout_zero_sets_infinite(basic_shrink_target):
     assert result.exit_code == 0
 
 
+@pytest.mark.slow
 def test_in_place_basename_sets_parallelism_to_one(tmpdir, monkeypatch):
     """Test that in_place + basename with parallelism=0 defaults to 1."""
     # Change to tmpdir so basename mode can find the file

@@ -54,6 +54,7 @@ test_cases = (python_files).filter(lambda b: 1 < len(b) <= 1000)
 common_settings = settings(deadline=None, max_examples=10, report_multiple_bugs=False)
 
 
+@pytest.mark.slow
 @common_settings
 @given(
     initial=test_cases,
@@ -185,6 +186,7 @@ async def test_can_succeed_at_shrinking_arbitrary_problems(initial, parallelism)
     assert len(problem.current_test_case) == 1
 
 
+@pytest.mark.slow
 def test_no_blockers():
     assert_no_blockers(
         potential_blockers=POTENTIAL_BLOCKERS,

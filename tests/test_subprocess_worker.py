@@ -1182,6 +1182,7 @@ async def test_worker_start_validates_initial_example(tmp_path):
     assert worker.running is False
 
 
+@pytest.mark.slow
 async def test_worker_full_run_with_failing_test(tmp_path):
     """Test full run() with a test that fails on initial example."""
     # Create a test file

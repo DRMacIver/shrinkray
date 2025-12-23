@@ -3,6 +3,8 @@
 import subprocess
 import sys
 
+import pytest
+
 
 class TestWorkerModule:
     def test_worker_can_be_imported(self):
@@ -98,6 +100,7 @@ class TestProtocolWithWorker:
         proc.terminate()
         proc.wait(timeout=5)
 
+    @pytest.mark.slow
     def test_worker_handles_malformed_json(self):
         """Test that the worker handles malformed JSON gracefully."""
         proc = subprocess.Popen(

@@ -3,12 +3,15 @@
 from random import Random
 
 import pytest
+import trio
 
 from shrinkray.passes.patching import (
     Conflict,
     Cuts,
     LazyMutableRange,
     ListPatches,
+    PatchApplier,
+    Patches,
     SetPatches,
     apply_patches,
     lazy_shuffle,
@@ -380,7 +383,6 @@ async def test_apply_patches_all_at_once():
 
 async def test_apply_patches_with_parallelism():
     """Test apply_patches with parallelism > 1."""
-    import trio
 
     async def is_interesting(x):
         await trio.lowlevel.checkpoint()  # Yield to allow parallelism
@@ -401,7 +403,6 @@ async def test_apply_patches_with_parallelism():
 
 async def test_apply_patches_conflict_in_combine():
     """Test apply_patches when patches conflict during combine."""
-    from shrinkray.passes.patching import PatchApplier, Patches
 
     class ConflictingPatches(Patches[tuple[int, ...], bytes]):
         @property
@@ -449,7 +450,6 @@ async def test_apply_patches_conflict_in_combine():
 
 async def test_apply_patches_patch_already_in_current():
     """Test when patch would result in same as current test case."""
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         return True
@@ -472,12 +472,8 @@ async def test_apply_patches_patch_already_in_current():
     assert result is True
 
 
-async def test_patch_applier_concurrent_patches():
+async def test_patch_applier_concurrent_patches(autojump_clock):
     """Test PatchApplier with concurrent patch applications."""
-    import trio
-
-    from shrinkray.passes.patching import PatchApplier
-
     call_count = [0]
 
     async def is_interesting(x):
@@ -555,10 +551,6 @@ async def test_apply_patches_conflict_in_initial_combine():
 
 async def test_patch_applier_merge_finds_partial(capfd):
     """Test merge logic when only some patches can be merged (lines 130, 137-138)."""
-    import trio
-
-    from shrinkray.passes.patching import PatchApplier
-
     call_count = [0]
 
     async def is_interesting(x):
@@ -589,7 +581,6 @@ async def test_patch_applier_merge_finds_partial(capfd):
 
 async def test_patch_applier_patch_equals_current():
     """Test when applying patch results in same as current (line 158)."""
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         return True
@@ -614,7 +605,6 @@ async def test_patch_applier_patch_equals_current():
 
 async def test_patch_applier_fast_path():
     """Test the fast path in try_apply_patch (lines 175-176)."""
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         return True
@@ -636,9 +626,6 @@ async def test_patch_applier_fast_path():
 
 async def test_merge_with_conflict_in_queue():
     """Test merge when patches in queue conflict (lines 114-115)."""
-    import trio
-
-    from shrinkray.passes.patching import PatchApplier, Patches
 
     class ConflictingPatches(Patches[frozenset[int], bytes]):
         @property
@@ -689,7 +676,6 @@ async def test_merge_with_conflict_in_queue():
 
 async def test_merge_patch_becomes_base():
     """Test when attempted_patch equals base_patch after combine (line 117)."""
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         return True
@@ -711,11 +697,8 @@ async def test_merge_patch_becomes_base():
     assert result is True
 
 
-async def test_is_reduction_fails_in_merge():
+async def test_is_reduction_fails_in_merge(autojump_clock):
     """Test when is_reduction returns False during merge (line 125)."""
-    import trio
-
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         await trio.lowlevel.checkpoint()
@@ -746,9 +729,6 @@ async def test_is_reduction_fails_in_merge():
 
 async def test_patch_applied_equals_problem_current():
     """Test line 158: when applying patch to initial equals problem's current."""
-
-    from shrinkray.passes.patching import PatchApplier
-
     # Problem where current_test_case changes during patch application
 
     async def is_interesting(x):
@@ -771,15 +751,11 @@ async def test_patch_applied_equals_problem_current():
     assert result is True
 
 
-async def test_merge_can_merge_k_greater_than_to_merge():
+async def test_merge_can_merge_k_greater_than_to_merge(autojump_clock):
     """Test line 108: k > to_merge returns False in can_merge.
 
     This is called by find_large_integer which probes beyond to_merge.
     """
-    import trio
-
-    from shrinkray.passes.patching import PatchApplier
-
     call_count = [0]
 
     async def is_interesting(x):
@@ -813,9 +789,6 @@ async def test_merge_can_merge_k_greater_than_to_merge():
 
 async def test_can_merge_attempted_equals_base():
     """Test line 117: when attempted_patch == base_patch after combine."""
-    import trio
-
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         return True
@@ -841,12 +814,8 @@ async def test_can_merge_attempted_equals_base():
     assert len(problem.current_test_case) < 6
 
 
-async def test_merge_empty_patches_equals_base():
+async def test_merge_empty_patches_equals_base(autojump_clock):
     """Test line 117: empty patch in queue equals base after combine."""
-    import trio
-
-    from shrinkray.passes.patching import PatchApplier
-
     call_count = [0]
 
     async def is_interesting(x):
@@ -873,12 +842,8 @@ async def test_merge_empty_patches_equals_base():
     assert len(problem.current_test_case) <= 5
 
 
-async def test_is_reduction_returns_false():
+async def test_is_reduction_returns_false(autojump_clock):
     """Test line 125: is_reduction returns False during merge."""
-    import trio
-
-    from shrinkray.passes.patching import PatchApplier
-
     # is_interesting always True, but is_reduction will fail for larger results
     async def is_interesting(x):
         await trio.sleep(0.01)
@@ -910,7 +875,7 @@ async def test_is_reduction_returns_false():
     # Nothing should have been applied since results are larger
 
 
-async def test_find_large_integer_probes_beyond():
+async def test_find_large_integer_probes_beyond(autojump_clock):
     """Test line 108: k > to_merge check in find_large_integer.
 
     find_large_integer probes k=1,2,3,4, then exponentially (5,10,20...).
@@ -918,10 +883,6 @@ async def test_find_large_integer_probes_beyond():
     If to_merge = 6 and can_merge(1-5) succeeds but can_merge(6) fails,
     then find_large_integer will try k=10 which triggers k > to_merge.
     """
-    import trio
-
-    from shrinkray.passes.patching import PatchApplier
-
     # Accept merging up to 5 patches, but not 6
     async def is_interesting(x):
         await trio.sleep(0.001)
@@ -952,11 +913,8 @@ async def test_find_large_integer_probes_beyond():
     assert len(problem.current_test_case) <= 15
 
 
-async def test_empty_patch_equals_base_in_merge():
+async def test_empty_patch_equals_base_in_merge(autojump_clock):
     """Test line 117: empty patch in queue means attempted == base."""
-    import trio
-
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         await trio.sleep(0.01)

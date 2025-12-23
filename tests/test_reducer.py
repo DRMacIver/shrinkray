@@ -1,9 +1,17 @@
 """Unit tests for reducer module."""
 
 import pytest
+import trio
 
 from shrinkray.problem import BasicReductionProblem
-from shrinkray.reducer import BasicReducer, KeyProblem, Reducer, RestartPass, UpdateKeys
+from shrinkray.reducer import (
+    BasicReducer,
+    KeyProblem,
+    Reducer,
+    RestartPass,
+    ShrinkRay,
+    UpdateKeys,
+)
 from shrinkray.work import WorkContext
 
 
@@ -1292,10 +1300,6 @@ async def test_initial_cut_watcher_cancels_on_no_progress(autojump_clock):
     This uses autojump_clock to test the time-dependent watcher code that
     normally requires 5 seconds to trigger.
     """
-    import trio
-
-    from shrinkray.reducer import ShrinkRay
-
     pass_iterations = [0]
     pass_cancelled = [False]
 
@@ -1337,10 +1341,6 @@ async def test_initial_cut_watcher_cancels_on_rate_drop(autojump_clock):
 
     The watcher cancels if rate drops below 50% of the best rate observed.
     """
-    import trio
-
-    from shrinkray.reducer import ShrinkRay
-
     pass_cancelled = [False]
     reductions_made = [0]
 
@@ -1357,7 +1357,7 @@ async def test_initial_cut_watcher_cancels_on_rate_drop(autojump_clock):
     async def slowing_pass(p):
         try:
             # Make some reductions quickly at first
-            for i in range(3):
+            for _ in range(3):
                 current = p.current_test_case
                 if len(current) > 50:
                     await p.is_interesting(current[:-10])  # Remove 10 bytes
@@ -1387,9 +1387,6 @@ async def test_initial_cut_watcher_multiple_iterations(autojump_clock):
     and rate doesn't improve (319->325 branch). The pass finishes naturally
     which triggers the nursery cancel from run_pass completion.
     """
-    import trio
-
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         return True

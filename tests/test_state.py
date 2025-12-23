@@ -1,6 +1,7 @@
 """Tests for state management."""
 
 import pytest
+import trio
 
 from shrinkray.cli import InputType
 from shrinkray.state import (
@@ -472,8 +473,6 @@ async def test_is_interesting_tracks_parallel_tasks(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
     )
-
-    import trio
 
     # Run two tasks in parallel
     results = []

@@ -1,16 +1,22 @@
 import os
 from glob import glob
 
+import libcst
+import libcst.matchers as m
 import pytest
+import trio
 
 from shrinkray.passes.python import (
     PYTHON_PASSES,
     is_python,
+    libcst_transform,
     lift_indented_constructs,
     replace_bodies_with_ellipsis,
     replace_statements_with_pass,
     strip_annotations,
 )
+from shrinkray.problem import BasicReductionProblem
+from shrinkray.work import WorkContext
 from tests.helpers import reduce, reduce_with
 
 
@@ -234,13 +240,6 @@ def test_libcst_transform_handles_test_case_becoming_invalid():
     This exercises lines 73-75: ParserSyntaxError when parsing during can_apply.
     The test case is valid initially but becomes invalid between calls.
     """
-    import libcst
-    import libcst.matchers as m
-    import trio
-
-    from shrinkray.passes.python import libcst_transform
-    from shrinkray.work import WorkContext
-
     # Track how many times current_test_case is accessed
     access_count = [0]
     valid_code = b"x = 1\ny = 2\nz = 3\n"
@@ -284,15 +283,6 @@ def test_libcst_transform_handles_cst_validation_error():
 
     This exercises line 80-81: CSTValidationError during transformation.
     """
-
-    import libcst
-    import libcst.matchers as m
-    import trio
-
-    from shrinkray.passes.python import libcst_transform
-    from shrinkray.problem import BasicReductionProblem
-    from shrinkray.work import WorkContext
-
     # Create a transformer that causes validation errors
     def bad_transformer(node):
         # Try to create an invalid CST node by adding a node in wrong context
@@ -325,14 +315,6 @@ def test_libcst_transform_handles_type_error_does_not_allow():
 
     This exercises lines 82-84: TypeError handling when transformation isn't allowed.
     """
-
-    import libcst.matchers as m
-    import trio
-
-    from shrinkray.passes.python import libcst_transform
-    from shrinkray.problem import BasicReductionProblem
-    from shrinkray.work import WorkContext
-
     # Create a transformer that raises the specific TypeError
     def bad_transformer(node):
         raise TypeError("The parent node does not allow for it")
@@ -363,14 +345,6 @@ def test_libcst_transform_reraises_other_type_error():
 
     This exercises line 85: the re-raise path for other TypeErrors.
     """
-    import libcst.matchers as m
-    import pytest
-    import trio
-
-    from shrinkray.passes.python import libcst_transform
-    from shrinkray.problem import BasicReductionProblem
-    from shrinkray.work import WorkContext
-
     # Create a transformer that raises a different TypeError
     def bad_transformer(node):
         raise TypeError("Some other type error")

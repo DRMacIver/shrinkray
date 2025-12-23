@@ -393,18 +393,14 @@ class UnitPropagator:
         self.__clean_dirty_clauses()
 
     def __enqueue_unit(self, unit: int) -> None:
-        if unit in self.units:  # pragma: no cover
-            # Defensive: unit already enqueued, nothing to do.
-            # This is structurally unreachable because satisfied clauses
-            # are skipped at line 417 before we try to enqueue their units.
-            return
-        if -unit in self.units:  # pragma: no cover
-            # Defensive: contradicting unit. This is structurally unreachable
-            # because we only add literals to watched_by if their negation
-            # is not in units (line 431).
-            raise Inconsistent(
-                f"Tried to add {unit} as a unit but {-unit} is already a unit."
-            )
+        # Invariant: unit should not already be in self.units because satisfied
+        # clauses are skipped at line 424 before we try to enqueue their units.
+        assert unit not in self.units, f"unit {unit} already enqueued"
+        # Invariant: -unit should not be in self.units because we only add
+        # literals to watched_by if their negation is not in units (line 438).
+        assert -unit not in self.units, (
+            f"Tried to add {unit} as a unit but {-unit} is already a unit"
+        )
         self.units.add(unit)
         self.forced_variables.add(abs(unit))
         self.__dirty.update(self.__watches.pop(-unit, ()))

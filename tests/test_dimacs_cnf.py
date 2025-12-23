@@ -194,13 +194,11 @@ def test_dimacs_cnf_name():
 
 
 def test_unit_propagator_duplicate_unit():
-    """Test UnitPropagator when adding same unit twice via propagation."""
+    """Test UnitPropagator handles unit clauses appearing multiple times."""
     from shrinkray.passes.sat import UnitPropagator
 
-    # Create a scenario where the same unit gets added twice
-    # [1] forces 1 as a unit, and [1, 2] becomes [2] which doesn't add 1 again
+    # [1] forces 1 as a unit, and [1, 2] becomes satisfied (contains unit 1)
     up = UnitPropagator([[1], [1, 2]])
-    # 1 should only be in units once
     assert 1 in up.units
     result = up.propagated_clauses()
     assert [1] in result
@@ -254,16 +252,10 @@ def test_combine_clauses_runs_on_sat():
 
 
 def test_unit_propagator_propagation_chain():
-    """Test UnitPropagator propagation that discovers same unit multiple ways.
-
-    This exercises the __enqueue_unit 'unit in self.units' path (line 396->exit).
-    We need a scenario where the same unit would be added twice.
-    """
+    """Test UnitPropagator propagation chain through multiple clauses."""
     from shrinkray.passes.sat import UnitPropagator
 
-    # Create clauses where propagation might try to add the same unit twice
-    # [1] forces 1, [-1, 2] forces 2
-    # [-2, 1] becomes [1] after 2 is set, but 1 is already in units
+    # [1] forces 1, [-1, 2] forces 2, [-2, 1] is satisfied by 1
     up = UnitPropagator([[1], [-1, 2], [-2, 1]])
     assert 1 in up.units
     assert 2 in up.units

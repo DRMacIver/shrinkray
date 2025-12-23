@@ -989,3 +989,170 @@ async def test_check_formatter_makes_uninteresting(tmp_path, capsys):
         await state.check_formatter()
     captured = capsys.readouterr()
     assert "uninteresting" in captured.err.lower()
+
+
+async def test_default_formatter_fallback(tmp_path):
+    """Test default formatter when no formatter command is determined.
+
+    This covers lines 407-409 (default_reformat_data fallback).
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    # Use a file extension that won't match any known formatter
+    target = tmp_path / "test.xyz"
+    target.write_text("  hello  world  ")  # Has extra spaces
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.xyz",
+        parallelism=1,
+        initial=b"  hello  world  ",
+        formatter="default",  # Use default formatter, not "none"
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # format_data should use default_reformat_data
+    result = await state.format_data(b"  hello  world  ")
+    # default_reformat_data normalizes whitespace
+    assert result is not None
+    assert result != b"  hello  world  "  # Should be normalized
+
+
+async def test_attempt_format_with_formatter(tmp_path):
+    """Test attempt_format when can_format is True.
+
+    This covers lines 275-276 (can_format set to False on failure).
+    """
+    # Create a formatter that outputs something different
+    formatter = tmp_path / "formatter.sh"
+    formatter.write_text("#!/bin/bash\necho 'formatted'")
+    formatter.chmod(0o755)
+
+    # Script that doesn't accept 'formatted'
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/bash\ngrep -q "hello" "$1" && exit 0 || exit 1')
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter=str(formatter),
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Initially can_format should be True (formatter is set)
+    assert state.can_format is True
+
+    # attempt_format should try formatting, but 'formatted' won't be interesting
+    # so it should set can_format to False and return original
+    result = await state.attempt_format(b"hello")
+    assert result == b"hello"
+    assert state.can_format is False
+
+
+async def test_is_interesting_tracks_first_call_time(tmp_path):
+    """Test that is_interesting sets first_call_time on first call.
+
+    This covers lines 256-263.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    # Use ShrinkRayDirectoryState to test the base class is_interesting
+    # (ShrinkRayStateSingleFile has its own implementation)
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial={"a.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # first_call_time should be None initially
+    assert state.first_call_time is None
+
+    # Call is_interesting
+    await state.is_interesting({"a.txt": b"hello"})
+
+    # first_call_time should now be set
+    assert state.first_call_time is not None
+
+
+async def test_print_exit_message_formatting_increase(tmp_path, capsys):
+    """Test print_exit_message when formatting increases size.
+
+    This covers line 477 (formatting increase message).
+    """
+    from unittest.mock import MagicMock
+
+    # Create a formatter that adds content (increases size)
+    formatter = tmp_path / "formatter.sh"
+    formatter.write_text("#!/bin/bash\ncat; echo 'extra content'")
+    formatter.chmod(0o755)
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("ab")  # Very short
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"abcdefghij",  # 10 bytes initially
+        formatter=str(formatter),
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Mock a problem where the result is smaller than initial but formatting adds bytes
+    problem = MagicMock()
+    problem.current_test_case = b"ab"  # 2 bytes (reduced from 10)
+    problem.stats.initial_test_case_size = 10
+    problem.stats.start_time = 0
+
+    await state.print_exit_message(problem)
+    captured = capsys.readouterr()
+    # Should show the deletion stats
+    assert "deleted" in captured.out.lower() or "increase" in captured.out.lower()

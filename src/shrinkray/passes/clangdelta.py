@@ -127,6 +127,9 @@ class ClangDelta:
                 ).stdout
             except subprocess.CalledProcessError as e:
                 msg = (e.stdout + e.stderr).strip()
+                # clang_delta has many internal assertions that can be triggered
+                # by malformed or unusual C/C++ code. These are harmless - we just
+                # report zero instances and skip this transformation.
                 if b"Assertion failed" in msg:
                     return 0
                 else:
@@ -201,14 +204,20 @@ def clang_delta_pump(
                     return False
                 return await problem.is_interesting(attempt)
 
+            not_found = False
+            clang_delta_failed = False
             try:
                 i = await problem.work.find_first_value(range(i, n + 1), can_apply)
-            except NotFound:
+            except* NotFound:
+                not_found = True
+            except* ClangDeltaError:
+                # clang_delta assertions can be triggered by unusual C/C++ code.
+                # These are harmless - just return what we have so far.
+                clang_delta_failed = True
+            if not_found:
                 break
-            # Note: ClangDeltaError from can_apply would be wrapped in an ExceptionGroup
-            # by trio's nursery, so we can't catch it here. apply_transformation already
-            # handles assertion failures by returning original data, so errors will
-            # propagate up and abort the pump.
+            if clang_delta_failed:
+                return target
 
             target = await clang_delta.apply_transformation(transformation, i, target)
             assert target is not None

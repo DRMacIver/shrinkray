@@ -43,7 +43,12 @@ class ParseError(Exception):
 
 
 class DumpError(Exception):
-    """Raised when a Format cannot serialize its output."""
+    """Raised when a Format cannot serialize its output.
+
+    This occurs because not all internal representations map to valid
+    output in the target format. For example, a reduction might create
+    an invalid AST structure that cannot be converted back to source code.
+    """
 
     pass
 

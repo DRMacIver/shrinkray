@@ -227,3 +227,13 @@ def test_subprocess_client_multiple_close_calls():
         await client.close()
 
     asyncio.run(run())
+
+
+def test_subprocess_client_read_output_returns_early_when_process_is_none():
+    async def run():
+        client = SubprocessClient()
+        # _read_output should return immediately when process is None
+        await client._read_output()
+        # No exception means success
+
+    asyncio.run(run())

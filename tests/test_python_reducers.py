@@ -160,3 +160,21 @@ def test_reduce_with_ellipsis_can_reduce_single_block():
         parallelism=1,
     )
     assert reduced == ISSUE_12_OUTPUT
+
+
+def test_python_passes_handle_invalid_syntax():
+    """Test that PYTHON_PASSES handle invalid Python syntax gracefully."""
+    invalid_python = b"def foo(:\n    pass"  # Missing parameter
+
+    # Should not raise, just return the original
+    result = reduce_with(PYTHON_PASSES, invalid_python, lambda x: True)
+    assert result == invalid_python
+
+
+def test_python_passes_handle_non_python():
+    """Test that PYTHON_PASSES handle non-Python content gracefully."""
+    not_python = b"This is not Python code at all {{{}}}"
+
+    # Should not raise, just return the original
+    result = reduce_with(PYTHON_PASSES, not_python, lambda x: True)
+    assert result == not_python

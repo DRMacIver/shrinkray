@@ -226,8 +226,8 @@ async def test_query_instances_raises_clang_delta_error():
     This tests line 133: raise ClangDeltaError(msg) when CalledProcessError
     doesn't contain 'Assertion failed'.
     """
-    from unittest.mock import patch, AsyncMock
     import subprocess
+    from unittest.mock import patch
 
     cd = ClangDelta(find_clang_delta())
 
@@ -246,8 +246,8 @@ async def test_apply_transformation_no_modification():
 
     This tests line 167: return data when the error message indicates no modification.
     """
-    from unittest.mock import patch
     import subprocess
+    from unittest.mock import patch
 
     cd = ClangDelta(find_clang_delta())
     source = b"int main() { return 0; }"
@@ -267,7 +267,7 @@ async def test_pump_handles_query_instances_error():
 
     This tests lines 190-191: ClangDeltaError during query_instances returns target.
     """
-    from unittest.mock import patch, AsyncMock
+    from unittest.mock import patch
 
     cd = ClangDelta(find_clang_delta())
     pump = clang_delta_pump(cd, "rename-var")

@@ -10,8 +10,18 @@ from typing import Any
 import click
 import trio
 
-from shrinkray.cli import EnumChoice, InputType, UIType, validate_command, validate_ui
-from shrinkray.passes.clangdelta import C_FILE_EXTENSIONS, ClangDelta, find_clang_delta
+from shrinkray.cli import (
+    EnumChoice,
+    InputType,
+    UIType,
+    validate_command,
+    validate_ui,
+)
+from shrinkray.passes.clangdelta import (
+    C_FILE_EXTENSIONS,
+    ClangDelta,
+    find_clang_delta,
+)
 from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import (
     ShrinkRayDirectoryState,
@@ -188,7 +198,9 @@ This behaviour can be disabled by passing --trivial-is-not-error.
 @click.argument("test", callback=validate_command)
 @click.argument(
     "filename",
-    type=click.Path(exists=True, resolve_path=False, dir_okay=True, allow_dash=False),
+    type=click.Path(
+        exists=True, resolve_path=False, dir_okay=True, allow_dash=False
+    ),
 )
 def main(
     input_type: InputType,
@@ -229,7 +241,10 @@ def main(
             parallelism = os.cpu_count() or 1
 
     clang_delta_executable: ClangDelta | None = None
-    if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:
+    if (
+        os.path.splitext(filename)[1] in C_FILE_EXTENSIONS
+        and not no_clang_delta
+    ):
         if not clang_delta:
             clang_delta = find_clang_delta()
         if not clang_delta:
@@ -278,7 +293,9 @@ def main(
         shutil.rmtree(backup, ignore_errors=True)
         shutil.copytree(filename, backup)
 
-        files = [os.path.join(d, f) for d, _, fs in os.walk(filename) for f in fs]
+        files = [
+            os.path.join(d, f) for d, _, fs in os.walk(filename) for f in fs
+        ]
 
         initial = {}
         for f in files:
@@ -324,8 +341,9 @@ def main(
         )
         return
 
-    if ui_type == UIType.basic:
-        ui = BasicUI(state)
+    # At this point, ui_type must be UIType.basic since textual returned above
+    assert ui_type == UIType.basic
+    ui = BasicUI(state)
 
     try:
         trio.run(

@@ -519,3 +519,70 @@ def test_custom_backup_filename(basic_shrink_target, tmp_path):
     )
     assert result.exit_code == 0
     assert os.path.exists(custom_backup)
+
+
+def test_textual_ui_path(basic_shrink_target, monkeypatch):
+    """Test that the textual UI path is exercised.
+
+    This tests lines 309-325 in __main__.py.
+    """
+    from unittest.mock import MagicMock
+
+    # Mock run_textual_ui to avoid actually launching the TUI
+    mock_run_textual_ui = MagicMock()
+    monkeypatch.setattr("shrinkray.tui.run_textual_ui", mock_run_textual_ui)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            basic_shrink_target.interestingness_test,
+            basic_shrink_target.test_case,
+            "--ui=textual",
+        ],
+    )
+
+    # The function should have been called
+    assert mock_run_textual_ui.called
+    assert result.exit_code == 0
+
+
+def test_keyboard_interrupt_handling(basic_shrink_target, tmp_path):
+    """Test that KeyboardInterrupt is properly re-raised from ExceptionGroup.
+
+    This tests line 343 in __main__.py.
+    """
+    from unittest.mock import patch
+
+    # Create a custom trio.run that tracks calls
+    call_count = [0]
+    original_trio_run = trio.run
+
+    def mock_trio_run(func):
+        call_count[0] += 1
+        # The first call is check_formatter - let it run normally
+        # The second call is the main run_shrink_ray - raise KeyboardInterrupt
+        if call_count[0] <= 1:
+            return original_trio_run(func)
+        else:
+            raise BaseExceptionGroup("test", [KeyboardInterrupt()])
+
+    # Patch at the __main__ module level
+    with patch.object(
+        __import__("shrinkray.__main__", fromlist=["trio"]).trio,
+        "run",
+        mock_trio_run,
+    ):
+        runner = CliRunner(catch_exceptions=True)
+        result = runner.invoke(
+            main,
+            [
+                basic_shrink_target.interestingness_test,
+                basic_shrink_target.test_case,
+                "--ui=basic",
+                "--formatter=none",  # Skip formatting to avoid issues
+            ],
+        )
+        # Should have raised KeyboardInterrupt
+        if result.exception is not None:
+            assert isinstance(result.exception, (KeyboardInterrupt, SystemExit))

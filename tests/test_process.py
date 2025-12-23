@@ -122,7 +122,7 @@ async def test_interrupt_wait_and_kill_handles_process_lookup_error_on_sigkill()
     This tests lines 40-41: the process exits between checking returncode
     and sending SIGKILL.
     """
-    from unittest.mock import MagicMock, patch, AsyncMock
+    from unittest.mock import AsyncMock, MagicMock, patch
 
     # Create a mock process
     mock_sp = MagicMock()
@@ -167,7 +167,8 @@ async def test_interrupt_wait_and_kill_raises_on_unkillable_process():
 
     This tests line 47: the process persists after all kill attempts.
     """
-    from unittest.mock import MagicMock, patch, AsyncMock
+    from unittest.mock import AsyncMock, MagicMock, patch
+
     import pytest
 
     # Create a mock process that never dies
@@ -197,7 +198,7 @@ async def test_interrupt_wait_and_kill_skips_sigkill_if_process_exits_after_poll
     This tests the branch at line 37 where returncode becomes non-None
     after all poll() calls return None but before checking returncode at line 37.
     """
-    from unittest.mock import MagicMock, patch, AsyncMock
+    from unittest.mock import AsyncMock, MagicMock, patch
 
     # Create a mock process
     mock_sp = MagicMock()
@@ -214,7 +215,6 @@ async def test_interrupt_wait_and_kill_skips_sigkill_if_process_exits_after_poll
 
     # returncode: None during poll loop, 0 after (simulating process exiting
     # after the loop but before the check at line 37)
-    original_poll = mock_sp.poll
     call_count = [0]
 
     def counting_poll():

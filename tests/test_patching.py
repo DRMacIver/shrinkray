@@ -751,7 +751,6 @@ async def test_patch_applied_equals_problem_current():
     from shrinkray.passes.patching import PatchApplier
 
     # Problem where current_test_case changes during patch application
-    current_value = [b"abcdef"]
 
     async def is_interesting(x):
         return True
@@ -896,7 +895,7 @@ async def test_is_reduction_returns_false():
     class GrowingPatches(Cuts):
         def apply(self, patch, target):
             # Instead of cutting, add bytes
-            for start, end in patch:
+            for start, _end in patch:
                 target = target[:start] + b"xxx" + target[start:]
             return target
 

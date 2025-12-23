@@ -717,7 +717,7 @@ async def test_view_keeps_cached_value_if_parse_is_larger():
 
     # Force underlying problem to have a larger value by directly manipulating
     # This simulates an edge case where the underlying changes but is larger
-    problem._BasicReductionProblem__current = b"longer"
+    problem._BasicReductionProblem__current = b"longer"  # type: ignore[attr-defined]
 
     # View should still return the cached smaller value
     current = view.current_test_case

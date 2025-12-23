@@ -136,13 +136,11 @@ def test_integer_format_dumps():
 
 
 def test_shortlex_shorter_wins():
-    # Verify shorter strings sort before longer ones
-    assert sorted([b"abc", b"ab"], key=shortlex) == [b"ab", b"abc"]
+    assert shortlex(b"ab") < shortlex(b"abc")
 
 
 def test_shortlex_same_length_lex_order():
-    # Verify same-length strings sort lexicographically
-    assert sorted([b"ba", b"ab"], key=shortlex) == [b"ab", b"ba"]
+    assert shortlex(b"ab") < shortlex(b"ba")
 
 
 # === iter_indices tests ===

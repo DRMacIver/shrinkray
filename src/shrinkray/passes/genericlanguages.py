@@ -133,6 +133,11 @@ def regex_pass(
 
 
 async def reduce_integer(problem: ReductionProblem[int]) -> None:
+    """Reduce an integer to its smallest interesting value.
+
+    Uses binary search to find the smallest integer that maintains
+    interestingness. Tries 0 first, then narrows down the range.
+    """
     assert problem.current_test_case >= 0
 
     if await problem.is_interesting(0):
@@ -170,11 +175,21 @@ class IntegerFormat(Format[bytes, int]):
 
 @regex_pass(b"[0-9]+")
 async def reduce_integer_literals(problem: ReductionProblem[bytes]) -> None:
+    """Reduce integer literals in source code to smaller values.
+
+    Finds numeric literals and tries to reduce each one independently
+    using binary search.
+    """
     await reduce_integer(problem.view(IntegerFormat()))
 
 
 @regex_pass(rb"[0-9]+ [*+-/] [0-9]+")
 async def combine_expressions(problem: ReductionProblem[bytes]) -> None:
+    """Evaluate and simplify simple arithmetic expressions.
+
+    Finds expressions like "2 + 3" and replaces them with their result "5".
+    Only handles basic integer arithmetic to avoid changing program semantics.
+    """
     try:
         # NB: Use of eval is safe, as everything passed to this is a simple
         # arithmetic expression. Would ideally replace with a guaranteed
@@ -188,15 +203,31 @@ async def combine_expressions(problem: ReductionProblem[bytes]) -> None:
 
 @regex_pass(rb'([\'"])\s*\1')
 async def merge_adjacent_strings(problem: ReductionProblem[bytes]) -> None:
+    """Remove empty string concatenations like '' '' or "" "".
+
+    These patterns (quote, whitespace, same quote) often result from
+    other reductions and can be eliminated entirely.
+    """
     await problem.is_interesting(b"")
 
 
 @regex_pass(rb"''|\"\"|false|\(\)|\[\]", re.IGNORECASE)
 async def replace_falsey_with_zero(problem: ReductionProblem[bytes]) -> None:
+    """Replace falsey values with 0.
+
+    Tries to replace empty strings, 'false', empty parentheses, and empty
+    brackets with the single character '0', which is shorter and often
+    equivalent in boolean contexts.
+    """
     await problem.is_interesting(b"0")
 
 
 async def simplify_brackets(problem: ReductionProblem[bytes]) -> None:
+    """Try to replace bracket types with simpler ones.
+
+    Attempts to replace {} with [] or (), and [] with (). This can
+    help normalize syntax when the specific bracket type doesn't matter.
+    """
     bracket_types = [b"[]", b"{}", b"()"]
 
     patches = [
@@ -217,6 +248,12 @@ def shortlex(s: T) -> tuple[int, T]:
 
 
 async def normalize_identifiers(problem: ReductionProblem[bytes]) -> None:
+    """Replace identifiers with shorter alternatives.
+
+    Finds all identifiers in the source and tries to replace longer ones
+    with shorter alternatives (single letters like 'a', 'b', etc.). This
+    normalizes variable/function names to minimal forms.
+    """
     identifiers = {m.group(0) for m in IDENTIFIER.finditer(problem.current_test_case)}
     replacements = set(identifiers)
 
@@ -262,6 +299,12 @@ def iter_indices(s, substring):
 
 
 async def cut_comments(problem: ReductionProblem[bytes], start, end, include_end=True):
+    """Remove comment-like regions bounded by start and end markers.
+
+    Finds all regions starting with 'start' and ending with 'end', then
+    tries to delete them. Used to remove comments from various languages.
+    If include_end is False, the end marker itself is not deleted.
+    """
     cuts = []
     target = problem.current_test_case
     # python comments
@@ -280,6 +323,11 @@ async def cut_comments(problem: ReductionProblem[bytes], start, end, include_end
 
 
 async def cut_comment_like_things(problem: ReductionProblem[bytes]):
+    """Remove common comment syntaxes from source code.
+
+    Tries to delete Python-style (#), C++-style (//), Python docstrings
+    (triple quotes), and C-style block comments (/* ... */).
+    """
     await cut_comments(problem, b"#", b"\n", include_end=False)
     await cut_comments(problem, b"//", b"\n", include_end=False)
     await cut_comments(problem, b'"""', b'"""')

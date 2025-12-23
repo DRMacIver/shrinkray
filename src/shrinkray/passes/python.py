@@ -28,6 +28,13 @@ async def libcst_transform(
         Replacement,
     ],
 ) -> None:
+    """Apply a LibCST transformation to matching nodes in Python source.
+
+    Parses the test case as Python, finds all nodes matching the given
+    matcher, and applies the transformer function to each. Uses binary
+    search to efficiently find which transformations maintain interestingness.
+    """
+
     class CM(codemod.VisitorBasedCodemodCommand):
         def __init__(
             self, context: codemod.CodemodContext, start_index: int, end_index: int
@@ -110,6 +117,12 @@ async def libcst_transform(
 
 
 async def lift_indented_constructs(problem: ReductionProblem[bytes]) -> None:
+    """Replace control structures with their body contents.
+
+    For if/while/try/with statements, removes the else/except clauses and
+    then tries to replace the entire construct with just its body. This
+    "lifts" the indented code out of its containing structure.
+    """
     await libcst_transform(
         problem,
         m.OneOf(m.While(), m.If(), m.Try()),
@@ -124,6 +137,11 @@ async def lift_indented_constructs(problem: ReductionProblem[bytes]) -> None:
 
 
 async def delete_statements(problem: ReductionProblem[bytes]) -> None:
+    """Try to delete simple statement lines from Python source.
+
+    Removes individual statements (assignments, expressions, imports, etc.)
+    one at a time to find which can be eliminated.
+    """
     await libcst_transform(
         problem,
         m.SimpleStatementLine(),
@@ -132,6 +150,11 @@ async def delete_statements(problem: ReductionProblem[bytes]) -> None:
 
 
 async def replace_statements_with_pass(problem: ReductionProblem[bytes]) -> None:
+    """Replace statement lines with 'pass' statements.
+
+    Useful when a statement can't be deleted outright (e.g., it's the only
+    statement in a block) but can be replaced with a no-op.
+    """
     await libcst_transform(
         problem,
         m.SimpleStatementLine(),
@@ -143,6 +166,11 @@ ELLIPSIS_STATEMENT = libcst.parse_statement("...")
 
 
 async def replace_bodies_with_ellipsis(problem: ReductionProblem[bytes]) -> None:
+    """Replace indented block bodies with '...' (ellipsis).
+
+    Replaces function bodies, class bodies, and other indented blocks
+    with just an ellipsis statement. Useful for stubbing out implementations.
+    """
     await libcst_transform(
         problem,
         m.IndentedBlock(),
@@ -151,6 +179,12 @@ async def replace_bodies_with_ellipsis(problem: ReductionProblem[bytes]) -> None
 
 
 async def strip_annotations(problem: ReductionProblem[bytes]) -> None:
+    """Remove type annotations from Python source.
+
+    Strips return type annotations from functions, parameter annotations,
+    and converts annotated assignments to plain assignments. Type annotations
+    are often unnecessary for reproducing bugs.
+    """
     await libcst_transform(
         problem,
         m.FunctionDef(),

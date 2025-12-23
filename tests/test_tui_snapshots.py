@@ -55,6 +55,10 @@ class FakeReductionClientForSnapshots:
     def is_completed(self) -> bool:
         return self._completed
 
+    @property
+    def error_message(self) -> str | None:
+        return None
+
 
 def make_app_with_updates(updates: list[ProgressUpdate]) -> ShrinkRayApp:
     """Create a ShrinkRayApp with fake updates for testing."""

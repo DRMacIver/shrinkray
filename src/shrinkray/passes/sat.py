@@ -67,6 +67,12 @@ DimacsCNF = _DimacsCNF()
 
 
 async def flip_literal_signs(problem: ReductionProblem[SAT]):
+    """Make negative literals positive.
+
+    Tries to replace negative literals (-x) with positive ones (x).
+    This normalizes the formula toward using positive literals only.
+    """
+
     def flip_terms(terms: frozenset[tuple[int, int]], sat: SAT) -> SAT:
         result = list(map(list, sat))
         for i, j in terms:
@@ -91,6 +97,13 @@ def literals_in(sat: SAT) -> frozenset[int]:
 
 
 async def delete_literals(problem: ReductionProblem[SAT]) -> None:
+    """Remove entire literals from the formula.
+
+    Tries to remove all occurrences of a literal (both positive and
+    negative forms) from all clauses. Clauses that become empty are
+    removed entirely.
+    """
+
     def remove_literals(literals: frozenset[int], sat: SAT) -> SAT:
         result: SAT = []
         for clause in sat:
@@ -107,6 +120,13 @@ async def delete_literals(problem: ReductionProblem[SAT]) -> None:
 
 
 async def delete_single_terms(problem: ReductionProblem[SAT]) -> None:
+    """Remove individual literal occurrences from specific clauses.
+
+    Unlike delete_literals (which removes a literal everywhere), this
+    tries removing literals from individual positions, allowing different
+    clauses to keep or lose the same literal independently.
+    """
+
     def remove_terms(terms: frozenset[tuple[int, int]], sat: SAT) -> SAT:
         result: list[list[int]] = [list(c) for c in sat]
         grouped: defaultdict[int, set[int]] = defaultdict(set)
@@ -130,6 +150,12 @@ async def delete_single_terms(problem: ReductionProblem[SAT]) -> None:
 
 
 async def renumber_variables(problem: ReductionProblem[SAT]) -> None:
+    """Renumber variables to use smaller indices.
+
+    Tries to replace variable numbers with smaller ones (1, 2, 3, etc.)
+    to minimize the variable indices used. This normalizes the formula
+    toward using the smallest possible variable numbers.
+    """
     variables = sorted(
         {abs(lit) for clause in problem.current_test_case for lit in clause}
     )
@@ -320,6 +346,13 @@ class NegatingMap:
 
 
 async def merge_literals(problem: ReductionProblem[SAT]) -> None:
+    """Merge pairs of literals into single variables.
+
+    Tries to identify pairs of literals that can be treated as equivalent
+    (or negations of each other) and replaces them with a single variable.
+    This reduces the number of distinct variables in the formula.
+    """
+
     def apply_merges(terms: frozenset[tuple[int, int]], sat: SAT) -> SAT:
         uf = BooleanEquivalence()
         try:
@@ -349,6 +382,12 @@ async def merge_literals(problem: ReductionProblem[SAT]) -> None:
 
 
 async def pass_to_component(problem: ReductionProblem[SAT]) -> None:
+    """Try to reduce to a single connected component.
+
+    If the formula can be split into independent components (clauses that
+    share no variables), tries each component individually to see if any
+    single component is sufficient to maintain interestingness.
+    """
     groups: UnionFind[int] = UnionFind()
     clauses = problem.current_test_case
     for clause in clauses:
@@ -362,6 +401,11 @@ async def pass_to_component(problem: ReductionProblem[SAT]) -> None:
 
 
 async def sort_clauses(problem: ReductionProblem[SAT]) -> None:
+    """Sort clauses and literals into canonical order.
+
+    Sorts literals within each clause and sorts clauses themselves.
+    This normalizes the formula representation for consistent output.
+    """
     await problem.is_interesting(sorted(map(sorted, problem.current_test_case)))
 
 
@@ -457,6 +501,12 @@ class UnitPropagator:
 
 
 async def unit_propagate(problem: ReductionProblem[SAT]) -> None:
+    """Apply unit propagation to simplify the formula.
+
+    Finds unit clauses (single-literal clauses) and propagates their
+    implications: removes satisfied clauses and removes the negated
+    literal from other clauses. This is a standard SAT preprocessing step.
+    """
     try:
         propagated = UnitPropagator(problem.current_test_case).propagated_clauses()
     except Inconsistent:
@@ -467,6 +517,12 @@ async def unit_propagate(problem: ReductionProblem[SAT]) -> None:
 
 
 async def force_literals(problem: ReductionProblem[SAT]) -> None:
+    """Try forcing each literal to a specific value.
+
+    For each literal in the formula, tries adding it as a unit clause
+    and propagating. If the result is interesting, the formula is
+    simplified by that forced assignment.
+    """
     literals = literals_in(problem.current_test_case)
     for lit in literals:
         try:
@@ -478,6 +534,13 @@ async def force_literals(problem: ReductionProblem[SAT]) -> None:
 
 
 async def combine_clauses(problem: ReductionProblem[SAT]) -> None:
+    """Merge pairs of clauses into single clauses.
+
+    Tries to combine clauses that share literals, creating a single
+    clause containing all literals from both. This reduces clause count
+    while potentially creating larger but fewer clauses.
+    """
+
     def apply_merges(terms: frozenset[tuple[int, int]], sat: SAT) -> SAT:
         uf: UnionFind[int] = UnionFind()
         for u, v in terms:

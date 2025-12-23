@@ -205,10 +205,21 @@ async def delete_intervals(
     intervals_to_delete: list[tuple[int, int]],
     shuffle: bool = False,
 ) -> None:
+    """Try to delete each of the given byte intervals.
+
+    Each interval (start, end) represents a contiguous region to try deleting.
+    The patch applier will find which intervals can be deleted independently
+    and combine compatible deletions.
+    """
     await apply_patches(problem, Cuts(), [[t] for t in intervals_to_delete])
 
 
 def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:
+    """Find all intervals enclosed by matching brace pairs.
+
+    Given a two-byte brace string like b"{}", returns intervals for content
+    between each matched open/close pair. Handles nesting correctly.
+    """
     open, close = brace
     intervals: list[tuple[int, int]] = []
     stack: list[int] = []
@@ -247,6 +258,10 @@ async def debracket(problem: ReductionProblem[bytes]) -> None:
 
 
 def quote_intervals(target: bytes) -> list[tuple[int, int]]:
+    """Find all intervals enclosed by matching quote pairs.
+
+    Returns intervals between consecutive single or double quotes.
+    """
     indices: dict[int, list[int]] = defaultdict(list)
     for i, c in enumerate(target):
         indices[c].append(i)
@@ -373,6 +388,12 @@ class Tokenize(Format[bytes, list[bytes]]):
 
 
 async def delete_byte_spans(problem: ReductionProblem[bytes]) -> None:
+    """Delete spans between occurrences of the same byte value.
+
+    For each byte value that appears multiple times, tries to delete
+    regions from the start to the first occurrence, between consecutive
+    occurrences, and from the last occurrence to the end.
+    """
     indices: dict[int, list[int]] = defaultdict(list)
     target = problem.current_test_case
     for i, c in enumerate(target):
@@ -390,6 +411,11 @@ async def delete_byte_spans(problem: ReductionProblem[bytes]) -> None:
 
 
 async def remove_indents(problem: ReductionProblem[bytes]) -> None:
+    """Remove leading spaces from lines.
+
+    Finds runs of spaces following newlines and tries to delete them.
+    Useful for normalizing indentation in code.
+    """
     target = problem.current_test_case
     spans: list[list[tuple[int, int]]] = []
 
@@ -409,6 +435,12 @@ async def remove_indents(problem: ReductionProblem[bytes]) -> None:
 
 
 async def remove_whitespace(problem: ReductionProblem[bytes]) -> None:
+    """Collapse runs of whitespace.
+
+    Finds consecutive whitespace characters and tries to remove all but
+    the first, or all but the first two. Complements remove_indents by
+    handling whitespace anywhere in the file.
+    """
     target = problem.current_test_case
     spans: list[list[tuple[int, int]]] = []
 
@@ -453,6 +485,11 @@ class NewlineReplacer(Patches[frozenset[int], bytes]):
 
 
 async def replace_space_with_newlines(problem: ReductionProblem[bytes]) -> None:
+    """Replace spaces and tabs with newlines.
+
+    Tries replacing each space or tab with a newline. This can help
+    normalize formatting and may enable other line-based reductions.
+    """
     await apply_patches(
         problem,
         NewlineReplacer(),
@@ -493,6 +530,12 @@ class ByteReplacement(Patches[ReplacementPatch, bytes]):
 
 
 async def lower_bytes(problem: ReductionProblem[bytes]) -> None:
+    """Globally replace byte values with smaller ones.
+
+    For each distinct byte value in the input, tries replacing all
+    occurrences with smaller values (0, 1, half, value-1, whitespace).
+    Also tries replacing pairs of bytes with the same smaller value.
+    """
     sources = sorted(set(problem.current_test_case))
 
     patches = [
@@ -538,6 +581,12 @@ class IndividualByteReplacement(Patches[ReplacementPatch, bytes]):
 
 
 async def lower_individual_bytes(problem: ReductionProblem[bytes]) -> None:
+    """Replace individual bytes at specific positions with smaller values.
+
+    Unlike lower_bytes (which replaces all occurrences of a byte value),
+    this tries reducing individual byte positions. Also handles carry-like
+    patterns where decrementing one byte allows the next to become 255.
+    """
     initial = problem.current_test_case
     patches = [
         {i: r}
@@ -579,6 +628,11 @@ class RegionReplacement(Patches[RegionReplacementPatch, bytes]):
 
 
 async def short_replacements(problem: ReductionProblem[bytes]) -> None:
+    """Replace short regions with uniform byte values.
+
+    Tries replacing 1-4 byte regions with uniform values like 0, 1,
+    space, newline, or period. Useful for simplifying small sequences.
+    """
     target = problem.current_test_case
     patches = [
         [(i, j, c)]
@@ -655,6 +709,11 @@ STANDARD_SUBSTITUTIONS = [(b"\0\0", b"\1"), (b"\0\0", b"\xff")]
 
 
 async def standard_substitutions(problem: ReductionProblem[bytes]):
+    """Apply standard byte sequence substitutions.
+
+    Tries some specific byte sequence replacements that are sometimes
+    helpful, primarily for handling edge cases in artificial test inputs.
+    """
     i = 0
     while i < len(problem.current_test_case):
         for k, v in STANDARD_SUBSTITUTIONS:
@@ -669,6 +728,12 @@ async def standard_substitutions(problem: ReductionProblem[bytes]):
 
 
 async def line_sorter(problem: ReductionProblem[bytes]):
+    """Sort lines into a more canonical order.
+
+    Uses insertion sort to reorder lines, swapping adjacent lines when
+    doing so maintains interestingness and produces a lexicographically
+    smaller result. This normalizes line order for reproducibility.
+    """
     lines = problem.current_test_case.split(b"\n")
     i = 1
     while i < len(lines):

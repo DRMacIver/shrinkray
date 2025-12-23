@@ -11,6 +11,11 @@ Seq = TypeVar("Seq", bound=Sequence[Any])
 
 
 async def delete_elements(problem: ReductionProblem[Seq]) -> None:
+    """Try to delete individual elements from the sequence.
+
+    Creates a patch for each element and uses the patch applier to find
+    which elements can be removed while maintaining interestingness.
+    """
     await apply_patches(
         problem, Cuts(), [[(i, i + 1)] for i in range(len(problem.current_test_case))]
     )
@@ -40,6 +45,12 @@ def with_deletions(target: Seq, deletions: list[tuple[int, int]]) -> Seq:
 
 
 def block_deletion(min_block: int, max_block: int) -> ReductionPass[Seq]:
+    """Create a pass that deletes contiguous blocks of elements.
+
+    Tries to remove blocks of size min_block to max_block, starting at
+    various offsets. Useful for removing larger chunks efficiently.
+    """
+
     async def apply(problem: ReductionProblem[Seq]) -> None:
         n = len(problem.current_test_case)
         if n <= min_block:
@@ -58,6 +69,12 @@ def block_deletion(min_block: int, max_block: int) -> ReductionPass[Seq]:
 
 
 async def delete_duplicates(problem: ReductionProblem[Seq]) -> None:
+    """Try to delete duplicate elements from the sequence.
+
+    Groups elements by value and tries to remove all occurrences of each
+    duplicated element together. Effective when the test case contains
+    repeated patterns that can be eliminated.
+    """
     index: dict[int, list[int]] = defaultdict(list)
 
     for i, c in enumerate(problem.current_test_case):

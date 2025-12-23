@@ -14,7 +14,7 @@ the details of caching, parallelism, and state management.
 import hashlib
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sized
 from datetime import timedelta
 from typing import (
     TYPE_CHECKING,
@@ -37,9 +37,10 @@ if TYPE_CHECKING:
 
 S = TypeVar("S")
 T = TypeVar("T")
+SizedT = TypeVar("SizedT", bound=Sized)
 
 
-def shortlex(value: T) -> tuple[int, T]:
+def shortlex(value: SizedT) -> tuple[int, SizedT]:
     """Return a comparison key for shortlex ordering.
 
     Shortlex ordering compares first by length, then lexicographically.

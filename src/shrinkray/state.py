@@ -10,7 +10,7 @@ import time
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from tempfile import TemporaryDirectory
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, cast
 
 import humanize
 import trio
@@ -127,11 +127,14 @@ class ShrinkRayState(Generic[TestCase], ABC):
             kwargs["capture_stdout"] = True
             kwargs["capture_stderr"] = True
             start_time = time.time()
-            result = await trio.run_process(command, **kwargs)
+            completed = cast(
+                subprocess.CompletedProcess[bytes],
+                await trio.run_process(command, **kwargs),
+            )
             runtime = time.time() - start_time
 
             if runtime >= self.timeout and self.first_call:
-                self.initial_exit_code = result.returncode
+                self.initial_exit_code = completed.returncode
                 self.first_call = False
                 raise TimeoutExceededOnInitial(
                     timeout=self.timeout,
@@ -139,18 +142,18 @@ class ShrinkRayState(Generic[TestCase], ABC):
                 )
 
             if self.first_call:
-                self.initial_exit_code = result.returncode
+                self.initial_exit_code = completed.returncode
             self.first_call = False
 
             # Store captured output
             output_parts = []
-            if result.stdout:
-                output_parts.append(result.stdout.decode("utf-8", errors="replace"))
-            if result.stderr:
-                output_parts.append(result.stderr.decode("utf-8", errors="replace"))
+            if completed.stdout:
+                output_parts.append(completed.stdout.decode("utf-8", errors="replace"))
+            if completed.stderr:
+                output_parts.append(completed.stderr.decode("utf-8", errors="replace"))
             self._last_debug_output = "\n".join(output_parts).strip()
 
-            return result.returncode
+            return completed.returncode
 
         # Non-debug mode: use nursery pattern for timeout handling
         kwargs["stdout"] = subprocess.DEVNULL

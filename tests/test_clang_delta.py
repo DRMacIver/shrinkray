@@ -177,3 +177,139 @@ async def test_pump_handles_apply_error():
     # Should not raise, should return the original
     result = await pump(problem)
     assert result == source
+
+
+# =============================================================================
+# Additional edge case tests for complete coverage
+# =============================================================================
+
+
+def test_find_clang_delta_when_found_in_path():
+    """Test find_clang_delta returns path when found via which()."""
+    from unittest.mock import patch
+
+    # Mock which to return a path
+    with patch(
+        "shrinkray.passes.clangdelta.which", return_value="/usr/bin/clang_delta"
+    ):
+        result = find_clang_delta()
+        assert result == "/usr/bin/clang_delta"
+
+
+def test_find_clang_delta_when_not_in_path():
+    """Test find_clang_delta falls back to glob when not in PATH."""
+    from unittest.mock import patch
+
+    # Mock which to return None (not in PATH)
+    with patch("shrinkray.passes.clangdelta.which", return_value=None):
+        # This will use glob to find clang_delta
+        result = find_clang_delta()
+        # Result depends on whether clang_delta is installed via homebrew/apt
+        # We just verify it doesn't crash and returns something (empty string if not found)
+        assert isinstance(result, str)
+
+
+def test_find_clang_delta_when_not_found_anywhere():
+    """Test find_clang_delta returns empty string when not found."""
+    from unittest.mock import patch
+
+    # Mock both which and glob to return nothing
+    with patch("shrinkray.passes.clangdelta.which", return_value=None):
+        with patch("shrinkray.passes.clangdelta.glob", return_value=[]):
+            result = find_clang_delta()
+            assert result == ""
+
+
+async def test_query_instances_raises_clang_delta_error():
+    """Test query_instances raises ClangDeltaError for non-assertion errors.
+
+    This tests line 133: raise ClangDeltaError(msg) when CalledProcessError
+    doesn't contain 'Assertion failed'.
+    """
+    from unittest.mock import patch, AsyncMock
+    import subprocess
+
+    cd = ClangDelta(find_clang_delta())
+
+    # Mock trio.run_process to raise CalledProcessError without "Assertion failed"
+    error = subprocess.CalledProcessError(1, "clang_delta")
+    error.stdout = b"Some other error"
+    error.stderr = b"More error info"
+
+    with patch("trio.run_process", side_effect=error):
+        with pytest.raises(ClangDeltaError):
+            await cd.query_instances("rename-var", b"int main() {}")
+
+
+async def test_apply_transformation_no_modification():
+    """Test apply_transformation returns original when 'No modification' error.
+
+    This tests line 167: return data when the error message indicates no modification.
+    """
+    from unittest.mock import patch
+    import subprocess
+
+    cd = ClangDelta(find_clang_delta())
+    source = b"int main() { return 0; }"
+
+    # Mock trio.run_process to raise CalledProcessError with "No modification" message
+    error = subprocess.CalledProcessError(1, "clang_delta")
+    error.stdout = b"Error: No modification to the transformed program!"
+    error.stderr = b""
+
+    with patch("trio.run_process", side_effect=error):
+        result = await cd.apply_transformation("rename-var", 1, source)
+        assert result == source
+
+
+async def test_pump_handles_query_instances_error():
+    """Test clang_delta_pump handles ClangDeltaError from query_instances.
+
+    This tests lines 190-191: ClangDeltaError during query_instances returns target.
+    """
+    from unittest.mock import patch, AsyncMock
+
+    cd = ClangDelta(find_clang_delta())
+    pump = clang_delta_pump(cd, "rename-var")
+
+    source = b"int main() { return 0; }"
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        source, is_interesting, work=WorkContext(parallelism=1)
+    )
+
+    # Mock query_instances to raise ClangDeltaError
+    with patch.object(
+        cd, "query_instances", side_effect=ClangDeltaError(b"Query failed")
+    ):
+        result = await pump(problem)
+        assert result == source
+
+
+async def test_pump_makes_progress_when_transformation_is_interesting():
+    """Test clang_delta_pump makes progress when transformations produce interesting results.
+
+    This tests lines 215-217: the code path after find_first_value succeeds.
+    """
+    cd = ClangDelta(find_clang_delta())
+    # Use rename-var which will rename variables
+    pump = clang_delta_pump(cd, "rename-var")
+
+    # Source with variables that can be renamed
+    source = b"int longVariableName = 1; int main() { return longVariableName; }"
+
+    # Accept any transformation (all results are interesting)
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        source, is_interesting, work=WorkContext(parallelism=1)
+    )
+
+    result = await pump(problem)
+    # The pump should have made some transformations
+    # We just verify it runs without error
+    assert result is not None

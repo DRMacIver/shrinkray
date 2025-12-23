@@ -226,3 +226,166 @@ def test_is_python_returns_false_for_invalid_python():
     """Test that is_python returns False for invalid Python code."""
     invalid_code = b"def foo(:"
     assert is_python(invalid_code) is False
+
+
+def test_libcst_transform_handles_test_case_becoming_invalid():
+    """Test that libcst_transform handles the case where the test case becomes invalid Python mid-reduction.
+
+    This exercises lines 73-75: ParserSyntaxError when parsing during can_apply.
+    The test case is valid initially but becomes invalid between calls.
+    """
+    import trio
+    import libcst.matchers as m
+    import libcst
+
+    from shrinkray.passes.python import libcst_transform
+    from shrinkray.problem import BasicReductionProblem
+    from shrinkray.work import WorkContext
+
+    # Track how many times current_test_case is accessed
+    access_count = [0]
+    valid_code = b"x = 1\ny = 2\nz = 3\n"
+    invalid_code = b"def foo(:\n"
+
+    class MockProblem:
+        def __init__(self):
+            self.work = WorkContext(parallelism=1)
+            self._test_case = valid_code
+
+        @property
+        def current_test_case(self):
+            access_count[0] += 1
+            # First access returns valid code (for initial parse)
+            # Later accesses return invalid code (to trigger ParserSyntaxError in can_apply)
+            if access_count[0] <= 2:
+                return valid_code
+            return invalid_code
+
+        def sort_key(self, x):
+            return (len(x), x)
+
+        async def is_interesting(self, x):
+            return True
+
+    problem = MockProblem()
+
+    async def run_test():
+        await libcst_transform(
+            problem,  # type: ignore
+            m.SimpleStatementLine(),
+            lambda x: libcst.RemoveFromParent(),
+        )
+
+    trio.run(run_test)
+    # The function should complete without raising, handling the ParserSyntaxError internally
+
+
+def test_libcst_transform_handles_cst_validation_error():
+    """Test that libcst_transform handles CSTValidationError gracefully.
+
+    This exercises line 80-81: CSTValidationError during transformation.
+    """
+    import trio
+    import libcst
+    import libcst.matchers as m
+
+    from shrinkray.passes.python import libcst_transform
+    from shrinkray.problem import BasicReductionProblem
+    from shrinkray.work import WorkContext
+    from unittest.mock import patch
+
+    # Create a transformer that causes validation errors
+    def bad_transformer(node):
+        # Try to create an invalid CST node by adding a node in wrong context
+        # This should trigger CSTValidationError
+        raise libcst.CSTValidationError("Test validation error")
+
+    code = b"x = 1\n"
+
+    async def run_test():
+        problem: BasicReductionProblem[bytes] = BasicReductionProblem(
+            initial=code,
+            is_interesting=lambda x: True,
+            work=WorkContext(parallelism=1),
+        )
+        await libcst_transform(
+            problem,
+            m.SimpleStatementLine(),
+            bad_transformer,
+        )
+
+    trio.run(run_test)
+    # Should complete without raising
+
+
+def test_libcst_transform_handles_type_error_does_not_allow():
+    """Test that libcst_transform handles TypeError with 'does not allow for it'.
+
+    This exercises lines 82-84: TypeError handling when transformation isn't allowed.
+    """
+    import trio
+    import libcst
+    import libcst.matchers as m
+
+    from shrinkray.passes.python import libcst_transform
+    from shrinkray.problem import BasicReductionProblem
+    from shrinkray.work import WorkContext
+    from unittest.mock import patch
+
+    # Create a transformer that raises the specific TypeError
+    def bad_transformer(node):
+        raise TypeError("The parent node does not allow for it")
+
+    code = b"x = 1\n"
+
+    async def run_test():
+        problem: BasicReductionProblem[bytes] = BasicReductionProblem(
+            initial=code,
+            is_interesting=lambda x: True,
+            work=WorkContext(parallelism=1),
+        )
+        await libcst_transform(
+            problem,
+            m.SimpleStatementLine(),
+            bad_transformer,
+        )
+
+    trio.run(run_test)
+    # Should complete without raising
+
+
+def test_libcst_transform_reraises_other_type_error():
+    """Test that libcst_transform re-raises TypeError without 'does not allow for it'.
+
+    This exercises line 85: the re-raise path for other TypeErrors.
+    """
+    import trio
+    import libcst
+    import libcst.matchers as m
+    import pytest
+
+    from shrinkray.passes.python import libcst_transform
+    from shrinkray.problem import BasicReductionProblem
+    from shrinkray.work import WorkContext
+
+    # Create a transformer that raises a different TypeError
+    def bad_transformer(node):
+        raise TypeError("Some other type error")
+
+    code = b"x = 1\n"
+
+    async def run_test():
+        problem: BasicReductionProblem[bytes] = BasicReductionProblem(
+            initial=code,
+            is_interesting=lambda x: True,
+            work=WorkContext(parallelism=1),
+        )
+        # The TypeError gets wrapped in ExceptionGroups by trio nurseries
+        with pytest.raises(ExceptionGroup):
+            await libcst_transform(
+                problem,
+                m.SimpleStatementLine(),
+                bad_transformer,
+            )
+
+    trio.run(run_test)

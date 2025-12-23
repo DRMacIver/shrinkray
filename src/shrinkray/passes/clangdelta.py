@@ -205,12 +205,10 @@ def clang_delta_pump(
                 i = await problem.work.find_first_value(range(i, n + 1), can_apply)
             except NotFound:
                 break
-            except ClangDeltaError:
-                # clang_delta sometimes produces errors on bad C++. Since
-                # apply_transformation already handles assertion failures by
-                # returning the original data, this catches any other errors
-                # and aborts the pump gracefully.
-                return target
+            # Note: ClangDeltaError from can_apply would be wrapped in an ExceptionGroup
+            # by trio's nursery, so we can't catch it here. apply_transformation already
+            # handles assertion failures by returning original data, so errors will
+            # propagate up and abort the pump.
 
             target = await clang_delta.apply_transformation(transformation, i, target)
             assert target is not None

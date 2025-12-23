@@ -193,6 +193,33 @@ def test_dimacs_cnf_name():
     assert DimacsCNF.name == "DimacsCNF"
 
 
+def test_union_find_repr():
+    """Test UnionFind.__repr__ shows component count."""
+    from shrinkray.passes.sat import UnionFind
+
+    uf: UnionFind[int] = UnionFind()
+    uf.find(1)
+    uf.find(2)
+    uf.merge(3, 4)
+    # 3 components: {1}, {2}, {3, 4}
+    assert repr(uf) == "UnionFind(3 components)"
+
+
+def test_negating_map_repr():
+    """Test NegatingMap.__repr__ shows both positive and negative keys."""
+    from shrinkray.passes.sat import NegatingMap
+
+    nm = NegatingMap()
+    nm[1] = 2
+    nm[3] = 4
+    r = repr(nm)
+    # Should contain both positive and negative mappings
+    assert "1" in r and "-1" in r
+    assert "2" in r and "-2" in r
+    assert "3" in r and "-3" in r
+    assert "4" in r and "-4" in r
+
+
 def test_unit_propagator_duplicate_unit():
     """Test UnitPropagator handles unit clauses appearing multiple times."""
     from shrinkray.passes.sat import UnitPropagator

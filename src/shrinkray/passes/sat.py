@@ -251,7 +251,7 @@ class UnionFind(Generic[T]):
             for b in sorted_values[1:]:  # type: ignore[reportUnknownVariableType]
                 self.merge(a, b)  # type: ignore[reportUnknownArgumentType]
 
-    def __repr__(self) -> str:  # pragma: no cover
+    def __repr__(self) -> str:
         return "%s(%d components)" % (
             type(self).__name__,
             len(self.components()),
@@ -291,7 +291,7 @@ class NegatingMap:
     def __init__(self) -> None:
         self._data = {}
 
-    def __repr__(self) -> str:  # pragma: no cover
+    def __repr__(self) -> str:
         m: dict[int, int] = {}
         for k, v in self._data.items():
             m[k] = v

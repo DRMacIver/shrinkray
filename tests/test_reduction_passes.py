@@ -121,6 +121,17 @@ def test_lift_braces_multiple_nested(parallelism):
     assert result == b"{b}"
 
 
+def test_lift_braces_with_empty_braces(parallelism):
+    """Test that lift_braces handles empty braces {} correctly."""
+    result = reduce_with(
+        [lift_braces],
+        b"{} {content} {}",
+        lambda x: b"content" in x,
+        parallelism=parallelism,
+    )
+    assert b"content" in result
+
+
 def test_debracket_removes_parens(parallelism):
     result = reduce_with(
         [debracket],

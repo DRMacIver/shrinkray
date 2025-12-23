@@ -214,3 +214,10 @@ def test_determine_formatter_default_case_insensitive():
 def test_determine_formatter_wraps_string_in_list():
     result = determine_formatter_command("my-formatter", "test.txt")
     assert result == ["my-formatter"]
+
+
+def test_default_formatter_python_files_without_black():
+    """Test that .py files return None when black is not found."""
+    with patch("shrinkray.formatting.find_python_command", return_value=None):
+        result = default_formatter_command_for("test.py")
+        assert result is None

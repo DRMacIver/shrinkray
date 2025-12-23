@@ -308,3 +308,30 @@ def test_merge_literals_with_contradiction_detection():
     except ExceptionGroup:
         # Conflict during patching is expected for some SAT instances
         pass
+
+
+def test_unit_propagator_removes_negated_units_from_clauses():
+    """Test UnitPropagator.propagated_clauses removes negated unit literals.
+
+    This covers line 455 where negated units are removed from clauses.
+    When a unit [1] is propagated, any clause containing -1 should have
+    that literal removed.
+    """
+    from shrinkray.passes.sat import UnitPropagator
+
+    # [1] is a unit clause, so 1 must be true
+    # [-1, 2, 3] contains -1 (negation of unit 1) which should be removed
+    # The result should have [-1, 2, 3] become [2, 3]
+    up = UnitPropagator([[1], [-1, 2, 3]])
+
+    assert 1 in up.units
+    result = up.propagated_clauses()
+
+    # Should have [1] as a unit clause
+    assert [1] in result
+
+    # Should have [2, 3] (with -1 removed) as a clause
+    # Note: the clause might be sorted differently
+    non_unit_clauses = [c for c in result if len(c) > 1]
+    assert len(non_unit_clauses) == 1
+    assert set(non_unit_clauses[0]) == {2, 3}

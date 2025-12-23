@@ -529,3 +529,176 @@ async def test_first_call_flag_is_cleared(tmp_path):
     assert state.first_call is False
     # Initial exit code should be recorded
     assert state.initial_exit_code == 0
+
+
+# === print_exit_message tests ===
+
+
+async def test_print_exit_message_directory(directory_state, capsys):
+    """Test directory state print_exit_message."""
+    problem = directory_state.problem
+    await directory_state.print_exit_message(problem)
+    captured = capsys.readouterr()
+    assert "done" in captured.out.lower()
+
+
+async def test_print_exit_message_already_reduced(tmp_path, capsys):
+    """Test print_exit_message when test case was already minimal."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("x")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"x",
+        formatter="none",
+        trivial_is_error=False,  # Don't error on trivial
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    problem = state.problem
+    await state.print_exit_message(problem)
+    captured = capsys.readouterr()
+    assert "already maximally reduced" in captured.out.lower()
+
+
+async def test_print_exit_message_reduced(tmp_path, capsys):
+    """Test print_exit_message when size was reduced."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    # Start with a longer file
+    target.write_text("hello world this is a test")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world this is a test",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    problem = state.problem
+    # Reduce the test case
+    await problem.is_interesting(b"hello")
+    await state.print_exit_message(problem)
+    captured = capsys.readouterr()
+    assert "Deleted" in captured.out
+
+
+# === report_error tests ===
+
+
+async def test_report_error_timeout_exceeded(tmp_path, capsys):
+    """Test report_error with TimeoutExceededOnInitial."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=1.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    exc = TimeoutExceededOnInitial(runtime=5.5, timeout=1.0)
+    with pytest.raises(SystemExit):
+        await state.report_error(exc)
+    captured = capsys.readouterr()
+    assert "timeout" in captured.err.lower()
+    assert "5.5" in captured.err or "5.50" in captured.err
+
+
+async def test_run_for_exit_code_no_input_type_arg(tmp_path):
+    """Test run_for_exit_code with input_type that doesn't include arg."""
+    script = tmp_path / "test.sh"
+    # Script that exits 0 always (testing that command is called without arg)
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.stdin,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Should run without the file argument
+    exit_code = await state.run_for_exit_code(b"hello")
+    assert exit_code == 0
+
+
+async def test_run_for_exit_code_in_place_not_basename(tmp_path):
+    """Test run_for_exit_code in_place mode but not basename input type."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\ntest -f \"$1\" && exit 0 || exit 1")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=True,  # in_place but using arg not basename
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Should create a temporary file with unique name
+    exit_code = await state.run_for_exit_code(b"hello world")
+    assert exit_code == 0

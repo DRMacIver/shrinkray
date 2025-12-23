@@ -325,6 +325,8 @@ class ShrinkRayApp(App[None]):
         ("q", "quit", "Quit"),
     ]
 
+    ENABLE_COMMAND_PALETTE = False
+
     def __init__(
         self,
         file_path: str,

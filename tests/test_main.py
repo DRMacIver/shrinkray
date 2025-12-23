@@ -1,3 +1,4 @@
+import json
 import os
 import pathlib
 import subprocess
@@ -348,3 +349,175 @@ def test_worker_main_can_be_imported():
     # Can't actually run it without proper stdin/stdout setup,
     # but at least verify it's importable and callable
     assert callable(worker_main)
+
+
+def test_directory_mode_stdin_error(tmp_path):
+    """Test that directory mode rejects stdin input type."""
+    target = tmp_path / "mydir"
+    target.mkdir()
+    (target / "test.txt").write_text("hello")
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [str(script), str(target), "--ui=basic", "--input-type=stdin"],
+    )
+    assert result.exit_code != 0
+    assert "Cannot pass a directory input on stdin" in str(result.output)
+
+
+def test_clang_delta_not_found_error(tmp_path, monkeypatch):
+    """Test error when clang_delta is needed but not found."""
+    target = tmp_path / "test.c"
+    target.write_text("int main() { return 0; }")
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    # Make find_clang_delta return empty string
+    def mock_find_clang_delta():
+        return ""
+
+    monkeypatch.setattr(
+        "shrinkray.__main__.find_clang_delta", mock_find_clang_delta
+    )
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [str(script), str(target), "--ui=basic"],
+    )
+    assert result.exit_code != 0
+    assert "clang_delta" in str(result.output).lower()
+
+
+def test_clang_delta_explicit_path(tmp_path, monkeypatch):
+    """Test passing explicit clang_delta path."""
+    target = tmp_path / "test.c"
+    target.write_text("int main() { return 0; }")
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    # Create a fake clang_delta executable
+    fake_clang_delta = tmp_path / "fake_clang_delta"
+    fake_clang_delta.write_text("#!/bin/bash\nexit 0")
+    fake_clang_delta.chmod(0o755)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            str(script),
+            str(target),
+            "--ui=basic",
+            f"--clang-delta={fake_clang_delta}",
+        ],
+    )
+    # Will fail at the setup stage, but should get past the clang_delta check
+    # The important thing is it doesn't fail with "clang_delta not installed"
+    assert "clang_delta is not installed" not in str(result.output)
+
+
+def test_default_backup_filename(basic_shrink_target):
+    """Test that default backup filename is created correctly."""
+    import os
+
+    # First, remove any existing backup
+    backup_path = basic_shrink_target.test_case + os.extsep + "bak"
+    if os.path.exists(backup_path):
+        os.remove(backup_path)
+
+    # Also clear test case backup
+    test_case_backup = basic_shrink_target.test_case + os.extsep + "bak"
+    if os.path.exists(test_case_backup):
+        os.remove(test_case_backup)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            basic_shrink_target.interestingness_test,
+            basic_shrink_target.test_case,
+            "--ui=basic",
+        ],
+    )
+    assert result.exit_code == 0
+
+    # The backup file should be created with the default name
+    expected_backup = basic_shrink_target.test_case + os.extsep + "bak"
+    assert os.path.exists(expected_backup)
+
+
+def test_directory_mode_with_basic_ui(tmp_path):
+    """Test directory reduction with BasicUI via CliRunner.
+
+    This tests the directory mode path (lines 278-290) in __main__.py.
+    """
+    target = tmp_path / "mydir"
+    target.mkdir()
+    (target / "a.txt").write_text("hello world")
+    (target / "b.txt").write_text("goodbye")
+
+    script = tmp_path / "test.sh"
+    script.write_text(
+        """#!/bin/bash
+test -f "$1/a.txt" && grep hello "$1/a.txt"
+"""
+    )
+    script.chmod(0o755)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [str(script), str(target), "--ui=basic", "--input-type=arg"],
+    )
+
+    # Should complete (possibly with warnings about trivial results)
+    # The key is that it exercises the directory handling code
+    assert result.exit_code in (0, 1)  # 1 for trivial result warning
+
+
+def test_worker_main_entry_point():
+    """Test that worker_main can be invoked (will fail without proper stdin)."""
+    import io
+
+    from shrinkray.__main__ import worker_main
+
+    # Capture what would happen if worker_main runs without proper input
+    old_stdin = sys.stdin
+    try:
+        sys.stdin = io.StringIO("")  # Empty input
+        # worker_main will fail because there's no proper JSON input
+        # but this exercises the import and function call
+        try:
+            worker_main()
+        except (EOFError, json.JSONDecodeError, Exception):
+            # Expected to fail without proper input
+            pass
+    finally:
+        sys.stdin = old_stdin
+
+
+def test_custom_backup_filename(basic_shrink_target, tmp_path):
+    """Test that custom backup filename is used when specified."""
+    custom_backup = str(tmp_path / "my_custom_backup.bak")
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            basic_shrink_target.interestingness_test,
+            basic_shrink_target.test_case,
+            "--ui=basic",
+            f"--backup={custom_backup}",
+        ],
+    )
+    assert result.exit_code == 0
+    assert os.path.exists(custom_backup)

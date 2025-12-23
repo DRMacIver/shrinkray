@@ -39,7 +39,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y minisat
+        sudo apt-get install -y minisat creduce
     - name: Install Python dependencies
       run: uv sync --extra dev
     - name: Run tests with coverage

@@ -702,3 +702,290 @@ async def test_run_for_exit_code_in_place_not_basename(tmp_path):
     # Should create a temporary file with unique name
     exit_code = await state.run_for_exit_code(b"hello world")
     assert exit_code == 0
+
+
+# === Additional error path tests ===
+
+
+async def test_report_error_non_timeout_rerun_fails(tmp_path, capsys):
+    """Test report_error when initial test fails with non-zero exit.
+
+    This covers lines 324-333 where we rerun for debugging and the exit code is non-zero.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 1")  # Always fails
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Pass a non-timeout exception to trigger the else branch
+    with pytest.raises(SystemExit):
+        await state.report_error(ValueError("test error"))
+    captured = capsys.readouterr()
+    assert "exit" in captured.err.lower() or "debug" in captured.err.lower()
+
+
+async def test_report_error_cwd_dependent(tmp_path, capsys, monkeypatch):
+    """Test report_error when test fails in temp dir but works locally.
+
+    This covers lines 339-359 where we detect cwd dependency.
+    """
+    call_count = {"value": 0}
+
+    script = tmp_path / "test.sh"
+    # Script that always succeeds
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Mock run_for_exit_code to fail (simulating temp dir failure)
+    original_run_for_exit_code = state.run_for_exit_code
+
+    async def mock_run_for_exit_code(test_case, debug=False):
+        call_count["value"] += 1
+        if call_count["value"] == 1:
+            # First call in report_error should fail
+            return 1
+        return await original_run_for_exit_code(test_case, debug)
+
+    monkeypatch.setattr(state, "run_for_exit_code", mock_run_for_exit_code)
+
+    with pytest.raises(SystemExit):
+        await state.report_error(ValueError("test error"))
+    captured = capsys.readouterr()
+    # Should mention running in directory
+    assert "directory" in captured.err.lower()
+
+
+async def test_print_exit_message_trivial_error(tmp_path, capsys):
+    """Test print_exit_message when result is trivial and trivial_is_error=True.
+
+    This covers lines 450-460.
+    """
+    from unittest.mock import MagicMock
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("x")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"x",
+        formatter="none",
+        trivial_is_error=True,  # This is key
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Mock a problem with a 1-byte result
+    problem = MagicMock()
+    problem.current_test_case = b"x"  # Single byte - trivial
+
+    with pytest.raises(SystemExit) as exc_info:
+        await state.print_exit_message(problem)
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "trivial" in captured.out.lower()
+
+
+async def test_print_exit_message_no_reduction(tmp_path, capsys):
+    """Test print_exit_message when changes made but no bytes deleted.
+
+    This covers lines 474-475.
+    """
+    from unittest.mock import MagicMock
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",  # 11 bytes
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Mock a problem where the result is DIFFERENT but SAME LENGTH as initial
+    # This triggers the "Some changes were made but no bytes were deleted" branch
+    problem = MagicMock()
+    problem.current_test_case = b"world hello"  # Different content, same length (11 bytes)
+    problem.stats.initial_test_case_size = len(b"hello world")
+    problem.stats.start_time = 0
+
+    await state.print_exit_message(problem)
+    captured = capsys.readouterr()
+    assert "no bytes were deleted" in captured.out.lower()
+
+
+async def test_run_script_on_file_nonexistent(tmp_path):
+    """Test run_script_on_file raises when file doesn't exist.
+
+    This covers line 100.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Try to run on a non-existent file
+    with pytest.raises(ValueError, match="No such file"):
+        await state.run_script_on_file(
+            working=str(tmp_path / "nonexistent.txt"),
+            debug=False,
+            cwd=str(tmp_path),
+        )
+
+
+async def test_check_formatter_failure(tmp_path, capsys):
+    """Test check_formatter when formatter exits non-zero.
+
+    This covers lines 279-294.
+    """
+    # Create a formatter that always fails
+    formatter = tmp_path / "bad_formatter.sh"
+    formatter.write_text("#!/bin/bash\necho 'error' >&2\nexit 1")
+    formatter.chmod(0o755)
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter=str(formatter),
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    with pytest.raises(SystemExit):
+        await state.check_formatter()
+    captured = capsys.readouterr()
+    assert "formatter" in captured.err.lower() or "unexpected" in captured.err.lower()
+
+
+async def test_check_formatter_makes_uninteresting(tmp_path, capsys):
+    """Test check_formatter when formatting makes test case uninteresting.
+
+    This covers lines 296-307.
+    """
+    # Create a formatter that outputs different content
+    formatter = tmp_path / "formatter.sh"
+    formatter.write_text("#!/bin/bash\necho 'different'")
+    formatter.chmod(0o755)
+
+    # Script that only accepts 'hello'
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/bash\ngrep -q "hello" "$1" && exit 0 || exit 1')
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter=str(formatter),
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    with pytest.raises(SystemExit):
+        await state.check_formatter()
+    captured = capsys.readouterr()
+    assert "uninteresting" in captured.err.lower()

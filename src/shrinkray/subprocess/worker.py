@@ -8,6 +8,7 @@ from typing import Any, Protocol
 import trio
 from binaryornot.helpers import is_binary_string
 
+from shrinkray.problem import InvalidInitialExample
 from shrinkray.subprocess.protocol import (
     ProgressUpdate,
     Request,
@@ -126,6 +127,13 @@ class ReducerWorker:
         try:
             await self._start_reduction(params)
             return Response(id=request_id, result={"status": "started"})
+        except InvalidInitialExample as e:
+            # Build a detailed error message for invalid initial examples
+            if self.state is not None:
+                error_message = await self.state.build_error_message(e)
+            else:
+                error_message = str(e)
+            return Response(id=request_id, error=error_message)
         except Exception as e:
             return Response(id=request_id, error=str(e))
 
@@ -151,6 +159,7 @@ class ReducerWorker:
         volume = Volume[params.get("volume", "normal")]
         no_clang_delta = params.get("no_clang_delta", False)
         clang_delta_path = params.get("clang_delta", "")
+        trivial_is_error = params.get("trivial_is_error", True)
 
         clang_delta_executable = None
         if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:
@@ -168,7 +177,7 @@ class ReducerWorker:
             parallelism=parallelism,
             filename=filename,
             formatter=formatter,
-            trivial_is_error=False,
+            trivial_is_error=trivial_is_error,
             seed=seed,
             volume=volume,
             clang_delta_executable=clang_delta_executable,
@@ -188,6 +197,11 @@ class ReducerWorker:
 
         self.problem = self.state.problem
         self.reducer = self.state.reducer
+
+        # Validate initial example before starting - this will raise
+        # InvalidInitialExample if the initial test case fails
+        await self.problem.setup()
+
         self.running = True
 
     def _handle_status(self, request_id: str) -> Response:
@@ -258,51 +272,62 @@ class ReducerWorker:
             except Exception:
                 return "", True
 
+    async def _build_progress_update(self) -> ProgressUpdate | None:
+        """Build a progress update from current state."""
+        if self.problem is None:
+            return None
+
+        stats = self.problem.stats
+        content_preview, hex_mode = self._get_content_preview()
+
+        # Get parallel workers count and track average
+        parallel_workers = 0
+        if self.state is not None and hasattr(self.state, "parallel_tasks_running"):
+            parallel_workers = self.state.parallel_tasks_running
+            self._parallel_samples += 1
+            self._parallel_total += parallel_workers
+
+        # Calculate parallelism stats
+        average_parallelism = 0.0
+        effective_parallelism = 0.0
+        if self._parallel_samples > 0:
+            average_parallelism = self._parallel_total / self._parallel_samples
+            wasteage = (
+                stats.wasted_interesting_calls / stats.calls
+                if stats.calls > 0
+                else 0.0
+            )
+            effective_parallelism = average_parallelism * (1.0 - wasteage)
+
+        return ProgressUpdate(
+            status=self.reducer.status if self.reducer else "",
+            size=stats.current_test_case_size,
+            original_size=stats.initial_test_case_size,
+            calls=stats.calls,
+            reductions=stats.reductions,
+            interesting_calls=stats.interesting_calls,
+            wasted_calls=stats.wasted_interesting_calls,
+            runtime=time.time() - stats.start_time,
+            parallel_workers=parallel_workers,
+            average_parallelism=average_parallelism,
+            effective_parallelism=effective_parallelism,
+            time_since_last_reduction=stats.time_since_last_reduction(),
+            content_preview=content_preview,
+            hex_mode=hex_mode,
+        )
+
     async def emit_progress_updates(self) -> None:
         """Periodically emit progress updates."""
+        # Emit initial progress update immediately
+        update = await self._build_progress_update()
+        if update is not None:
+            await self.emit(update)
+
         while self.running:
             await trio.sleep(0.1)
-            if self.problem is None:
-                continue
-            stats = self.problem.stats
-            content_preview, hex_mode = self._get_content_preview()
-
-            # Get parallel workers count and track average
-            parallel_workers = 0
-            if self.state is not None and hasattr(self.state, "parallel_tasks_running"):
-                parallel_workers = self.state.parallel_tasks_running
-                self._parallel_samples += 1
-                self._parallel_total += parallel_workers
-
-            # Calculate parallelism stats
-            average_parallelism = 0.0
-            effective_parallelism = 0.0
-            if self._parallel_samples > 0:
-                average_parallelism = self._parallel_total / self._parallel_samples
-                wasteage = (
-                    stats.wasted_interesting_calls / stats.calls
-                    if stats.calls > 0
-                    else 0.0
-                )
-                effective_parallelism = average_parallelism * (1.0 - wasteage)
-
-            update = ProgressUpdate(
-                status=self.reducer.status if self.reducer else "",
-                size=stats.current_test_case_size,
-                original_size=stats.initial_test_case_size,
-                calls=stats.calls,
-                reductions=stats.reductions,
-                interesting_calls=stats.interesting_calls,
-                wasted_calls=stats.wasted_interesting_calls,
-                runtime=time.time() - stats.start_time,
-                parallel_workers=parallel_workers,
-                average_parallelism=average_parallelism,
-                effective_parallelism=effective_parallelism,
-                time_since_last_reduction=stats.time_since_last_reduction(),
-                content_preview=content_preview,
-                hex_mode=hex_mode,
-            )
-            await self.emit(update)
+            update = await self._build_progress_update()
+            if update is not None:
+                await self.emit(update)
 
     async def run_reducer(self) -> None:
         """Run the reducer."""
@@ -313,6 +338,22 @@ class ReducerWorker:
             with trio.CancelScope() as scope:
                 self._cancel_scope = scope
                 await self.reducer.run()
+
+            # Check for trivial result after successful completion
+            if self.state is not None and self.problem is not None:
+                trivial_error = self.state.check_trivial_result(self.problem)
+                if trivial_error:
+                    await self.emit(Response(id="", error=trivial_error))
+        except InvalidInitialExample as e:
+            # Build a detailed error message for invalid initial examples
+            if self.state is not None:
+                error_message = await self.state.build_error_message(e)
+            else:
+                error_message = str(e)
+            await self.emit(Response(id="", error=error_message))
+        except Exception as e:
+            # Catch any other exception during reduction and emit as error
+            await self.emit(Response(id="", error=str(e)))
         finally:
             self._cancel_scope = None
             self.running = False
@@ -329,6 +370,11 @@ class ReducerWorker:
             # Start progress updates and reducer
             nursery.start_soon(self.emit_progress_updates)
             await self.run_reducer()
+
+            # Emit final progress update before completion
+            final_update = await self._build_progress_update()
+            if final_update is not None:
+                await self.emit(final_update)
 
             # Signal completion
             await self.emit(Response(id="", result={"status": "completed"}))

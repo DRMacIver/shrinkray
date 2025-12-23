@@ -4,9 +4,16 @@ import io
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
 import trio
 
-from shrinkray.subprocess.protocol import ProgressUpdate, Request, Response, serialize
+from shrinkray.subprocess.protocol import (
+    ProgressUpdate,
+    Request,
+    Response,
+    deserialize,
+    serialize,
+)
 from shrinkray.subprocess.worker import ReducerWorker
 
 
@@ -1093,3 +1100,309 @@ def test_worker_main_module_entry_point():
 
     # trio.run should have been called via main()
     assert mock_trio_run.called
+
+
+# === Tests for startup error conditions ===
+
+
+async def test_worker_start_with_failing_interestingness_test(tmp_path):
+    """Test that worker properly reports error when initial test case is not interesting.
+
+    When the interestingness test (e.g., 'false') returns non-zero for the initial
+    test case, the worker should return an error response immediately during start,
+    not hang or corrupt the JSON protocol with print statements.
+    """
+    # Create a test file
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a test script that always fails (returns non-zero)
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 1")
+    script.chmod(0o755)
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+    }
+
+    # Start the reduction - should fail immediately with detailed error
+    response = await worker._handle_start("test-start", params)
+
+    # Should get back an error response with detailed message
+    assert response.error is not None
+    assert "Shrink ray cannot proceed" in response.error
+    assert "interestingness test" in response.error
+    assert response.result is None
+
+    # Worker should not be running
+    assert worker.running is False
+
+
+async def test_worker_start_validates_initial_example(tmp_path):
+    """Test that _start_reduction validates initial example and raises on failure."""
+    # Create a test file
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    params = {
+        "file_path": str(target),
+        "test": ["false"],  # Always returns 1
+        "parallelism": 1,
+        "timeout": 1.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+    }
+
+    # _start_reduction should raise InvalidInitialExample
+    from shrinkray.problem import InvalidInitialExample
+
+    with pytest.raises(InvalidInitialExample):
+        await worker._start_reduction(params)
+
+    # Worker should not be marked as running since start failed
+    assert worker.running is False
+
+
+async def test_worker_full_run_with_failing_test(tmp_path):
+    """Test full run() with a test that fails on initial example."""
+    # Create a test file
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a start command with a failing test
+    start_params = {
+        "file_path": str(target),
+        "test": ["false"],  # Always fails
+        "parallelism": 1,
+        "timeout": 1.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+    }
+    start_request = Request(id="start-fail", command="start", params=start_params)
+    input_data = serialize(start_request) + "\n"
+
+    output = MemoryOutputStream()
+    input_stream = MemoryInputStream(input_data.encode("utf-8"))
+
+    worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+    # Run with a timeout to prevent hanging
+    with trio.move_on_after(10):
+        await worker.run()
+
+    # Should not hang - worker should complete with error
+    output_str = output.data.decode("utf-8")
+
+    # Should have gotten an error response (not "started")
+    assert b"error" in output.data
+    assert b"Shrink ray cannot proceed" in output.data
+
+    # All output should be valid JSON
+    import json
+
+    for line in output_str.strip().split("\n"):
+        if line:
+            parsed = json.loads(line)  # Will raise JSONDecodeError if not valid JSON
+            # Check it's a valid protocol message
+            assert "id" in parsed or "type" in parsed
+
+
+async def test_worker_timeout_on_initial_test(tmp_path):
+    """Test handling when initial test exceeds timeout."""
+    # Create a test file
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a test script that sleeps longer than timeout
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nsleep 10\nexit 0")
+    script.chmod(0o755)
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 0.1,  # Very short timeout
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+    }
+
+    # Start should fail with timeout error during initial validation
+    response = await worker._handle_start("test-timeout", params)
+
+    # Should get an error (either about timeout or wrapped exception)
+    assert response.error is not None
+    # The error could be a timeout message, or it could be wrapped in an exception group
+    # Either way, the worker should not be in a running state
+    assert worker.running is False
+
+
+async def test_worker_error_message_is_detailed(tmp_path):
+    """Test that error messages for invalid initial examples are detailed."""
+    # Create a target file
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a script that always fails
+    script = tmp_path / "fail.sh"
+    script.write_text("#!/bin/bash\nexit 1")
+    script.chmod(0o755)
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 5.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+    }
+
+    # Start should fail with detailed error message
+    response = await worker._handle_start("test-detailed", params)
+
+    # Should get an error response
+    assert response.error is not None
+    error_message = response.error
+
+    # Check that the error message is detailed (not just a simple exception message)
+    assert "Shrink ray cannot proceed" in error_message
+    assert "interestingness test" in error_message
+    assert "exit" in error_message.lower() or "code" in error_message.lower()
+
+
+@pytest.mark.trio
+async def test_worker_trivial_result_error(tmp_path):
+    """Test that reducing to a trivial result shows an error."""
+    # Create a target file with content
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a script that always succeeds (accepts any input)
+    script = tmp_path / "pass.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 5.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+        "trivial_is_error": True,
+    }
+
+    # Start should succeed
+    response = await worker._handle_start("test-trivial", params)
+    assert response.error is None
+    assert response.result == {"status": "started"}
+
+    # Run the reducer
+    await worker.run_reducer()
+
+    # Check the output for the trivial error message
+    output_data = output.data
+    found_trivial_error = False
+    for line in output_data.split(b"\n"):
+        if line:
+            msg = deserialize(line.decode("utf-8"))
+            if isinstance(msg, Response) and msg.error:
+                if "trivial" in msg.error.lower():
+                    found_trivial_error = True
+                    break
+
+    assert found_trivial_error, "Should have emitted a trivial result error"
+
+
+@pytest.mark.trio
+async def test_worker_trivial_result_no_error_when_disabled(tmp_path):
+    """Test that trivial result is not an error when trivial_is_error=False."""
+    # Create a target file with content
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a script that always succeeds (accepts any input)
+    script = tmp_path / "pass.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 5.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+        "trivial_is_error": False,
+    }
+
+    # Start should succeed
+    response = await worker._handle_start("test-trivial-disabled", params)
+    assert response.error is None
+
+    # Run the reducer
+    await worker.run_reducer()
+
+    # Check the output - should NOT have trivial error
+    # (completion message is emitted by run(), not run_reducer())
+    output_data = output.data
+    found_error = False
+    for line in output_data.split(b"\n"):
+        if line:
+            msg = deserialize(line.decode("utf-8"))
+            if isinstance(msg, Response) and msg.error:
+                if "trivial" in msg.error.lower():
+                    found_error = True
+
+    assert not found_error, "Should not have emitted trivial error"

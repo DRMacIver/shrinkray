@@ -330,6 +330,7 @@ def main(
             volume=volume.name,
             no_clang_delta=no_clang_delta,
             clang_delta=clang_delta,
+            trivial_is_error=trivial_is_error,
             theme=theme,  # type: ignore[arg-type]
         )
         return

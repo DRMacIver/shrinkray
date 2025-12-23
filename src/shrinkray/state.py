@@ -67,6 +67,9 @@ class ShrinkRayState(Generic[TestCase], ABC):
     _interrupt_wait_and_kill: Any = None
     _InputType: Any = None
 
+    # Stores the output from the last debug run
+    _last_debug_output: str = ""
+
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
         self.setup_formatter()
@@ -117,9 +120,39 @@ class ShrinkRayState(Generic[TestCase], ABC):
         else:
             kwargs["stdin"] = b""
 
-        if not debug:
-            kwargs["stdout"] = subprocess.DEVNULL
-            kwargs["stderr"] = subprocess.DEVNULL
+        # For debug mode, use simpler approach to capture output
+        if debug:
+            kwargs["capture_stdout"] = True
+            kwargs["capture_stderr"] = True
+            start_time = time.time()
+            result = await trio.run_process(command, **kwargs)
+            runtime = time.time() - start_time
+
+            if runtime >= self.timeout and self.first_call:
+                self.initial_exit_code = result.returncode
+                self.first_call = False
+                raise TimeoutExceededOnInitial(
+                    timeout=self.timeout,
+                    runtime=runtime,
+                )
+
+            if self.first_call:
+                self.initial_exit_code = result.returncode
+            self.first_call = False
+
+            # Store captured output
+            output_parts = []
+            if result.stdout:
+                output_parts.append(result.stdout.decode("utf-8", errors="replace"))
+            if result.stderr:
+                output_parts.append(result.stderr.decode("utf-8", errors="replace"))
+            self._last_debug_output = "\n".join(output_parts).strip()
+
+            return result.returncode
+
+        # Non-debug mode: use nursery pattern for timeout handling
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.DEVNULL
 
         async with trio.open_nursery() as nursery:
 
@@ -153,6 +186,7 @@ class ShrinkRayState(Generic[TestCase], ABC):
 
             result: int | None = sp.returncode
             assert result is not None
+
             return result
 
     async def run_for_exit_code(self, test_case: TestCase, debug: bool = False) -> int:
@@ -307,66 +341,97 @@ class ShrinkRayState(Generic[TestCase], ABC):
             )
             sys.exit(1)
 
-    async def report_error(self, e):
-        print(
-            "Shrink ray cannot proceed because the initial call of the interestingness test resulted in an uninteresting test case.",
-            file=sys.stderr,
-        )
+    async def build_error_message(self, e: Exception) -> str:
+        """Build a detailed error message for an invalid initial example.
+
+        This is used by the subprocess worker to provide helpful error messages
+        without printing directly to stderr or calling sys.exit.
+        """
+        lines = [
+            "Shrink ray cannot proceed because the initial call of the "
+            "interestingness test resulted in an uninteresting test case."
+        ]
+
         if isinstance(e, TimeoutExceededOnInitial):
-            print(
-                f"This is because your initial test case took {e.runtime:.2f}s exceeding your timeout setting of {self.timeout}.",
-                file=sys.stderr,
+            lines.append(
+                f"This is because your initial test case took {e.runtime:.2f}s "
+                f"exceeding your timeout setting of {self.timeout}."
             )
-            print(
-                f"Try rerunning with --timeout={math.ceil(e.runtime * 2)}.",
-                file=sys.stderr,
-            )
+            lines.append(f"Try rerunning with --timeout={math.ceil(e.runtime * 2)}.")
         else:
-            print(
-                "Rerunning the interestingness test for debugging purposes...",
-                file=sys.stderr,
-            )
+            lines.append("Rerunning the interestingness test for debugging purposes...")
             exit_code = await self.run_for_exit_code(self.initial, debug=True)
             if exit_code != 0:
-                print(
-                    f"This exited with code {exit_code}, but the script should return 0 for interesting test cases.",
-                    file=sys.stderr,
+                lines.append(
+                    f"This exited with code {exit_code}, but the script should "
+                    "return 0 for interesting test cases."
                 )
+                # Include the captured output from the debug run
+                if self._last_debug_output:
+                    lines.append("\nOutput from the interestingness test:")
+                    lines.append(self._last_debug_output)
                 local_exit_code = await self.run_script_on_file(
                     working=self.filename,
                     debug=False,
                     cwd=os.getcwd(),
                 )
                 if local_exit_code == 0:
-                    print(
-                        "Note that Shrink Ray runs your script on a copy of the file in a temporary directory. "
-                        "Here are the results of running it in the current directory directory...",
-                        file=sys.stderr,
+                    lines.append(
+                        "\nNote that Shrink Ray runs your script on a copy of the file "
+                        "in a temporary directory. Here are the results of running it "
+                        "in the current directory..."
                     )
                     other_exit_code = await self.run_script_on_file(
                         working=self.filename,
                         debug=True,
                         cwd=os.getcwd(),
                     )
+                    # Include the output from running in current directory
+                    if self._last_debug_output:
+                        lines.append(self._last_debug_output)
                     if other_exit_code != local_exit_code:
-                        print(
-                            f"This interestingness is probably flaky as the first time we reran it locally it exited with {local_exit_code}, "
-                            f"but the second time it exited with {other_exit_code}. Please make sure your interestingness test is deterministic.",
-                            file=sys.stderr,
+                        lines.append(
+                            f"This interestingness test is probably flaky as the first "
+                            f"time we reran it locally it exited with {local_exit_code}, "
+                            f"but the second time it exited with {other_exit_code}. "
+                            "Please make sure your interestingness test is deterministic."
                         )
                     else:
-                        print(
-                            "This suggests that your script depends on being run from the current working directory. Please fix it to be directory independent.",
-                            file=sys.stderr,
+                        lines.append(
+                            "This suggests that your script depends on being run from "
+                            "the current working directory. Please fix it to be "
+                            "directory independent."
                         )
             else:
                 assert self.initial_exit_code not in (None, 0)
-                print(
-                    f"This exited with code 0, but previously the script exited with {self.initial_exit_code}. "
-                    "This suggests your interestingness test exhibits nondeterministic behaviour.",
-                    file=sys.stderr,
+                lines.append(
+                    f"This exited with code 0, but previously the script exited with "
+                    f"{self.initial_exit_code}. This suggests your interestingness "
+                    "test exhibits nondeterministic behaviour."
                 )
+
+        return "\n".join(lines)
+
+    async def report_error(self, e):
+        error_message = await self.build_error_message(e)
+        print(error_message, file=sys.stderr)
         sys.exit(1)
+
+    def check_trivial_result(self, problem) -> str | None:
+        """Check if the result is trivially small and return error message if so.
+
+        Returns None if the result is acceptable, or an error message string
+        if the result is trivial and trivial_is_error is True.
+        """
+        if len(problem.current_test_case) <= 1 and self.trivial_is_error:
+            return (
+                f"Reduced to a trivial test case of size {len(problem.current_test_case)}\n"
+                "This probably wasn't what you intended. If so, please modify your "
+                "interestingness test to be more restrictive.\n"
+                "If you intended this behaviour, you can run with '--trivial-is-not-error' "
+                "to suppress this message."
+            )
+        return None
 
 
 @define(slots=False)

@@ -24,6 +24,7 @@ class SubprocessClient:
         self._progress_queue: asyncio.Queue[ProgressUpdate] = asyncio.Queue()
         self._reader_task: asyncio.Task | None = None
         self._completed = False
+        self._error_message: str | None = None
 
     async def start(self) -> None:
         """Launch the subprocess."""
@@ -66,13 +67,21 @@ class SubprocessClient:
         if isinstance(msg, ProgressUpdate):
             await self._progress_queue.put(msg)
         elif isinstance(msg, Response):
-            # Check for completion signal
-            if msg.id == "" and msg.result and msg.result.get("status") == "completed":
-                self._completed = True
-                # Wake up any pending futures
-                for future in self._pending_responses.values():
-                    if not future.done():
-                        future.set_exception(Exception("Subprocess completed"))
+            # Check for completion or error signal (unsolicited responses with empty id)
+            if msg.id == "":
+                if msg.result and msg.result.get("status") == "completed":
+                    self._completed = True
+                    # Wake up any pending futures
+                    for future in self._pending_responses.values():
+                        if not future.done():
+                            future.set_exception(Exception("Subprocess completed"))
+                elif msg.error:
+                    self._completed = True
+                    self._error_message = msg.error
+                    # Wake up any pending futures with the error
+                    for future in self._pending_responses.values():
+                        if not future.done():
+                            future.set_exception(Exception(msg.error))
                 return
 
             # Match response to pending request
@@ -120,6 +129,7 @@ class SubprocessClient:
         volume: str = "normal",
         no_clang_delta: bool = False,
         clang_delta: str = "",
+        trivial_is_error: bool = True,
     ) -> Response:
         """Start the reduction process."""
         params = {
@@ -133,6 +143,7 @@ class SubprocessClient:
             "volume": volume,
             "no_clang_delta": no_clang_delta,
             "clang_delta": clang_delta,
+            "trivial_is_error": trivial_is_error,
         }
         if parallelism is not None:
             params["parallelism"] = parallelism
@@ -166,6 +177,11 @@ class SubprocessClient:
     def is_completed(self) -> bool:
         """Check if the reduction has completed."""
         return self._completed
+
+    @property
+    def error_message(self) -> str | None:
+        """Get the error message if the subprocess failed."""
+        return self._error_message
 
     async def close(self) -> None:
         """Close the subprocess."""

@@ -102,9 +102,13 @@ class ReductionClientProtocol(Protocol):
         volume: str = "normal",
         no_clang_delta: bool = False,
         clang_delta: str = "",
+        trivial_is_error: bool = True,
     ) -> Response: ...
     async def cancel(self) -> Response: ...
     async def close(self) -> None: ...
+
+    @property
+    def error_message(self) -> str | None: ...
     def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]: ...
     @property
     def is_completed(self) -> bool: ...
@@ -340,6 +344,7 @@ class ShrinkRayApp(App[None]):
         volume: str = "normal",
         no_clang_delta: bool = False,
         clang_delta: str = "",
+        trivial_is_error: bool = True,
         client: ReductionClientProtocol | None = None,
         theme: ThemeMode = "auto",
     ) -> None:
@@ -355,6 +360,7 @@ class ShrinkRayApp(App[None]):
         self._volume = volume
         self._no_clang_delta = no_clang_delta
         self._clang_delta = clang_delta
+        self._trivial_is_error = trivial_is_error
         self._client: ReductionClientProtocol | None = client
         self._owns_client = client is None
         self._completed = False
@@ -391,33 +397,36 @@ class ShrinkRayApp(App[None]):
     @work(exclusive=True)
     async def run_reduction(self) -> None:
         """Start the reduction subprocess and monitor progress."""
-        if self._client is None:
-            self._client = SubprocessClient()
-            self._owns_client = True
-
         try:
-            await self._client.start()
+            if self._client is None:
+                # No client provided - start one and begin reduction
+                self._client = SubprocessClient()
+                self._owns_client = True
 
-            # Start the reduction
-            response = await self._client.start_reduction(
-                file_path=self._file_path,
-                test=self._test,
-                parallelism=self._parallelism,
-                timeout=self._timeout,
-                seed=self._seed,
-                input_type=self._input_type,
-                in_place=self._in_place,
-                formatter=self._formatter,
-                volume=self._volume,
-                no_clang_delta=self._no_clang_delta,
-                clang_delta=self._clang_delta,
-            )
+                await self._client.start()
 
-            if response.error:
-                self.update_status(f"Error: {response.error}")
-                return
+                # Start the reduction
+                response = await self._client.start_reduction(
+                    file_path=self._file_path,
+                    test=self._test,
+                    parallelism=self._parallelism,
+                    timeout=self._timeout,
+                    seed=self._seed,
+                    input_type=self._input_type,
+                    in_place=self._in_place,
+                    formatter=self._formatter,
+                    volume=self._volume,
+                    no_clang_delta=self._no_clang_delta,
+                    clang_delta=self._clang_delta,
+                    trivial_is_error=self._trivial_is_error,
+                )
 
-            # Monitor progress
+                if response.error:
+                    # Exit immediately on startup error
+                    self.exit(return_code=1, message=f"Error: {response.error}")
+                    return
+
+            # Monitor progress (client is already started and reduction is running)
             stats_display = self.query_one("#stats-display", StatsDisplay)
             content_preview = self.query_one("#content-preview", ContentPreview)
 
@@ -429,10 +438,17 @@ class ShrinkRayApp(App[None]):
                     break
 
             self._completed = True
-            self.update_status("Reduction completed! Press 'q' to exit.")
+
+            # Check if there was an error from the worker
+            if self._client.error_message:
+                # Exit immediately on error, printing the error message
+                self.exit(return_code=1, message=f"Error: {self._client.error_message}")
+                return
+            else:
+                self.update_status("Reduction completed! Press 'q' to exit.")
 
         except Exception as e:
-            self.update_status(f"Error: {e}")
+            self.exit(return_code=1, message=f"Error: {e}")
         finally:
             if self._owns_client and self._client:
                 await self._client.close()
@@ -459,6 +475,53 @@ class ShrinkRayApp(App[None]):
         return self._completed
 
 
+async def _validate_initial_example(
+    file_path: str,
+    test: list[str],
+    parallelism: int | None,
+    timeout: float,
+    seed: int,
+    input_type: str,
+    in_place: bool,
+    formatter: str,
+    volume: str,
+    no_clang_delta: bool,
+    clang_delta: str,
+    trivial_is_error: bool,
+) -> str | None:
+    """Validate initial example before showing TUI.
+
+    Returns error_message if validation failed, None if it passed.
+    """
+    client = SubprocessClient()
+    try:
+        await client.start()
+
+        response = await client.start_reduction(
+            file_path=file_path,
+            test=test,
+            parallelism=parallelism,
+            timeout=timeout,
+            seed=seed,
+            input_type=input_type,
+            in_place=in_place,
+            formatter=formatter,
+            volume=volume,
+            no_clang_delta=no_clang_delta,
+            clang_delta=clang_delta,
+            trivial_is_error=trivial_is_error,
+        )
+
+        if response.error:
+            return response.error
+
+        # Validation passed - cancel this reduction since TUI will start fresh
+        await client.cancel()
+        return None
+    finally:
+        await client.close()
+
+
 def run_textual_ui(
     file_path: str,
     test: list[str],
@@ -471,9 +534,37 @@ def run_textual_ui(
     volume: str = "normal",
     no_clang_delta: bool = False,
     clang_delta: str = "",
+    trivial_is_error: bool = True,
     theme: ThemeMode = "auto",
 ) -> None:
     """Run the textual TUI."""
+    import asyncio
+    import sys
+
+    # Validate initial example before showing TUI
+    async def validate():
+        return await _validate_initial_example(
+            file_path=file_path,
+            test=test,
+            parallelism=parallelism,
+            timeout=timeout,
+            seed=seed,
+            input_type=input_type,
+            in_place=in_place,
+            formatter=formatter,
+            volume=volume,
+            no_clang_delta=no_clang_delta,
+            clang_delta=clang_delta,
+            trivial_is_error=trivial_is_error,
+        )
+
+    error = asyncio.run(validate())
+
+    if error:
+        print(f"Error: {error}", file=sys.stderr)
+        sys.exit(1)
+
+    # Validation passed - now show the TUI which will start a fresh client
     app = ShrinkRayApp(
         file_path=file_path,
         test=test,
@@ -486,6 +577,9 @@ def run_textual_ui(
         volume=volume,
         no_clang_delta=no_clang_delta,
         clang_delta=clang_delta,
+        trivial_is_error=trivial_is_error,
         theme=theme,
     )
     app.run()
+    if app.return_code:
+        sys.exit(app.return_code)

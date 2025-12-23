@@ -762,3 +762,76 @@ def test_subprocess_client_send_command_exception_propagates():
         await send_with_exception()
 
     asyncio.run(run())
+
+
+def test_subprocess_client_error_message_property():
+    """Test error_message property."""
+    client = SubprocessClient()
+    assert client.error_message is None
+
+    client._error_message = "Test error"
+    assert client.error_message == "Test error"
+
+
+def test_subprocess_client_handle_error_response():
+    """Test that client properly handles error responses from worker."""
+
+    async def run():
+        client = SubprocessClient()
+
+        # Create a pending future
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[Response] = loop.create_future()
+        client._pending_responses["pending-123"] = future
+
+        # Simulate receiving an error response with empty id
+        error_response = '{"id": "", "error": "Initial example does not satisfy test", "result": null}'
+        await client._handle_message(error_response)
+
+        # Should have set completed and error_message
+        assert client._completed is True
+        assert client._error_message == "Initial example does not satisfy test"
+
+        # The pending future should be resolved with an exception
+        assert future.done()
+        with pytest.raises(Exception, match="Initial example does not satisfy test"):
+            future.result()
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_handle_error_response_integration(tmp_path):
+    """Integration test: verify client handles worker startup errors."""
+
+    async def run():
+        # Create a test file
+        target = tmp_path / "test.txt"
+        target.write_text("hello world")
+
+        client = SubprocessClient()
+        await client.start()
+
+        try:
+            # Start reduction with a failing test (false always returns 1)
+            response = await client.start_reduction(
+                file_path=str(target),
+                test=["false"],
+                parallelism=1,
+                timeout=1.0,
+                seed=0,
+                input_type="all",
+                in_place=False,
+                formatter="none",
+                volume="quiet",
+                no_clang_delta=True,
+            )
+
+            # The start command should return an error immediately
+            assert response.error is not None
+            assert "Shrink ray cannot proceed" in response.error
+            assert "interestingness" in response.error.lower()
+
+        finally:
+            await client.close()
+
+    asyncio.run(run())

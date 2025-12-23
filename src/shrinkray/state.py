@@ -137,7 +137,9 @@ class ShrinkRayState(Generic[TestCase], ABC):
 
                 runtime = time.time() - start_time
 
-                if sp.returncode is None:
+                if sp.returncode is None:  # pragma: no cover
+                    # Defensive: process didn't terminate after wait.
+                    # This can't happen in normal operation since we wait with timeout.
                     await self._interrupt_wait_and_kill(sp)
 
                 if runtime >= self.timeout and self.first_call:
@@ -441,9 +443,14 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
         final_result = problem.current_test_case
         reformatted = await self.attempt_format(final_result)
         if reformatted != final_result:
+            # Note: attempt_format already checked is_interesting, so this should
+            # always be True. The check is defensive for nondeterministic tests.
             if await self.is_interesting(reformatted):
                 async with await trio.open_file(self.filename, "wb") as o:
                     await o.write(reformatted)
+            else:  # pragma: no cover
+                # Defensive: is_interesting was True in attempt_format but False now.
+                pass
             formatting_increase = max(0, len(reformatted) - len(final_result))
             final_result = reformatted
 

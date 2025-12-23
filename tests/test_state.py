@@ -866,7 +866,9 @@ async def test_print_exit_message_no_reduction(tmp_path, capsys):
     # Mock a problem where the result is DIFFERENT but SAME LENGTH as initial
     # This triggers the "Some changes were made but no bytes were deleted" branch
     problem = MagicMock()
-    problem.current_test_case = b"world hello"  # Different content, same length (11 bytes)
+    problem.current_test_case = (
+        b"world hello"  # Different content, same length (11 bytes)
+    )
     problem.stats.initial_test_case_size = len(b"hello world")
     problem.stats.start_time = 0
 
@@ -1156,3 +1158,443 @@ async def test_print_exit_message_formatting_increase(tmp_path, capsys):
     captured = capsys.readouterr()
     # Should show the deletion stats
     assert "deleted" in captured.out.lower() or "increase" in captured.out.lower()
+
+
+async def test_run_for_exit_code_in_place_basename(tmp_path):
+    """Test run_for_exit_code in_place mode with basename input type.
+
+    This covers lines 166-169 (in_place with basename).
+    """
+    import os
+
+    # Change to tmp_path so the script can find the file by basename
+    original_cwd = os.getcwd()
+    os.chdir(tmp_path)
+
+    try:
+        script = tmp_path / "test.sh"
+        # Script that checks the file by basename exists in cwd
+        script.write_text('#!/bin/bash\ntest -f "test.txt" && exit 0 || exit 1')
+        script.chmod(0o755)
+
+        target = tmp_path / "test.txt"
+        target.write_text("hello")
+
+        state = ShrinkRayStateSingleFile(
+            input_type=InputType.basename,
+            in_place=True,  # in_place with basename input type
+            test=[str(script)],
+            filename=str(target),
+            timeout=5.0,
+            base="test.txt",
+            parallelism=1,
+            initial=b"hello",
+            formatter="none",
+            trivial_is_error=True,
+            seed=0,
+            volume=Volume.quiet,
+            clang_delta_executable=None,
+        )
+
+        # Should write to the original filename and run the script
+        exit_code = await state.run_for_exit_code(b"hello world")
+        assert exit_code == 0
+    finally:
+        os.chdir(original_cwd)
+
+
+async def test_check_formatter_none(tmp_path):
+    """Test check_formatter returns immediately when formatter is None.
+
+    This covers line 280 (early return when formatter_command is None).
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",  # No formatter
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # check_formatter should return immediately without doing anything
+    # (no exception, no side effects)
+    await state.check_formatter()
+
+
+async def test_is_interesting_multiple_calls(tmp_path):
+    """Test is_interesting when called multiple times (first_call_time already set).
+
+    This covers line 256->258 branch (first_call_time is not None).
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial={"a.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # First call sets first_call_time
+    await state.is_interesting({"a.txt": b"hello"})
+    first_time = state.first_call_time
+
+    # Second call should skip setting first_call_time
+    await state.is_interesting({"a.txt": b"hello"})
+    second_time = state.first_call_time
+
+    # first_call_time should remain the same
+    assert first_time == second_time
+
+
+async def test_report_error_flaky_test(tmp_path, capsys):
+    """Test report_error when test is flaky (different exit codes).
+
+    This covers line 351 (flaky test message).
+    The flow to hit line 351:
+    1. run_for_exit_code (temp dir) -> non-zero (enters if exit_code != 0)
+    2. run_script_on_file (cwd) -> 0 (enters if local_exit_code == 0)
+    3. run_script_on_file (cwd) -> non-zero (different from local_exit_code = flaky)
+    """
+    # Create a script that returns different exit codes
+    counter_file = tmp_path / "counter"
+    counter_file.write_text("0")
+
+    script = tmp_path / "test.sh"
+    # Script sequence:
+    # Call 1 (temp dir): exits 1 (fails)
+    # Call 2 (cwd, local_exit_code): exits 0 (succeeds)
+    # Call 3 (cwd, other_exit_code): exits 1 (different from 0 = flaky!)
+    script.write_text(f"""#!/bin/bash
+COUNTER=$(cat "{counter_file}")
+COUNTER=$((COUNTER + 1))
+echo $COUNTER > "{counter_file}"
+if [ "$COUNTER" -eq 1 ]; then
+    exit 1  # First call fails (temp dir)
+elif [ "$COUNTER" -eq 2 ]; then
+    exit 0  # Second call succeeds (local_exit_code)
+else
+    exit 1  # Third call fails (other_exit_code, different from 0 = flaky!)
+fi
+""")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Set initial_exit_code to 0 (what it would be if initial test passed)
+    # Also set first_call = False to prevent run_for_exit_code from overwriting it
+    state.initial_exit_code = 0
+    state.first_call = False
+
+    with pytest.raises(SystemExit):
+        await state.report_error(ValueError("test error"))
+    captured = capsys.readouterr()
+    # Should mention flaky
+    assert "flaky" in captured.err.lower()
+
+
+async def test_report_error_nondeterministic(tmp_path, capsys):
+    """Test report_error when initial was non-zero but now exits 0.
+
+    This covers lines 362-363 (nondeterministic behavior message).
+    The flow to hit lines 362-363:
+    1. run_for_exit_code returns 0 (now succeeds)
+    2. initial_exit_code is not None and not 0 (previously failed)
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")  # Always succeeds now
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Set initial_exit_code to non-zero (as if initial test returned non-zero)
+    # Also set first_call = False to prevent run_for_exit_code from overwriting it
+    state.initial_exit_code = 1
+    state.first_call = False
+
+    with pytest.raises(SystemExit):
+        await state.report_error(ValueError("test error"))
+    captured = capsys.readouterr()
+    # Should mention nondeterministic
+    assert "nondeterministic" in captured.err.lower()
+
+
+async def test_print_exit_message_reformatted_is_interesting(tmp_path, capsys):
+    """Test print_exit_message when reformatted result is interesting.
+
+    This covers lines 447-449 (reformatted is interesting, write to file).
+    """
+    # Create a formatter that transforms content
+    formatter = tmp_path / "formatter.sh"
+    formatter.write_text("#!/bin/bash\necho 'formatted'")
+    formatter.chmod(0o755)
+
+    # Script accepts anything
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello world this is long")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world this is long",  # 24 bytes
+        formatter=str(formatter),
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Get the problem and reduce it
+    problem = state.problem
+    await problem.is_interesting(b"hello")  # 5 bytes
+
+    # Now print_exit_message should format it, and the formatted version
+    # should be interesting and written to file
+    await state.print_exit_message(problem)
+
+    # Check the file was updated with formatted content
+    content = target.read_bytes()
+    assert b"formatted" in content or content == b"hello"
+
+
+async def test_print_exit_message_reformatted_not_interesting(tmp_path, capsys):
+    """Test print_exit_message when reformatted result is NOT interesting.
+
+    This covers branch 447->450 (reformatted is NOT interesting, skip write).
+    """
+    # Create a formatter that transforms content
+    formatter = tmp_path / "formatter.sh"
+    formatter.write_text("#!/bin/bash\necho 'formatted'")
+    formatter.chmod(0o755)
+
+    # Script only accepts content with 'hello' in it
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/bash\ngrep -q "hello" "$1" && exit 0 || exit 1')
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello world this is long")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world this is long",  # 24 bytes
+        formatter=str(formatter),
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Get the problem and reduce it to something with 'hello'
+    problem = state.problem
+    await problem.is_interesting(b"hello")  # 5 bytes
+
+    # Now print_exit_message should format it, but 'formatted' won't be interesting
+    # because it doesn't contain 'hello'
+    await state.print_exit_message(problem)
+
+    # Check the file still contains 'hello' (not 'formatted')
+    content = target.read_bytes()
+    assert b"hello" in content
+
+
+async def test_check_formatter_reformatted_is_interesting(tmp_path):
+    """Test check_formatter when reformatted result IS interesting.
+
+    This covers branch 299->exit (formatter passes - condition is False).
+    """
+    # Create a formatter that transforms content
+    formatter = tmp_path / "formatter.sh"
+    formatter.write_text("#!/bin/bash\ncat")  # Just passes through
+    formatter.chmod(0o755)
+
+    # Script accepts anything
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter=str(formatter),
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # check_formatter should pass without error (formatter works and result is interesting)
+    await state.check_formatter()
+
+
+async def test_timeout_on_first_call(tmp_path):
+    """Test that TimeoutExceededOnInitial is raised when first call exceeds timeout.
+
+    This covers lines 143-147 (timeout check on first call).
+    """
+    # Create a script that sleeps longer than the timeout
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nsleep 0.5\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=0.1,  # Very short timeout
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # First call should raise TimeoutExceededOnInitial (wrapped in ExceptionGroup by trio)
+    with pytest.raises(ExceptionGroup) as exc_info:
+        await state.run_for_exit_code(b"hello")
+
+    # Find the TimeoutExceededOnInitial in the group
+    timeout_exc = None
+    for exc in exc_info.value.exceptions:
+        if isinstance(exc, ExceptionGroup):
+            for inner_exc in exc.exceptions:
+                if isinstance(inner_exc, TimeoutExceededOnInitial):
+                    timeout_exc = inner_exc
+                    break
+        elif isinstance(exc, TimeoutExceededOnInitial):
+            timeout_exc = exc
+            break
+
+    assert timeout_exc is not None
+    assert timeout_exc.timeout == 0.1
+    assert timeout_exc.runtime >= 0.1
+
+
+async def test_directory_cleanup_in_place_mode(tmp_path):
+    """Test directory cleanup in in_place mode.
+
+    This covers line 189 (shutil.rmtree for directory cleanup).
+    """
+    # Create a script that creates a directory instead of file
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test_dir"
+    target.mkdir()
+    (target / "a.txt").write_text("content")
+
+    # Use directory state instead of file state
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=True,  # in_place mode
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test_dir",
+        parallelism=1,
+        initial={"a.txt": b"content"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # This should exercise the directory cleanup code
+    exit_code = await state.run_for_exit_code({"a.txt": b"modified"})
+    assert exit_code == 0

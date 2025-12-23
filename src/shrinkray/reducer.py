@@ -294,7 +294,7 @@ class ShrinkRay(Reducer[bytes]):
                 async with trio.open_nursery() as nursery:
 
                     @nursery.start_soon
-                    async def _() -> None:
+                    async def _() -> None:  # pragma: no cover
                         """
                         Watcher task that cancels the current reduction pass as
                         soon as it stops looking like a good idea to keep running
@@ -303,6 +303,9 @@ class ShrinkRay(Reducer[bytes]):
                         1. If it's been more than 5s since the last successful reduction.
                         2. If the reduction rate of the task has dropped under 50% of its
                            best so far.
+
+                        This is marked no cover because it's a time-dependent
+                        performance optimization that only runs after 5 seconds.
                         """
                         iters = 0
                         initial_size = self.target.current_size

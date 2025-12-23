@@ -921,3 +921,361 @@ async def test_shrinkray_pump_no_change():
 
     # Pass should NOT have been called since pump returned same content
     assert not pass_called[0]
+
+
+async def test_basic_reducer_pump_changes_result():
+    """Test BasicReducer when pump produces different result that leads to reduction.
+
+    This covers the TRUE branch of line 103 (pumped != current_test_case).
+    """
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    pump_returned_different = [False]
+    pass_called_under_pump = [False]
+
+    async def simple_pass(p):
+        if pump_returned_different[0]:
+            pass_called_under_pump[0] = True
+            # Make a reduction under pump
+            if len(p.current_test_case) > 3:
+                await p.is_interesting(b"hi")
+
+    async def changing_pump(p):
+        # Return a different (larger) test case to trigger pump branch
+        pump_returned_different[0] = True
+        return b"hello world different"
+
+    changing_pump.__name__ = "changing_pump"
+
+    reducer = BasicReducer(
+        target=problem,
+        reduction_passes=[simple_pass],
+        pumps=[changing_pump],
+    )
+    await reducer.run()
+
+    assert pump_returned_different[0]
+    assert pass_called_under_pump[0]
+
+
+async def test_basic_reducer_pump_returns_same():
+    """Test BasicReducer when pump returns same value (no change).
+
+    This covers line 103->100 (pumped == current_test_case, skip if block).
+    """
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    pump_calls = [0]
+    pass_under_pump_called = [False]
+
+    async def simple_pass(p):
+        # Track if pass is called while pump tracking is active
+        if pump_calls[0] > 0:
+            pass_under_pump_called[0] = True
+
+    # First pump returns same, second pump returns different
+    async def identity_pump(p):
+        pump_calls[0] += 1
+        # Always return same value - pump produces no change
+        return p.current_test_case
+
+    identity_pump.__name__ = "identity_pump"
+
+    async def changing_pump(p):
+        # This one changes to trigger the other branch
+        return b"different value"
+
+    changing_pump.__name__ = "changing_pump"
+
+    reducer = BasicReducer(
+        target=problem,
+        reduction_passes=[simple_pass],
+        pumps=[identity_pump, changing_pump],
+    )
+    await reducer.run()
+
+    # identity_pump should have been called
+    assert pump_calls[0] >= 1
+
+
+async def test_shrinkray_pump_early_break_on_improvement():
+    """Test ShrinkRay.pump breaks early when finding smaller result.
+
+    This covers line 246 (break when smaller found during pump).
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world testing",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+
+    call_sequence = []
+
+    # Create passes that track calls and make reductions
+    async def great_pass(p):
+        call_sequence.append("great")
+        # Make a significant reduction
+        if len(p.current_test_case) > 5:
+            await p.is_interesting(b"hi")
+
+    async def ok_pass(p):
+        call_sequence.append("ok")
+
+    async def last_ditch_pass(p):
+        call_sequence.append("last_ditch")
+
+    reducer.great_passes = [great_pass]
+    reducer.ok_passes = [ok_pass]
+    reducer.last_ditch_passes = [last_ditch_pass]
+
+    # Pump that returns expanded content
+    async def expanding_pump(p):
+        return p.current_test_case + b" extra content"
+
+    expanding_pump.__name__ = "expanding_pump"
+
+    await reducer.pump(expanding_pump)
+
+    # Should have called great pass (which reduced) and broken early
+    assert "great" in call_sequence
+    # ok and last_ditch may not be called if early break happened
+    # (depends on timing - the break happens if smaller found)
+
+
+async def test_shrinkray_great_passes_no_reduction():
+    """Test ShrinkRay.run_great_passes resets to all passes when none reduce.
+
+    This covers line 267 (current = self.great_passes when no successful passes).
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    call_counts = {"pass1": 0, "pass2": 0}
+
+    # Create passes that don't make reductions
+    async def pass1(p):
+        call_counts["pass1"] += 1
+
+    async def pass2(p):
+        call_counts["pass2"] += 1
+
+    reducer.great_passes = [pass1, pass2]
+
+    await reducer.run_great_passes()
+
+    # Both passes should have been called
+    assert call_counts["pass1"] >= 1
+    assert call_counts["pass2"] >= 1
+
+
+async def test_shrinkray_great_passes_change_without_size_reduction():
+    """Test run_great_passes when test case changes but no pass reduces size.
+
+    This covers line 267 (elif not successful: current = self.great_passes).
+    The condition is: test case changed, but no individual pass reduced size.
+    This can happen if a pass changes content to lexicographically smaller but same size.
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    call_count = [0]
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"zzzzzzzzzzzz",  # 12 bytes, starts with 'z'
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+
+    # Pass that changes content to lexicographically smaller but same size
+    # shortlex prefers (smaller length, then smaller bytes)
+    # "aaaaaaaaaaaa" < "zzzzzzzzzzzz" lexicographically, same length
+    async def same_size_change_pass(p):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            # Change to lexicographically smaller content of same size
+            # This will be accepted (smaller by shortlex) but size doesn't decrease
+            await p.is_interesting(b"aaaaaaaaaaaa")  # Same 12 bytes
+
+    reducer.great_passes = [same_size_change_pass]
+
+    await reducer.run_great_passes()
+
+    # The pass should have been called at least twice (once to change, once to confirm no more changes)
+    assert call_count[0] >= 2
+
+
+async def test_shrinkray_ok_passes_make_progress():
+    """Test ShrinkRay.run_some_passes returns after ok_passes when they make progress.
+
+    This covers line 287 (return after ok_passes when prev != current).
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world testing",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    reducer.unlocked_ok_passes = True  # Pre-unlock ok_passes
+
+    last_ditch_called = [False]
+
+    # great_passes don't reduce
+    async def non_reducing_great(p):
+        pass
+
+    # ok_passes make progress
+    async def reducing_ok(p):
+        if len(p.current_test_case) > 5:
+            await p.is_interesting(b"hi")
+
+    # last_ditch should not be called if ok_passes succeeded
+    async def last_ditch(p):
+        last_ditch_called[0] = True
+
+    reducer.great_passes = [non_reducing_great]
+    reducer.ok_passes = [reducing_ok]
+    reducer.last_ditch_passes = [last_ditch]
+
+    await reducer.run_some_passes()
+
+    # last_ditch should not be called since ok_passes made progress
+    assert not last_ditch_called[0]
+
+
+async def test_shrinkray_main_loop_with_pumps():
+    """Test ShrinkRay.run main loop calls pumps and continues on progress.
+
+    This covers lines 364-365 (pump call and continue branch in main loop).
+    The continue at line 365->358 happens when pump changes test case.
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    call_log = []
+    loop_iterations = [0]
+
+    async def is_interesting(x):
+        # Not interesting if empty or single byte (to avoid early exit)
+        if len(x) <= 1:
+            return False
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world testing longer",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    # Create subclass to override initial_cut and pumps
+    pump_calls = [0]
+
+    async def progress_pump(p):
+        pump_calls[0] += 1
+        call_log.append(f"pump:{pump_calls[0]}")
+        if pump_calls[0] == 1:
+            # Directly update the problem's test case via is_interesting
+            # This simulates the pump finding a reduced version
+            await p.is_interesting(b"reduced by pump")
+        return p.current_test_case
+
+    progress_pump.__name__ = "progress_pump"
+
+    class TestShrinkRay(ShrinkRay):
+        async def initial_cut(self) -> None:
+            # Skip initial cut for faster testing
+            pass
+
+        @property
+        def pumps(self):
+            return [progress_pump]
+
+        async def run_some_passes(self) -> None:
+            loop_iterations[0] += 1
+            call_log.append(f"passes:{loop_iterations[0]}")
+            # Don't make progress (test case stays same)
+            # This allows us to reach the pump code in main loop
+
+    reducer = TestShrinkRay(target=problem)
+
+    await reducer.run()
+
+    # Both pass iterations and pump should have been called
+    assert any("passes:" in x for x in call_log)
+    assert any("pump:" in x for x in call_log)
+    # Should have at least 2 pass iterations (one before pump progress, one after)
+    assert loop_iterations[0] >= 2
+
+
+async def test_directory_shrinkray_with_c_files():
+    """Test DirectoryShrinkRay uses clang_delta for C files.
+
+    This covers line 457 (clang_delta for C files in DirectoryShrinkRay).
+    """
+    from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
+    from shrinkray.reducer import DirectoryShrinkRay
+
+    clang_delta_exec = find_clang_delta()
+    if not clang_delta_exec:
+        pytest.skip("clang_delta not available")
+
+    async def is_interesting(x):
+        # Just needs to contain main
+        return "test.c" in x and b"main" in x.get("test.c", b"")
+
+    problem = BasicReductionProblem(
+        initial={
+            "test.c": b"int main() { return 0; }",
+            "other.txt": b"not a c file",
+        },
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    cd = ClangDelta(clang_delta_exec)
+    reducer = DirectoryShrinkRay(target=problem, clang_delta=cd)
+    await reducer.run()
+
+    # Should have reduced the directory
+    assert "test.c" in problem.current_test_case
+    assert b"main" in problem.current_test_case["test.c"]

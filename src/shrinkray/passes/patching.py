@@ -127,9 +127,7 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                 if await can_merge(to_merge):
                     merged = to_merge
                 else:
-                    merged = await self.__problem.work.find_large_integer(
-                        can_merge
-                    )
+                    merged = await self.__problem.work.find_large_integer(can_merge)
 
                 for _, _, send_result in self.__merge_queue[:merged]:
                     send_result.send_nowait(True)
@@ -196,9 +194,7 @@ async def apply_patches(
 ) -> None:
     try:
         if await problem.is_interesting(
-            patch_info.apply(
-                patch_info.combine(*patches), problem.current_test_case
-            )
+            patch_info.apply(patch_info.combine(*patches), problem.current_test_case)
         ):
             return
     except Conflict:

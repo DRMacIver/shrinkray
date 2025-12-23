@@ -988,7 +988,9 @@ async def test_worker_start_reduction_clang_delta_found(tmp_path):
     }
 
     # Mock find_clang_delta to return a fake path and ClangDelta
-    with patch("shrinkray.passes.clangdelta.find_clang_delta", return_value="/fake/clang_delta"):
+    with patch(
+        "shrinkray.passes.clangdelta.find_clang_delta", return_value="/fake/clang_delta"
+    ):
         with patch("shrinkray.passes.clangdelta.ClangDelta") as mock_clang_delta:
             await worker._start_reduction(params)
 

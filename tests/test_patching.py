@@ -508,7 +508,6 @@ async def test_patch_applier_concurrent_patches():
 async def test_apply_patches_partial_merge():
     """Test when only some patches can be merged."""
 
-
     async def is_interesting(x):
         # Only interesting if keeps first 3 chars
         return len(x) >= 3 and x[:3] == b"abc"

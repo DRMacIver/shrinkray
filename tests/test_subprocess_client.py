@@ -273,7 +273,9 @@ def test_subprocess_client_handle_message_ignores_unmatched_response():
         client = SubprocessClient()
 
         # Send response with ID that has no pending future
-        response_json = '{"id": "unknown-id", "result": {"key": "value"}, "error": null}'
+        response_json = (
+            '{"id": "unknown-id", "result": {"key": "value"}, "error": null}'
+        )
         await client._handle_message(response_json)
 
         # Should not raise, just ignore the response
@@ -547,7 +549,11 @@ def test_subprocess_client_send_command_exception_cleanup():
 
         def capture_future():
             future = original_create_future()
-            request_id_holder[0] = list(client._pending_responses.keys())[-1] if client._pending_responses else None
+            request_id_holder[0] = (
+                list(client._pending_responses.keys())[-1]
+                if client._pending_responses
+                else None
+            )
             # Set an exception on the future
             asyncio.get_event_loop().call_soon(
                 lambda: future.set_exception(Exception("Test exception"))

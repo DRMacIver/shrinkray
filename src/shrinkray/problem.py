@@ -39,7 +39,7 @@ S = TypeVar("S")
 T = TypeVar("T")
 
 
-def shortlex(value: Any) -> Any:
+def shortlex(value: T) -> tuple[int, T]:
     """Return a comparison key for shortlex ordering.
 
     Shortlex ordering compares first by length, then lexicographically.
@@ -259,10 +259,10 @@ class ReductionProblem(Generic[T], ABC):
         Example:
             # Pump inlines a function, making code larger
             pumped = await pump(problem)  # Returns larger test case
-            with reducer.backtrack(pumped):
-                # Try to reduce the larger test case
-                await run_passes()
-                # If we got smaller than original, keep the result
+            backtracked = problem.backtrack(pumped)
+            # Try to reduce the larger test case
+            await run_passes(backtracked)
+            # If result is smaller than original, keep it
         """
         return BasicReductionProblem(
             initial=new_test_case,

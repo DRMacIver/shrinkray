@@ -57,15 +57,17 @@ class ShrinkRayState(Generic[TestCase], ABC):
 
     first_call: bool = True
     initial_exit_code: int | None = None
-    parallel_tasks_running: int = 0
     can_format: bool = True
     formatter_command: list[str] | None = None
 
     first_call_time: float | None = None
 
-    # These are imported lazily to avoid circular imports
+    # Lazy imports to break circular dependencies:
+    # - shrinkray.process imports from shrinkray.work which imports from here
+    # - shrinkray.cli imports from here for state configuration
+    # These are cached after first import for performance.
     _interrupt_wait_and_kill: Any = None
-    _InputType: Any = None
+    _InputType: Any = None  # InputType enum from shrinkray.cli
 
     # Stores the output from the last debug run
     _last_debug_output: str = ""
@@ -291,11 +293,12 @@ class ShrinkRayState(Generic[TestCase], ABC):
         if self.first_call_time is None:
             self.first_call_time = time.time()
         async with self.is_interesting_limiter:
-            try:
-                self.parallel_tasks_running += 1
-                return await self.run_for_exit_code(test_case) == 0
-            finally:
-                self.parallel_tasks_running -= 1
+            return await self.run_for_exit_code(test_case) == 0
+
+    @property
+    def parallel_tasks_running(self) -> int:
+        """Number of parallel tasks currently running."""
+        return self.is_interesting_limiter.borrowed_tokens
 
     async def attempt_format(self, data: TestCase) -> TestCase:
         if not self.can_format:
@@ -496,11 +499,7 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
 
     async def is_interesting(self, test_case: bytes) -> bool:
         async with self.is_interesting_limiter:
-            try:
-                self.parallel_tasks_running += 1
-                return await self.run_for_exit_code(test_case) == 0
-            finally:
-                self.parallel_tasks_running -= 1
+            return await self.run_for_exit_code(test_case) == 0
 
     async def print_exit_message(self, problem):
         formatting_increase = 0

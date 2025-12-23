@@ -43,15 +43,23 @@ async def test_can_apply_transformations(transformation, source):
 
 
 def test_clang_delta_error_without_assertion():
-    """Test ClangDeltaError can be raised with normal message."""
-    with pytest.raises(ClangDeltaError):
-        raise ClangDeltaError(b"Some error message")
+    """Test ClangDeltaError can be raised with normal error messages.
+
+    ClangDeltaError is used for non-assertion errors from clang_delta.
+    """
+    error = ClangDeltaError(b"Some error message")
+    assert isinstance(error, Exception)
 
 
-def test_clang_delta_error_with_assertion_fails():
-    """Test ClangDeltaError raises AssertionError if message contains 'Assertion failed'."""
+def test_clang_delta_error_rejects_assertion_messages():
+    """Test ClangDeltaError rejects messages containing 'Assertion failed'.
+
+    clang_delta assertion failures are handled specially - they're ignored
+    rather than propagated. ClangDeltaError.__init__ asserts that the message
+    doesn't contain 'Assertion failed' to catch misuse.
+    """
     with pytest.raises(AssertionError):
-        raise ClangDeltaError(b"Assertion failed: something went wrong")
+        ClangDeltaError(b"Assertion failed: something went wrong")
 
 
 async def test_invalid_transformation():
@@ -64,10 +72,10 @@ async def test_invalid_transformation():
 async def test_query_instances_returns_count():
     """Test query_instances returns the number of transformation instances."""
     cd = ClangDelta(find_clang_delta())
-    # Use the BAD_HELLO source which has known transformable instances
+    # Use the BAD_HELLO source which has known renameable variables
     count = await cd.query_instances("rename-var", BAD_HELLO)
     assert isinstance(count, int)
-    assert count >= 0
+    assert count > 0, "BAD_HELLO should have at least one renameable variable"
 
 
 def test_clang_delta_pumps():

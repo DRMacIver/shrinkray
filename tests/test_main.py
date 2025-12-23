@@ -166,7 +166,7 @@ sys.exit(1)
             text=True,
         )
 
-    assert "Hello world" in excinfo.value.stdout
+    assert "Hello world" in excinfo.value.stderr
 
 
 @define

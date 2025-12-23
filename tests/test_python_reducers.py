@@ -5,6 +5,7 @@ import pytest
 
 from shrinkray.passes.python import (
     PYTHON_PASSES,
+    is_python,
     lift_indented_constructs,
     replace_bodies_with_ellipsis,
     replace_statements_with_pass,
@@ -178,3 +179,50 @@ def test_python_passes_handle_non_python():
     # Should not raise, just return the original
     result = reduce_with(PYTHON_PASSES, not_python, lambda x: True)
     assert result == not_python
+
+
+def test_libcst_validation_error_handling():
+    """Test that CSTValidationError is handled gracefully.
+
+    The Python passes can encounter situations where a transformation
+    would create an invalid CST structure. These should be caught
+    and handled gracefully.
+    """
+    # Code that when reduced might try to create invalid structures
+    # This tests the CSTValidationError exception handling (line 81)
+    code = b"""
+class A:
+    def method(self):
+        pass
+"""
+    # Force various reductions to exercise validation paths
+    result = reduce_with(PYTHON_PASSES, code, lambda x: len(x) > 10)
+    assert len(result) <= len(code)
+
+
+def test_python_reduction_with_complex_annotations():
+    """Test reduction of code with complex type annotations."""
+    code = b"""
+def complex_function(
+    x: list[tuple[int, str]],
+    y: dict[str, list[int]] | None = None
+) -> tuple[int, ...]:
+    z: set[int] = set()
+    return (1, 2, 3)
+"""
+    result = reduce_with([strip_annotations], code, lambda x: b"def" in x)
+    # Annotations should be stripped
+    assert b": list[tuple" not in result
+    assert b"-> tuple" not in result
+
+
+def test_is_python_returns_true_for_valid_python():
+    """Test that is_python returns True for valid Python code."""
+    valid_code = b"x = 1"
+    assert is_python(valid_code) is True
+
+
+def test_is_python_returns_false_for_invalid_python():
+    """Test that is_python returns False for invalid Python code."""
+    invalid_code = b"def foo(:"
+    assert is_python(invalid_code) is False

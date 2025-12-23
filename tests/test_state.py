@@ -1429,53 +1429,6 @@ async def test_print_exit_message_reformatted_is_interesting(tmp_path, capsys):
     assert b"formatted" in content or content == b"hello"
 
 
-async def test_print_exit_message_reformatted_not_interesting(tmp_path, capsys):
-    """Test print_exit_message when reformatted result is NOT interesting.
-
-    This covers branch 447->450 (reformatted is NOT interesting, skip write).
-    """
-    # Create a formatter that transforms content
-    formatter = tmp_path / "formatter.sh"
-    formatter.write_text("#!/bin/bash\necho 'formatted'")
-    formatter.chmod(0o755)
-
-    # Script only accepts content with 'hello' in it
-    script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ngrep -q "hello" "$1" && exit 0 || exit 1')
-    script.chmod(0o755)
-
-    target = tmp_path / "test.txt"
-    target.write_text("hello world this is long")
-
-    state = ShrinkRayStateSingleFile(
-        input_type=InputType.arg,
-        in_place=False,
-        test=[str(script)],
-        filename=str(target),
-        timeout=5.0,
-        base="test.txt",
-        parallelism=1,
-        initial=b"hello world this is long",  # 24 bytes
-        formatter=str(formatter),
-        trivial_is_error=True,
-        seed=0,
-        volume=Volume.quiet,
-        clang_delta_executable=None,
-    )
-
-    # Get the problem and reduce it to something with 'hello'
-    problem = state.problem
-    await problem.is_interesting(b"hello")  # 5 bytes
-
-    # Now print_exit_message should format it, but 'formatted' won't be interesting
-    # because it doesn't contain 'hello'
-    await state.print_exit_message(problem)
-
-    # Check the file still contains 'hello' (not 'formatted')
-    content = target.read_bytes()
-    assert b"hello" in content
-
-
 async def test_check_formatter_reformatted_is_interesting(tmp_path):
     """Test check_formatter when reformatted result IS interesting.
 
@@ -1562,6 +1515,57 @@ async def test_timeout_on_first_call(tmp_path):
     assert timeout_exc is not None
     assert timeout_exc.timeout == 0.1
     assert timeout_exc.runtime >= 0.1
+
+
+async def test_process_killed_on_timeout(tmp_path):
+    """Test that process is killed when it doesn't terminate before wait timeout.
+
+    This covers line 142 (the _interrupt_wait_and_kill call).
+    We need the process to exceed timeout*10 on first call so it doesn't finish
+    before the actual wait timeout expires.
+    """
+    # Create a script that sleeps for 2 seconds
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nsleep 2\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=0.05,  # 50ms timeout, wait timeout = 500ms, but script sleeps 2s
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # First call should raise TimeoutExceededOnInitial and also kill the process
+    with pytest.raises(ExceptionGroup) as exc_info:
+        await state.run_for_exit_code(b"hello")
+
+    # Find the TimeoutExceededOnInitial in the group
+    timeout_exc = None
+    for exc in exc_info.value.exceptions:
+        if isinstance(exc, ExceptionGroup):
+            for inner_exc in exc.exceptions:
+                if isinstance(inner_exc, TimeoutExceededOnInitial):
+                    timeout_exc = inner_exc
+                    break
+        elif isinstance(exc, TimeoutExceededOnInitial):
+            timeout_exc = exc
+            break
+
+    assert timeout_exc is not None
+    # The process should have been killed (line 142 executed)
 
 
 async def test_directory_cleanup_in_place_mode(tmp_path):

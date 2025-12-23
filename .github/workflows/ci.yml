@@ -4,7 +4,25 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+    - name: Set up Python
+      run: uv python install 3.12
+    - name: Install dependencies
+      run: uv sync --extra dev
+    - name: Run ruff check
+      run: uv run ruff check src tests
+    - name: Run type checking
+      run: uv run basedpyright src tests
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -24,5 +42,7 @@ jobs:
         sudo apt-get install -y minisat
     - name: Install Python dependencies
       run: uv sync --extra dev
-    - name: Run tests
-      run: uv run python -m pytest tests/
+    - name: Run tests with coverage
+      run: uv run coverage run -m pytest tests/
+    - name: Check coverage
+      run: uv run coverage report

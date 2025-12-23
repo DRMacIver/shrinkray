@@ -4,7 +4,9 @@ import os
 import signal
 import subprocess
 import sys
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 import trio
 
 from shrinkray.process import interrupt_wait_and_kill, signal_group
@@ -119,11 +121,8 @@ async def test_interrupt_wait_and_kill_closes_pipes_before_signaling():
 async def test_interrupt_wait_and_kill_handles_process_lookup_error_on_sigkill():
     """Test that ProcessLookupError is handled when sending SIGKILL.
 
-    This tests lines 40-41: the process exits between checking returncode
-    and sending SIGKILL.
+    The process exits between checking returncode and sending SIGKILL.
     """
-    from unittest.mock import AsyncMock, MagicMock, patch
-
     # Create a mock process
     mock_sp = MagicMock()
     mock_sp.pid = 12345
@@ -165,12 +164,8 @@ async def test_interrupt_wait_and_kill_handles_process_lookup_error_on_sigkill()
 async def test_interrupt_wait_and_kill_raises_on_unkillable_process():
     """Test that ValueError is raised when process cannot be killed.
 
-    This tests line 47: the process persists after all kill attempts.
+    The process persists after all kill attempts.
     """
-    from unittest.mock import AsyncMock, MagicMock, patch
-
-    import pytest
-
     # Create a mock process that never dies
     mock_sp = MagicMock()
     mock_sp.pid = 12345
@@ -195,11 +190,9 @@ async def test_interrupt_wait_and_kill_raises_on_unkillable_process():
 async def test_interrupt_wait_and_kill_skips_sigkill_if_process_exits_after_poll_loop():
     """Test that SIGKILL is skipped if process exits after poll loop completes.
 
-    This tests the branch at line 37 where returncode becomes non-None
-    after all poll() calls return None but before checking returncode at line 37.
+    The returncode becomes non-None after all poll() calls return None but
+    before checking returncode for the SIGKILL decision.
     """
-    from unittest.mock import AsyncMock, MagicMock, patch
-
     # Create a mock process
     mock_sp = MagicMock()
     mock_sp.pid = 12345

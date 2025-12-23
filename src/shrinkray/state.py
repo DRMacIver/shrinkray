@@ -10,7 +10,7 @@ import time
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from tempfile import TemporaryDirectory
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, Generic, TypeVar
 
 import humanize
 import trio
@@ -127,10 +127,7 @@ class ShrinkRayState(Generic[TestCase], ABC):
             kwargs["capture_stdout"] = True
             kwargs["capture_stderr"] = True
             start_time = time.time()
-            completed = cast(
-                subprocess.CompletedProcess[bytes],
-                await trio.run_process(command, **kwargs),
-            )
+            completed = await trio.run_process(command, **kwargs)
             runtime = time.time() - start_time
 
             if runtime >= self.timeout and self.first_call:

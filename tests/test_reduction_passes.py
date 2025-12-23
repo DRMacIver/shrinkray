@@ -375,7 +375,7 @@ def test_sort_whitespace_simple(parallelism):
 
 
 def test_sort_whitespace_with_initial_newline(parallelism):
-    # Test the case where initial whitespace ends with newline (line 619)
+    """Test whitespace sorting when initial whitespace ends with newline."""
     result = reduce_with(
         [sort_whitespace],
         b"x\n y z",
@@ -386,7 +386,7 @@ def test_sort_whitespace_with_initial_newline(parallelism):
 
 
 def test_sort_whitespace_large_k(parallelism):
-    # Test case where i + k > len(problem.current_test_case) (line 630)
+    """Test whitespace sorting when sort size exceeds remaining input."""
     result = reduce_with(
         [sort_whitespace],
         b"abc   ",
@@ -485,7 +485,7 @@ def test_encoding_parse():
 
 def test_encoding_dumps():
     enc = Encoding("utf-8")
-    assert enc.dumps("hello") == b"hello"
+    assert enc.dumps("caf\u00e9") == b"caf\xc3\xa9"
 
 
 def test_encoding_name():
@@ -638,7 +638,7 @@ def test_reduce_integer_literals_to_boundary(parallelism):
 
 
 def test_reduce_integer_literals_edge_case(parallelism):
-    # Test case to hit line 148 (hi -= 1 when hi-1 is interesting)
+    """Test integer reduction when consecutive lower values are also interesting."""
     result = reduce_with(
         [reduce_integer_literals],
         b"n = 10",
@@ -779,7 +779,7 @@ def test_normalize_identifiers_multiple(parallelism):
 
 
 def test_normalize_identifiers_not_found_after_reduction(parallelism):
-    # Tests the continue branch (line 234) when identifier not in current source
+    """Test identifier normalization when identifier disappears during reduction."""
     result = reduce_with(
         [normalize_identifiers],
         b"x = y + z",
@@ -830,7 +830,7 @@ def test_cut_comment_like_things_docstring(parallelism):
 
 
 def test_cut_comment_like_things_end_of_file(parallelism):
-    # Test where comment goes to end of file (include_end=False, no newline) - line 270
+    """Test comment removal when comment extends to end of file without newline."""
     result = reduce_with(
         [cut_comment_like_things],
         b"code # comment without newline",
@@ -919,7 +919,7 @@ def test_region_replacement_size():
 
 
 def test_lexeme_based_deletions_all_same_bytes(parallelism):
-    # Test ngram_search returns early when all bytes are the same (line 92)
+    """Test ngram_search returns early when all bytes are identical."""
     result = reduce_with(
         [lexeme_based_deletions],
         b"aaaa",
@@ -930,22 +930,28 @@ def test_lexeme_based_deletions_all_same_bytes(parallelism):
 
 
 def test_sort_whitespace_newline_at_end_of_initial_ws(parallelism):
-    # Hit line 619: whitespace_up_to -= 1 when whitespace ends with newline
-    # The algorithm: skip non-ws, then consume ws, check if last ws is newline
+    """Test whitespace sorting when whitespace block ends with newline.
+
+    Input has whitespace ' \\n' which ends with newline - the algorithm needs
+    to adjust the whitespace boundary to avoid including the trailing newline.
+    """
     result = reduce_with(
         [sort_whitespace],
         b"a \nb",  # 'a', then ' \n' (ws ending in newline), then 'b'
         lambda x: True,
         parallelism=parallelism,
     )
-    # Just verify it runs without error
+    # Verify it runs without error and doesn't grow
     assert isinstance(result, bytes)
+    assert len(result) <= 4
 
 
 def test_sort_whitespace_k_exceeds_length(parallelism):
-    # Hit line 630: return False when i + k > len(test_case)
-    # Need: non-ws, then ws, then non-ws, then ws at end
-    # So the inner loop finds ws and find_large_integer probes past end
+    """Test whitespace sorting when probing past end of input.
+
+    The algorithm uses find_large_integer to probe how much whitespace to sort,
+    which may probe past the end of the input.
+    """
     result = reduce_with(
         [sort_whitespace],
         b"a b ",  # 'a', ' ', 'b', ' ' - second space triggers the search
@@ -953,13 +959,14 @@ def test_sort_whitespace_k_exceeds_length(parallelism):
         parallelism=parallelism,
     )
     assert isinstance(result, bytes)
+    assert len(result) <= 4
 
 
 def test_reduce_integer_literals_hi_minus_one_interesting(parallelism):
-    # Hit line 148: hi -= 1 when hi-1 is interesting
-    # Binary search converges to smallest interesting value (hi),
-    # then checks if hi-1 is also interesting
-    # Need: 0 is NOT interesting, but both 4 and 5 are interesting
+    """Test integer reduction finds minimum when consecutive values are interesting.
+
+    Binary search converges to smallest interesting value, then checks if
+    hi-1 is also interesting to find the true minimum."""
     result = reduce_with(
         [reduce_integer_literals],
         b"x = 10",
@@ -971,8 +978,7 @@ def test_reduce_integer_literals_hi_minus_one_interesting(parallelism):
 
 
 def test_normalize_identifiers_pattern_not_found(parallelism):
-    # Hit line 234: continue when identifier not in current source
-    # This happens when one identifier replacement removes another identifier
+    """Test identifier normalization when one replacement removes another identifier."""
     result = reduce_with(
         [normalize_identifiers],
         b"longFoo longFoo longFoo",

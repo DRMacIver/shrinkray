@@ -35,11 +35,6 @@ S = TypeVar("S")
 T = TypeVar("T")
 
 
-# Legacy constant, kept for compatibility but no longer actively used.
-# Was previously used for progress tick intervals.
-TICK_FREQUENCY = 0.05
-
-
 class WorkContext:
     """Coordinates parallel work execution for reduction.
 

@@ -30,6 +30,7 @@ class FakeReductionClientForSnapshots:
         volume: str = "normal",
         no_clang_delta: bool = False,
         clang_delta: str = "",
+        trivial_is_error: bool = True,
     ):
         from shrinkray.subprocess.protocol import Response
 

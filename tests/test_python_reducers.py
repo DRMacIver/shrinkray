@@ -4,7 +4,6 @@ from glob import glob
 import libcst
 import libcst.matchers as m
 import pytest
-import trio
 
 from shrinkray.passes.python import (
     PYTHON_PASSES,
@@ -234,11 +233,11 @@ def test_is_python_returns_false_for_invalid_python():
     assert is_python(invalid_code) is False
 
 
-def test_libcst_transform_handles_test_case_becoming_invalid():
+async def test_libcst_transform_handles_test_case_becoming_invalid():
     """Test that libcst_transform handles the case where the test case becomes invalid Python mid-reduction.
 
-    This exercises lines 73-75: ParserSyntaxError when parsing during can_apply.
-    The test case is valid initially but becomes invalid between calls.
+    The test case is valid initially but becomes invalid between calls, which
+    should trigger ParserSyntaxError handling in can_apply.
     """
     # Track how many times current_test_case is accessed
     access_count = [0]
@@ -267,21 +266,18 @@ def test_libcst_transform_handles_test_case_becoming_invalid():
 
     problem = MockProblem()
 
-    async def run_test():
-        await libcst_transform(
-            problem,  # type: ignore
-            m.SimpleStatementLine(),
-            lambda x: libcst.RemoveFromParent(),
-        )
-
-    trio.run(run_test)
+    await libcst_transform(
+        problem,  # type: ignore
+        m.SimpleStatementLine(),
+        lambda x: libcst.RemoveFromParent(),
+    )
     # The function should complete without raising, handling the ParserSyntaxError internally
 
 
-def test_libcst_transform_handles_cst_validation_error():
+async def test_libcst_transform_handles_cst_validation_error():
     """Test that libcst_transform handles CSTValidationError gracefully.
 
-    This exercises line 80-81: CSTValidationError during transformation.
+    A transformer that raises CSTValidationError should not crash the reduction.
     """
     # Create a transformer that causes validation errors
     def bad_transformer(node):
@@ -294,26 +290,23 @@ def test_libcst_transform_handles_cst_validation_error():
     async def is_interesting(x: bytes) -> bool:
         return True
 
-    async def run_test():
-        problem: BasicReductionProblem[bytes] = BasicReductionProblem(
-            initial=code,
-            is_interesting=is_interesting,
-            work=WorkContext(parallelism=1),
-        )
-        await libcst_transform(
-            problem,
-            m.SimpleStatementLine(),
-            bad_transformer,
-        )
-
-    trio.run(run_test)
+    problem: BasicReductionProblem[bytes] = BasicReductionProblem(
+        initial=code,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    await libcst_transform(
+        problem,
+        m.SimpleStatementLine(),
+        bad_transformer,
+    )
     # Should complete without raising
 
 
-def test_libcst_transform_handles_type_error_does_not_allow():
+async def test_libcst_transform_handles_type_error_does_not_allow():
     """Test that libcst_transform handles TypeError with 'does not allow for it'.
 
-    This exercises lines 82-84: TypeError handling when transformation isn't allowed.
+    This error occurs when a transformation is structurally invalid for the parent node.
     """
     # Create a transformer that raises the specific TypeError
     def bad_transformer(node):
@@ -324,26 +317,23 @@ def test_libcst_transform_handles_type_error_does_not_allow():
     async def is_interesting(x: bytes) -> bool:
         return True
 
-    async def run_test():
-        problem: BasicReductionProblem[bytes] = BasicReductionProblem(
-            initial=code,
-            is_interesting=is_interesting,
-            work=WorkContext(parallelism=1),
-        )
-        await libcst_transform(
-            problem,
-            m.SimpleStatementLine(),
-            bad_transformer,
-        )
-
-    trio.run(run_test)
+    problem: BasicReductionProblem[bytes] = BasicReductionProblem(
+        initial=code,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    await libcst_transform(
+        problem,
+        m.SimpleStatementLine(),
+        bad_transformer,
+    )
     # Should complete without raising
 
 
-def test_libcst_transform_reraises_other_type_error():
+async def test_libcst_transform_reraises_other_type_error():
     """Test that libcst_transform re-raises TypeError without 'does not allow for it'.
 
-    This exercises line 85: the re-raise path for other TypeErrors.
+    TypeErrors that aren't about parent node restrictions should propagate.
     """
     # Create a transformer that raises a different TypeError
     def bad_transformer(node):
@@ -354,18 +344,15 @@ def test_libcst_transform_reraises_other_type_error():
     async def is_interesting(x: bytes) -> bool:
         return True
 
-    async def run_test():
-        problem: BasicReductionProblem[bytes] = BasicReductionProblem(
-            initial=code,
-            is_interesting=is_interesting,
-            work=WorkContext(parallelism=1),
+    problem: BasicReductionProblem[bytes] = BasicReductionProblem(
+        initial=code,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    # The TypeError gets wrapped in ExceptionGroups by trio nurseries
+    with pytest.raises(ExceptionGroup):
+        await libcst_transform(
+            problem,
+            m.SimpleStatementLine(),
+            bad_transformer,
         )
-        # The TypeError gets wrapped in ExceptionGroups by trio nurseries
-        with pytest.raises(ExceptionGroup):
-            await libcst_transform(
-                problem,
-                m.SimpleStatementLine(),
-                bad_transformer,
-            )
-
-    trio.run(run_test)

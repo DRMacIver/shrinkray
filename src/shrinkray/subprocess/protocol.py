@@ -87,7 +87,7 @@ def serialize(msg: Request | Response | ProgressUpdate) -> str:
             },
         }
     else:
-        raise TypeError(f"Cannot serialize {type(msg)}")
+        raise TypeError(f"Cannot serialize {msg!r}")
     return json.dumps(data, separators=(",", ":"))
 
 

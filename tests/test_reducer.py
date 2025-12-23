@@ -1279,3 +1279,154 @@ async def test_directory_shrinkray_with_c_files():
     # Should have reduced the directory
     assert "test.c" in problem.current_test_case
     assert b"main" in problem.current_test_case["test.c"]
+
+
+# =============================================================================
+# Initial cut watcher tests (using mock clock)
+# =============================================================================
+
+
+async def test_initial_cut_watcher_cancels_on_no_progress(autojump_clock):
+    """Test that the watcher task cancels a pass when no progress is made.
+
+    This uses autojump_clock to test the time-dependent watcher code that
+    normally requires 5 seconds to trigger.
+    """
+    import trio
+
+    from shrinkray.reducer import ShrinkRay
+
+    pass_iterations = [0]
+    pass_cancelled = [False]
+
+    async def is_interesting(x):
+        return len(x) > 0
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    # Create a pass that runs forever but never makes progress
+    async def slow_no_progress_pass(p):
+        try:
+            while True:
+                pass_iterations[0] += 1
+                # Yield control so the watcher can run
+                await trio.sleep(0.1)
+        except trio.Cancelled:
+            pass_cancelled[0] = True
+            raise
+
+    # Create a ShrinkRay with only our slow pass as initial cut
+    reducer = ShrinkRay(target=problem)
+    reducer.initial_cuts = [slow_no_progress_pass]
+
+    # Run initial_cut - the watcher should cancel after 5s (mock time)
+    await reducer.initial_cut()
+
+    # The pass should have been cancelled by the watcher
+    assert pass_cancelled[0], "Pass should have been cancelled by watcher"
+    # Should have run for multiple iterations before being cancelled
+    assert pass_iterations[0] > 0, "Pass should have run at least once"
+
+
+async def test_initial_cut_watcher_cancels_on_rate_drop(autojump_clock):
+    """Test that the watcher cancels when reduction rate drops significantly.
+
+    The watcher cancels if rate drops below 50% of the best rate observed.
+    """
+    import trio
+
+    from shrinkray.reducer import ShrinkRay
+
+    pass_cancelled = [False]
+    reductions_made = [0]
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"x" * 100,  # Start with 100 bytes
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    # Create a pass that makes fast progress initially, then stops
+    async def slowing_pass(p):
+        try:
+            # Make some reductions quickly at first
+            for i in range(3):
+                current = p.current_test_case
+                if len(current) > 50:
+                    await p.is_interesting(current[:-10])  # Remove 10 bytes
+                    reductions_made[0] += 1
+                await trio.sleep(0.1)
+
+            # Now just loop without making progress
+            while True:
+                await trio.sleep(0.1)
+        except trio.Cancelled:
+            pass_cancelled[0] = True
+            raise
+
+    reducer = ShrinkRay(target=problem)
+    reducer.initial_cuts = [slowing_pass]
+
+    await reducer.initial_cut()
+
+    assert pass_cancelled[0], "Pass should have been cancelled by watcher"
+    assert reductions_made[0] > 0, "Should have made some reductions first"
+
+
+async def test_initial_cut_watcher_multiple_iterations(autojump_clock):
+    """Test watcher runs multiple iterations when progress continues.
+
+    This exercises the branch where best_reduction_rate is already set
+    and rate doesn't improve (319->325 branch). The pass finishes naturally
+    which triggers the nursery cancel from run_pass completion.
+    """
+    import trio
+
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"x" * 1000,  # Start with 1000 bytes - large enough for many watcher iterations
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    # Create a pass that makes progress at varying rates
+    # First batch: fast progress (establishes high best_reduction_rate)
+    # Second batch: slower progress (rate < best_reduction_rate, hits False branch)
+    iteration = [0]
+
+    async def varying_rate_pass(p):
+        # First 20 seconds: make 10 reductions (fast)
+        for _ in range(10):
+            await trio.sleep(2)
+            current = p.current_test_case
+            if len(current) > 100:
+                await p.is_interesting(current[:-50])  # Remove 50 bytes
+            iteration[0] += 1
+
+        # Next 50 seconds: make 5 reductions (slow - rate drops)
+        for _ in range(5):
+            await trio.sleep(10)
+            current = p.current_test_case
+            if len(current) > 100:
+                await p.is_interesting(current[:-10])  # Remove 10 bytes
+            iteration[0] += 1
+
+    reducer = ShrinkRay(target=problem)
+    reducer.initial_cuts = [varying_rate_pass]
+
+    initial_size = problem.current_size
+    await reducer.initial_cut()
+
+    # Progress should have been made
+    assert problem.current_size < initial_size, "Should have made progress"

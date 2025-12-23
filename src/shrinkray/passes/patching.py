@@ -104,8 +104,10 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                 to_merge = len(self.__merge_queue)
 
                 async def can_merge(k):
-                    if k > to_merge:
-                        return False
+                    # find_large_integer doubles each time, and
+                    # if we call it then we know that can_merge(to_merge)
+                    # is False, so we should never hit this.
+                    assert k <= 2 * to_merge
                     try:
                         attempted_patch = self.__patches.combine(
                             base_patch,
@@ -113,8 +115,6 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                         )
                     except Conflict:
                         return False
-                    if attempted_patch == base_patch:
-                        return True
                     with_patch_applied = self.__patches.apply(
                         attempted_patch, self.__initial_test_case
                     )
@@ -127,7 +127,9 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                 if await can_merge(to_merge):
                     merged = to_merge
                 else:
-                    merged = await self.__problem.work.find_large_integer(can_merge)
+                    merged = await self.__problem.work.find_large_integer(
+                        can_merge
+                    )
 
                 for _, _, send_result in self.__merge_queue[:merged]:
                     send_result.send_nowait(True)
@@ -163,18 +165,6 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
         sort_key = (self.__tick, self.__problem.sort_key(with_patch_applied))
         self.__tick += 1
 
-        # If there is no merge currently going on and nothing has changed under
-        # us, we apply a fast path where we just update the patch immediately.
-        if not self.__merge_lock.locked() and (
-            self.__current_patch == initial_patch
-            and len(self.__merge_queue) == 1
-            and self.__merge_queue[0][1] == patch
-            and self.__problem.sort_key(with_patch_applied)
-            <= self.__problem.sort_key(self.__problem.current_test_case)
-        ):
-            self.__current_patch = combined_patch
-            return True
-
         self.__merge_queue.append((sort_key, patch, send_merge_result))
 
         # If nobody else is merging the queue, that's our job now. This will
@@ -206,7 +196,9 @@ async def apply_patches(
 ) -> None:
     try:
         if await problem.is_interesting(
-            patch_info.apply(patch_info.combine(*patches), problem.current_test_case)
+            patch_info.apply(
+                patch_info.combine(*patches), problem.current_test_case
+            )
         ):
             return
     except Conflict:

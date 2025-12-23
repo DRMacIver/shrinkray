@@ -89,9 +89,11 @@ class ShrinkRayState(Generic[TestCase], ABC):
         # Lazy import to avoid circular dependency
         if self._interrupt_wait_and_kill is None:
             from shrinkray.process import interrupt_wait_and_kill
+
             self._interrupt_wait_and_kill = interrupt_wait_and_kill
         if self._InputType is None:
             from shrinkray.cli import InputType
+
             self._InputType = InputType
 
         if not os.path.exists(working):
@@ -107,7 +109,9 @@ class ShrinkRayState(Generic[TestCase], ABC):
             cwd=cwd,
             check=False,
         )
-        if self.input_type.enabled(self._InputType.stdin) and not os.path.isdir(working):
+        if self.input_type.enabled(self._InputType.stdin) and not os.path.isdir(
+            working
+        ):
             with open(working, "rb") as i:
                 kwargs["stdin"] = i.read()
         else:
@@ -154,6 +158,7 @@ class ShrinkRayState(Generic[TestCase], ABC):
         # Lazy import
         if self._InputType is None:
             from shrinkray.cli import InputType
+
             self._InputType = InputType
 
         if self.in_place:

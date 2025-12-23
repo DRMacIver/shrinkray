@@ -286,7 +286,7 @@ async def test_run_for_exit_code_with_stdin_input_type(tmp_path):
 async def test_run_for_exit_code_in_place_mode(tmp_path):
     """Test in_place mode writes to original file location."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\ncat \"$1\" | grep -q hello && exit 0 || exit 1")
+    script.write_text('#!/bin/bash\ncat "$1" | grep -q hello && exit 0 || exit 1')
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -677,7 +677,7 @@ async def test_run_for_exit_code_no_input_type_arg(tmp_path):
 async def test_run_for_exit_code_in_place_not_basename(tmp_path):
     """Test run_for_exit_code in_place mode but not basename input type."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\ntest -f \"$1\" && exit 0 || exit 1")
+    script.write_text('#!/bin/bash\ntest -f "$1" && exit 0 || exit 1')
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"

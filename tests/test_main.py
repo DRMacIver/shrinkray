@@ -383,9 +383,7 @@ def test_clang_delta_not_found_error(tmp_path, monkeypatch):
     def mock_find_clang_delta():
         return ""
 
-    monkeypatch.setattr(
-        "shrinkray.__main__.find_clang_delta", mock_find_clang_delta
-    )
+    monkeypatch.setattr("shrinkray.__main__.find_clang_delta", mock_find_clang_delta)
 
     runner = CliRunner(catch_exceptions=False)
     result = runner.invoke(

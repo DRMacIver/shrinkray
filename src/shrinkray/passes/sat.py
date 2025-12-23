@@ -323,7 +323,8 @@ class BooleanEquivalence(UnionFind[int]):
             return
         if left2 == -right2:
             raise Inconsistent(
-                "Attempted to merge %d (=%d) with %d (=%d)" % (left, left2, right, right2)
+                "Attempted to merge %d (=%d) with %d (=%d)"
+                % (left, left2, right, right2)
             )
         super().merge(left, right)
 

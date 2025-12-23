@@ -161,6 +161,7 @@ async def strip_annotations(problem: ReductionProblem[bytes]) -> None:
         m.Param(),
         lambda x: x.with_changes(annotation=None),
     )
+
     def ann_assign_to_assign(x: libcst.CSTNode) -> Replacement:
         ann = cast(libcst.AnnAssign, x)
         if ann.value is not None:

@@ -413,6 +413,7 @@ def test_basic_problem_display():
 
 def test_basic_problem_with_provided_stats():
     """Test that BasicReductionProblem uses provided stats."""
+
     async def is_interesting(x):
         return True
 
@@ -690,3 +691,223 @@ async def test_view_only_accepts_smaller_parse_results():
     # If somehow underlying got larger (shouldn't happen in practice),
     # view would keep the smaller cached value
     # This is tested by the sort_key comparison in the property
+
+
+async def test_view_keeps_cached_value_if_parse_is_larger():
+    """Test View keeps cached value when parsed result is larger."""
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hi",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        sort_key=lambda x: len(x),
+    )
+
+    view = View(
+        problem=problem,
+        parse=lambda b: b.decode("utf-8"),
+        dump=lambda s: s.encode("utf-8"),
+        sort_key=lambda s: len(s),
+    )
+
+    assert view.current_test_case == "hi"
+
+    # Force underlying problem to have a larger value by directly manipulating
+    # This simulates an edge case where the underlying changes but is larger
+    problem._BasicReductionProblem__current = b"longer"
+
+    # View should still return the cached smaller value
+    current = view.current_test_case
+    assert current == "hi"
+
+
+async def test_basic_problem_setup_called_twice():
+    """Test that setup() is idempotent - second call does nothing."""
+    call_count = [0]
+
+    async def is_interesting(x):
+        call_count[0] += 1
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    await problem.setup()
+    first_call_count = call_count[0]
+
+    # Second call should not call is_interesting again
+    await problem.setup()
+    assert call_count[0] == first_call_count
+
+
+# =============================================================================
+# ReductionProblem.view() tests
+# =============================================================================
+
+
+def test_reduction_problem_view_method():
+    """Test that view() creates a View with correct format."""
+    from shrinkray.passes.definitions import Format
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    class StringFormat(Format[bytes, str]):
+        @staticmethod
+        def parse(data: bytes) -> str:
+            return data.decode("utf-8")
+
+        @staticmethod
+        def dumps(value: str) -> bytes:
+            return value.encode("utf-8")
+
+    view = problem.view(StringFormat)
+    assert view.current_test_case == "hello"
+
+
+def test_reduction_problem_view_caches():
+    """Test that view() returns cached View for same format."""
+    from shrinkray.passes.definitions import Format
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    class StringFormat(Format[bytes, str]):
+        @staticmethod
+        def parse(data: bytes) -> str:
+            return data.decode("utf-8")
+
+        @staticmethod
+        def dumps(value: str) -> bytes:
+            return value.encode("utf-8")
+
+    view1 = problem.view(StringFormat)
+    view2 = problem.view(StringFormat)
+    assert view1 is view2
+
+
+def test_reduction_problem_view_with_instance():
+    """Test that view() works with format instance."""
+    from shrinkray.passes.definitions import Format
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    class StringFormat(Format[bytes, str]):
+        @staticmethod
+        def parse(data: bytes) -> str:
+            return data.decode("utf-8")
+
+        @staticmethod
+        def dumps(value: str) -> bytes:
+            return value.encode("utf-8")
+
+    format_instance = StringFormat()
+    view = problem.view(format_instance)
+    assert view.current_test_case == "hello"
+
+
+async def test_reduction_problem_base_setup():
+    """Test that base ReductionProblem.setup() does nothing."""
+    from shrinkray.problem import ReductionProblem
+
+    # Create a minimal concrete implementation
+    class MinimalProblem(ReductionProblem[bytes]):
+        def __init__(self, work: WorkContext):
+            super().__init__(work=work)
+            self._current = b"test"
+
+        @property
+        def current_test_case(self) -> bytes:
+            return self._current
+
+        @property
+        def stats(self) -> ReductionStats:
+            return ReductionStats()
+
+        async def is_interesting(self, test_case: bytes) -> bool:
+            return True
+
+        def sort_key(self, test_case: bytes):
+            return len(test_case)
+
+        def size(self, test_case: bytes) -> int:
+            return len(test_case)
+
+        def display(self, value: bytes) -> str:
+            return str(value)
+
+    problem = MinimalProblem(work=WorkContext(parallelism=1))
+    # Base setup should do nothing and not raise
+    await problem.setup()
+
+
+async def test_abstract_method_default_implementations():
+    """Test that abstract method default implementations can be called via super().
+
+    The abstract methods is_interesting and size have default implementations
+    that can be used by subclasses calling super().
+    """
+    from shrinkray.problem import ReductionProblem
+
+    # Create a subclass that explicitly calls super() for abstract methods
+    class SubclassThatCallsSuper(ReductionProblem[bytes]):
+        def __init__(self, work: WorkContext):
+            super().__init__(work=work)
+            self._current = b"test"
+
+        @property
+        def current_test_case(self) -> bytes:
+            return self._current
+
+        @property
+        def stats(self) -> ReductionStats:
+            return ReductionStats()
+
+        async def is_interesting(self, test_case: bytes) -> bool:
+            # Call the base class implementation (which is just pass)
+            await ReductionProblem.is_interesting(self, test_case)
+            return True
+
+        def sort_key(self, test_case: bytes):
+            return len(test_case)
+
+        def size(self, test_case: bytes) -> int:
+            # Call the base class implementation
+            return ReductionProblem.size(self, test_case)
+
+        def display(self, value: bytes) -> str:
+            return str(value)
+
+    problem = SubclassThatCallsSuper(work=WorkContext(parallelism=1))
+
+    # Test that size() calls base implementation (which returns len())
+    assert problem.size(b"hello") == 5
+
+    # Test that is_interesting() calls base implementation (which is pass)
+    result = await problem.is_interesting(b"hello")
+    assert result is True  # Our implementation returns True after calling super

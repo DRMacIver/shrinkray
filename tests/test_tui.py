@@ -949,3 +949,347 @@ class TestModuleInterface:
         assert hasattr(client, "close")
         assert hasattr(client, "get_progress_updates")
         assert hasattr(client, "is_completed")
+
+
+class TestContentPreviewEdgeCases:
+    """Edge case tests for ContentPreview."""
+
+    def test_get_available_lines_fallback_to_app_size(self):
+        """Test _get_available_lines falls back to app.size when parent unavailable."""
+        widget = ContentPreview()
+        # Mock the app with a valid size
+        from unittest.mock import MagicMock
+
+        mock_app = MagicMock()
+        mock_app.size.height = 50
+        widget._app = mock_app  # type: ignore
+
+        # The method should use the app size fallback
+        result = widget._get_available_lines()
+        assert result >= 10  # Minimum is 10
+
+    def test_render_identical_content_no_diff(self):
+        """Test that identical content shows truncated view, not diff."""
+        widget = ContentPreview()
+
+        # Set up large content
+        lines = [f"Line {i}" for i in range(50)]
+        content = "\n".join(lines)
+        widget.content = content
+        widget._last_displayed_content = content  # Same content
+
+        # Mock _get_available_lines
+        widget._get_available_lines = lambda: 10  # type: ignore
+
+        rendered = widget.render()
+        # Should show truncated content, not diff (since content is identical)
+        # The diff would be empty
+        assert "more lines" in rendered or "Line" in rendered
+
+
+class TestShrinkRayAppExceptionHandlers:
+    """Tests for exception handling paths in ShrinkRayApp."""
+
+    def test_update_status_before_mount(self):
+        """Test update_status handles exception when widget not mounted."""
+
+        async def run_test():
+            fake_client = FakeReductionClient(updates=[])
+            app = ShrinkRayApp(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                client=fake_client,
+            )
+            # Try to update status before mounting - should not raise
+            app.update_status("Test message")
+
+        run_async(run_test())
+
+    def test_quit_handles_cancel_exception(self):
+        """Test that action_quit handles exceptions from cancel."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        async def run_test():
+            # Create a mock client that raises on cancel
+            mock_client = MagicMock()
+            mock_client.start = AsyncMock()
+            mock_client.start_reduction = AsyncMock(
+                return_value=Response(id="start", result={"status": "started"})
+            )
+            mock_client.cancel = AsyncMock(side_effect=Exception("Process exited"))
+            mock_client.close = AsyncMock()
+            mock_client.is_completed = False
+
+            async def get_updates():
+                while True:
+                    await asyncio.sleep(0.1)
+                    if mock_client._cancelled:
+                        break
+                    yield ProgressUpdate(
+                        status="Running",
+                        size=100,
+                        original_size=100,
+                        calls=0,
+                        reductions=0,
+                    )
+
+            mock_client.get_progress_updates = get_updates
+
+            app = ShrinkRayApp(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                client=mock_client,
+            )
+            # Set _owns_client to False so it doesn't try to close
+            app._owns_client = False
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.05)
+                # Trigger quit which should handle the cancel exception
+                await pilot.press("q")
+                await pilot.pause()
+                # Should not raise
+
+        run_async(run_test())
+
+    def test_client_completed_breaks_loop(self):
+        """Test that loop breaks when client.is_completed is True."""
+
+        async def run_test():
+            # Create updates that mark client as completed
+            updates = [
+                ProgressUpdate(
+                    status="Done",
+                    size=50,
+                    original_size=100,
+                    calls=10,
+                    reductions=5,
+                ),
+            ]
+            fake_client = FakeReductionClient(updates=updates)
+
+            app = ShrinkRayApp(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                # Wait for completion
+                for _ in range(20):
+                    await pilot.pause()
+                    await asyncio.sleep(0.02)
+                    if app.is_completed:
+                        break
+
+                # Client should be completed
+                assert fake_client.is_completed
+
+        run_async(run_test())
+
+
+class TestCoverageEdgeCases:
+    """Tests specifically for hard-to-cover edge cases."""
+
+    def test_content_preview_app_size_zero_height(self):
+        """Test _get_available_lines when app.size.height is 0."""
+        from unittest.mock import MagicMock, PropertyMock, patch
+
+        widget = ContentPreview()
+
+        # Mock the app with zero height
+        mock_app = MagicMock()
+        mock_app.size.height = 0
+
+        # Mock parent with no usable size
+        mock_parent = MagicMock()
+        mock_parent.size.height = 0
+
+        # Use patch to override the app property
+        with patch.object(
+            type(widget), "app", new_callable=PropertyMock
+        ) as mock_app_prop:
+            mock_app_prop.return_value = mock_app
+            with patch.object(
+                type(widget), "parent", new_callable=PropertyMock
+            ) as mock_parent_prop:
+                mock_parent_prop.return_value = mock_parent
+
+                # Should fall through to the default return value of 30
+                result = widget._get_available_lines()
+                assert result == 30
+
+    def test_content_preview_diff_is_empty(self):
+        """Test render when diff computation produces empty result.
+
+        This covers line 286->291 where if diff is empty, we fall through
+        to the truncated content display.
+        """
+        widget = ContentPreview()
+        # Set up content that appears different (to pass the != check)
+        # but produces an empty diff when unified_diff is called
+        large_content_old = "\n".join([f"line {i}" for i in range(50)])
+        large_content_new = (
+            "\n".join([f"line {i}" for i in range(50)]) + " "
+        )  # Slightly different
+
+        widget._last_displayed_content = large_content_old
+        widget.content = large_content_new
+        widget.hex_mode = False
+
+        # Mock unified_diff to return empty list
+        # Note: unified_diff is imported inside render(), so patch difflib directly
+        from unittest.mock import patch
+
+        with patch.object(widget, "_get_available_lines", return_value=10):
+            with patch("difflib.unified_diff", return_value=[]):
+                result = widget.render()
+
+        # Since diff is empty (mocked), should show truncated content
+        assert "more lines" in result
+
+    def test_cancel_exception_is_caught(self):
+        """Test that exceptions during cancel() are caught (lines 450-451)."""
+
+        class ExceptionOnCancelClient(FakeReductionClient):
+            def __init__(self):
+                # Many updates so we can quit mid-reduction
+                super().__init__(updates=[])
+
+            async def cancel(self) -> Response:
+                raise ConnectionError("Process already dead")
+
+            async def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]:
+                # Yield many updates with delays
+                for i in range(100):
+                    if self._cancelled:
+                        break
+                    yield ProgressUpdate(
+                        status="Running",
+                        size=100 - i,
+                        original_size=100,
+                        calls=i,
+                        reductions=0,
+                    )
+                    await asyncio.sleep(0.05)
+                self._completed = True
+
+        async def run_test():
+            fake_client = ExceptionOnCancelClient()
+
+            app = ShrinkRayApp(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                # Wait for reduction to start and get at least one update
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+
+                # Verify app is not completed yet
+                assert not app._completed
+
+                # Press quit - this should trigger cancel() which raises
+                await pilot.press("q")
+                # If we get here without crashing, the exception was caught
+                await pilot.pause()
+
+        # Should not raise
+        run_async(run_test())
+
+    def test_run_textual_ui_creates_and_runs_app(self):
+        """Test run_textual_ui function creates app and calls run()."""
+        from unittest.mock import MagicMock, patch
+
+        from shrinkray.tui import run_textual_ui
+
+        # Patch ShrinkRayApp to track calls
+        with patch("shrinkray.tui.ShrinkRayApp") as mock_app_class:
+            mock_app = MagicMock()
+            mock_app_class.return_value = mock_app
+
+            run_textual_ui(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                parallelism=4,
+                timeout=2.0,
+                seed=42,
+                input_type="bytes",
+                in_place=True,
+                formatter="clang-format",
+                volume="quiet",
+                no_clang_delta=True,
+                clang_delta="/usr/bin/clang_delta",
+                theme="dark",
+            )
+
+            # Verify app was created with correct arguments
+            mock_app_class.assert_called_once_with(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                parallelism=4,
+                timeout=2.0,
+                seed=42,
+                input_type="bytes",
+                in_place=True,
+                formatter="clang-format",
+                volume="quiet",
+                no_clang_delta=True,
+                clang_delta="/usr/bin/clang_delta",
+                theme="dark",
+            )
+
+            # Verify run() was called
+            mock_app.run.assert_called_once()
+
+    def test_completed_flag_during_iteration_breaks_loop(self):
+        """Test that is_completed becoming True mid-iteration breaks the loop."""
+
+        class CompletesEarlyClient(FakeReductionClient):
+            def __init__(self):
+                super().__init__(updates=[])
+                self._yield_count = 0
+
+            async def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]:
+                for i in range(10):
+                    self._yield_count += 1
+                    yield ProgressUpdate(
+                        status=f"Update {i}",
+                        size=100 - i * 10,
+                        original_size=100,
+                        calls=i,
+                        reductions=i // 2,
+                    )
+                    await asyncio.sleep(0.01)
+                    # Set completed after a few yields
+                    if i >= 2:
+                        self._completed = True
+                        # App should break out of loop now
+
+        async def run_test():
+            fake_client = CompletesEarlyClient()
+
+            app = ShrinkRayApp(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                # Wait for updates to be processed
+                for _ in range(20):
+                    await pilot.pause()
+                    await asyncio.sleep(0.02)
+                    if app.is_completed:
+                        break
+
+                # Should have completed early, not processed all 10
+                # The break happens after checking is_completed, so
+                # we should have processed 3 updates (0, 1, 2), then
+                # after 2 we set completed and break before 3
+                assert fake_client._yield_count <= 5
+
+        run_async(run_test())

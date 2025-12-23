@@ -226,6 +226,55 @@ class TestContentPreview:
         # But pending content should be stored
         assert widget._pending_content == "Second"
 
+    def test_render_diff_for_changed_large_content(self):
+        """Test that diff is rendered when large content changes."""
+        widget = ContentPreview()
+
+        # Set up initial large content (must be larger than available_lines)
+        initial_lines = [f"Line {i}" for i in range(50)]
+        initial_content = "\n".join(initial_lines)
+
+        # Set the initial content and last displayed content
+        widget.content = initial_content
+        widget._last_displayed_content = initial_content
+
+        # Now change the content
+        new_lines = [f"Line {i}" for i in range(45)]  # Remove 5 lines
+        new_content = "\n".join(new_lines)
+        widget.content = new_content
+
+        # Mock _get_available_lines to return a small number
+        original_method = widget._get_available_lines
+        widget._get_available_lines = lambda: 10  # type: ignore
+
+        try:
+            rendered = widget.render()
+            # Should contain diff markers
+            assert "---" in rendered or "@@" in rendered
+        finally:
+            widget._get_available_lines = original_method
+
+    def test_render_diff_no_changes_shows_truncated(self):
+        """Test that truncated content is shown when no diff is available."""
+        widget = ContentPreview()
+
+        # Set content larger than available lines
+        lines = [f"Line {i}" for i in range(50)]
+        content = "\n".join(lines)
+        widget.content = content
+        # No _last_displayed_content set
+
+        # Mock _get_available_lines to return a small number
+        original_method = widget._get_available_lines
+        widget._get_available_lines = lambda: 10  # type: ignore
+
+        try:
+            rendered = widget.render()
+            # Should show truncation message
+            assert "more lines" in rendered
+        finally:
+            widget._get_available_lines = original_method
+
 
 class TestShrinkRayAppWithFakeClient:
     """Tests for ShrinkRayApp using a fake client."""

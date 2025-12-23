@@ -411,6 +411,26 @@ def test_basic_problem_display():
     assert "b'hi'" in display
 
 
+def test_basic_problem_with_provided_stats():
+    """Test that BasicReductionProblem uses provided stats."""
+    async def is_interesting(x):
+        return True
+
+    custom_stats = ReductionStats()
+    custom_stats.initial_test_case_size = 100
+    custom_stats.current_test_case_size = 50
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        stats=custom_stats,
+    )
+    # Should use the provided stats, not create new ones
+    assert problem.stats.initial_test_case_size == 100
+    assert problem.stats.current_test_case_size == 50
+
+
 # =============================================================================
 # View tests
 # =============================================================================

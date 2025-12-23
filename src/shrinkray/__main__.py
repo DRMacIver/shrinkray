@@ -22,7 +22,7 @@ import click
 import humanize
 import trio
 import urwid
-from urwid import raw_display
+import urwid.raw_display
 from attrs import define
 from binaryornot.check import is_binary_string
 

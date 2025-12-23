@@ -806,3 +806,118 @@ async def test_shrinkray_pump_method():
     assert pump_called[0]
     # Pass should have been called during pump
     assert pass_called[0]
+
+
+async def test_shrinkray_run_empty_is_interesting():
+    """Test ShrinkRay.run returns immediately if empty string is interesting.
+
+    This covers line 343.
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        # Everything is interesting, including empty string
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    # Should have reduced to empty immediately
+    assert problem.current_test_case == b""
+
+
+async def test_shrinkray_run_single_byte_interesting():
+    """Test ShrinkRay.run returns early if single byte is interesting.
+
+    This covers lines 347-351.
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        # Only empty is not interesting, but single byte newline is
+        if x == b"":
+            return False
+        return b"\n" in x or len(x) == 1
+
+    problem = BasicReductionProblem(
+        initial=b"hello\nworld",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    # Should have reduced to a single byte (likely 0 since it's smallest)
+    assert len(problem.current_test_case) == 1
+
+
+async def test_shrinkray_run_single_byte_finds_smaller():
+    """Test ShrinkRay.run finds smaller single byte when possible.
+
+    This covers the inner loop in lines 348-350.
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        # Empty is not interesting
+        if x == b"":
+            return False
+        # Single bytes >= 5 are interesting (so we can find smaller)
+        if len(x) == 1:
+            return x[0] >= 5
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    # Should have reduced to bytes([5]) - the smallest acceptable single byte
+    assert problem.current_test_case == bytes([5])
+
+
+async def test_shrinkray_pump_no_change():
+    """Test ShrinkRay.pump returns early when pumped equals current.
+
+    This covers line 235 (pumped == current branch).
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    pass_called = [False]
+
+    async def tracking_pass(p):
+        pass_called[0] = True
+
+    reducer.great_passes = [tracking_pass]
+
+    # Create a pump that returns the same content (no change)
+    async def identity_pump(p):
+        return p.current_test_case
+
+    identity_pump.__name__ = "identity_pump"
+
+    await reducer.pump(identity_pump)
+
+    # Pass should NOT have been called since pump returned same content
+    assert not pass_called[0]

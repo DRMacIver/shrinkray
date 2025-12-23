@@ -615,3 +615,194 @@ async def test_directory_shrinkray_run_reduces_directory():
     # a.txt should be reduced to minimal form containing 'x'
     assert b"x" in problem.current_test_case["a.txt"]
     assert len(problem.current_test_case["a.txt"]) < 6
+
+
+# =============================================================================
+# ShrinkRay clang_delta and pump tests
+# =============================================================================
+
+
+def test_shrinkray_pumps_with_clang_delta():
+    """Test ShrinkRay.pumps returns clang_delta_pumps when clang_delta is set.
+
+    This covers line 205.
+    """
+    from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
+    from shrinkray.reducer import ShrinkRay
+
+    clang_delta_exec = find_clang_delta()
+    if not clang_delta_exec:
+        pytest.skip("clang_delta not available")
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"int main() {}",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    cd = ClangDelta(clang_delta_exec)
+    reducer = ShrinkRay(target=problem, clang_delta=cd)
+    pumps = list(reducer.pumps)
+    assert len(pumps) > 0
+    # Each pump should be a callable
+    for pump in pumps:
+        assert callable(pump)
+
+
+def test_shrinkray_status_with_pass_no_pump():
+    """Test ShrinkRay status when pass is set but pump is not.
+
+    This covers line 211.
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+
+    # Simulate pass running without pump
+    async def mock_pass(p):
+        pass
+
+    mock_pass.__name__ = "test_pass"
+    reducer.current_reduction_pass = mock_pass
+    reducer.current_pump = None
+
+    status = reducer.status
+    assert "test_pass" in status
+    assert "Running reduction pass" in status
+
+
+def test_shrinkray_register_format_specific_pass():
+    """Test ShrinkRay.register_format_specific_pass adds passes for valid format.
+
+    This covers lines 196-198.
+    """
+    from shrinkray.passes.definitions import Format, ParseError
+    from shrinkray.reducer import ShrinkRay
+
+    # Create a simple format that only validates if starts with "FORMAT:"
+    class TestFormat(Format[bytes, bytes]):
+        @property
+        def name(self) -> str:
+            return "TestFormat"
+
+        def parse(self, input: bytes) -> bytes:
+            if input.startswith(b"FORMAT:"):
+                return input[7:]
+            raise ParseError()
+
+        def dumps(self, input: bytes) -> bytes:
+            return b"FORMAT:" + input
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"FORMAT:hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    initial_great_count = len(reducer.great_passes)
+
+    async def test_pass(p):
+        pass
+
+    reducer.register_format_specific_pass(TestFormat(), [test_pass])
+
+    # Should have added the pass
+    assert len(reducer.great_passes) > initial_great_count
+
+
+def test_shrinkray_register_format_specific_pass_invalid_format():
+    """Test register_format_specific_pass doesn't add passes for invalid format."""
+    from shrinkray.passes.definitions import Format, ParseError
+    from shrinkray.reducer import ShrinkRay
+
+    class TestFormat(Format[bytes, bytes]):
+        @property
+        def name(self) -> str:
+            return "TestFormat"
+
+        def parse(self, input: bytes) -> bytes:
+            if input.startswith(b"FORMAT:"):
+                return input[7:]
+            raise ParseError()
+
+        def dumps(self, input: bytes) -> bytes:
+            return b"FORMAT:" + input
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",  # Doesn't match format
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    initial_great_count = len(reducer.great_passes)
+
+    async def test_pass(p):
+        pass
+
+    reducer.register_format_specific_pass(TestFormat(), [test_pass])
+
+    # Should not have added the pass
+    assert len(reducer.great_passes) == initial_great_count
+
+
+async def test_shrinkray_pump_method():
+    """Test ShrinkRay.pump method runs pump and reduction passes.
+
+    This covers lines 229-249.
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    pump_called = [False]
+    pass_called = [False]
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+
+    # Add a pass that marks when it's called
+    async def tracking_pass(p):
+        pass_called[0] = True
+
+    reducer.great_passes = [tracking_pass]
+    reducer.ok_passes = []
+    reducer.last_ditch_passes = []
+
+    # Create a pump that returns larger content (to trigger reduction)
+    async def expanding_pump(p):
+        pump_called[0] = True
+        return p.current_test_case + b" extra"
+
+    expanding_pump.__name__ = "expanding_pump"
+
+    await reducer.pump(expanding_pump)
+
+    assert pump_called[0]
+    # Pass should have been called during pump
+    assert pass_called[0]

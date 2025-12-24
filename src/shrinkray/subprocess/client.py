@@ -23,6 +23,7 @@ class SubprocessClient:
         self._pending_responses: dict[str, asyncio.Future[Response]] = {}
         self._progress_queue: asyncio.Queue[ProgressUpdate] = asyncio.Queue()
         self._reader_task: asyncio.Task | None = None
+        self._stderr_task: asyncio.Task | None = None
         self._completed = False
         self._error_message: str | None = None
 
@@ -37,6 +38,20 @@ class SubprocessClient:
             stderr=asyncio.subprocess.PIPE,
         )
         self._reader_task = asyncio.create_task(self._read_output())
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
+
+    async def _drain_stderr(self) -> None:
+        """Read and discard stderr to prevent subprocess from blocking."""
+        if self._process is None or self._process.stderr is None:
+            return
+
+        while True:
+            try:
+                chunk = await self._process.stderr.read(4096)
+                if not chunk:
+                    break
+            except Exception:
+                break
 
     async def _read_output(self) -> None:
         """Read and dispatch messages from subprocess stdout."""
@@ -189,6 +204,13 @@ class SubprocessClient:
             self._reader_task.cancel()
             try:
                 await self._reader_task
+            except asyncio.CancelledError:
+                pass
+
+        if self._stderr_task is not None:
+            self._stderr_task.cancel()
+            try:
+                await self._stderr_task
             except asyncio.CancelledError:
                 pass
 

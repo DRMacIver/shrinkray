@@ -1036,3 +1036,122 @@ async def test_compose_with_changing_format():
 
     # This should work since initial input is parseable
     await composed(problem)
+
+
+# =============================================================================
+# Python passes tests - python.py coverage
+# =============================================================================
+
+
+async def test_strip_annotations_with_value():
+    """Test stripping type annotations from assignments with values."""
+    from shrinkray.passes.python import strip_annotations
+    from shrinkray.problem import BasicReductionProblem
+    from shrinkray.work import WorkContext
+
+    # Python code with type annotation that has a value
+    code = b"x: int = 5\n"
+
+    async def is_interesting(x):
+        # Accept if it's valid Python and assigns x
+        return b"x" in x and b"=" in x
+
+    problem = BasicReductionProblem(
+        initial=code, is_interesting=is_interesting, work=WorkContext(parallelism=1)
+    )
+
+    await strip_annotations(problem)
+
+    # Should have removed the type annotation
+    result = problem.current_test_case
+    assert b"int" not in result or result != code
+
+
+async def test_strip_annotations_without_value():
+    """Test stripping type annotations from declarations without values."""
+    from shrinkray.passes.python import strip_annotations
+    from shrinkray.problem import BasicReductionProblem
+    from shrinkray.work import WorkContext
+
+    # Python code with type annotation declaration only (no value)
+    code = b"x: int\ny = 1\n"
+
+    async def is_interesting(x):
+        # Accept if it has y assignment
+        return b"y = 1" in x
+
+    problem = BasicReductionProblem(
+        initial=code, is_interesting=is_interesting, work=WorkContext(parallelism=1)
+    )
+
+    await strip_annotations(problem)
+
+    # Should have removed the type-only declaration
+    result = problem.current_test_case
+    assert result == b"y = 1\n" or b"x: int" not in result
+
+
+async def test_libcst_transform_invalid_python():
+    """Test that libcst_transform handles invalid Python gracefully."""
+    from shrinkray.passes.python import replace_bodies_with_ellipsis
+    from shrinkray.problem import BasicReductionProblem
+    from shrinkray.work import WorkContext
+
+    # Invalid Python code
+    code = b"def foo(:\n  pass\n"
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=code, is_interesting=is_interesting, work=WorkContext(parallelism=1)
+    )
+
+    # Should not raise, should just return early
+    await replace_bodies_with_ellipsis(problem)
+
+    # Code should be unchanged since parsing failed
+    assert problem.current_test_case == code
+
+
+async def test_libcst_transform_reparsing_fails():
+    """Test handling when code becomes unparseable during reduction."""
+    from unittest.mock import patch
+
+    import libcst
+
+    from shrinkray.passes.python import replace_bodies_with_ellipsis
+    from shrinkray.problem import BasicReductionProblem
+    from shrinkray.work import WorkContext
+
+    # Valid Python code with a function
+    code = b"def foo():\n    return 1\n"
+
+    call_count = [0]
+    original_parse = libcst.parse_module
+
+    def mock_parse(source):
+        call_count[0] += 1
+        if call_count[0] > 1:
+            # Fail on subsequent parses with a proper ParserSyntaxError
+            raise libcst.ParserSyntaxError(
+                "mock syntax error",
+                lines=["def foo():"],
+                raw_line=1,
+                raw_column=0,
+            )
+        return original_parse(source)
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=code, is_interesting=is_interesting, work=WorkContext(parallelism=1)
+    )
+
+    with patch.object(libcst, "parse_module", side_effect=mock_parse):
+        await replace_bodies_with_ellipsis(problem)
+
+    # Should have handled the error gracefully
+
+

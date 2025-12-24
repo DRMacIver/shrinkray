@@ -1255,6 +1255,53 @@ async def test_shrinkray_main_loop_with_pumps():
     assert loop_iterations[0] >= 2
 
 
+async def test_directory_shrinkray_shrink_values_uses_clang_delta():
+    """Test shrink_values passes clang_delta to ShrinkRay for C files.
+
+    This is a fast unit test that verifies the clang_delta assignment logic
+    (line 462) without running a full reduction.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
+
+    # Create a mock clang_delta
+    mock_cd = MagicMock()
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial={
+            "test.c": b"int main() { return 0; }",
+            "other.txt": b"not a c file",
+        },
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = DirectoryShrinkRay(target=problem, clang_delta=mock_cd)
+
+    # Track what clang_delta values are passed to ShrinkRay
+    created_shrinkrays = []
+    original_init = ShrinkRay.__init__
+
+    def tracking_init(self, *args, **kwargs):
+        created_shrinkrays.append(kwargs.get("clang_delta"))
+        original_init(self, *args, **kwargs)
+
+    # Mock ShrinkRay.run to return immediately
+    with patch.object(ShrinkRay, "__init__", tracking_init):
+        with patch.object(ShrinkRay, "run", AsyncMock()):
+            await reducer.shrink_values()
+
+    # Should have created two ShrinkRays: one with clang_delta (for .c), one without
+    assert len(created_shrinkrays) == 2
+    # One should be the mock clang_delta (for test.c)
+    assert mock_cd in created_shrinkrays
+    # One should be None (for other.txt)
+    assert None in created_shrinkrays
+
+
 @pytest.mark.slow
 async def test_directory_shrinkray_with_c_files():
     """Test DirectoryShrinkRay uses clang_delta for C files."""

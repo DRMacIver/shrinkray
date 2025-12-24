@@ -45,6 +45,7 @@ def test_short_deletions_can_delete_brackets() -> None:
 @example(b"")
 @example(b"\x00")
 @example(b"\x00\x00")
+@example(b"aaab")  # Triggers branch 103->102 (overlapping indices skipped)
 @given(st.binary())
 def test_ngram_endpoints(b):
     find_ngram_endpoints(b)

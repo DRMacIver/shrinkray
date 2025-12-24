@@ -298,10 +298,7 @@ async def test_pump_handles_query_instances_error():
 
 
 async def test_pump_makes_progress_when_transformation_is_interesting():
-    """Test clang_delta_pump makes progress when transformations produce interesting results.
-
-    This tests lines 215-217: the code path after find_first_value succeeds.
-    """
+    """Test clang_delta_pump makes progress when transformations produce interesting results."""
     cd = ClangDelta(find_clang_delta())
     # Use rename-var which will rename variables
     pump = clang_delta_pump(cd, "rename-var")
@@ -321,3 +318,41 @@ async def test_pump_makes_progress_when_transformation_is_interesting():
     # The pump should have made some transformations
     # We just verify it runs without error
     assert result is not None
+
+
+async def test_pump_handles_clang_delta_error_during_find_first_value():
+    """Test pump handles ClangDeltaError raised during find_first_value.
+
+    This tests lines 213-220: when ClangDeltaError is raised during the apply
+    call inside can_apply, the pump catches it and returns the target.
+    """
+    from unittest.mock import patch
+
+    cd = ClangDelta(find_clang_delta())
+    pump = clang_delta_pump(cd, "rename-var")
+
+    # Source that has instances to transform
+    source = b"int longVariableName = 1; int main() { return longVariableName; }"
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        source, is_interesting, work=WorkContext(parallelism=1)
+    )
+
+    # First, let query_instances return 1 to enter the while loop
+    # Then, when apply_transformation is called inside can_apply,
+    # it will raise ClangDeltaError
+    call_count = [0]
+
+    async def mock_apply(*args, **kwargs):
+        call_count[0] += 1
+        # Raise on first call (inside can_apply during find_first_value)
+        raise ClangDeltaError(b"Test error during find_first_value")
+
+    with patch.object(cd, "apply_transformation", side_effect=mock_apply):
+        result = await pump(problem)
+
+    # Should return target without raising
+    assert result == source

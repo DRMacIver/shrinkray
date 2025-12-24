@@ -848,3 +848,111 @@ def test_subprocess_client_handle_error_response_integration(tmp_path):
             await client.close()
 
     asyncio.run(run())
+
+
+def test_subprocess_client_close_actually_kills_after_terminate_timeout():
+    """Test that close() calls kill() when terminate() doesn't work.
+
+    This tests lines 207-208 in client.py by patching asyncio.wait_for
+    to raise TimeoutError for the specific wait call.
+    """
+
+    async def run():
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        client = SubprocessClient()
+
+        # Create a mock process
+        mock_process = MagicMock()
+        mock_process.returncode = None
+        mock_process.stdin = MagicMock()
+        mock_process.stdin.close = MagicMock()
+        mock_process.terminate = MagicMock()
+        mock_process.kill = MagicMock()
+
+        # Create a mock wait that returns immediately after kill
+        wait_calls = [0]
+
+        async def mock_wait():
+            wait_calls[0] += 1
+            # After kill is called, return immediately
+            mock_process.returncode = -9
+
+        mock_process.wait = mock_wait
+        client._process = mock_process
+        client._reader_task = None
+
+        # Patch asyncio.wait_for in the client module to raise TimeoutError
+        async def patched_wait_for(coro, *, timeout=None):
+            # Always cancel and raise TimeoutError to simulate timeout
+            coro.close()  # Clean up the coroutine
+            raise TimeoutError("Simulated timeout")
+
+        with patch(
+            "shrinkray.subprocess.client.asyncio.wait_for",
+            side_effect=patched_wait_for,
+        ):
+            await client.close()
+
+        # Verify terminate was called
+        assert mock_process.terminate.called
+
+        # Verify kill was called (this is lines 207-208)
+        assert mock_process.kill.called
+
+        # Verify wait was called at least once (after kill)
+        assert wait_calls[0] >= 1
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_handle_message_no_error():
+    """Test _handle_message when message has no error (78->85 branch).
+
+    This tests the case where we get an empty-id Response that's neither
+    a completion signal nor an error signal - we should just return without
+    setting completed or error_message.
+    """
+
+    async def run():
+        client = SubprocessClient()
+
+        # Create an empty-id Response with no error and no completion status
+        # This hits the 78->85 branch (falling through without setting anything)
+        msg_json = '{"id": "", "result": {"status": "running"}, "error": null}'
+
+        # This should handle the message without entering error path
+        await client._handle_message(msg_json)
+
+        # Should not set completed or error_message
+        assert not client._completed
+        assert client._error_message is None
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_handle_message_with_already_done_future():
+    """Test _handle_message when future is already done (83->82 branch)."""
+
+    async def run():
+        client = SubprocessClient()
+
+        # Add a future that's already done
+        future = asyncio.get_event_loop().create_future()
+        future.set_result("already done")
+        client._pending_responses["test-id"] = future
+
+        # Create a response with error (JSON string)
+        msg_json = '{"id": "", "error": "Test error", "result": null}'
+
+        # This should handle the error path but skip setting exception on done future
+        await client._handle_message(msg_json)
+
+        # Should be completed with error
+        assert client._completed
+        assert client._error_message == "Test error"
+
+        # The already-done future should not have been modified
+        assert future.result() == "already done"
+
+    asyncio.run(run())

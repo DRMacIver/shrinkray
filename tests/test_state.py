@@ -1601,3 +1601,234 @@ async def test_directory_cleanup_in_place_mode(tmp_path):
     # This should exercise the directory cleanup code
     exit_code = await state.run_for_exit_code({"a.txt": b"modified"})
     assert exit_code == 0
+
+
+# === Debug mode tests ===
+
+
+async def test_run_for_exit_code_debug_mode_timeout_on_first_call(tmp_path):
+    """Test timeout handling in debug mode on first call.
+
+    This covers lines 133-136 (timeout check in debug mode).
+    """
+    # Create a script that sleeps longer than the timeout
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nsleep 0.5\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=0.1,  # Very short timeout
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # First call in debug mode should raise TimeoutExceededOnInitial
+    with pytest.raises(TimeoutExceededOnInitial) as exc_info:
+        await state.run_for_exit_code(b"hello", debug=True)
+
+    assert exc_info.value.timeout == 0.1
+    assert exc_info.value.runtime >= 0.1
+    # first_call should be False after this
+    assert state.first_call is False
+
+
+async def test_run_for_exit_code_debug_mode_captures_stdout(tmp_path):
+    """Test that debug mode captures stdout output.
+
+    This covers line 148 (stdout capture in debug mode).
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\necho 'hello from stdout'\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Run in debug mode
+    exit_code = await state.run_for_exit_code(b"hello", debug=True)
+    assert exit_code == 0
+
+    # Check that stdout was captured
+    assert "hello from stdout" in state._last_debug_output
+
+
+async def test_run_for_exit_code_debug_mode_captures_stderr(tmp_path):
+    """Test that debug mode captures stderr output.
+
+    This covers line 150 (stderr capture in debug mode).
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\necho 'error from stderr' >&2\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Run in debug mode
+    exit_code = await state.run_for_exit_code(b"hello", debug=True)
+    assert exit_code == 0
+
+    # Check that stderr was captured
+    assert "error from stderr" in state._last_debug_output
+
+
+async def test_build_error_message_includes_debug_output(tmp_path):
+    """Test that build_error_message includes debug output.
+
+    This covers lines 374-375 and 394 (including debug output in error message).
+    """
+    from shrinkray.problem import InvalidInitialExample
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\necho 'diagnostic output' >&2\nexit 1")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # First, ensure first_call is set so we can trigger the right code path
+    state.first_call = False
+    state.initial_exit_code = 0
+
+    # Create an InvalidInitialExample exception
+    exc = InvalidInitialExample("Test error")
+
+    # Build the error message (this calls run_for_exit_code with debug=True internally)
+    error_message = await state.build_error_message(exc)
+
+    # The error message should include the captured debug output
+    assert "diagnostic output" in error_message
+
+
+async def test_build_error_message_includes_cwd_debug_output(tmp_path):
+    """Test build_error_message includes debug output from cwd run."""
+    import os
+
+    from shrinkray.problem import InvalidInitialExample
+
+    # Create a counter file to track call count
+    counter_file = tmp_path / ".call_count"
+    counter_file.write_text("0")
+
+    # Create a script that:
+    # Call 1: run_for_exit_code with debug=True (returns 1 to trigger lines 367-375)
+    # Call 2: run_script_on_file with debug=False from cwd (returns 0 to trigger line 381)
+    # Call 3: run_script_on_file with debug=True from cwd (produces output, line 394)
+    script = tmp_path / "test.sh"
+    script.write_text(
+        f"""#!/bin/bash
+COUNTER_FILE="{counter_file}"
+COUNT=$(cat "$COUNTER_FILE")
+COUNT=$((COUNT + 1))
+echo "$COUNT" > "$COUNTER_FILE"
+
+if [ "$COUNT" -eq 1 ]; then
+    # First call - return 1 to trigger error path
+    echo "first call output" >&2
+    exit 1
+elif [ "$COUNT" -eq 2 ]; then
+    # Second call (local check) - return 0
+    exit 0
+else
+    # Third call (debug run in cwd) - return 0 with output
+    echo "cwd debug output" >&2
+    exit 0
+fi
+"""
+    )
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+
+        state = ShrinkRayStateSingleFile(
+            input_type=InputType.arg,
+            in_place=False,
+            test=[str(script)],
+            filename=str(target),
+            timeout=5.0,
+            base="test.txt",
+            parallelism=1,
+            initial=b"hello",
+            formatter="none",
+            trivial_is_error=True,
+            seed=0,
+            volume=Volume.quiet,
+            clang_delta_executable=None,
+        )
+
+        state.first_call = False
+        state.initial_exit_code = 1
+
+        exc = InvalidInitialExample("Test error")
+        error_message = await state.build_error_message(exc)
+
+        # Should include debug output from the cwd run
+        assert "cwd debug output" in error_message
+    finally:
+        os.chdir(old_cwd)

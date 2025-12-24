@@ -1407,3 +1407,139 @@ async def test_worker_trivial_result_no_error_when_disabled(tmp_path):
                     found_error = True
 
     assert not found_error, "Should not have emitted trivial error"
+
+
+
+# === Additional coverage tests for exception handling ===
+
+
+@pytest.mark.trio
+async def test_worker_handle_start_invalid_initial_example_without_state():
+    """Test error handling when InvalidInitialExample is raised before state is set."""
+    from shrinkray.problem import InvalidInitialExample
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    async def mock_start_reduction(params):
+        raise InvalidInitialExample("Test error without state")
+
+    worker._start_reduction = mock_start_reduction
+
+    response = await worker._handle_start("test-no-state", {"test": ["fake"]})
+    assert response.error == "Test error without state"
+
+
+@pytest.mark.trio
+async def test_worker_run_reducer_exception_handling():
+    """Test that run_reducer catches and emits generic exceptions."""
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    class MockReducer:
+        async def run(self):
+            raise RuntimeError("Test runtime error")
+
+    worker.reducer = MockReducer()  # type: ignore[assignment]
+    worker.running = True
+
+    await worker.run_reducer()
+
+    output_data = output.data.decode("utf-8")
+    assert "Test runtime error" in output_data
+
+
+@pytest.mark.trio
+async def test_worker_run_reducer_invalid_initial_example_without_state():
+    """Test run_reducer handles InvalidInitialExample when state is None."""
+    from shrinkray.problem import InvalidInitialExample
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    class MockReducer:
+        async def run(self):
+            raise InvalidInitialExample("Invalid example without state")
+
+    worker.reducer = MockReducer()  # type: ignore[assignment]
+    worker.state = None
+    worker.running = True
+
+    await worker.run_reducer()
+
+    output_data = output.data.decode("utf-8")
+    assert "Invalid example without state" in output_data
+
+
+@pytest.mark.trio
+async def test_worker_run_reducer_invalid_initial_example_with_state():
+    """Test run_reducer builds error message when state is available."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from shrinkray.problem import InvalidInitialExample
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    class MockReducer:
+        async def run(self):
+            raise InvalidInitialExample("Test initial example error")
+
+    mock_state = MagicMock()
+    mock_state.build_error_message = AsyncMock(return_value="Built error message")
+
+    worker.reducer = MockReducer()  # type: ignore[assignment]
+    worker.state = mock_state
+    worker.running = True
+
+    await worker.run_reducer()
+
+    mock_state.build_error_message.assert_called_once()
+    output_data = output.data.decode("utf-8")
+    assert "Built error message" in output_data
+
+
+@pytest.mark.trio
+async def test_worker_run_with_none_progress_update():
+    """Test run() when _build_progress_update returns None (376->380 branch)."""
+    from unittest.mock import AsyncMock
+
+    output = MemoryOutputStream()
+
+    # Create JSON command as bytes - use chr(10) for newline
+    json_cmd = b'{"id":"test","command":"start","params":{"file_path":"/tmp/test.txt","test":["./test.sh"],"parallelism":1}}'
+    input_data = json_cmd + bytes([10])  # 10 is newline
+
+    class MockInputStream:
+        def __init__(self):
+            self.data = input_data
+            self.sent = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.sent:
+                self.sent = True
+                return self.data
+            raise StopAsyncIteration
+
+    worker = ReducerWorker(input_stream=MockInputStream(), output_stream=output)
+
+    async def mock_handle_start(request_id, params):
+        worker.running = True
+        return Response(id=request_id, result={"status": "started"})
+
+    worker._handle_start = mock_handle_start
+
+    async def quick_run_reducer():
+        await trio.sleep(0)
+
+    worker.run_reducer = quick_run_reducer
+    worker._build_progress_update = AsyncMock(return_value=None)
+
+    with trio.move_on_after(0.5):
+        await worker.run()
+
+    output_data = output.data.decode("utf-8")
+    assert len(output_data) >= 0

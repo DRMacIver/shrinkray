@@ -1557,7 +1557,7 @@ async def test_process_killed_on_timeout(tmp_path):
             break
 
     assert timeout_exc is not None
-    # The process should have been killed (line 142 executed)
+    # The process should have been killed via the timeout handler
 
 
 async def test_directory_cleanup_in_place_mode(tmp_path):
@@ -1765,9 +1765,9 @@ async def test_build_error_message_includes_cwd_debug_output(tmp_path):
     counter_file.write_text("0")
 
     # Create a script that:
-    # Call 1: run_for_exit_code with debug=True (returns 1 to trigger lines 367-375)
-    # Call 2: run_script_on_file with debug=False from cwd (returns 0 to trigger line 381)
-    # Call 3: run_script_on_file with debug=True from cwd (produces output, line 394)
+    # Call 1: run_for_exit_code with debug=True (returns 1 to trigger first-call failure path)
+    # Call 2: run_script_on_file with debug=False from cwd (returns 0 to trigger cwd success path)
+    # Call 3: run_script_on_file with debug=True from cwd (produces output for error message)
     script = tmp_path / "test.sh"
     script.write_text(
         f"""#!/bin/bash

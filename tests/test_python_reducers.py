@@ -194,7 +194,7 @@ def test_libcst_validation_error_handling():
     and handled gracefully.
     """
     # Code that when reduced might try to create invalid structures
-    # This tests the CSTValidationError exception handling (line 81)
+    # This exercises the CSTValidationError exception handling path
     code = b"""
 class A:
     def method(self):

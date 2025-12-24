@@ -131,7 +131,7 @@ async def test_interrupt_wait_and_kill_handles_process_lookup_error_on_sigkill()
     mock_sp.stderr = None
     mock_sp.stdin = None
 
-    # returncode is None initially, then None at line 37 check,
+    # returncode is None initially, then None at returncode check,
     # but process disappears before SIGKILL
     poll_returns = iter([None] * 11)  # All poll() calls return None
     mock_sp.poll.side_effect = lambda: next(poll_returns)
@@ -208,7 +208,7 @@ async def test_interrupt_wait_and_kill_skips_sigkill_if_process_exits_after_poll
     poll_loop_done = [False]
 
     # returncode: None during poll loop, 0 after (simulating process exiting
-    # after the loop but before the check at line 37)
+    # after the loop but before the returncode check)
     call_count = [0]
 
     def counting_poll():
@@ -238,5 +238,5 @@ async def test_interrupt_wait_and_kill_skips_sigkill_if_process_exits_after_poll
         await interrupt_wait_and_kill(mock_sp, delay=0.001)
 
     # SIGKILL should not have been sent since returncode became non-None
-    # after the poll loop, skipping the SIGKILL branch at line 37
+    # after the poll loop, skipping the SIGKILL branch
     assert not sigkill_sent[0]

@@ -736,7 +736,6 @@ def test_default_backup_filename_calculation(tmpdir, monkeypatch):
 
     # Track if os.remove was called with the default backup path
     removed_files = []
-    original_remove = os.remove
 
     def tracking_remove(path):
         removed_files.append(path)

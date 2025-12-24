@@ -150,13 +150,13 @@ class ShrinkRay(Reducer[bytes]):
             remove_indents,
             hollow,
             lift_braces,
-            delete_byte_spans,
             debracket,
         ]
     )
 
     ok_passes: list[ReductionPass[bytes]] = attrs.Factory(
         lambda: [
+            delete_byte_spans,
             compose(Split(b"\n"), block_deletion(11, 20)),
             remove_indents,
             remove_whitespace,
@@ -202,8 +202,8 @@ class ShrinkRay(Reducer[bytes]):
     ):
         if format.is_valid(self.target.current_test_case):
             composed = [compose(format, p) for p in passes]
-            self.great_passes[:0] = composed
-            self.initial_cuts[:0] = composed
+            self.great_passes.extend(composed)
+            self.initial_cuts.extend(composed)
 
     @property
     def pumps(self) -> Iterable[ReductionPump[bytes]]:

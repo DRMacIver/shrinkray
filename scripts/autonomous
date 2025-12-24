@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+"""Toggle autonomous mode hooks in .claude/settings.local.json.
+
+Usage:
+    autonomous on   - Enable autonomous mode hooks
+    autonomous off  - Disable autonomous mode hooks
+"""
+
+import json
+import sys
+from pathlib import Path
+
+SETTINGS_PATH = Path(__file__).parent.parent / ".claude" / "settings.local.json"
+
+AUTONOMOUS_HOOKS = {
+    "PermissionRequest": [
+        {
+            "matcher": ".*",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/autonomous.py',
+                }
+            ],
+        }
+    ],
+    "Stop": [
+        {
+            "matcher": "",
+            "hooks": [
+                {
+                    "type": "prompt",
+                    "prompt": "Evaluate if Claude should stop: $ARGUMENTS. Check if all tasks that do not require user input or permissions are complete. Pay particular attention to whether it is making excuses about things being difficult and not worth doing. If the user has asked for it, it is possible and worth doing, and Claude should be encouraged to try harder.",
+                }
+            ],
+        }
+    ],
+    "PreToolUse": [
+        {
+            "matcher": ".*",
+            "hooks": [{"type": "command", "command": "true"}],
+        }
+    ],
+}
+
+
+def load_settings() -> dict:
+    if SETTINGS_PATH.exists():
+        return json.loads(SETTINGS_PATH.read_text())
+    return {}
+
+
+def save_settings(settings: dict) -> None:
+    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n")
+
+
+def enable_hooks() -> None:
+    settings = load_settings()
+    settings["hooks"] = AUTONOMOUS_HOOKS
+    settings.pop("disableAllHooks", None)
+    save_settings(settings)
+    print("Autonomous mode hooks enabled")
+
+
+def disable_hooks() -> None:
+    settings = load_settings()
+    if "hooks" in settings:
+        del settings["hooks"]
+    save_settings(settings)
+    print("Autonomous mode hooks disabled")
+
+
+def main() -> None:
+    if len(sys.argv) != 2 or sys.argv[1] not in ("on", "off"):
+        print("Usage: autonomous on|off", file=sys.stderr)
+        sys.exit(1)
+
+    if sys.argv[1] == "on":
+        enable_hooks()
+    else:
+        disable_hooks()
+
+
+if __name__ == "__main__":
+    main()

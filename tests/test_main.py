@@ -310,6 +310,88 @@ def test_timeout_zero_sets_infinite(basic_shrink_target):
     assert result.exit_code == 0
 
 
+def test_parallelism_defaults_to_one_for_basename_inplace(tmpdir, monkeypatch):
+    """Fast test verifying parallelism=0 defaults to 1 with in_place + basename.
+
+    This test mocks the state creation to verify the parallelism value
+    without running a full reduction.
+    """
+    from unittest.mock import patch
+
+    monkeypatch.chdir(tmpdir)
+
+    target = tmpdir / "hello.txt"
+    target.write_text("hello world", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    script.chmod(0o777)
+
+    captured_parallelism = []
+
+    def mock_state_init(**kwargs):
+        captured_parallelism.append(kwargs.get("parallelism"))
+        raise SystemExit(0)
+
+    with patch("shrinkray.__main__.ShrinkRayStateSingleFile") as mock_state:
+        mock_state.side_effect = mock_state_init
+        runner = CliRunner(catch_exceptions=False)
+        try:
+            runner.invoke(
+                main,
+                [
+                    str(script),
+                    str(target),
+                    "--ui=basic",
+                    "--in-place",
+                    "--input-type=basename",
+                    "--parallelism=0",
+                ],
+            )
+        except SystemExit:
+            pass
+
+    # Verify parallelism was set to 1 (not cpu_count)
+    assert captured_parallelism == [1]
+
+
+def test_explicit_parallelism_skips_default_logic(tmpdir, monkeypatch):
+    """Test that explicit non-zero parallelism skips the default logic (235->241 branch)."""
+    from unittest.mock import patch
+
+    monkeypatch.chdir(tmpdir)
+
+    target = tmpdir / "hello.txt"
+    target.write_text("hello world", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    script.chmod(0o777)
+
+    captured_parallelism = []
+
+    def mock_state_init(**kwargs):
+        captured_parallelism.append(kwargs.get("parallelism"))
+        raise SystemExit(0)
+
+    with patch("shrinkray.__main__.ShrinkRayStateSingleFile") as mock_state:
+        mock_state.side_effect = mock_state_init
+        runner = CliRunner(catch_exceptions=False)
+        try:
+            runner.invoke(
+                main,
+                [
+                    str(script),
+                    str(target),
+                    "--ui=basic",
+                    "--parallelism=4",  # Explicit non-zero value
+                ],
+            )
+        except SystemExit:
+            pass
+
+    # Verify parallelism was kept as 4 (not modified by default logic)
+    assert captured_parallelism == [4]
+
+
 @pytest.mark.slow
 def test_in_place_basename_sets_parallelism_to_one(tmpdir, monkeypatch):
     """Test that in_place + basename with parallelism=0 defaults to 1."""

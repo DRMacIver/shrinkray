@@ -226,9 +226,10 @@ def test_normalize_identifiers_multiple():
 
 
 def test_normalize_identifiers_target_not_found():
-    """Test the continue branch when target is not in current source."""
-    # This tests line 235 - when a target identifier is no longer in the source
-    # after a previous replacement
+    """Test the continue branch when target is not in current source.
+
+    When a target identifier is no longer in the source after a previous replacement.
+    """
     result = reduce_with(
         [normalize_identifiers],
         b"abc ab abc",  # Both abc and ab are identifiers
@@ -279,9 +280,6 @@ def test_reduce_integer_early_termination():
     for early termination when lo + 1 is interesting. This happens when
     the search narrows down to where lo + 1 equals the minimum interesting value.
     """
-    # Test case: reduce 100 where only values >= 5 are interesting
-    # 0 is not interesting (so we enter the loop)
-    # Eventually lo becomes 4, and checking lo+1=5 returns True -> line 152
     result = reduce_with(
         [reduce_integer_literals],
         b"100",
@@ -338,9 +336,9 @@ def test_normalize_identifiers_all_letters_used():
 
 
 async def test_normalize_identifiers_target_disappears():
-    """Test line 235: when an identifier disappears before its turn in the loop.
+    """Test when an identifier disappears before its turn in the loop.
 
-    This tests the defensive continue statement when an identifier that was
+    Exercises the defensive continue statement when an identifier that was
     in the original source is no longer present when we try to process it.
     This can happen in concurrent scenarios or with modified problem classes.
     """

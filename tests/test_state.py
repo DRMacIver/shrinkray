@@ -709,7 +709,7 @@ async def test_run_for_exit_code_in_place_not_basename(tmp_path):
 async def test_report_error_non_timeout_rerun_fails(tmp_path, capsys):
     """Test report_error when initial test fails with non-zero exit.
 
-    This covers lines 324-333 where we rerun for debugging and the exit code is non-zero.
+    Exercises the debug rerun path where the script produces a non-zero exit code.
     """
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 1")  # Always fails
@@ -744,7 +744,7 @@ async def test_report_error_non_timeout_rerun_fails(tmp_path, capsys):
 async def test_report_error_cwd_dependent(tmp_path, capsys, monkeypatch):
     """Test report_error when test fails in temp dir but works locally.
 
-    This covers lines 339-359 where we detect cwd dependency.
+    Exercises the cwd dependency detection in report_error.
     """
     call_count = {"value": 0}
 
@@ -794,7 +794,7 @@ async def test_report_error_cwd_dependent(tmp_path, capsys, monkeypatch):
 async def test_print_exit_message_trivial_error(tmp_path, capsys):
     """Test print_exit_message when result is trivial and trivial_is_error=True.
 
-    This covers lines 450-460.
+    Exercises the trivial result error path in print_exit_message.
     """
     from unittest.mock import MagicMock
 
@@ -835,7 +835,7 @@ async def test_print_exit_message_trivial_error(tmp_path, capsys):
 async def test_print_exit_message_no_reduction(tmp_path, capsys):
     """Test print_exit_message when changes made but no bytes deleted.
 
-    This covers lines 474-475.
+    Exercises the 'no bytes deleted' message path in print_exit_message.
     """
     from unittest.mock import MagicMock
 
@@ -879,7 +879,7 @@ async def test_print_exit_message_no_reduction(tmp_path, capsys):
 async def test_run_script_on_file_nonexistent(tmp_path):
     """Test run_script_on_file raises when file doesn't exist.
 
-    This covers line 100.
+    Exercises the FileNotFoundError path in run_script_on_file.
     """
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")
@@ -916,7 +916,7 @@ async def test_run_script_on_file_nonexistent(tmp_path):
 async def test_check_formatter_failure(tmp_path, capsys):
     """Test check_formatter when formatter exits non-zero.
 
-    This covers lines 279-294.
+    Exercises the formatter failure path in check_formatter.
     """
     # Create a formatter that always fails
     formatter = tmp_path / "bad_formatter.sh"
@@ -955,7 +955,7 @@ async def test_check_formatter_failure(tmp_path, capsys):
 async def test_check_formatter_makes_uninteresting(tmp_path, capsys):
     """Test check_formatter when formatting makes test case uninteresting.
 
-    This covers lines 296-307.
+    Exercises the uninteresting-after-format path in check_formatter.
     """
     # Create a formatter that outputs different content
     formatter = tmp_path / "formatter.sh"
@@ -995,7 +995,7 @@ async def test_check_formatter_makes_uninteresting(tmp_path, capsys):
 async def test_default_formatter_fallback(tmp_path):
     """Test default formatter when no formatter command is determined.
 
-    This covers lines 407-409 (default_reformat_data fallback).
+    Exercises the default_reformat_data fallback path in format_data.
     """
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")
@@ -1031,7 +1031,7 @@ async def test_default_formatter_fallback(tmp_path):
 async def test_attempt_format_with_formatter(tmp_path):
     """Test attempt_format when can_format is True.
 
-    This covers lines 275-276 (can_format set to False on failure).
+    Exercises the can_format disabled path in attempt_format.
     """
     # Create a formatter that outputs something different
     formatter = tmp_path / "formatter.sh"
@@ -1075,7 +1075,7 @@ async def test_attempt_format_with_formatter(tmp_path):
 async def test_is_interesting_tracks_first_call_time(tmp_path):
     """Test that is_interesting sets first_call_time on first call.
 
-    This covers lines 256-263.
+    Exercises the first_call_time initialization in is_interesting.
     """
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")
@@ -1115,7 +1115,7 @@ async def test_is_interesting_tracks_first_call_time(tmp_path):
 async def test_print_exit_message_formatting_increase(tmp_path, capsys):
     """Test print_exit_message when formatting increases size.
 
-    This covers line 477 (formatting increase message).
+    Exercises the formatting increase message path in print_exit_message.
     """
     from unittest.mock import MagicMock
 
@@ -1162,7 +1162,7 @@ async def test_print_exit_message_formatting_increase(tmp_path, capsys):
 async def test_run_for_exit_code_in_place_basename(tmp_path):
     """Test run_for_exit_code in_place mode with basename input type.
 
-    This covers lines 166-169 (in_place with basename).
+    Exercises the in_place with basename input type path in run_for_exit_code.
     """
     import os
 
@@ -1205,7 +1205,7 @@ async def test_run_for_exit_code_in_place_basename(tmp_path):
 async def test_check_formatter_none(tmp_path):
     """Test check_formatter returns immediately when formatter is None.
 
-    This covers line 280 (early return when formatter_command is None).
+    Exercises the early return path in check_formatter when no formatter is set.
     """
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")
@@ -1238,7 +1238,7 @@ async def test_check_formatter_none(tmp_path):
 async def test_is_interesting_multiple_calls(tmp_path):
     """Test is_interesting when called multiple times (first_call_time already set).
 
-    This covers line 256->258 branch (first_call_time is not None).
+    Exercises the skip path in is_interesting when first_call_time is already set.
     """
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")
@@ -1278,11 +1278,8 @@ async def test_is_interesting_multiple_calls(tmp_path):
 async def test_report_error_flaky_test(tmp_path, capsys):
     """Test report_error when test is flaky (different exit codes).
 
-    This covers line 351 (flaky test message).
-    The flow to hit line 351:
-    1. run_for_exit_code (temp dir) -> non-zero (enters if exit_code != 0)
-    2. run_script_on_file (cwd) -> 0 (enters if local_exit_code == 0)
-    3. run_script_on_file (cwd) -> non-zero (different from local_exit_code = flaky)
+    Exercises the flaky test detection in report_error when the script
+    returns different exit codes on repeated runs.
     """
     # Create a script that returns different exit codes
     counter_file = tmp_path / "counter"
@@ -1341,10 +1338,8 @@ fi
 async def test_report_error_nondeterministic(tmp_path, capsys):
     """Test report_error when initial was non-zero but now exits 0.
 
-    This covers lines 362-363 (nondeterministic behavior message).
-    The flow to hit lines 362-363:
-    1. run_for_exit_code returns 0 (now succeeds)
-    2. initial_exit_code is not None and not 0 (previously failed)
+    Exercises the nondeterministic behavior detection in report_error when
+    the test now succeeds but previously failed.
     """
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")  # Always succeeds now
@@ -1384,7 +1379,7 @@ async def test_report_error_nondeterministic(tmp_path, capsys):
 async def test_print_exit_message_reformatted_is_interesting(tmp_path, capsys):
     """Test print_exit_message when reformatted result is interesting.
 
-    This covers lines 447-449 (reformatted is interesting, write to file).
+    Exercises the formatter application path in print_exit_message.
     """
     # Create a formatter that transforms content
     formatter = tmp_path / "formatter.sh"
@@ -1469,7 +1464,7 @@ async def test_check_formatter_reformatted_is_interesting(tmp_path):
 async def test_timeout_on_first_call(tmp_path):
     """Test that TimeoutExceededOnInitial is raised when first call exceeds timeout.
 
-    This covers lines 143-147 (timeout check on first call).
+    Exercises the timeout check on first call in run_for_exit_code.
     """
     # Create a script that sleeps longer than the timeout
     script = tmp_path / "test.sh"
@@ -1519,9 +1514,7 @@ async def test_timeout_on_first_call(tmp_path):
 async def test_process_killed_on_timeout(tmp_path):
     """Test that process is killed when it doesn't terminate before wait timeout.
 
-    This covers line 142 (the _interrupt_wait_and_kill call).
-    We need the process to exceed timeout*10 on first call so it doesn't finish
-    before the actual wait timeout expires.
+    Exercises the _interrupt_wait_and_kill call when the process exceeds timeout.
     """
     # Create a script that sleeps for 2 seconds
     script = tmp_path / "test.sh"
@@ -1570,7 +1563,7 @@ async def test_process_killed_on_timeout(tmp_path):
 async def test_directory_cleanup_in_place_mode(tmp_path):
     """Test directory cleanup in in_place mode.
 
-    This covers line 189 (shutil.rmtree for directory cleanup).
+    Exercises the shutil.rmtree cleanup path for directories in in_place mode.
     """
     # Create a script that creates a directory instead of file
     script = tmp_path / "test.sh"
@@ -1609,7 +1602,7 @@ async def test_directory_cleanup_in_place_mode(tmp_path):
 async def test_run_for_exit_code_debug_mode_timeout_on_first_call(tmp_path):
     """Test timeout handling in debug mode on first call.
 
-    This covers lines 133-136 (timeout check in debug mode).
+    Exercises the timeout check in debug mode.
     """
     # Create a script that sleeps longer than the timeout
     script = tmp_path / "test.sh"
@@ -1648,7 +1641,7 @@ async def test_run_for_exit_code_debug_mode_timeout_on_first_call(tmp_path):
 async def test_run_for_exit_code_debug_mode_captures_stdout(tmp_path):
     """Test that debug mode captures stdout output.
 
-    This covers line 148 (stdout capture in debug mode).
+    Exercises the stdout capture in debug mode.
     """
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\necho 'hello from stdout'\nexit 0")
@@ -1684,7 +1677,7 @@ async def test_run_for_exit_code_debug_mode_captures_stdout(tmp_path):
 async def test_run_for_exit_code_debug_mode_captures_stderr(tmp_path):
     """Test that debug mode captures stderr output.
 
-    This covers line 150 (stderr capture in debug mode).
+    Exercises the stderr capture in debug mode.
     """
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\necho 'error from stderr' >&2\nexit 0")
@@ -1720,7 +1713,7 @@ async def test_run_for_exit_code_debug_mode_captures_stderr(tmp_path):
 async def test_build_error_message_includes_debug_output(tmp_path):
     """Test that build_error_message includes debug output.
 
-    This covers lines 374-375 and 394 (including debug output in error message).
+    Exercises the debug output inclusion in build_error_message.
     """
     from shrinkray.problem import InvalidInitialExample
 

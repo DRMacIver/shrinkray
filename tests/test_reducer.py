@@ -631,10 +631,7 @@ async def test_directory_shrinkray_run_reduces_directory():
 
 
 def test_shrinkray_pumps_with_clang_delta():
-    """Test ShrinkRay.pumps returns clang_delta_pumps when clang_delta is set.
-
-    This covers line 205.
-    """
+    """Test ShrinkRay.pumps returns clang_delta_pumps when clang_delta is set."""
     from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
     from shrinkray.reducer import ShrinkRay
 
@@ -661,10 +658,7 @@ def test_shrinkray_pumps_with_clang_delta():
 
 
 def test_shrinkray_status_with_pass_no_pump():
-    """Test ShrinkRay status when pass is set but pump is not.
-
-    This covers line 211.
-    """
+    """Test ShrinkRay status when pass is set but pump is not."""
     from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
@@ -692,10 +686,7 @@ def test_shrinkray_status_with_pass_no_pump():
 
 
 def test_shrinkray_register_format_specific_pass():
-    """Test ShrinkRay.register_format_specific_pass adds passes for valid format.
-
-    This covers lines 196-198.
-    """
+    """Test ShrinkRay.register_format_specific_pass adds passes for valid format."""
     from shrinkray.passes.definitions import Format, ParseError
     from shrinkray.reducer import ShrinkRay
 
@@ -774,10 +765,7 @@ def test_shrinkray_register_format_specific_pass_invalid_format():
 
 
 async def test_shrinkray_pump_method():
-    """Test ShrinkRay.pump method runs pump and reduction passes.
-
-    This covers lines 229-249.
-    """
+    """Test ShrinkRay.pump method runs pump and reduction passes."""
     from shrinkray.reducer import ShrinkRay
 
     pump_called = [False]
@@ -817,10 +805,7 @@ async def test_shrinkray_pump_method():
 
 
 async def test_shrinkray_run_empty_is_interesting():
-    """Test ShrinkRay.run returns immediately if empty string is interesting.
-
-    This covers line 343.
-    """
+    """Test ShrinkRay.run returns immediately if empty string is interesting."""
     from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
@@ -841,10 +826,7 @@ async def test_shrinkray_run_empty_is_interesting():
 
 
 async def test_shrinkray_run_single_byte_interesting():
-    """Test ShrinkRay.run returns early if single byte is interesting.
-
-    This covers lines 347-351.
-    """
+    """Test ShrinkRay.run returns early if single byte is interesting."""
     from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
@@ -867,10 +849,7 @@ async def test_shrinkray_run_single_byte_interesting():
 
 
 async def test_shrinkray_run_single_byte_finds_smaller():
-    """Test ShrinkRay.run finds smaller single byte when possible.
-
-    This covers the inner loop in lines 348-350.
-    """
+    """Test ShrinkRay.run finds smaller single byte when possible."""
     from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
@@ -896,10 +875,7 @@ async def test_shrinkray_run_single_byte_finds_smaller():
 
 
 async def test_shrinkray_pump_no_change():
-    """Test ShrinkRay.pump returns early when pumped equals current.
-
-    This covers line 235 (pumped == current branch).
-    """
+    """Test ShrinkRay.pump returns early when pumped equals current."""
     from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
@@ -932,10 +908,7 @@ async def test_shrinkray_pump_no_change():
 
 
 async def test_basic_reducer_pump_changes_result():
-    """Test BasicReducer when pump produces different result that leads to reduction.
-
-    This covers the TRUE branch of line 103 (pumped != current_test_case).
-    """
+    """Test BasicReducer when pump produces different result that leads to reduction."""
 
     async def is_interesting(x):
         return True
@@ -975,10 +948,7 @@ async def test_basic_reducer_pump_changes_result():
 
 
 async def test_basic_reducer_pump_returns_same():
-    """Test BasicReducer when pump returns same value (no change).
-
-    This covers line 103->100 (pumped == current_test_case, skip if block).
-    """
+    """Test BasicReducer when pump returns same value (no change)."""
 
     async def is_interesting(x):
         return True
@@ -1023,10 +993,7 @@ async def test_basic_reducer_pump_returns_same():
 
 
 async def test_shrinkray_pump_early_break_on_improvement():
-    """Test ShrinkRay.pump breaks early when finding smaller result.
-
-    This covers line 246 (break when smaller found during pump).
-    """
+    """Test ShrinkRay.pump breaks early when finding smaller result."""
     from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
@@ -1074,10 +1041,7 @@ async def test_shrinkray_pump_early_break_on_improvement():
 
 
 async def test_shrinkray_great_passes_no_reduction():
-    """Test ShrinkRay.run_great_passes resets to all passes when none reduce.
-
-    This covers line 267 (current = self.great_passes when no successful passes).
-    """
+    """Test ShrinkRay.run_great_passes resets to all passes when none reduce."""
     from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
@@ -1111,7 +1075,6 @@ async def test_shrinkray_great_passes_no_reduction():
 async def test_shrinkray_great_passes_change_without_size_reduction():
     """Test run_great_passes when test case changes but no pass reduces size.
 
-    This covers line 267 (elif not successful: current = self.great_passes).
     The condition is: test case changed, but no individual pass reduced size.
     This can happen if a pass changes content to lexicographically smaller but same size.
     """
@@ -1149,10 +1112,7 @@ async def test_shrinkray_great_passes_change_without_size_reduction():
 
 
 async def test_shrinkray_ok_passes_make_progress():
-    """Test ShrinkRay.run_some_passes returns after ok_passes when they make progress.
-
-    This covers line 287 (return after ok_passes when prev != current).
-    """
+    """Test ShrinkRay.run_some_passes returns after ok_passes when they make progress."""
     from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
@@ -1193,11 +1153,7 @@ async def test_shrinkray_ok_passes_make_progress():
 
 
 async def test_shrinkray_main_loop_with_pumps():
-    """Test ShrinkRay.run main loop calls pumps and continues on progress.
-
-    This covers lines 364-365 (pump call and continue branch in main loop).
-    The continue at line 365->358 happens when pump changes test case.
-    """
+    """Test ShrinkRay.run main loop calls pumps and continues on progress."""
     from shrinkray.reducer import ShrinkRay
 
     call_log = []
@@ -1259,7 +1215,7 @@ async def test_directory_shrinkray_shrink_values_uses_clang_delta():
     """Test shrink_values passes clang_delta to ShrinkRay for C files.
 
     This is a fast unit test that verifies the clang_delta assignment logic
-    (line 462) without running a full reduction.
+    without running a full reduction.
     """
     from unittest.mock import AsyncMock, MagicMock, patch
 

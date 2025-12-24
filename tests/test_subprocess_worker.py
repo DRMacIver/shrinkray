@@ -598,7 +598,7 @@ async def test_worker_handle_start_error(tmp_path):
 
 
 async def test_stdout_stream_send():
-    """Test StdoutStream wrapper class (lines 37-38)."""
+    """Test StdoutStream wrapper class sends data to stdout."""
     from shrinkray.subprocess.worker import StdoutStream
 
     output = io.StringIO()
@@ -611,7 +611,7 @@ async def test_stdout_stream_send():
 
 
 async def test_worker_read_commands_empty_lines():
-    """Test read_commands handles empty lines between commands (line 92->90)."""
+    """Test read_commands handles empty lines between commands."""
     # Create commands with empty line between them
     req1 = Request(id="a", command="status", params={})
     req2 = Request(id="b", command="status", params={})
@@ -630,7 +630,7 @@ async def test_worker_read_commands_empty_lines():
 
 
 async def test_worker_emit_progress_updates_no_problem():
-    """Test emit_progress_updates continues when problem is None (line 266)."""
+    """Test emit_progress_updates continues when problem is None."""
     output = MemoryOutputStream()
     worker = ReducerWorker(output_stream=output)
     worker.running = True
@@ -650,7 +650,7 @@ async def test_worker_emit_progress_updates_no_problem():
 
 
 async def test_worker_emit_progress_updates_no_parallel_attr():
-    """Test emit_progress_updates handles state without parallel_tasks_running (line 272->278)."""
+    """Test emit_progress_updates handles state without parallel_tasks_running attribute."""
     output = MemoryOutputStream()
     worker = ReducerWorker(output_stream=output)
     worker.running = True
@@ -693,7 +693,7 @@ async def test_worker_emit_progress_updates_no_parallel_attr():
 
 
 async def test_worker_emit_progress_updates_zero_samples():
-    """Test emit_progress_updates with zero parallel samples (line 280->289)."""
+    """Test emit_progress_updates with zero parallel samples."""
     output = MemoryOutputStream()
     worker = ReducerWorker(output_stream=output)
     worker.running = True
@@ -738,7 +738,7 @@ async def test_worker_emit_progress_updates_zero_samples():
 
 
 def test_worker_get_content_preview_decode_exception():
-    """Test _get_content_preview handles decode exceptions (lines 258-259)."""
+    """Test _get_content_preview handles decode exceptions gracefully."""
     worker = ReducerWorker()
 
     # Create a mock problem with real bytes but mock is_binary_string to return False
@@ -770,7 +770,7 @@ def test_worker_get_content_preview_decode_exception():
 
 
 async def test_worker_start_reduction_with_clang_delta(tmp_path):
-    """Test _start_reduction with a C file and clang_delta (lines 157-160)."""
+    """Test _start_reduction with a C file and clang_delta enabled."""
     from shrinkray.passes.clangdelta import find_clang_delta
 
     clang_delta_path = find_clang_delta()
@@ -810,7 +810,7 @@ async def test_worker_start_reduction_with_clang_delta(tmp_path):
 
 
 async def test_worker_full_run_with_mock(tmp_path):
-    """Test the full run() method (lines 322-335)."""
+    """Test the full run() method with mocked reducer."""
     # Create a test file
     target = tmp_path / "test.txt"
     target.write_text("hello world")
@@ -859,7 +859,7 @@ async def test_worker_full_run_with_mock(tmp_path):
 
 
 def test_worker_main_function():
-    """Test the main() function (lines 340-341)."""
+    """Test the main() function is callable."""
     from shrinkray.subprocess.worker import main
 
     # We can't easily test the actual main() since it blocks on trio.run
@@ -868,7 +868,7 @@ def test_worker_main_function():
 
 
 def test_worker_main_guard():
-    """Test that __name__ == '__main__' block exists (line 345)."""
+    """Test that the module has a main function."""
     # This is just to verify the module can be imported
     import shrinkray.subprocess.worker
 
@@ -877,7 +877,7 @@ def test_worker_main_guard():
 
 
 async def test_worker_run_waits_for_start(tmp_path):
-    """Test that run() waits for start command (line 327)."""
+    """Test that run() waits for start command before proceeding."""
     # Create a test file
     target = tmp_path / "test.txt"
     target.write_text("hello world")
@@ -940,7 +940,7 @@ async def test_worker_run_waits_for_start(tmp_path):
 
 
 async def test_worker_start_reduction_clang_delta_not_found(tmp_path):
-    """Test _start_reduction when find_clang_delta returns empty (line 157->159 false branch)."""
+    """Test _start_reduction when find_clang_delta returns empty string."""
     # Create a C file
     target = tmp_path / "test.c"
     target.write_text("int main() { return 0; }")
@@ -972,7 +972,7 @@ async def test_worker_start_reduction_clang_delta_not_found(tmp_path):
 
 
 async def test_worker_start_reduction_clang_delta_found(tmp_path):
-    """Test _start_reduction when find_clang_delta returns a path (lines 157->158->159->160)."""
+    """Test _start_reduction when find_clang_delta returns a path."""
     # Create a C file
     target = tmp_path / "test.c"
     target.write_text("int main() { return 0; }")
@@ -1006,7 +1006,7 @@ async def test_worker_start_reduction_clang_delta_found(tmp_path):
 
 
 async def test_worker_start_reduction_clang_delta_path_provided(tmp_path):
-    """Test _start_reduction when clang_delta path is provided directly (line 157->159)."""
+    """Test _start_reduction when clang_delta path is provided directly."""
     # Create a C file
     target = tmp_path / "test.c"
     target.write_text("int main() { return 0; }")
@@ -1038,7 +1038,7 @@ async def test_worker_start_reduction_clang_delta_path_provided(tmp_path):
 
 
 def test_worker_main_runs_trio():
-    """Test main() function creates worker and runs trio (lines 340-341)."""
+    """Test main() function creates worker and runs trio."""
     from shrinkray.subprocess.worker import main
 
     # Mock trio.run and ReducerWorker to verify the flow
@@ -1054,7 +1054,7 @@ def test_worker_main_runs_trio():
 
 
 async def test_worker_read_commands_uses_stdin_when_no_stream():
-    """Test read_commands uses stdin when no stream is provided (line 85)."""
+    """Test read_commands uses stdin when no stream is provided."""
     import os
 
     output = MemoryOutputStream()
@@ -1083,7 +1083,7 @@ async def test_worker_read_commands_uses_stdin_when_no_stream():
 
 
 def test_worker_main_module_entry_point():
-    """Test the __name__ == '__main__' guard (line 345)."""
+    """Test the __name__ == '__main__' guard."""
     import runpy
 
     # Mock trio.run to prevent it from actually running

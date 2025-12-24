@@ -243,7 +243,7 @@ def test_subprocess_client_read_output_returns_early_when_process_is_none():
 
 
 def test_subprocess_client_start_reduction():
-    """Test start_reduction method (lines 125-139)."""
+    """Test start_reduction method sends correct parameters."""
 
     async def run():
         async with SubprocessClient() as client:
@@ -267,7 +267,7 @@ def test_subprocess_client_start_reduction():
 
 
 def test_subprocess_client_handle_message_ignores_unmatched_response():
-    """Test that unmatched response IDs are ignored (lines 79->exit)."""
+    """Test that unmatched response IDs are ignored."""
 
     async def run():
         client = SubprocessClient()
@@ -284,7 +284,7 @@ def test_subprocess_client_handle_message_ignores_unmatched_response():
 
 
 def test_subprocess_client_handle_message_skips_already_done_future():
-    """Test that already-done futures are not set again (lines 81->exit, 74->73)."""
+    """Test that already-done futures are not set again."""
 
     async def run():
         client = SubprocessClient()
@@ -307,7 +307,7 @@ def test_subprocess_client_handle_message_skips_already_done_future():
 
 
 def test_subprocess_client_cancel_handles_send_command_exception():
-    """Test cancel handles exception from send_command (lines 151-154)."""
+    """Test cancel handles exception from send_command gracefully."""
 
     async def run():
         client = SubprocessClient()
@@ -333,7 +333,7 @@ def test_subprocess_client_cancel_handles_send_command_exception():
 
 @pytest.mark.slow
 def test_subprocess_client_get_progress_updates_timeout():
-    """Test get_progress_updates timeout handling (lines 159-163)."""
+    """Test get_progress_updates timeout handling in update loop."""
 
     async def run():
         client = SubprocessClient()
@@ -361,7 +361,7 @@ def test_subprocess_client_get_progress_updates_timeout():
 
 
 def test_subprocess_client_close_handles_stdin_exception():
-    """Test close handles exception when closing stdin (lines 183-184)."""
+    """Test close handles exception when closing stdin gracefully."""
 
     async def run():
         client = SubprocessClient()
@@ -462,7 +462,7 @@ def test_subprocess_client_close_handles_process_lookup_error():
 
 
 def test_subprocess_client_read_output_handles_exception():
-    """Test _read_output handles exception (line 57)."""
+    """Test _read_output handles connection exceptions gracefully."""
 
     async def run():
         from unittest.mock import MagicMock
@@ -485,7 +485,7 @@ def test_subprocess_client_read_output_handles_exception():
 
 
 def test_subprocess_client_handle_message_ignores_request_type():
-    """Test _handle_message ignores Request messages (line 68->exit)."""
+    """Test _handle_message ignores Request messages."""
 
     async def run():
         client = SubprocessClient()
@@ -500,7 +500,7 @@ def test_subprocess_client_handle_message_ignores_request_type():
 
 
 def test_subprocess_client_read_output_handles_empty_lines():
-    """Test _read_output handles empty lines between newlines (line 54->52)."""
+    """Test _read_output handles empty lines between newlines."""
 
     async def run():
         from unittest.mock import MagicMock
@@ -538,7 +538,7 @@ def test_subprocess_client_read_output_handles_empty_lines():
 
 
 def test_subprocess_client_send_command_exception_cleanup():
-    """Test send_command cleans up on exception (lines 106-108)."""
+    """Test send_command cleans up pending responses on exception."""
 
     async def run():
         client = SubprocessClient()
@@ -602,7 +602,7 @@ def test_subprocess_client_send_command_exception_cleanup():
 
 
 def test_subprocess_client_get_progress_updates_yields_update():
-    """Test get_progress_updates yields updates from queue (line 161)."""
+    """Test get_progress_updates yields updates from queue."""
 
     async def run():
         client = SubprocessClient()
@@ -655,7 +655,7 @@ def test_subprocess_client_get_progress_updates_yields_update():
 
 
 def test_subprocess_client_close_handles_no_stdin():
-    """Test close handles case where stdin is None (line 180->186)."""
+    """Test close handles case where stdin is None."""
 
     async def run():
         from unittest.mock import MagicMock
@@ -682,7 +682,7 @@ def test_subprocess_client_close_handles_no_stdin():
 
 
 def test_subprocess_client_start_reduction_without_parallelism():
-    """Test start_reduction without parallelism parameter (line 137->139)."""
+    """Test start_reduction without parallelism parameter uses None."""
 
     async def run():
         async with SubprocessClient() as client:
@@ -698,7 +698,7 @@ def test_subprocess_client_start_reduction_without_parallelism():
 
 
 def test_subprocess_client_completion_skips_already_done_futures():
-    """Test completion signal skips futures that are already done (line 74->73)."""
+    """Test completion signal skips futures that are already done."""
 
     async def run():
         client = SubprocessClient()
@@ -730,7 +730,7 @@ def test_subprocess_client_completion_skips_already_done_futures():
 
 
 def test_subprocess_client_send_command_exception_propagates():
-    """Test send_command propagates exception and cleans up (lines 106-108)."""
+    """Test send_command propagates exception and cleans up."""
 
     async def run():
         client = SubprocessClient()
@@ -854,8 +854,7 @@ def test_subprocess_client_handle_error_response_integration(tmp_path):
 def test_subprocess_client_close_actually_kills_after_terminate_timeout():
     """Test that close() calls kill() when terminate() doesn't work.
 
-    This tests lines 207-208 in client.py by patching asyncio.wait_for
-    to raise TimeoutError for the specific wait call.
+    Exercises the kill fallback path in close() when terminate times out.
     """
 
     async def run():
@@ -908,7 +907,7 @@ def test_subprocess_client_close_actually_kills_after_terminate_timeout():
 
 
 def test_subprocess_client_handle_message_no_error():
-    """Test _handle_message when message has no error (78->85 branch).
+    """Test _handle_message when message has no error.
 
     This tests the case where we get an empty-id Response that's neither
     a completion signal nor an error signal - we should just return without
@@ -919,7 +918,6 @@ def test_subprocess_client_handle_message_no_error():
         client = SubprocessClient()
 
         # Create an empty-id Response with no error and no completion status
-        # This hits the 78->85 branch (falling through without setting anything)
         msg_json = '{"id": "", "result": {"status": "running"}, "error": null}'
 
         # This should handle the message without entering error path
@@ -928,6 +926,44 @@ def test_subprocess_client_handle_message_no_error():
         # Should not set completed or error_message
         assert not client._completed
         assert client._error_message is None
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_get_progress_updates_timeout_continue():
+    """Test that get_progress_updates continues on timeout when waiting for updates.
+
+    This tests the timeout handling in the progress update loop - when no
+    update is available within the timeout, it should continue looping.
+    """
+    from unittest.mock import patch
+
+    async def run():
+        client = SubprocessClient()
+
+        timeout_count = [0]
+
+        # Mock wait_for to raise TimeoutError twice, then let completed be set
+        async def mock_wait_for(coro, *, timeout=None):
+            timeout_count[0] += 1
+            coro.close()  # Clean up the coroutine
+            if timeout_count[0] >= 2:
+                # After 2 timeouts, mark as completed
+                client._completed = True
+            raise TimeoutError("Simulated timeout")
+
+        with patch(
+            "shrinkray.subprocess.client.asyncio.wait_for",
+            side_effect=mock_wait_for,
+        ):
+            updates = []
+            async for update in client.get_progress_updates():
+                updates.append(update)
+
+        # Should have no updates (queue was never populated)
+        assert updates == []
+        # Should have hit the continue path at least once
+        assert timeout_count[0] >= 2
 
     asyncio.run(run())
 

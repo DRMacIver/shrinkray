@@ -291,7 +291,7 @@ def test_unit_propagator_propagation_chain():
 def test_union_find_components_with_singletons():
     """Test UnionFind.components with both merged and singleton elements.
 
-    This exercises line 485->484 (loop continues when component has len == 1).
+    Exercises the skip path in components() when a component has only one element.
     """
     from shrinkray.passes.sat import UnionFind
 
@@ -310,8 +310,7 @@ def test_union_find_components_with_singletons():
 def test_merge_literals_with_contradiction_detection():
     """Test merge_literals triggers Conflict on contradictory merge attempt.
 
-    This tries to trigger lines 328-329 where Inconsistent -> Conflict.
-    The Conflict exception is expected during reduction when patches conflict.
+    Exercises the Inconsistent->Conflict path in merge_literals.
     """
     from shrinkray.passes.sat import merge_literals
     from tests.helpers import reduce_with
@@ -332,7 +331,6 @@ def test_merge_literals_with_contradiction_detection():
 def test_unit_propagator_removes_negated_units_from_clauses():
     """Test UnitPropagator.propagated_clauses removes negated unit literals.
 
-    This covers line 455 where negated units are removed from clauses.
     When a unit [1] is propagated, any clause containing -1 should have
     that literal removed.
     """

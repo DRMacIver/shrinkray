@@ -524,7 +524,7 @@ async def test_apply_patches_partial_merge():
 
 
 async def test_apply_patches_conflict_in_initial_combine():
-    """Test when combining all patches at once raises Conflict (lines 212-213)."""
+    """Test when combining all patches at once raises Conflict."""
 
     class ConflictOnAllPatches(Cuts):
         def combine(self, *patches):
@@ -550,7 +550,7 @@ async def test_apply_patches_conflict_in_initial_combine():
 
 
 async def test_patch_applier_merge_finds_partial(capfd):
-    """Test merge logic when only some patches can be merged (lines 130, 137-138)."""
+    """Test merge logic when only some patches can be merged."""
     call_count = [0]
 
     async def is_interesting(x):
@@ -580,7 +580,7 @@ async def test_patch_applier_merge_finds_partial(capfd):
 
 
 async def test_patch_applier_patch_equals_current():
-    """Test when applying patch results in same as current (line 158)."""
+    """Test when applying patch results in same as current."""
 
     async def is_interesting(x):
         return True
@@ -604,7 +604,7 @@ async def test_patch_applier_patch_equals_current():
 
 
 async def test_patch_applier_fast_path():
-    """Test the fast path in try_apply_patch (lines 175-176)."""
+    """Test the fast path in try_apply_patch for single patches."""
 
     async def is_interesting(x):
         return True
@@ -625,7 +625,7 @@ async def test_patch_applier_fast_path():
 
 
 async def test_merge_with_conflict_in_queue():
-    """Test merge when patches in queue conflict (lines 114-115)."""
+    """Test merge when patches in queue conflict."""
 
     class ConflictingPatches(Patches[frozenset[int], bytes]):
         @property
@@ -675,7 +675,7 @@ async def test_merge_with_conflict_in_queue():
 
 
 async def test_merge_patch_becomes_base():
-    """Test when attempted_patch equals base_patch after combine (line 117)."""
+    """Test when attempted_patch equals base_patch after combine."""
 
     async def is_interesting(x):
         return True
@@ -698,7 +698,7 @@ async def test_merge_patch_becomes_base():
 
 
 async def test_is_reduction_fails_in_merge(autojump_clock):
-    """Test when is_reduction returns False during merge (line 125)."""
+    """Test when is_reduction returns False during merge."""
 
     async def is_interesting(x):
         await trio.lowlevel.checkpoint()
@@ -728,7 +728,7 @@ async def test_is_reduction_fails_in_merge(autojump_clock):
 
 
 async def test_patch_applied_equals_problem_current():
-    """Test line 158: when applying patch to initial equals problem's current."""
+    """Test when applying patch to initial equals problem's current."""
     # Problem where current_test_case changes during patch application
 
     async def is_interesting(x):
@@ -752,7 +752,7 @@ async def test_patch_applied_equals_problem_current():
 
 
 async def test_merge_can_merge_k_greater_than_to_merge(autojump_clock):
-    """Test line 108: k > to_merge returns False in can_merge.
+    """Test can_merge returns False when k > number of patches to merge.
 
     This is called by find_large_integer which probes beyond to_merge.
     """
@@ -788,7 +788,7 @@ async def test_merge_can_merge_k_greater_than_to_merge(autojump_clock):
 
 
 async def test_can_merge_attempted_equals_base():
-    """Test line 117: when attempted_patch == base_patch after combine."""
+    """Test when attempted_patch == base_patch after combine."""
 
     async def is_interesting(x):
         return True
@@ -815,7 +815,7 @@ async def test_can_merge_attempted_equals_base():
 
 
 async def test_merge_empty_patches_equals_base(autojump_clock):
-    """Test line 117: empty patch in queue equals base after combine."""
+    """Test empty patch in queue equals base after combine."""
     call_count = [0]
 
     async def is_interesting(x):
@@ -843,7 +843,7 @@ async def test_merge_empty_patches_equals_base(autojump_clock):
 
 
 async def test_is_reduction_returns_false(autojump_clock):
-    """Test line 125: is_reduction returns False during merge."""
+    """Test is_reduction returns False during merge."""
     # is_interesting always True, but is_reduction will fail for larger results
     async def is_interesting(x):
         await trio.sleep(0.01)
@@ -876,12 +876,10 @@ async def test_is_reduction_returns_false(autojump_clock):
 
 
 async def test_find_large_integer_probes_beyond(autojump_clock):
-    """Test line 108: k > to_merge check in find_large_integer.
+    """Test find_large_integer probes beyond to_merge.
 
     find_large_integer probes k=1,2,3,4, then exponentially (5,10,20...).
-    For line 108, we need to_merge < k for some probed value.
-    If to_merge = 6 and can_merge(1-5) succeeds but can_merge(6) fails,
-    then find_large_integer will try k=10 which triggers k > to_merge.
+    When to_merge < k for some probed value, can_merge returns False.
     """
     # Accept merging up to 5 patches, but not 6
     async def is_interesting(x):
@@ -914,7 +912,7 @@ async def test_find_large_integer_probes_beyond(autojump_clock):
 
 
 async def test_empty_patch_equals_base_in_merge(autojump_clock):
-    """Test line 117: empty patch in queue means attempted == base."""
+    """Test empty patch in queue means attempted == base."""
 
     async def is_interesting(x):
         await trio.sleep(0.01)

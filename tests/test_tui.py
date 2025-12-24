@@ -449,9 +449,23 @@ class TestShrinkRayAppWithFakeClient:
         """Test that pressing 'q' cancels the reduction and quits."""
 
         async def run_test():
-            # Use enough updates to ensure reduction is still running when we press 'q'
-            # Each update takes 0.01s, so 50 updates = 0.5s runtime
-            fake_client = FakeReductionClient(updates=basic_updates * 50)
+            # Create a client that yields updates indefinitely until cancelled
+            class InfiniteUpdatesClient(FakeReductionClient):
+                async def get_progress_updates(self):
+                    i = 0
+                    while not self._cancelled:
+                        yield ProgressUpdate(
+                            status=f"Running step {i}",
+                            size=1000 - i,
+                            original_size=1000,
+                            calls=i,
+                            reductions=0,
+                        )
+                        i += 1
+                        await asyncio.sleep(0.01)
+                    self._completed = True
+
+            fake_client = InfiniteUpdatesClient(updates=[])
             app = ShrinkRayApp(
                 file_path="/tmp/test.txt",
                 test=["./test.sh"],
@@ -460,11 +474,11 @@ class TestShrinkRayAppWithFakeClient:
 
             async with app.run_test() as pilot:
                 # Wait for the reduction to start
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.05)
                 await pilot.pause()
                 await pilot.press("q")
                 # Wait for quit to be processed
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.05)
                 await pilot.pause()
 
                 # Client should have received cancel
@@ -1175,8 +1189,7 @@ class TestCoverageEdgeCases:
     def test_content_preview_diff_is_empty(self):
         """Test render when diff computation produces empty result.
 
-        This covers line 286->291 where if diff is empty, we fall through
-        to the truncated content display.
+        When the diff is empty, we fall through to the truncated content display.
         """
         widget = ContentPreview()
         # Set up content that appears different (to pass the != check)
@@ -1202,7 +1215,7 @@ class TestCoverageEdgeCases:
         assert "more lines" in result
 
     def test_cancel_exception_is_caught(self):
-        """Test that exceptions during cancel() are caught (lines 450-451)."""
+        """Test that exceptions during cancel() are caught gracefully."""
 
         class ExceptionOnCancelClient(FakeReductionClient):
             def __init__(self):

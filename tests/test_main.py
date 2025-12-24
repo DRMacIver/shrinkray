@@ -543,7 +543,7 @@ def test_default_backup_filename(basic_shrink_target):
 def test_directory_mode_with_basic_ui(tmp_path):
     """Test directory reduction with BasicUI via CliRunner.
 
-    This tests the directory mode path (lines 278-290) in __main__.py.
+    This exercises the directory handling code path in run_command.
     """
     target = tmp_path / "mydir"
     target.mkdir()
@@ -612,7 +612,7 @@ def test_custom_backup_filename(basic_shrink_target, tmp_path):
 def test_textual_ui_path(basic_shrink_target, monkeypatch):
     """Test that the textual UI path is exercised.
 
-    This tests lines 309-325 in __main__.py.
+    Exercises the textual UI code path in run_command.
     """
     from unittest.mock import MagicMock
 
@@ -638,7 +638,7 @@ def test_textual_ui_path(basic_shrink_target, monkeypatch):
 def test_keyboard_interrupt_handling(basic_shrink_target, tmp_path):
     """Test that KeyboardInterrupt is properly re-raised from ExceptionGroup.
 
-    This tests line 343 in __main__.py.
+    Exercises the KeyboardInterrupt handling in run_command.
     """
     from unittest.mock import patch
 
@@ -674,3 +674,222 @@ def test_keyboard_interrupt_handling(basic_shrink_target, tmp_path):
         # Should have raised KeyboardInterrupt
         if result.exception is not None:
             assert isinstance(result.exception, (KeyboardInterrupt, SystemExit))
+
+
+def test_timeout_zero_converts_to_infinity(tmpdir, monkeypatch):
+    """Fast test verifying timeout=0 is converted to infinity.
+
+    Exercises the timeout=0 to infinity conversion in run_command.
+    """
+    from unittest.mock import patch
+
+    monkeypatch.chdir(tmpdir)
+
+    target = tmpdir / "hello.txt"
+    target.write_text("hello world", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    script.chmod(0o777)
+
+    captured_timeout = []
+
+    def mock_state_init(**kwargs):
+        captured_timeout.append(kwargs.get("timeout"))
+        raise SystemExit(0)
+
+    with patch("shrinkray.__main__.ShrinkRayStateSingleFile") as mock_state:
+        mock_state.side_effect = mock_state_init
+        runner = CliRunner(catch_exceptions=False)
+        try:
+            runner.invoke(
+                main,
+                [
+                    str(script),
+                    str(target),
+                    "--ui=basic",
+                    "--timeout=0",
+                ],
+            )
+        except SystemExit:
+            pass
+
+    # Verify timeout was converted to infinity
+    assert len(captured_timeout) == 1
+    assert captured_timeout[0] == float("inf")
+
+
+def test_default_backup_filename_calculation(tmpdir, monkeypatch):
+    """Fast test verifying default backup filename is calculated correctly.
+
+    Exercises the default backup filename calculation in run_command.
+    """
+    import os
+    from unittest.mock import patch
+
+    monkeypatch.chdir(tmpdir)
+
+    target = tmpdir / "hello.txt"
+    target.write_text("hello world", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    script.chmod(0o777)
+
+    # Track if os.remove was called with the default backup path
+    removed_files = []
+    original_remove = os.remove
+
+    def tracking_remove(path):
+        removed_files.append(path)
+        # Don't actually remove, just raise FileNotFoundError like the code expects
+        raise FileNotFoundError()
+
+    def mock_state_init(**kwargs):
+        raise SystemExit(0)
+
+    with patch("shrinkray.__main__.ShrinkRayStateSingleFile") as mock_state:
+        mock_state.side_effect = mock_state_init
+        with patch("os.remove", tracking_remove):
+            runner = CliRunner(catch_exceptions=False)
+            try:
+                runner.invoke(
+                    main,
+                    [
+                        str(script),
+                        str(target),
+                        "--ui=basic",
+                        # Note: no --backup specified, so default should be used
+                    ],
+                )
+            except SystemExit:
+                pass
+
+    # Verify the default backup path was attempted to be removed
+    expected_backup = str(target) + os.extsep + "bak"
+    assert expected_backup in removed_files
+
+
+def test_custom_backup_path_is_used(tmpdir, monkeypatch):
+    """Fast test verifying custom backup path skips default backup calculation.
+
+    This tests the case when --backup is explicitly provided.
+    """
+    import os
+    from unittest.mock import patch
+
+    monkeypatch.chdir(tmpdir)
+
+    target = tmpdir / "hello.txt"
+    target.write_text("hello world", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    script.chmod(0o777)
+
+    custom_backup = str(tmpdir / "my_custom.bak")
+
+    # Track if os.remove was called with the custom backup path
+    removed_files = []
+
+    def tracking_remove(path):
+        removed_files.append(path)
+        raise FileNotFoundError()
+
+    def mock_state_init(**kwargs):
+        raise SystemExit(0)
+
+    with patch("shrinkray.__main__.ShrinkRayStateSingleFile") as mock_state:
+        mock_state.side_effect = mock_state_init
+        with patch("os.remove", tracking_remove):
+            runner = CliRunner(catch_exceptions=False)
+            try:
+                runner.invoke(
+                    main,
+                    [
+                        str(script),
+                        str(target),
+                        "--ui=basic",
+                        f"--backup={custom_backup}",
+                    ],
+                )
+            except SystemExit:
+                pass
+
+    # Verify the custom backup path was used, not the default
+    assert custom_backup in removed_files
+    default_backup = str(target) + os.extsep + "bak"
+    assert default_backup not in removed_files
+
+
+def test_directory_mode_setup(tmp_path, monkeypatch):
+    """Fast test verifying directory mode setup logic including check_formatter call.
+
+    This tests the directory mode initialization without running a full reduction.
+    """
+    import shutil
+    from unittest.mock import MagicMock, patch
+
+    # Create a test directory with files
+    target = tmp_path / "mydir"
+    target.mkdir()
+    (target / "a.txt").write_text("hello")
+    (target / "b.txt").write_text("world")
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    # Track what was passed to ShrinkRayDirectoryState
+    captured_initial = []
+    mock_state_instance = MagicMock()
+
+    def mock_dir_state_init(**kwargs):
+        captured_initial.append(kwargs.get("initial"))
+        return mock_state_instance
+
+    # Track copytree calls
+    copytree_calls = []
+    original_copytree = shutil.copytree
+
+    def tracking_copytree(src, dst, **kwargs):
+        copytree_calls.append((src, dst))
+        original_copytree(src, dst, **kwargs)
+
+    # Track trio.run calls
+    trio_run_calls = []
+
+    def mock_trio_run(coro):
+        trio_run_calls.append(coro)
+        # Exit after check_formatter is called
+        raise SystemExit(0)
+
+    with patch("shrinkray.__main__.ShrinkRayDirectoryState", side_effect=mock_dir_state_init):
+        with patch("shutil.copytree", tracking_copytree):
+            with patch("shrinkray.__main__.trio.run", mock_trio_run):
+                runner = CliRunner(catch_exceptions=False)
+                try:
+                    runner.invoke(
+                        main,
+                        [
+                            str(script),
+                            str(target),
+                            "--ui=basic",
+                            "--input-type=arg",
+                        ],
+                    )
+                except SystemExit:
+                    pass
+
+    # Verify copytree was called for backup
+    assert len(copytree_calls) == 1
+    assert copytree_calls[0][0] == str(target)
+
+    # Verify the initial dict was populated correctly
+    assert len(captured_initial) == 1
+    initial = captured_initial[0]
+    assert "a.txt" in initial
+    assert "b.txt" in initial
+    assert initial["a.txt"] == b"hello"
+    assert initial["b.txt"] == b"world"
+
+    # Verify trio.run was called with check_formatter
+    assert len(trio_run_calls) == 1
+    assert trio_run_calls[0] == mock_state_instance.check_formatter

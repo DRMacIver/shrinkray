@@ -231,7 +231,7 @@ def test_find_clang_delta_when_not_found_anywhere():
 async def test_query_instances_raises_clang_delta_error():
     """Test query_instances raises ClangDeltaError for non-assertion errors.
 
-    This tests line 133: raise ClangDeltaError(msg) when CalledProcessError
+    Exercises the ClangDeltaError path when CalledProcessError
     doesn't contain 'Assertion failed'.
     """
     import subprocess
@@ -252,7 +252,7 @@ async def test_query_instances_raises_clang_delta_error():
 async def test_apply_transformation_no_modification():
     """Test apply_transformation returns original when 'No modification' error.
 
-    This tests line 167: return data when the error message indicates no modification.
+    Exercises the no-modification fallback path in apply_transformation.
     """
     import subprocess
     from unittest.mock import patch
@@ -273,7 +273,7 @@ async def test_apply_transformation_no_modification():
 async def test_pump_handles_query_instances_error():
     """Test clang_delta_pump handles ClangDeltaError from query_instances.
 
-    This tests lines 190-191: ClangDeltaError during query_instances returns target.
+    Exercises the error handling path when query_instances raises ClangDeltaError.
     """
     from unittest.mock import patch
 
@@ -323,8 +323,7 @@ async def test_pump_makes_progress_when_transformation_is_interesting():
 async def test_pump_handles_clang_delta_error_during_find_first_value():
     """Test pump handles ClangDeltaError raised during find_first_value.
 
-    This tests lines 213-220: when ClangDeltaError is raised during the apply
-    call inside can_apply, the pump catches it and returns the target.
+    Exercises the error handling when ClangDeltaError is raised during apply.
     """
     from unittest.mock import patch
 

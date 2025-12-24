@@ -1206,10 +1206,90 @@ def test_loop_with_empty_updates():
     This exercises the 433->440 branch where the iterator is immediately
     exhausted (no updates) and the loop exits without executing the body.
     """
+    from unittest.mock import AsyncMock, MagicMock
 
     async def run_test():
-        # Empty updates list - loop body never executes
-        fake_client = FakeReductionClient(updates=[])
+        # Create a mock client with an empty async generator
+        mock_client = MagicMock()
+        mock_client.start = AsyncMock()
+        mock_client.start_reduction = AsyncMock(
+            return_value=Response(id="start", result={"status": "started"})
+        )
+        mock_client.cancel = AsyncMock(
+            return_value=Response(id="cancel", result={"status": "cancelled"})
+        )
+        mock_client.close = AsyncMock()
+        mock_client.error_message = None
+        mock_client._completed = False
+
+        @property
+        def is_completed(self):
+            return self._completed
+
+        # Patch the is_completed property
+        type(mock_client).is_completed = is_completed
+
+        async def empty_updates():
+            # Async generator that yields nothing - just returns immediately
+            mock_client._completed = True
+            if False:
+                yield  # Make this an async generator but never yield
+
+        mock_client.get_progress_updates = empty_updates
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=mock_client,
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for completion
+            for _ in range(30):
+                await pilot.pause()
+                await asyncio.sleep(0.02)
+                if app.is_completed:
+                    break
+
+            assert app.is_completed
+
+    run_async(run_test())
+
+
+def test_loop_breaks_on_first_iteration():
+    """Test that the loop breaks immediately when is_completed is True.
+
+    This specifically exercises the break path where the loop body executes
+    once but is_completed is already True, triggering immediate break.
+    """
+
+    class AlreadyCompletedClient(FakeReductionClient):
+        """A client where is_completed is True from the start."""
+
+        def __init__(self):
+            super().__init__(updates=[])
+
+        async def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]:
+            # Mark as completed BEFORE yielding
+            self._completed = True
+            yield ProgressUpdate(
+                status="Done",
+                size=50,
+                original_size=100,
+                calls=1,
+                reductions=1,
+            )
+            # This second yield should never be reached due to break
+            yield ProgressUpdate(
+                status="Should not see this",
+                size=25,
+                original_size=100,
+                calls=2,
+                reductions=2,
+            )
+
+    async def run_test():
+        fake_client = AlreadyCompletedClient()
 
         app = ShrinkRayApp(
             file_path="/tmp/test.txt",
@@ -1218,15 +1298,12 @@ def test_loop_with_empty_updates():
         )
 
         async with app.run_test() as pilot:
-            # Wait for completion (should be immediate since no updates)
             for _ in range(20):
                 await pilot.pause()
                 await asyncio.sleep(0.02)
                 if app.is_completed:
                     break
 
-            # Should have completed without processing any updates
-            assert fake_client.is_completed
             assert app.is_completed
 
     run_async(run_test())
@@ -1571,3 +1648,26 @@ def test_run_textual_ui_exits_with_app_return_code():
                 )
 
             assert exc_info.value.code == 42
+
+
+def test_run_textual_ui_prints_validation_message(capsys):
+    """Test run_textual_ui prints validation message before validating."""
+    from unittest.mock import MagicMock, patch
+
+    from shrinkray.tui import run_textual_ui
+
+    async def mock_validate(*args, **kwargs):
+        return None
+
+    mock_app = MagicMock()
+    mock_app.return_code = None
+
+    with patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate):
+        with patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app):
+            run_textual_ui(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+            )
+
+    captured = capsys.readouterr()
+    assert "Validating initial example" in captured.out

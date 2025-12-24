@@ -541,6 +541,8 @@ def run_textual_ui(
     import asyncio
     import sys
 
+    print("Validating initial example...", flush=True)
+
     # Validate initial example before showing TUI
     async def validate():
         return await _validate_initial_example(

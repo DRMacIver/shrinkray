@@ -38,6 +38,13 @@ class BasicUI(ShrinkRayUI[TestCase]):
     """Simple text-based UI for non-interactive use."""
 
     async def run(self, nursery: trio.Nursery):
+        initial = self.state.initial
+        size = self.state.problem.size
+        print(
+            f"Starting reduction. Initial test case size: "
+            f"{humanize.naturalsize(size(initial))}",
+            flush=True,
+        )
         prev_reduction = 0
         while True:
             initial = self.state.initial

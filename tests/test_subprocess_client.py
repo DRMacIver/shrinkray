@@ -1085,8 +1085,6 @@ def test_subprocess_client_does_not_deadlock_on_stderr(tmp_path):
         )
 
         # Patch SubprocessClient to use our blocking script instead of the worker
-        original_start = SubprocessClient.start
-
         async def patched_start(self):
             self._process = await asyncio.create_subprocess_exec(
                 sys.executable,

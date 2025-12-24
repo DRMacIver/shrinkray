@@ -100,12 +100,17 @@ grep -rn "covers line\|tests line\|at line" tests/ --include="*.py"
 
 ### 6. Test Quality Review
 
-Run the sampling script to select tests for review:
+First, review any tests modified during this session. Use git to identify them:
 ```bash
-uv run python scripts/sample-tests.py --count 10
+git diff --name-only HEAD~1 | grep "^tests/test_" || echo "No test files changed"
 ```
 
-Then review each sampled test plus any tests changed in this session for:
+Then run the sampling script to select additional tests for review:
+```bash
+uv run python scripts/sample-tests.py --count 10 --changed
+```
+
+Review all modified tests AND the random sample for:
 
 **Comprehensibility:**
 - [ ] Test name clearly describes what's being tested

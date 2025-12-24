@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+import traceback
 from typing import Any, Protocol
 
 import trio
@@ -127,15 +128,18 @@ class ReducerWorker:
         try:
             await self._start_reduction(params)
             return Response(id=request_id, result={"status": "started"})
-        except InvalidInitialExample as e:
+        except* InvalidInitialExample as excs:
+            assert len(excs.exceptions) == 1
+            (e,) = excs.exceptions
             # Build a detailed error message for invalid initial examples
             if self.state is not None:
                 error_message = await self.state.build_error_message(e)
             else:
                 error_message = str(e)
-            return Response(id=request_id, error=error_message)
-        except Exception as e:
-            return Response(id=request_id, error=str(e))
+        except* Exception as e:
+            traceback.print_exc()
+            error_message = str(e.exceptions[0])
+        return Response(id=request_id, error=error_message)
 
     async def _start_reduction(self, params: dict) -> None:
         """Initialize and start the reduction."""
@@ -145,7 +149,10 @@ class ReducerWorker:
             ClangDelta,
             find_clang_delta,
         )
-        from shrinkray.state import ShrinkRayDirectoryState, ShrinkRayStateSingleFile
+        from shrinkray.state import (
+            ShrinkRayDirectoryState,
+            ShrinkRayStateSingleFile,
+        )
         from shrinkray.work import Volume
 
         filename = params["file_path"]
@@ -342,16 +349,18 @@ class ReducerWorker:
                 trivial_error = self.state.check_trivial_result(self.problem)
                 if trivial_error:
                     await self.emit(Response(id="", error=trivial_error))
-        except InvalidInitialExample as e:
+        except* InvalidInitialExample as excs:
+            assert len(excs.exceptions) == 1
+            (e,) = excs.exceptions
             # Build a detailed error message for invalid initial examples
             if self.state is not None:
                 error_message = await self.state.build_error_message(e)
             else:
                 error_message = str(e)
             await self.emit(Response(id="", error=error_message))
-        except Exception as e:
+        except* Exception as e:
             # Catch any other exception during reduction and emit as error
-            await self.emit(Response(id="", error=str(e)))
+            await self.emit(Response(id="", error=str(e.exceptions[0])))
         finally:
             self._cancel_scope = None
             self.running = False

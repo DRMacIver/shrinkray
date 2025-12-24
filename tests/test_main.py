@@ -489,9 +489,7 @@ def test_clang_delta_not_found_error(tmp_path, monkeypatch):
     def mock_find_clang_delta():
         return ""
 
-    monkeypatch.setattr(
-        "shrinkray.__main__.find_clang_delta", mock_find_clang_delta
-    )
+    monkeypatch.setattr("shrinkray.__main__.find_clang_delta", mock_find_clang_delta)
 
     runner = CliRunner(catch_exceptions=False)
     result = runner.invoke(
@@ -1010,3 +1008,138 @@ exit 0
     combined_output = result.stdout + result.stderr
     assert "Shrink ray cannot proceed" in combined_output
     assert "exceeding your timeout setting" in combined_output
+
+
+@pytest.mark.slow
+def test_invalid_initial_shows_error_message_basic(tmp_path):
+    """Test that when the initial test case is invalid, basic UI shows a user-friendly error."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Script that always fails
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 1\n")
+    script.chmod(0o755)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "shrinkray",
+            str(script),
+            str(target),
+            "--ui=basic",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "Shrink ray cannot proceed" in result.stderr
+    assert "uninteresting test case" in result.stderr
+
+
+@pytest.mark.slow
+def test_invalid_initial_shows_error_message_tui(tmp_path):
+    """Test that when the initial test case is invalid, TUI shows a user-friendly error."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Script that always fails
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 1\n")
+    script.chmod(0o755)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "shrinkray",
+            str(script),
+            str(target),
+            "--ui=textual",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    combined_output = result.stdout + result.stderr
+    assert "Shrink ray cannot proceed" in combined_output
+    assert "uninteresting test case" in combined_output
+
+
+@pytest.mark.slow
+def test_script_depends_on_cwd_shows_error_tui(tmp_path):
+    """Test that TUI shows helpful error when script depends on current directory."""
+    target = tmp_path / "hello.txt"
+    target.write_text("hello world")
+
+    # Script that only works when run from a specific directory
+    script = tmp_path / "test.py"
+    script.write_text(
+        f"""#!/usr/bin/env {sys.executable}
+import sys
+# Only succeed if the argument is the exact original path
+if sys.argv[1] != {repr(str(target))}:
+    sys.exit(1)
+sys.exit(0)
+"""
+    )
+    script.chmod(0o755)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "shrinkray",
+            str(script),
+            str(target),
+            "--ui=textual",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    combined_output = result.stdout + result.stderr
+    assert "your script depends" in combined_output.lower()
+
+
+@pytest.mark.slow
+def test_prints_script_output_on_error_tui(tmp_path):
+    """Test that TUI shows script output when initial test case fails."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Script that prints output and fails
+    script = tmp_path / "test.py"
+    script.write_text(
+        f"""#!/usr/bin/env {sys.executable}
+import sys
+print("Debug output from failing script")
+sys.exit(1)
+"""
+    )
+    script.chmod(0o755)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "shrinkray",
+            str(script),
+            str(target),
+            "--ui=textual",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    combined_output = result.stdout + result.stderr
+    assert "Debug output from failing script" in combined_output

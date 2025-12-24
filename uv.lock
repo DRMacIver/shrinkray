@@ -759,6 +759,7 @@ requires-dist = [
     { name = "black" },
     { name = "chardet", specifier = ">=5.2.0" },
     { name = "click", specifier = ">=8.0.1" },
+    { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.13.0" },
     { name = "coverage", extras = ["toml"], marker = "extra == 'dev'" },
     { name = "exceptiongroup", specifier = ">=1.2.0" },
     { name = "humanize", specifier = ">=4.9.0" },

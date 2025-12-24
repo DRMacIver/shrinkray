@@ -19,6 +19,8 @@ jobs:
         version: "latest"
     - name: Set up Python ${{ matrix.python-version }}
       run: uv python install ${{ matrix.python-version }}
+    - name: Pin Python version
+      run: uv python pin ${{ matrix.python-version }}
     - name: Install system dependencies
       run: |
         sudo apt-get update
@@ -40,6 +42,8 @@ jobs:
         version: "latest"
     - name: Set up Python 3.14
       run: uv python install 3.14
+    - name: Pin Python version
+      run: uv python pin 3.14
     - name: Install system dependencies
       run: |
         sudo apt-get update

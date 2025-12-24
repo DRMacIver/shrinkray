@@ -257,7 +257,9 @@ def test_clang_delta_works_when_returns_nonzero():
     with patch(
         "shrinkray.passes.clangdelta.find_clang_delta", return_value="/usr/bin/fake"
     ):
-        with patch("shrinkray.passes.clangdelta.subprocess.run", return_value=mock_result):
+        with patch(
+            "shrinkray.passes.clangdelta.subprocess.run", return_value=mock_result
+        ):
             assert clang_delta_works() is False
 
 

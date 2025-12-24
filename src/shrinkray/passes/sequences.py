@@ -28,7 +28,9 @@ def merged_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return list(map(tuple, normalized))  # type: ignore
 
 
-def with_deletions[Seq: Sequence[Any]](target: Seq, deletions: list[tuple[int, int]]) -> Seq:
+def with_deletions[Seq: Sequence[Any]](
+    target: Seq, deletions: list[tuple[int, int]]
+) -> Seq:
     result: list[Any] = []
     prev = 0
     total_deleted = 0

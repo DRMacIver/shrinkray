@@ -23,7 +23,6 @@ class SubprocessClient:
         self._pending_responses: dict[str, asyncio.Future[Response]] = {}
         self._progress_queue: asyncio.Queue[ProgressUpdate] = asyncio.Queue()
         self._reader_task: asyncio.Task | None = None
-        self._stderr_task: asyncio.Task | None = None
         self._completed = False
         self._error_message: str | None = None
         self._debug_mode = debug_mode
@@ -32,32 +31,15 @@ class SubprocessClient:
         """Launch the subprocess."""
         # In debug mode, inherit stderr so interestingness test output
         # goes directly to the parent process's stderr
-        stderr = None if self._debug_mode else asyncio.subprocess.PIPE
         self._process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
             "shrinkray.subprocess.worker",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=stderr,
+            stderr=sys.stderr,
         )
         self._reader_task = asyncio.create_task(self._read_output())
-        # Only drain stderr if we're capturing it
-        if not self._debug_mode:
-            self._stderr_task = asyncio.create_task(self._drain_stderr())
-
-    async def _drain_stderr(self) -> None:
-        """Read and discard stderr to prevent subprocess from blocking."""
-        if self._process is None or self._process.stderr is None:
-            return
-
-        while True:
-            try:
-                chunk = await self._process.stderr.read(4096)
-                if not chunk:
-                    break
-            except Exception:
-                break
 
     async def _read_output(self) -> None:
         """Read and dispatch messages from subprocess stdout."""
@@ -210,13 +192,6 @@ class SubprocessClient:
             self._reader_task.cancel()
             try:
                 await self._reader_task
-            except asyncio.CancelledError:
-                pass
-
-        if self._stderr_task is not None:
-            self._stderr_task.cancel()
-            try:
-                await self._stderr_task
             except asyncio.CancelledError:
                 pass
 

@@ -70,23 +70,17 @@ class ShrinkRayState[TestCase](ABC):
     _last_debug_output: str = ""
 
     def __attrs_post_init__(self):
-        self.is_interesting_limiter = trio.CapacityLimiter(
-            max(self.parallelism, 1)
-        )
+        self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
         self.setup_formatter()
 
     @abstractmethod
     def setup_formatter(self): ...
 
     @abstractmethod
-    def new_reducer(
-        self, problem: ReductionProblem[TestCase]
-    ) -> Reducer[TestCase]: ...
+    def new_reducer(self, problem: ReductionProblem[TestCase]) -> Reducer[TestCase]: ...
 
     @abstractmethod
-    async def write_test_case_to_file_impl(
-        self, working: str, test_case: TestCase
-    ): ...
+    async def write_test_case_to_file_impl(self, working: str, test_case: TestCase): ...
 
     async def write_test_case_to_file(self, working: str, test_case: TestCase):
         await self.write_test_case_to_file_impl(working, test_case)
@@ -148,13 +142,9 @@ class ShrinkRayState[TestCase](ABC):
             # Store captured output
             output_parts = []
             if completed.stdout:
-                output_parts.append(
-                    completed.stdout.decode("utf-8", errors="replace")
-                )
+                output_parts.append(completed.stdout.decode("utf-8", errors="replace"))
             if completed.stderr:
-                output_parts.append(
-                    completed.stderr.decode("utf-8", errors="replace")
-                )
+                output_parts.append(completed.stderr.decode("utf-8", errors="replace"))
             self._last_debug_output = "\n".join(output_parts).strip()
 
             return completed.returncode
@@ -172,9 +162,7 @@ class ShrinkRayState[TestCase](ABC):
         async with trio.open_nursery() as nursery:
 
             def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
-                return trio.run_process(
-                    command, **kwargs, task_status=task_status
-                )
+                return trio.run_process(command, **kwargs, task_status=task_status)
 
             start_time = time.time()
             sp = await nursery.start(call_with_kwargs)
@@ -206,9 +194,7 @@ class ShrinkRayState[TestCase](ABC):
 
             return result
 
-    async def run_for_exit_code(
-        self, test_case: TestCase, debug: bool = False
-    ) -> int:
+    async def run_for_exit_code(self, test_case: TestCase, debug: bool = False) -> int:
         # Lazy import
         if self._InputType is None:
             from shrinkray.cli import InputType
@@ -348,9 +334,9 @@ class ShrinkRayState[TestCase](ABC):
             )
             sys.exit(1)
         reformatted = formatter_result.stdout
-        if not await self.is_interesting(
-            reformatted
-        ) and await self.is_interesting(self.initial):
+        if not await self.is_interesting(reformatted) and await self.is_interesting(
+            self.initial
+        ):
             print(
                 "Formatting initial test case made it uninteresting. If this is expected, please run with --formatter=none.",
                 file=sys.stderr,
@@ -377,13 +363,9 @@ class ShrinkRayState[TestCase](ABC):
                 f"This is because your initial test case took {e.runtime:.2f}s "
                 f"exceeding your timeout setting of {self.timeout}."
             )
-            lines.append(
-                f"Try rerunning with --timeout={math.ceil(e.runtime * 2)}."
-            )
+            lines.append(f"Try rerunning with --timeout={math.ceil(e.runtime * 2)}.")
         else:
-            lines.append(
-                "Rerunning the interestingness test for debugging purposes..."
-            )
+            lines.append("Rerunning the interestingness test for debugging purposes...")
             exit_code = await self.run_for_exit_code(self.initial, debug=True)
             if exit_code != 0:
                 lines.append(
@@ -514,9 +496,7 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
             check=False,
         )
 
-    async def write_test_case_to_file_impl(
-        self, working: str, test_case: bytes
-    ):
+    async def write_test_case_to_file_impl(self, working: str, test_case: bytes):
         async with await trio.open_file(working, "wb") as o:
             await o.write(test_case)
 
@@ -605,9 +585,7 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
             async with await trio.open_file(f, "wb") as o:
                 await o.write(v)
 
-    async def format_data(
-        self, test_case: dict[str, bytes]
-    ) -> dict[str, bytes] | None:
+    async def format_data(self, test_case: dict[str, bytes]) -> dict[str, bytes] | None:
         # Formatting not supported for directory reduction
         return None
 

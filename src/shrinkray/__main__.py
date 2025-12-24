@@ -41,7 +41,9 @@ async def run_shrink_ray(
         problem = state.problem
         try:
             await problem.setup()
-        except InvalidInitialExample as e:
+        except* InvalidInitialExample as excs:
+            assert len(excs.exceptions) == 1
+            (e,) = excs.exceptions
             await state.report_error(e)
 
         reducer = state.reducer
@@ -198,9 +200,7 @@ This behaviour can be disabled by passing --trivial-is-not-error.
 @click.argument("test", callback=validate_command)
 @click.argument(
     "filename",
-    type=click.Path(
-        exists=True, resolve_path=False, dir_okay=True, allow_dash=False
-    ),
+    type=click.Path(exists=True, resolve_path=False, dir_okay=True, allow_dash=False),
 )
 def main(
     input_type: InputType,
@@ -241,10 +241,7 @@ def main(
             parallelism = os.cpu_count() or 1
 
     clang_delta_executable: ClangDelta | None = None
-    if (
-        os.path.splitext(filename)[1] in C_FILE_EXTENSIONS
-        and not no_clang_delta
-    ):
+    if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:
         if not clang_delta:
             clang_delta = find_clang_delta()
         if not clang_delta:
@@ -293,9 +290,7 @@ def main(
         shutil.rmtree(backup, ignore_errors=True)
         shutil.copytree(filename, backup)
 
-        files = [
-            os.path.join(d, f) for d, _, fs in os.walk(filename) for f in fs
-        ]
+        files = [os.path.join(d, f) for d, _, fs in os.walk(filename) for f in fs]
 
         initial = {}
         for f in files:

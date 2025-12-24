@@ -95,7 +95,14 @@ except AssertionError:
         )
     else:
         subprocess.check_call(
-            [sys.executable, "-m", "shrinkray", str(script), str(target), "--ui=basic"],
+            [
+                sys.executable,
+                "-m",
+                "shrinkray",
+                str(script),
+                str(target),
+                "--ui=basic",
+            ],
         )
 
     assert a.exists()
@@ -130,7 +137,14 @@ if sys.argv[1] != {repr(str(target))}:
 
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
         subprocess.run(
-            [sys.executable, "-m", "shrinkray", str(script), str(target), "--ui=basic"],
+            [
+                sys.executable,
+                "-m",
+                "shrinkray",
+                str(script),
+                str(target),
+                "--ui=basic",
+            ],
             check=True,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -159,7 +173,14 @@ sys.exit(1)
 
     with pytest.raises(subprocess.CalledProcessError) as excinfo:
         subprocess.run(
-            [sys.executable, "-m", "shrinkray", str(script), str(target), "--ui=basic"],
+            [
+                sys.executable,
+                "-m",
+                "shrinkray",
+                str(script),
+                str(target),
+                "--ui=basic",
+            ],
             check=True,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -468,7 +489,9 @@ def test_clang_delta_not_found_error(tmp_path, monkeypatch):
     def mock_find_clang_delta():
         return ""
 
-    monkeypatch.setattr("shrinkray.__main__.find_clang_delta", mock_find_clang_delta)
+    monkeypatch.setattr(
+        "shrinkray.__main__.find_clang_delta", mock_find_clang_delta
+    )
 
     runner = CliRunner(catch_exceptions=False)
     result = runner.invoke(
@@ -861,7 +884,8 @@ def test_directory_mode_setup(tmp_path, monkeypatch):
         raise SystemExit(0)
 
     with patch(
-        "shrinkray.__main__.ShrinkRayDirectoryState", side_effect=mock_dir_state_init
+        "shrinkray.__main__.ShrinkRayDirectoryState",
+        side_effect=mock_dir_state_init,
     ):
         with patch("shutil.copytree", tracking_copytree):
             with patch("shrinkray.__main__.trio.run", mock_trio_run):
@@ -894,3 +918,95 @@ def test_directory_mode_setup(tmp_path, monkeypatch):
     # Verify trio.run was called with check_formatter
     assert len(trio_run_calls) == 1
     assert trio_run_calls[0] == mock_state_instance.check_formatter
+
+
+@pytest.mark.slow
+def test_timeout_exceeded_on_initial_shows_error_message_basic(tmp_path):
+    """Test that when the initial test case exceeds the timeout, an appropriate error is shown.
+
+    This is an integration test that runs the full CLI and verifies the error message
+    is properly surfaced to the user with a user-friendly message (not a raw traceback).
+    """
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Script that sleeps longer than the timeout
+    script = tmp_path / "test.sh"
+    script.write_text(
+        """#!/bin/bash
+sleep 0.5
+exit 0
+"""
+    )
+    script.chmod(0o755)
+
+    # Run with a very short timeout (0.1 seconds)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "shrinkray",
+            str(script),
+            str(target),
+            "--ui=basic",
+            "--timeout=0.01",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    # Should fail
+    assert result.returncode != 0
+
+    # Should show user-friendly error message, not a raw traceback
+    # The message should contain the friendly error from report_error/build_error_message
+    assert "Shrink ray cannot proceed" in result.stderr
+    assert "exceeding your timeout setting" in result.stderr
+
+
+@pytest.mark.slow
+def test_timeout_exceeded_on_initial_shows_error_message_tui(tmp_path):
+    """Test that when the initial test case exceeds the timeout, the TUI shows an appropriate error.
+
+    This is an integration test that runs the full CLI with --ui=textual and verifies
+    the error message is properly surfaced to the user.
+    """
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Script that sleeps longer than the timeout
+    script = tmp_path / "test.sh"
+    script.write_text(
+        """#!/bin/bash
+sleep 0.5
+exit 0
+"""
+    )
+    script.chmod(0o755)
+
+    # Run with a very short timeout (0.01 seconds) and the textual UI
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "shrinkray",
+            str(script),
+            str(target),
+            "--ui=textual",
+            "--timeout=0.01",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    # Should fail
+    assert result.returncode != 0
+
+    # Should show user-friendly error message, not a raw traceback
+    # The message should contain the friendly error from build_error_message
+    # Check both stdout and stderr since TUI may output to either
+    combined_output = result.stdout + result.stderr
+    assert "Shrink ray cannot proceed" in combined_output
+    assert "exceeding your timeout setting" in combined_output

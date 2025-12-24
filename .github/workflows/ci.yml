@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
     - uses: actions/checkout@v6
     - name: Install uv
@@ -42,7 +42,27 @@ jobs:
         sudo apt-get install -y minisat creduce
     - name: Install Python dependencies
       run: uv sync --extra dev
-    - name: Run tests with coverage
-      run: uv run coverage run -m pytest tests/
+    - name: Run fast tests with coverage
+      run: uv run coverage run -m pytest tests/ -m "not slow"
     - name: Check coverage
       run: uv run coverage report
+
+  slow-tests:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+    - uses: actions/checkout@v6
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        version: "latest"
+    - name: Set up Python 3.14
+      run: uv python install 3.14
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y minisat creduce
+    - name: Install Python dependencies
+      run: uv sync --extra dev
+    - name: Run slow tests
+      run: uv run pytest tests/ -m slow

@@ -400,7 +400,8 @@ class ShrinkRayApp(App[None]):
         try:
             if self._client is None:
                 # No client provided - start one and begin reduction
-                self._client = SubprocessClient()
+                debug_mode = self._volume == "debug"
+                self._client = SubprocessClient(debug_mode=debug_mode)
                 self._owns_client = True
 
                 await self._client.start()
@@ -493,7 +494,8 @@ async def _validate_initial_example(
 
     Returns error_message if validation failed, None if it passed.
     """
-    client = SubprocessClient()
+    debug_mode = volume == "debug"
+    client = SubprocessClient(debug_mode=debug_mode)
     try:
         await client.start()
 

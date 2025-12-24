@@ -18,7 +18,7 @@ from shrinkray.subprocess.protocol import (
 class SubprocessClient:
     """Client for communicating with the reducer subprocess via JSON protocol."""
 
-    def __init__(self):
+    def __init__(self, debug_mode: bool = False):
         self._process: asyncio.subprocess.Process | None = None
         self._pending_responses: dict[str, asyncio.Future[Response]] = {}
         self._progress_queue: asyncio.Queue[ProgressUpdate] = asyncio.Queue()
@@ -26,19 +26,25 @@ class SubprocessClient:
         self._stderr_task: asyncio.Task | None = None
         self._completed = False
         self._error_message: str | None = None
+        self._debug_mode = debug_mode
 
     async def start(self) -> None:
         """Launch the subprocess."""
+        # In debug mode, inherit stderr so interestingness test output
+        # goes directly to the parent process's stderr
+        stderr = None if self._debug_mode else asyncio.subprocess.PIPE
         self._process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
             "shrinkray.subprocess.worker",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=stderr,
         )
         self._reader_task = asyncio.create_task(self._read_output())
-        self._stderr_task = asyncio.create_task(self._drain_stderr())
+        # Only drain stderr if we're capturing it
+        if not self._debug_mode:
+            self._stderr_task = asyncio.create_task(self._drain_stderr())
 
     async def _drain_stderr(self) -> None:
         """Read and discard stderr to prevent subprocess from blocking."""

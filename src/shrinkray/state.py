@@ -152,9 +152,15 @@ class ShrinkRayState(Generic[TestCase], ABC):
 
             return completed.returncode
 
-        # Non-debug mode: use nursery pattern for timeout handling
-        kwargs["stdout"] = subprocess.DEVNULL
-        kwargs["stderr"] = subprocess.DEVNULL
+        # Check if we should stream output to stderr (volume=debug)
+        if self.volume == Volume.debug:
+            # Inherit stderr from parent process to stream output in real-time
+            kwargs["stderr"] = None  # None means inherit
+            kwargs["stdout"] = subprocess.DEVNULL
+        else:
+            # Non-debug mode: discard all output
+            kwargs["stdout"] = subprocess.DEVNULL
+            kwargs["stderr"] = subprocess.DEVNULL
 
         async with trio.open_nursery() as nursery:
 

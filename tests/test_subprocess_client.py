@@ -1115,3 +1115,44 @@ def test_subprocess_client_does_not_deadlock_on_stderr(tmp_path):
                 await client.close()
 
     asyncio.run(run())
+
+
+def test_subprocess_client_debug_mode_inherits_stderr():
+    """Test that debug_mode=True causes subprocess to inherit stderr."""
+
+    async def run():
+        # When debug_mode=True, stderr should be None (inherit) not PIPE
+        client = SubprocessClient(debug_mode=True)
+        assert client._debug_mode is True
+
+        # We can't easily test the actual subprocess creation without
+        # running a full subprocess, but we can verify the flag is stored
+        # and that _stderr_task won't be created in debug mode
+
+        # Start and immediately close
+        await client.start()
+
+        # In debug mode, _stderr_task should be None (not started)
+        assert client._stderr_task is None
+
+        await client.close()
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_normal_mode_captures_stderr():
+    """Test that debug_mode=False (default) causes subprocess to capture stderr."""
+
+    async def run():
+        # Default mode: stderr should be captured (PIPE)
+        client = SubprocessClient()  # debug_mode defaults to False
+        assert client._debug_mode is False
+
+        await client.start()
+
+        # In normal mode, _stderr_task should be created
+        assert client._stderr_task is not None
+
+        await client.close()
+
+    asyncio.run(run())

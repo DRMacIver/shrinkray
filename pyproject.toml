@@ -56,6 +56,8 @@ source = ["src", "*/site-packages"]
 [tool.coverage.run]
 branch = true
 source = ["shrinkray"]
+# Use ctrace core instead of sysmon to avoid Python 3.14 async for branch bug
+core = "ctrace"
 
 [tool.coverage.report]
 show_missing = true

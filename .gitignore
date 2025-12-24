@@ -13,4 +13,6 @@ __pycache__/
 .vscode
 scratch
 .venv*
-.claude
+# Claude Code - ignore settings but keep commands
+.claude/*
+!.claude/commands/

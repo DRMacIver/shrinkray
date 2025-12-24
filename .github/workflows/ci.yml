@@ -6,6 +6,23 @@ on:
     branches: [ main ]
 
 jobs:
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+    - name: Set up Python
+      run: uv python install 3.13
+    - name: Install dependencies
+      run: uv sync --extra dev
+    - name: Run ruff check
+      run: uv run ruff check src tests
+    - name: Run type checking
+      run: uv run basedpyright src tests
+
   test:
     runs-on: ubuntu-22.04
     strategy:

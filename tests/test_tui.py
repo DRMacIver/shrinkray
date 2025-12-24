@@ -1200,6 +1200,38 @@ def test_client_completed_breaks_loop():
     run_async(run_test())
 
 
+def test_loop_with_empty_updates():
+    """Test that the async for loop handles empty update iterator.
+
+    This exercises the 433->440 branch where the iterator is immediately
+    exhausted (no updates) and the loop exits without executing the body.
+    """
+
+    async def run_test():
+        # Empty updates list - loop body never executes
+        fake_client = FakeReductionClient(updates=[])
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for completion (should be immediate since no updates)
+            for _ in range(20):
+                await pilot.pause()
+                await asyncio.sleep(0.02)
+                if app.is_completed:
+                    break
+
+            # Should have completed without processing any updates
+            assert fake_client.is_completed
+            assert app.is_completed
+
+    run_async(run_test())
+
+
 # === Coverage edge cases ===
 
 

@@ -183,8 +183,18 @@ Main Process (asyncio/textual)     Subprocess (trio)
 ### Test Organization
 - **Use module-level functions, not classes** - Write tests as `def test_something():` at module level, not inside `class TestSomething:`. Group related tests using section comments instead of classes.
 - Group related tests with section comments (e.g., `# === View tests ===`)
-- Keep tests fast (< 5 seconds each, ideally much less)
+- Keep tests fast (< 500ms each, ideally much less)
 - Test edge cases explicitly with meaningful test names
+
+### Slow Tests
+- **Mark genuinely slow tests with `@pytest.mark.slow`** - Tests that inherently require waiting (timeouts, full reductions, integration tests) should be marked as slow
+- **By default, `just test` skips slow tests** - This keeps the feedback loop fast during development
+- **Run `just test -m ""` to run all tests including slow ones** - Use this before committing or in CI
+- **Maintain 100% coverage from non-slow tests** - If a slow test provides unique coverage, either:
+  1. Add a fast test that covers the same code path differently
+  2. Accept the test as non-slow if the coverage is essential
+  3. Refactor the code to be more testable without slow operations
+- **Use `--durations=10` to monitor test performance** - The justfile includes this by default to show slowest tests
 
 ### TUI Testing
 - **Snapshot tests** (`tests/test_tui_snapshots.py`) use `pytest-textual-snapshot` for visual regression testing

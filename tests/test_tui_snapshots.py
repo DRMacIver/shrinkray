@@ -158,35 +158,40 @@ def large_file_update() -> ProgressUpdate:
     )
 
 
-class TestTUISnapshots:
-    """Snapshot tests for the TUI."""
+# === TUI snapshot tests ===
 
-    def test_initial_state(self, snap_compare, initial_state_update):
-        """Snapshot test for initial app state."""
-        app = make_app_with_updates([initial_state_update])
-        assert snap_compare(app, terminal_size=(120, 40))
 
-    def test_mid_reduction(self, snap_compare, mid_reduction_update):
-        """Snapshot test for mid-reduction state."""
-        app = make_app_with_updates([mid_reduction_update])
-        assert snap_compare(app, terminal_size=(120, 40))
+def test_initial_state(snap_compare, initial_state_update):
+    """Snapshot test for initial app state."""
+    app = make_app_with_updates([initial_state_update])
+    assert snap_compare(app, terminal_size=(120, 40))
 
-    def test_hex_mode(self, snap_compare, hex_mode_update):
-        """Snapshot test for hex mode display."""
-        app = make_app_with_updates([hex_mode_update])
-        assert snap_compare(app, terminal_size=(120, 40))
 
-    def test_large_file(self, snap_compare, large_file_update):
-        """Snapshot test for large file with potential diff."""
-        app = make_app_with_updates([large_file_update])
-        assert snap_compare(app, terminal_size=(120, 40))
+def test_mid_reduction(snap_compare, mid_reduction_update):
+    """Snapshot test for mid-reduction state."""
+    app = make_app_with_updates([mid_reduction_update])
+    assert snap_compare(app, terminal_size=(120, 40))
 
-    def test_small_terminal(self, snap_compare, mid_reduction_update):
-        """Snapshot test with smaller terminal size."""
-        app = make_app_with_updates([mid_reduction_update])
-        assert snap_compare(app, terminal_size=(80, 24))
 
-    def test_wide_terminal(self, snap_compare, mid_reduction_update):
-        """Snapshot test with wider terminal."""
-        app = make_app_with_updates([mid_reduction_update])
-        assert snap_compare(app, terminal_size=(160, 50))
+def test_hex_mode(snap_compare, hex_mode_update):
+    """Snapshot test for hex mode display."""
+    app = make_app_with_updates([hex_mode_update])
+    assert snap_compare(app, terminal_size=(120, 40))
+
+
+def test_large_file(snap_compare, large_file_update):
+    """Snapshot test for large file with potential diff."""
+    app = make_app_with_updates([large_file_update])
+    assert snap_compare(app, terminal_size=(120, 40))
+
+
+def test_small_terminal(snap_compare, mid_reduction_update):
+    """Snapshot test with smaller terminal size."""
+    app = make_app_with_updates([mid_reduction_update])
+    assert snap_compare(app, terminal_size=(80, 24))
+
+
+def test_wide_terminal(snap_compare, mid_reduction_update):
+    """Snapshot test with wider terminal."""
+    app = make_app_with_updates([mid_reduction_update])
+    assert snap_compare(app, terminal_size=(160, 50))

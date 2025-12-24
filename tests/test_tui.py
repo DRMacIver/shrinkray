@@ -489,9 +489,9 @@ def test_quit_cancels_reduction(basic_updates):
         )
 
         async with app.run_test() as pilot:
-            # Wait for the reduction to start
+            # Wait briefly for the reduction to start - don't use pause() here
+            # as the infinite update loop would cause it to timeout
             await asyncio.sleep(0.05)
-            await pilot.pause()
             await pilot.press("q")
             # Wait for quit to be processed
             await asyncio.sleep(0.05)
@@ -1297,8 +1297,8 @@ def test_cancel_exception_is_caught():
         )
 
         async with app.run_test() as pilot:
-            # Wait for reduction to start and get at least one update
-            await pilot.pause()
+            # Wait briefly for reduction to start - don't use pause() here
+            # as the update loop would cause it to timeout
             await asyncio.sleep(0.1)
 
             # Verify app is not completed yet

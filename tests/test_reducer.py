@@ -1394,7 +1394,8 @@ async def test_initial_cut_watcher_multiple_iterations(autojump_clock):
         return True
 
     problem = BasicReductionProblem(
-        initial=b"x" * 1000,  # Start with 1000 bytes - large enough for many watcher iterations
+        initial=b"x"
+        * 1000,  # Start with 1000 bytes - large enough for many watcher iterations
         is_interesting=is_interesting,
         work=WorkContext(parallelism=1),
     )

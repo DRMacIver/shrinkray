@@ -860,7 +860,9 @@ def test_directory_mode_setup(tmp_path, monkeypatch):
         # Exit after check_formatter is called
         raise SystemExit(0)
 
-    with patch("shrinkray.__main__.ShrinkRayDirectoryState", side_effect=mock_dir_state_init):
+    with patch(
+        "shrinkray.__main__.ShrinkRayDirectoryState", side_effect=mock_dir_state_init
+    ):
         with patch("shutil.copytree", tracking_copytree):
             with patch("shrinkray.__main__.trio.run", mock_trio_run):
                 runner = CliRunner(catch_exceptions=False)

@@ -1218,9 +1218,7 @@ def test_content_preview_app_size_zero_height():
     mock_parent.size.height = 0
 
     # Use patch to override the app property
-    with patch.object(
-        type(widget), "app", new_callable=PropertyMock
-    ) as mock_app_prop:
+    with patch.object(type(widget), "app", new_callable=PropertyMock) as mock_app_prop:
         mock_app_prop.return_value = mock_app
         with patch.object(
             type(widget), "parent", new_callable=PropertyMock
@@ -1326,9 +1324,7 @@ def test_run_textual_ui_creates_and_runs_app():
     # Patch ShrinkRayApp and validation
     with (
         patch("shrinkray.tui.ShrinkRayApp") as mock_app_class,
-        patch(
-            "shrinkray.tui._validate_initial_example", side_effect=mock_validate
-        ),
+        patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate),
     ):
         mock_app = MagicMock()
         mock_app.return_code = None  # Ensure no exit
@@ -1473,9 +1469,7 @@ def test_validate_initial_example_returns_error():
         mock_client = MagicMock()
         mock_client.start = AsyncMock()
         mock_client.start_reduction = AsyncMock(
-            return_value=Response(
-                id="start", error="Interestingness test failed"
-            )
+            return_value=Response(id="start", error="Interestingness test failed")
         )
         mock_client.close = AsyncMock()
 
@@ -1511,9 +1505,7 @@ def test_run_textual_ui_prints_error_and_exits(capsys):
     async def mock_validate(*args, **kwargs):
         return "Test validation error"
 
-    with patch(
-        "shrinkray.tui._validate_initial_example", side_effect=mock_validate
-    ):
+    with patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate):
         with pytest.raises(SystemExit) as exc_info:
             run_textual_ui(
                 file_path="/tmp/test.txt",
@@ -1538,9 +1530,7 @@ def test_run_textual_ui_exits_with_app_return_code():
     mock_app = MagicMock()
     mock_app.return_code = 42  # Non-zero return code
 
-    with patch(
-        "shrinkray.tui._validate_initial_example", side_effect=mock_validate
-    ):
+    with patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate):
         with patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app):
             with pytest.raises(SystemExit) as exc_info:
                 run_textual_ui(

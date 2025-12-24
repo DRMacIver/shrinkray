@@ -27,7 +27,10 @@ def to_blocks(test_case: bytes, block_size: int = 80) -> list[str]:
         block_size: Number of bytes per block (default 80 for ~160 hex chars,
                     fitting most terminal widths)
     """
-    return [test_case[i : i + block_size].hex() for i in range(0, len(test_case), block_size)]
+    return [
+        test_case[i : i + block_size].hex()
+        for i in range(0, len(test_case), block_size)
+    ]
 
 
 def format_diff(diff: Iterable[str], max_lines: int = 500) -> str:

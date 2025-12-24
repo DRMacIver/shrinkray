@@ -293,9 +293,7 @@ class ReducerWorker:
         if self._parallel_samples > 0:
             average_parallelism = self._parallel_total / self._parallel_samples
             wasteage = (
-                stats.wasted_interesting_calls / stats.calls
-                if stats.calls > 0
-                else 0.0
+                stats.wasted_interesting_calls / stats.calls if stats.calls > 0 else 0.0
             )
             effective_parallelism = average_parallelism * (1.0 - wasteage)
 

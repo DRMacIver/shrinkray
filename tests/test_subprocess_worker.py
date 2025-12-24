@@ -1410,7 +1410,6 @@ async def test_worker_trivial_result_no_error_when_disabled(tmp_path):
     assert not found_error, "Should not have emitted trivial error"
 
 
-
 # === Additional coverage tests for exception handling ===
 
 

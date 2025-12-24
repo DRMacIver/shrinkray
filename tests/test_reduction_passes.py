@@ -1153,5 +1153,3 @@ async def test_libcst_transform_reparsing_fails():
         await replace_bodies_with_ellipsis(problem)
 
     # Should have handled the error gracefully
-
-

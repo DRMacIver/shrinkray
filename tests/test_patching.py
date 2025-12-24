@@ -844,6 +844,7 @@ async def test_merge_empty_patches_equals_base(autojump_clock):
 
 async def test_is_reduction_returns_false(autojump_clock):
     """Test is_reduction returns False during merge."""
+
     # is_interesting always True, but is_reduction will fail for larger results
     async def is_interesting(x):
         await trio.sleep(0.01)
@@ -881,6 +882,7 @@ async def test_find_large_integer_probes_beyond(autojump_clock):
     find_large_integer probes k=1,2,3,4, then exponentially (5,10,20...).
     When to_merge < k for some probed value, can_merge returns False.
     """
+
     # Accept merging up to 5 patches, but not 6
     async def is_interesting(x):
         await trio.sleep(0.001)

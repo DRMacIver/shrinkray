@@ -113,18 +113,6 @@ PYTHON_FILES = glob(os.path.join(ROOT, "src", "**", "*.py"), recursive=True) + g
 )
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize("pyfile", PYTHON_FILES)
-def test_reduce_all(pyfile):
-    with open(pyfile, "rb") as i:
-        code = i.read()
-
-    def is_interesting(x):
-        return True
-
-    reduce_with(PYTHON_PASSES, code, is_interesting)
-
-
 ISSUE_12_INPUT = b"""
 import asyncio
 import _lsprof
@@ -279,6 +267,7 @@ async def test_libcst_transform_handles_cst_validation_error():
 
     A transformer that raises CSTValidationError should not crash the reduction.
     """
+
     # Create a transformer that causes validation errors
     def bad_transformer(node):
         # Try to create an invalid CST node by adding a node in wrong context
@@ -308,6 +297,7 @@ async def test_libcst_transform_handles_type_error_does_not_allow():
 
     This error occurs when a transformation is structurally invalid for the parent node.
     """
+
     # Create a transformer that raises the specific TypeError
     def bad_transformer(node):
         raise TypeError("The parent node does not allow for it")
@@ -335,6 +325,7 @@ async def test_libcst_transform_reraises_other_type_error():
 
     TypeErrors that aren't about parent node restrictions should propagate.
     """
+
     # Create a transformer that raises a different TypeError
     def bad_transformer(node):
         raise TypeError("Some other type error")

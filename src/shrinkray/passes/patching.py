@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from random import Random
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 import trio
 
@@ -10,17 +10,13 @@ from shrinkray.problem import ReductionProblem
 
 
 Seq = TypeVar("Seq", bound=Sequence[Any])
-T = TypeVar("T")
-
-PatchType = TypeVar("PatchType")
-TargetType = TypeVar("TargetType")
 
 
 class Conflict(Exception):
     pass
 
 
-class Patches(Generic[PatchType, TargetType], ABC):
+class Patches[PatchType, TargetType](ABC):
     @property
     @abstractmethod
     def empty(self) -> PatchType: ...
@@ -35,7 +31,7 @@ class Patches(Generic[PatchType, TargetType], ABC):
     def size(self, patch: PatchType) -> int: ...
 
 
-class SetPatches(Patches[frozenset[T], TargetType]):
+class SetPatches[T, TargetType](Patches[frozenset[T], TargetType]):
     def __init__(self, apply: Callable[[frozenset[T], TargetType], TargetType]):
         self.__apply = apply
 
@@ -56,7 +52,7 @@ class SetPatches(Patches[frozenset[T], TargetType]):
         return len(patch)
 
 
-class ListPatches(Patches[list[T], TargetType]):
+class ListPatches[T, TargetType](Patches[list[T], TargetType]):
     def __init__(self, apply: Callable[[list[T], TargetType], TargetType]):
         self.__apply = apply
 
@@ -77,7 +73,7 @@ class ListPatches(Patches[list[T], TargetType]):
         return len(patch)
 
 
-class PatchApplier(Generic[PatchType, TargetType], ABC):
+class PatchApplier[PatchType, TargetType]:
     def __init__(
         self,
         patches: Patches[PatchType, TargetType],
@@ -187,7 +183,7 @@ class Completed(Exception):
     pass
 
 
-async def apply_patches(
+async def apply_patches[PatchType, TargetType](
     problem: ReductionProblem[TargetType],
     patch_info: Patches[PatchType, TargetType],
     patches: Iterable[PatchType],
@@ -246,7 +242,7 @@ class LazyMutableRange:
         return result
 
 
-def lazy_shuffle(seq: Sequence[T], rnd: Random) -> Iterable[T]:
+def lazy_shuffle[T](seq: Sequence[T], rnd: Random) -> Iterable[T]:
     indices = LazyMutableRange(len(seq))
     while indices:
         j = len(indices) - 1

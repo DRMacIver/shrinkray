@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable, Sized
 from functools import wraps
 from string import ascii_lowercase, ascii_uppercase
-from typing import AnyStr, TypeVar
+from typing import AnyStr
 
 import trio
 from attr import define
@@ -16,9 +16,6 @@ from shrinkray.passes.definitions import Format, ParseError, ReductionPass
 from shrinkray.passes.patching import PatchApplier, Patches, apply_patches
 from shrinkray.problem import BasicReductionProblem, ReductionProblem
 from shrinkray.work import NotFound
-
-
-T = TypeVar("T", bound=Sized)
 
 
 @define(frozen=True)
@@ -243,7 +240,7 @@ async def simplify_brackets(problem: ReductionProblem[bytes]) -> None:
 IDENTIFIER = re.compile(rb"(\b[A-Za-z][A-Za-z0-9_]*\b)|([0-9]+)")
 
 
-def shortlex(s: T) -> tuple[int, T]:
+def shortlex[T: Sized](s: T) -> tuple[int, T]:
     return (len(s), s)
 
 

@@ -1,16 +1,13 @@
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import Any, TypeVar
+from typing import Any
 
 from shrinkray.passes.definitions import ReductionPass
 from shrinkray.passes.patching import CutPatch, Cuts, apply_patches
 from shrinkray.problem import ReductionProblem
 
 
-Seq = TypeVar("Seq", bound=Sequence[Any])
-
-
-async def delete_elements(problem: ReductionProblem[Seq]) -> None:
+async def delete_elements[Seq: Sequence[Any]](problem: ReductionProblem[Seq]) -> None:
     """Try to delete individual elements from the sequence.
 
     Creates a patch for each element and uses the patch applier to find
@@ -31,7 +28,7 @@ def merged_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return list(map(tuple, normalized))  # type: ignore
 
 
-def with_deletions(target: Seq, deletions: list[tuple[int, int]]) -> Seq:
+def with_deletions[Seq: Sequence[Any]](target: Seq, deletions: list[tuple[int, int]]) -> Seq:
     result: list[Any] = []
     prev = 0
     total_deleted = 0
@@ -44,7 +41,9 @@ def with_deletions(target: Seq, deletions: list[tuple[int, int]]) -> Seq:
     return type(target)(result)  # type: ignore
 
 
-def block_deletion(min_block: int, max_block: int) -> ReductionPass[Seq]:
+def block_deletion[Seq: Sequence[Any]](
+    min_block: int, max_block: int
+) -> ReductionPass[Seq]:
     """Create a pass that deletes contiguous blocks of elements.
 
     Tries to remove blocks of size min_block to max_block, starting at
@@ -68,7 +67,7 @@ def block_deletion(min_block: int, max_block: int) -> ReductionPass[Seq]:
     return apply
 
 
-async def delete_duplicates(problem: ReductionProblem[Seq]) -> None:
+async def delete_duplicates[Seq: Sequence[Any]](problem: ReductionProblem[Seq]) -> None:
     """Try to delete duplicate elements from the sequence.
 
     Groups elements by value and tries to remove all occurrences of each

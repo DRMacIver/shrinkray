@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any, AnyStr, cast
+from typing import Any, cast
 
 import libcst
 import libcst.matchers as m
@@ -9,7 +9,7 @@ from shrinkray.problem import ReductionProblem
 from shrinkray.work import NotFound
 
 
-def is_python(source: AnyStr) -> bool:
+def is_python[AnyStr: (str, bytes)](source: AnyStr) -> bool:
     try:
         libcst.parse_module(source)
         return True

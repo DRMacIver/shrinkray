@@ -5,7 +5,7 @@ import shlex
 import sys
 from enum import Enum, IntEnum, auto
 from shutil import which
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 import click
 
@@ -25,10 +25,7 @@ def validate_command(ctx: Any, param: Any, value: str) -> list[str]:
     return [command] + parts[1:]
 
 
-EnumType = TypeVar("EnumType", bound=Enum)
-
-
-class EnumChoice(click.Choice, Generic[EnumType]):
+class EnumChoice[EnumType: Enum](click.Choice):
     """A click Choice that works with Enums."""
 
     def __init__(self, enum: type[EnumType]) -> None:

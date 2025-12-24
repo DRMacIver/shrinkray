@@ -19,7 +19,6 @@ from datetime import timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
-    Generic,
     TypeVar,
     cast,
 )
@@ -37,10 +36,9 @@ if TYPE_CHECKING:
 
 S = TypeVar("S")
 T = TypeVar("T")
-SizedT = TypeVar("SizedT", bound=Sized)
 
 
-def shortlex(value: SizedT) -> tuple[int, SizedT]:
+def shortlex[SizedT: Sized](value: SizedT) -> tuple[int, SizedT]:
     """Return a comparison key for shortlex ordering.
 
     Shortlex ordering compares first by length, then lexicographically.
@@ -140,7 +138,7 @@ class ReductionStats:
 
 
 @define(slots=False)
-class ReductionProblem(Generic[T], ABC):
+class ReductionProblem[T](ABC):
     """Abstract base class representing a test-case reduction task.
 
     A ReductionProblem encapsulates everything needed to reduce a test case:
@@ -205,8 +203,12 @@ class ReductionProblem(Generic[T], ABC):
 
         return cast(ReductionProblem[S], self.__view_cache.setdefault(format, result))
 
-    async def setup(self) -> None:
-        pass
+    async def setup(self) -> None:  # noqa: B027
+        """Initialize the problem before reduction begins.
+
+        Subclasses may override this to perform validation or initialization.
+        The default implementation does nothing.
+        """
 
     @property
     @abstractmethod
@@ -395,7 +397,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         return self.__current
 
 
-class View(ReductionProblem[T], Generic[S, T]):
+class View[S, T](ReductionProblem[T]):
     """A view of a ReductionProblem through a parse/dump transformation.
 
     View wraps an underlying problem, presenting it as a different type.

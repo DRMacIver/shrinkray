@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from contextlib import contextmanager
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 import attrs
 import trio
@@ -52,12 +52,8 @@ from shrinkray.passes.sequences import block_deletion, delete_duplicates
 from shrinkray.problem import ReductionProblem, ReductionStats, shortlex
 
 
-S = TypeVar("S")
-T = TypeVar("T")
-
-
 @define
-class Reducer(Generic[T], ABC):
+class Reducer[T](ABC):
     target: ReductionProblem[T]
 
     @contextmanager
@@ -78,7 +74,7 @@ class Reducer(Generic[T], ABC):
 
 
 @define
-class BasicReducer(Reducer[T]):
+class BasicReducer[T](Reducer[T]):
     reduction_passes: Iterable[ReductionPass[T]]
     pumps: Iterable[ReductionPump[T]] = ()
     _status: str = "Starting up"
@@ -197,7 +193,7 @@ class ShrinkRay(Reducer[bytes]):
             SAT_PASSES,
         )
 
-    def register_format_specific_pass(
+    def register_format_specific_pass[T](
         self, format: Format[bytes, T], passes: Iterable[ReductionPass[T]]
     ):
         if format.is_valid(self.target.current_test_case):

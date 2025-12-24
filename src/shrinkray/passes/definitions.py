@@ -15,7 +15,7 @@ JSON arrays, or any other sequence-like type.
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from functools import wraps
-from typing import Generic, TypeVar
+from typing import TypeVar
 
 from shrinkray.problem import ReductionProblem
 
@@ -53,7 +53,7 @@ class DumpError(Exception):
     pass
 
 
-class Format(Generic[S, T], ABC):
+class Format[S, T](ABC):
     """A bidirectional transformation between two types.
 
     Formats enable format-agnostic passes by abstracting the

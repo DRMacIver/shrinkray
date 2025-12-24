@@ -1,7 +1,7 @@
 """UI abstractions for shrink ray."""
 
 from abc import ABC
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING
 
 import humanize
 import trio
@@ -12,11 +12,9 @@ if TYPE_CHECKING:
     from shrinkray.problem import BasicReductionProblem
     from shrinkray.state import ShrinkRayState
 
-TestCase = TypeVar("TestCase")
-
 
 @define(slots=False)
-class ShrinkRayUI(Generic[TestCase], ABC):
+class ShrinkRayUI[TestCase](ABC):
     """Base class for shrink ray UI implementations."""
 
     state: "ShrinkRayState[TestCase]"
@@ -29,12 +27,22 @@ class ShrinkRayUI(Generic[TestCase], ABC):
     def problem(self) -> "BasicReductionProblem":
         return self.reducer.target  # type: ignore
 
-    def install_into_nursery(self, nursery: trio.Nursery): ...
+    def install_into_nursery(self, nursery: trio.Nursery):  # noqa: B027
+        """Install any background tasks into the nursery.
 
-    async def run(self, nursery: trio.Nursery): ...
+        Subclasses may override this to add tasks that run alongside reduction.
+        The default implementation does nothing.
+        """
+
+    async def run(self, nursery: trio.Nursery):  # noqa: B027
+        """Run the UI update loop.
+
+        Subclasses may override this to display progress or status updates.
+        The default implementation does nothing.
+        """
 
 
-class BasicUI(ShrinkRayUI[TestCase]):
+class BasicUI[TestCase](ShrinkRayUI[TestCase]):
     """Simple text-based UI for non-interactive use."""
 
     async def run(self, nursery: trio.Nursery):

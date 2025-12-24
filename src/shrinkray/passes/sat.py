@@ -1,6 +1,5 @@
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Iterator
-from typing import Generic, TypeVar
 
 from shrinkray.passes.definitions import (
     DumpError,
@@ -15,8 +14,6 @@ from shrinkray.problem import ReductionProblem
 
 Clause = list[int]
 SAT = list[Clause]
-
-T = TypeVar("T")
 
 
 class _DimacsCNF(Format[bytes, SAT]):
@@ -217,7 +214,7 @@ async def renumber_variables(problem: ReductionProblem[SAT]) -> None:
     await unit_propagate(problem)
 
 
-class UnionFind(Generic[T]):
+class UnionFind[T]:
     table: dict[T, T]
     key: Callable[[T], object] | None
     generation: int

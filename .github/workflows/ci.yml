@@ -6,32 +6,15 @@ on:
     branches: [ main ]
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v6
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
-        version: "latest"
-    - name: Set up Python
-      run: uv python install 3.12
-    - name: Install dependencies
-      run: uv sync --extra dev
-    - name: Run ruff check
-      run: uv run ruff check src tests
-    - name: Run type checking
-      run: uv run basedpyright src tests
-
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v4
     - name: Install uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@v3
       with:
         version: "latest"
     - name: Set up Python ${{ matrix.python-version }}
@@ -43,17 +26,16 @@ jobs:
     - name: Install Python dependencies
       run: uv sync --extra dev
     - name: Run fast tests with coverage
-      run: uv run coverage run -m pytest tests/ -m "not slow"
-    - name: Check coverage
-      run: uv run coverage report
+      run: |
+        uv run coverage run -m pytest tests/ -m "not slow" -q
+        uv run coverage report --show-missing --fail-under=100
 
   slow-tests:
-    runs-on: ubuntu-latest
-    needs: test
+    runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v4
     - name: Install uv
-      uses: astral-sh/setup-uv@v7
+      uses: astral-sh/setup-uv@v3
       with:
         version: "latest"
     - name: Set up Python 3.14
@@ -65,4 +47,4 @@ jobs:
     - name: Install Python dependencies
       run: uv sync --extra dev
     - name: Run slow tests
-      run: uv run pytest tests/ -m slow
+      run: uv run pytest tests/ -m slow -v

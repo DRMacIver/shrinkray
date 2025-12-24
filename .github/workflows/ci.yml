@@ -28,9 +28,16 @@ jobs:
     - name: Install Python dependencies
       run: uv sync --extra dev
     - name: Run fast tests with coverage
+      # We hit weird bugs with coverage on 3.14 that we've (ironically)
+      # not yet adequately minimised to reproduce and file upstream, so
+      # we disable coverage on 3.14 for now.
+      if: matrix.python-version != '3.14'
       run: |
         uv run coverage run -m pytest tests/ -m "not slow" -q
         uv run coverage report --show-missing --fail-under=100
+    - name: Run fast tests without coverage (Python 3.14)
+      if: matrix.python-version == '3.14'
+      run: uv run pytest tests/ -m "not slow" -q
 
   slow-tests:
     runs-on: ubuntu-22.04

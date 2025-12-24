@@ -1262,6 +1262,7 @@ async def test_directory_shrinkray_shrink_values_uses_clang_delta():
     (line 462) without running a full reduction.
     """
     from unittest.mock import AsyncMock, MagicMock, patch
+
     from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
 
     # Create a mock clang_delta

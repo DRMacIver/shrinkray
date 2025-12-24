@@ -1231,6 +1231,7 @@ async def test_worker_full_run_with_failing_test(tmp_path):
             assert "id" in parsed or "type" in parsed
 
 
+@pytest.mark.slow
 async def test_worker_timeout_on_initial_test(tmp_path):
     """Test handling when initial test exceeds timeout."""
     # Create a test file

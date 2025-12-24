@@ -152,7 +152,20 @@ def test_shrink_to_one_single_literal_clause(clauses):
     assert result == [[1]]
 
 
-@pytest.mark.parametrize("n", range(2, 11))
+@pytest.mark.parametrize(
+    "n",
+    [
+        2,
+        3,
+        4,
+        5,
+        pytest.param(6, marks=pytest.mark.slow),
+        pytest.param(7, marks=pytest.mark.slow),
+        pytest.param(8, marks=pytest.mark.slow),
+        pytest.param(9, marks=pytest.mark.slow),
+        pytest.param(10, marks=pytest.mark.slow),
+    ],
+)
 def test_can_shrink_chain_to_two(n):
     chain = [[-i, i + 1] for i in range(1, n + 1)]
 

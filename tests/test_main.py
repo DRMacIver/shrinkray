@@ -295,6 +295,7 @@ def test_error_when_test_not_executable(tmpdir):
     assert "not executable" in result.stderr
 
 
+@pytest.mark.slow
 def test_timeout_zero_sets_infinite(basic_shrink_target):
     runner = CliRunner(catch_exceptions=False)
     result = runner.invoke(
@@ -507,6 +508,7 @@ def test_clang_delta_explicit_path(tmp_path, monkeypatch):
     assert "clang_delta is not installed" not in str(result.output)
 
 
+@pytest.mark.slow
 def test_default_backup_filename(basic_shrink_target):
     """Test that default backup filename is created correctly."""
     import os
@@ -537,6 +539,7 @@ def test_default_backup_filename(basic_shrink_target):
     assert os.path.exists(expected_backup)
 
 
+@pytest.mark.slow
 def test_directory_mode_with_basic_ui(tmp_path):
     """Test directory reduction with BasicUI via CliRunner.
 
@@ -587,6 +590,7 @@ def test_worker_main_entry_point():
         sys.stdin = old_stdin
 
 
+@pytest.mark.slow
 def test_custom_backup_filename(basic_shrink_target, tmp_path):
     """Test that custom backup filename is used when specified."""
     custom_backup = str(tmp_path / "my_custom_backup.bak")

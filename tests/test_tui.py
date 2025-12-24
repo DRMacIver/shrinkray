@@ -449,9 +449,9 @@ class TestShrinkRayAppWithFakeClient:
         """Test that pressing 'q' cancels the reduction and quits."""
 
         async def run_test():
-            # Use many updates to ensure we have time to cancel
-            many_updates = basic_updates * 100
-            fake_client = FakeReductionClient(updates=many_updates)
+            # Use enough updates to ensure reduction is still running when we press 'q'
+            # Each update takes 0.01s, so 50 updates = 0.5s runtime
+            fake_client = FakeReductionClient(updates=basic_updates * 50)
             app = ShrinkRayApp(
                 file_path="/tmp/test.txt",
                 test=["./test.sh"],

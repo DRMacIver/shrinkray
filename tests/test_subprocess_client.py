@@ -331,6 +331,7 @@ def test_subprocess_client_cancel_handles_send_command_exception():
     asyncio.run(run())
 
 
+@pytest.mark.slow
 def test_subprocess_client_get_progress_updates_timeout():
     """Test get_progress_updates timeout handling (lines 159-163)."""
 
@@ -858,7 +859,7 @@ def test_subprocess_client_close_actually_kills_after_terminate_timeout():
     """
 
     async def run():
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import MagicMock, patch
 
         client = SubprocessClient()
 

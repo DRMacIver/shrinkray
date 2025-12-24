@@ -10,7 +10,7 @@ import time
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from tempfile import TemporaryDirectory
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 import humanize
 import trio
@@ -27,9 +27,6 @@ from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
 
 
-TestCase = TypeVar("TestCase")
-
-
 class TimeoutExceededOnInitial(InvalidInitialExample):
     def __init__(self, runtime: float, timeout: float) -> None:
         self.runtime = runtime
@@ -40,7 +37,7 @@ class TimeoutExceededOnInitial(InvalidInitialExample):
 
 
 @define(slots=False)
-class ShrinkRayState(Generic[TestCase], ABC):
+class ShrinkRayState[TestCase](ABC):
     input_type: Any  # InputType from __main__
     in_place: bool
     test: list[str]

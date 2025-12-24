@@ -1829,8 +1829,6 @@ fi
 
 async def test_volume_debug_inherits_stderr(tmp_path):
     """Test that volume=debug causes stderr to be inherited, not discarded."""
-    import subprocess
-
     # Create a script that writes to stderr
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\necho 'debug output' >&2\nexit 0")

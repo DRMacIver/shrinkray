@@ -185,6 +185,7 @@ Main Process (asyncio/textual)     Subprocess (trio)
 - Group related tests with section comments (e.g., `# === View tests ===`)
 - Keep tests fast (< 500ms each, ideally much less)
 - Test edge cases explicitly with meaningful test names
+- **All imports at top of file** - Never put imports inside test functions. Put all imports (including `from unittest.mock import patch`) at the top of the test file. To check for violations: `git grep '    import' tests/`
 
 ### Slow Tests
 - **Mark genuinely slow tests with `@pytest.mark.slow`** - Tests that inherently require waiting (timeouts, full reductions, integration tests) should be marked as slow

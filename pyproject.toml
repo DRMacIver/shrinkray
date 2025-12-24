@@ -10,7 +10,7 @@ readme = "README.md"
 classifiers = [
     "Development Status :: 4 - Beta",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "click>=8.0.1",
     "chardet>=5.2.0",
@@ -63,7 +63,7 @@ fail_under = 100
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "C4", "UP"]

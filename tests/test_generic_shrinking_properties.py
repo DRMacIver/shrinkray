@@ -112,6 +112,7 @@ async def test_can_shrink_arbitrary_problems(
     assert len(problem.current_test_case) <= len(initial)
 
 
+@pytest.mark.slow
 @settings(common_settings, phases=[Phase.explicit])
 @example(b":\x80", 1)
 @example(b"#\x80", 1)

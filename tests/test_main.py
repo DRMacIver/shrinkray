@@ -1159,11 +1159,15 @@ def simple_file_target(tmp_path):
     target = tmp_path / "test.txt"
     target.write_text("hello world")  # 11 bytes
 
-    script = tmp_path / "test.sh"
+    script = tmp_path / "test.py"
     script.write_text(
-        """#!/bin/bash
+        f"""#!/usr/bin/env {sys.executable}
+import sys
+from pathlib import Path
+
 # Interesting if file has more than 1 byte
-[ "$(wc -c < "$1")" -gt 1 ]
+file_size = Path(sys.argv[1]).stat().st_size
+sys.exit(0 if file_size > 1 else 1)
 """
     )
     script.chmod(0o755)
@@ -1179,11 +1183,16 @@ def simple_directory_target(tmp_path):
     (target / "a.txt").write_text("hello")  # 5 bytes
     (target / "b.txt").write_text("world")  # 5 bytes
 
-    script = tmp_path / "test.sh"
+    script = tmp_path / "test.py"
     script.write_text(
-        """#!/bin/bash
-# Interesting if a.txt exists and has content
-[ -f "$1/a.txt" ] && [ -s "$1/a.txt" ]
+        f"""#!/usr/bin/env {sys.executable}
+import sys
+from pathlib import Path
+
+# Interesting if total size of all files > 1 byte
+dir_path = Path(sys.argv[1])
+total_size = sum(f.stat().st_size for f in dir_path.iterdir() if f.is_file())
+sys.exit(0 if total_size > 1 else 1)
 """
     )
     script.chmod(0o755)
@@ -1237,56 +1246,60 @@ def test_happy_path_basic_ui_directory(simple_directory_target):
     assert a_path.stat().st_size > 0
 
 
-def test_happy_path_tui_single_file(simple_file_target, monkeypatch):
-    """Test that TUI path is exercised for single file reduction.
-
-    Uses mocking to verify TUI is called without actually running the full TUI
-    (which doesn't exit cleanly in non-interactive mode).
-    """
-    from unittest.mock import MagicMock
-
-    mock_run_textual_ui = MagicMock()
-    monkeypatch.setattr("shrinkray.tui.run_textual_ui", mock_run_textual_ui)
-
-    runner = CliRunner(catch_exceptions=False)
-    result = runner.invoke(
-        main,
+@pytest.mark.slow
+def test_happy_path_tui_single_file(simple_file_target):
+    """Test TUI reduction with single file (auto-exits on completion)."""
+    # Use subprocess.run instead of CliRunner because the TUI spawns
+    # subprocesses which need real file descriptors.
+    result = subprocess.run(
         [
+            sys.executable,
+            "-m",
+            "shrinkray",
             simple_file_target.interestingness_test,
             simple_file_target.test_case,
             "--ui=textual",
             "--parallelism=1",
         ],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
-    assert mock_run_textual_ui.called
-    assert result.exit_code == 0
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+
+    # File should be reduced
+    target_path = pathlib.Path(simple_file_target.test_case)
+    assert target_path.stat().st_size > 0
 
 
-def test_happy_path_tui_directory(simple_directory_target, monkeypatch):
-    """Test that TUI path is exercised for directory reduction.
-
-    Uses mocking to verify TUI is called without actually running the full TUI.
-    """
-    from unittest.mock import MagicMock
-
-    mock_run_textual_ui = MagicMock()
-    monkeypatch.setattr("shrinkray.tui.run_textual_ui", mock_run_textual_ui)
-
-    runner = CliRunner(catch_exceptions=False)
-    result = runner.invoke(
-        main,
+@pytest.mark.slow
+def test_happy_path_tui_directory(simple_directory_target):
+    """Test TUI reduction with directory (auto-exits on completion)."""
+    # Use subprocess.run instead of CliRunner because the TUI spawns
+    # subprocesses which need real file descriptors.
+    result = subprocess.run(
         [
+            sys.executable,
+            "-m",
+            "shrinkray",
             simple_directory_target.interestingness_test,
             simple_directory_target.test_case,
             "--ui=textual",
             "--input-type=arg",
             "--parallelism=1",
+            "--trivial-is-not-error",  # Directory reduction may reach trivial size
         ],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
-    assert mock_run_textual_ui.called
-    assert result.exit_code == 0
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+
+    # Directory should still exist with some content
+    a_path = pathlib.Path(simple_directory_target.test_case) / "a.txt"
+    assert a_path.exists()
 
 
 @pytest.mark.slow

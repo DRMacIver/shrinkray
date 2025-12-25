@@ -345,6 +345,7 @@ class ShrinkRayApp(App[None]):
         no_clang_delta: bool = False,
         clang_delta: str = "",
         trivial_is_error: bool = True,
+        exit_on_completion: bool = True,
         client: ReductionClientProtocol | None = None,
         theme: ThemeMode = "auto",
     ) -> None:
@@ -361,6 +362,7 @@ class ShrinkRayApp(App[None]):
         self._no_clang_delta = no_clang_delta
         self._clang_delta = clang_delta
         self._trivial_is_error = trivial_is_error
+        self._exit_on_completion = exit_on_completion
         self._client: ReductionClientProtocol | None = client
         self._owns_client = client is None
         self._completed = False
@@ -445,6 +447,8 @@ class ShrinkRayApp(App[None]):
                 # Exit immediately on error, printing the error message
                 self.exit(return_code=1, message=f"Error: {self._client.error_message}")
                 return
+            elif self._exit_on_completion:
+                self.exit()
             else:
                 self.update_status("Reduction completed! Press 'q' to exit.")
 
@@ -537,6 +541,7 @@ def run_textual_ui(
     no_clang_delta: bool = False,
     clang_delta: str = "",
     trivial_is_error: bool = True,
+    exit_on_completion: bool = True,
     theme: ThemeMode = "auto",
 ) -> None:
     """Run the textual TUI."""
@@ -582,6 +587,7 @@ def run_textual_ui(
         no_clang_delta=no_clang_delta,
         clang_delta=clang_delta,
         trivial_is_error=trivial_is_error,
+        exit_on_completion=exit_on_completion,
         theme=theme,
     )
     app.run()

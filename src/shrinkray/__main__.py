@@ -187,6 +187,11 @@ This behaviour can be disabled by passing --trivial-is-not-error.
 """,
 )
 @click.option(
+    "--exit-on-completion/--no-exit-on-completion",
+    default=True,
+    help="Exit automatically when reduction completes (TUI only). Default: exit on completion.",
+)
+@click.option(
     "--no-clang-delta",
     is_flag=True,
     default=False,
@@ -216,6 +221,7 @@ def main(
     no_clang_delta: bool,
     clang_delta: str,
     trivial_is_error: bool,
+    exit_on_completion: bool,
     ui_type: UIType,
     theme: str,
 ) -> None:
@@ -333,6 +339,7 @@ def main(
             no_clang_delta=no_clang_delta,
             clang_delta=clang_delta,
             trivial_is_error=trivial_is_error,
+            exit_on_completion=exit_on_completion,
             theme=theme,  # type: ignore[arg-type]
         )
         return

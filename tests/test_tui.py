@@ -1452,6 +1452,7 @@ def test_run_textual_ui_creates_and_runs_app():
             no_clang_delta=True,
             clang_delta="/usr/bin/clang_delta",
             trivial_is_error=True,
+            exit_on_completion=True,
             theme="dark",
         )
 
@@ -1469,6 +1470,7 @@ def test_run_textual_ui_creates_and_runs_app():
             no_clang_delta=True,
             clang_delta="/usr/bin/clang_delta",
             trivial_is_error=True,
+            exit_on_completion=True,
             theme="dark",
         )
 

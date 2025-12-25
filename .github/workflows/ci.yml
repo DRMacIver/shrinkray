@@ -17,7 +17,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Run zizmor
-        uses: zizmorcore/zizmor-action@v0
+        uses: zizmorcore/zizmor-action@v0.3.0
 
   lint:
     runs-on: ubuntu-latest

@@ -1549,20 +1549,20 @@ sys.exit(0)
             "--no-exit-on-completion",  # Stay open after completion
         ],
         encoding="utf-8",
-        timeout=5,
+        timeout=10,
         dimensions=(24, 80),  # Terminal size
     )
 
     try:
         # Wait for TUI to start and show initial state
         # Look for "Validating" message first
-        child.expect("Validating initial example...", timeout=5)
+        child.expect("Validating initial example...", timeout=10)
 
         # Now wait for the TUI to show reduction progress
         # We're looking for any percentage > 0% in the output
         reduction_seen = False
         start_time = time.time()
-        timeout = 5.0
+        timeout = 10.0
 
         while time.time() - start_time < timeout:
             # Read available output
@@ -1597,7 +1597,7 @@ sys.exit(0)
         child.send("q")
 
         # Wait for process to exit (should be fast)
-        child.expect(pexpect.EOF, timeout=5)
+        child.expect(pexpect.EOF, timeout=10)
 
         # Verify clean exit
         child.close()

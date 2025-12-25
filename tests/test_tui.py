@@ -6,6 +6,7 @@ import tempfile
 from collections.abc import AsyncIterator
 
 import pytest
+from textual.widgets import Label
 
 from shrinkray.subprocess.protocol import ProgressUpdate, Response
 from shrinkray.tui import ContentPreview, ShrinkRayApp, StatsDisplay
@@ -1196,6 +1197,50 @@ def test_client_completed_breaks_loop():
 
             # Client should be completed
             assert fake_client.is_completed
+
+    run_async(run_test())
+
+
+def test_no_exit_on_completion_shows_press_q_message():
+    """Test that exit_on_completion=False shows 'Press q to exit' message."""
+
+    async def run_test():
+        # Create updates that mark client as completed
+        updates = [
+            ProgressUpdate(
+                status="Done",
+                size=50,
+                original_size=100,
+                calls=10,
+                reductions=5,
+            ),
+        ]
+        fake_client = FakeReductionClient(updates=updates)
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+            exit_on_completion=False,  # Don't auto-exit
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for completion
+            for _ in range(20):
+                await pilot.pause()
+                await asyncio.sleep(0.02)
+                if app.is_completed:
+                    break
+
+            # Check that status shows the completion message with press q to exit
+            status_label = app.query_one("#status-label", Label)
+            label_text = str(status_label.render())
+            assert "Reduction completed" in label_text
+            assert "Press 'q' to exit" in label_text
+
+            # Now press 'q' to quit - this exercises the action_quit branch
+            # where _completed is True (skips cancel, goes straight to exit)
+            await pilot.press("q")
 
     run_async(run_test())
 

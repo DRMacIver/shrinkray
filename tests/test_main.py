@@ -1,10 +1,14 @@
+import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
 import black
+import pexpect
+import pyte
 import pytest
 import trio
 from attrs import define
@@ -1465,3 +1469,141 @@ def test_happy_path_formatter_none(simple_file_target):
     with open(simple_file_target.test_case) as f:
         content = f.read()
     assert len(content) > 1
+
+
+# === TUI terminal interaction test ===
+
+
+@pytest.mark.slow
+def test_tui_terminal_interaction_quit_during_reduction(tmp_path):
+    """Test TUI interaction using pexpect/pyte to simulate real terminal usage.
+
+    This test:
+    1. Launches the TUI with a file and a restrictive interestingness test
+    2. Waits for the first successful reduction to appear on screen
+    3. Presses 'q' to quit
+    4. Verifies the app exits cleanly
+
+    The test typically completes in 2-3 seconds (most of which is subprocess and
+    TUI startup overhead), with 5 second timeouts as safety margins for CI.
+    """
+    import time
+
+    # Create a smaller file (100 bytes) for faster testing
+    # We need content whose hash is divisible by 10 so the initial test passes
+    # Seed 8 works for 1000 bytes, find one that works for 100 bytes
+    for seed in range(1000):
+        original_content = bytes([(i * 17 + seed) % 256 for i in range(100)])
+        content_hash = int(hashlib.sha256(original_content).hexdigest(), 16)
+        if content_hash % 10 == 0:
+            break
+    else:
+        pytest.fail("Could not find initial content with hash divisible by 10")
+
+    target = tmp_path / "test.bin"
+    target.write_bytes(original_content)
+    original_size = len(original_content)
+
+    # Interestingness test: size >= 1/4 original AND hash % 10 == 0
+    # This allows some reductions but not arbitrary ones
+    script = tmp_path / "test.py"
+    script.write_text(
+        f"""#!/usr/bin/env {sys.executable}
+import hashlib
+import sys
+from pathlib import Path
+
+original_size = {original_size}
+file_path = Path(sys.argv[1])
+content = file_path.read_bytes()
+size = len(content)
+
+# Must be at least 1/4 of the original size
+if size < original_size // 4:
+    sys.exit(1)
+
+# Hash must be divisible by 10 (about 10% of candidates pass)
+file_hash = int(hashlib.sha256(content).hexdigest(), 16)
+if file_hash % 10 != 0:
+    sys.exit(1)
+
+sys.exit(0)
+"""
+    )
+    script.chmod(0o755)
+
+    # Set up pyte screen to parse terminal output
+    screen = pyte.Screen(80, 24)
+    stream = pyte.Stream(screen)
+
+    # Spawn the TUI process with --no-exit-on-completion so it waits for 'q'
+    child = pexpect.spawn(
+        sys.executable,
+        [
+            "-m",
+            "shrinkray",
+            str(script),
+            str(target),
+            "--ui=textual",
+            "--parallelism=1",
+            "--no-exit-on-completion",  # Stay open after completion
+        ],
+        encoding="utf-8",
+        timeout=5,
+        dimensions=(24, 80),  # Terminal size
+    )
+
+    try:
+        # Wait for TUI to start and show initial state
+        # Look for "Validating" message first
+        child.expect("Validating initial example...", timeout=5)
+
+        # Now wait for the TUI to show reduction progress
+        # We're looking for any percentage > 0% in the output
+        reduction_seen = False
+        start_time = time.time()
+        timeout = 5.0
+
+        while time.time() - start_time < timeout:
+            # Read available output
+            try:
+                data = child.read_nonblocking(size=4096, timeout=0.1)
+                stream.feed(data)
+            except pexpect.TIMEOUT:
+                pass
+            except pexpect.EOF:
+                break
+
+            # Get current screen content
+            screen_text = "\n".join(screen.display)
+
+            # Check for reduction progress (any percentage > 0%)
+            # Pattern matches things like "10.00% reduction" or "5.50% reduction"
+            if re.search(r"[1-9]\d*\.\d+% reduction", screen_text):
+                reduction_seen = True
+                break
+
+            # Also check for completed state
+            if "Reduction completed" in screen_text:
+                reduction_seen = True
+                break
+
+        assert reduction_seen, (
+            f"No reduction seen within {timeout}s. Screen content:\n"
+            + "\n".join(screen.display)
+        )
+
+        # Press 'q' to quit
+        child.send("q")
+
+        # Wait for process to exit (should be fast)
+        child.expect(pexpect.EOF, timeout=5)
+
+        # Verify clean exit
+        child.close()
+        assert child.exitstatus == 0, f"Exit status was {child.exitstatus}"
+
+    finally:
+        # Clean up if still running
+        if child.isalive():
+            child.terminate(force=True)

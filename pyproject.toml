@@ -46,6 +46,8 @@ dev = [
     "pygments",
     "basedpyright",
     "ruff",
+    "pexpect>=4.9.0",
+    "pyte>=0.8.2",
 ]
 
 [tool.setuptools.packages.find]

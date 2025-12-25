@@ -1,225 +1,44 @@
-# Reduction Passes Guide
+# Reduction Passes Overview
 
-This document catalogs the reduction passes and their strategies.
+This document provides a high-level overview of the reduction pass modules. For detailed information about specific passes, see the docstrings in each module.
 
-## Byte-Level Passes (bytes.py)
+## Module Overview
 
-### Deletion Passes
+### bytes.py
 
-**delete_byte_spans**
-Tries deleting contiguous byte ranges. Generates spans of various sizes and positions.
-```
-Input:  "hello world goodbye"
-Tries:  "world goodbye", "hello goodbye", "hello world", etc.
-```
+Byte-level reduction passes that operate on raw bytes. These are the foundation of Shrink Ray's reduction strategy, as all file formats ultimately reduce to bytes. Includes passes for bracket manipulation (`hollow`, `lift_braces`, `debracket`), byte span deletion, whitespace normalisation, and byte value reduction. Also provides the `Split` and `Tokenize` formats for viewing bytes as sequences.
 
-**short_deletions**
-Deletes small (1-8 byte) sequences throughout the file.
-```
-Input:  "x = 1 + 2"
-Tries:  " = 1 + 2", "x= 1 + 2", "x  1 + 2", etc.
-```
+### sequences.py
 
-**hollow**
-Keeps only the first and last portions of the file.
-```
-Input:  "int main() { lots of code here }"
-Result: "int main() { }"  (if interesting)
-```
+Generic operations on sequences (lists, tuples, etc.). Provides `block_deletion` for removing contiguous blocks, `delete_elements` for single-element removal, and `delete_duplicates` for removing duplicate elements. These are typically used via `compose()` with a format like `Split(b"\n")`.
 
-### Structural Passes
+### genericlanguages.py
 
-**Split(delimiter)** (Format)
-Parses bytes into list of segments, enables sequence operations.
-```python
-compose(Split(b"\n"), block_deletion(1, 10))  # Delete 1-10 lines
-compose(Split(b";"), delete_duplicates)       # Delete duplicate statements
-```
+Reduction passes for "things that look like programming languages" - text with comments, identifiers, brackets, and integer literals. Includes comment removal (`cut_comment_like_things`), integer literal reduction (`reduce_integer_literals`), identifier normalisation (`normalize_identifiers`), and bracket simplification. Language-agnostic, working on any text that uses common programming conventions.
 
-**Tokenize()** (Format)
-Parses into tokens respecting quotes and brackets.
-```python
-compose(Tokenize(), block_deletion(1, 20))  # Delete 1-20 tokens
-```
+### python.py
 
-**lift_braces**
-Replaces `{...}` or `(...)` with just the content.
-```
-Input:  "if (x) { return 1; }"
-Tries:  "if (x)  return 1; " or "if x { return 1; }"
-```
+Python-specific AST-aware reductions using libcst. Includes passes for lifting indented constructs (replacing `if`/`while`/`with` blocks with their bodies), replacing function bodies with `...`, stripping type annotations, and deleting statements. These understand Python syntax and produce valid Python output.
 
-**debracket**
-Removes matching bracket pairs.
-```
-Input:  "(x + y)"
-Result: "x + y"
-```
+### json.py
 
-### Whitespace Passes
+JSON-specific passes. Provides `DeleteIdentifiers` for recursively removing keys from JSON objects throughout the structure.
 
-**remove_indents**
-Reduces or removes indentation.
-```
-Input:  "    x = 1"
-Result: "x = 1"
-```
+### sat.py
 
-**remove_whitespace**
-Deletes whitespace characters.
-```
-Input:  "x = 1 + 2"
-Tries:  "x= 1 + 2", "x =1 + 2", etc.
-```
+Passes for DIMACS CNF files (SAT solver input format). Includes clause deletion, literal deletion, unit propagation, and literal sign flipping. The `DimacsCNF` format parses bytes into a list of clauses (each clause being a list of integers).
 
-**replace_space_with_newlines**
-Replaces spaces with newlines (can help line-based passes).
+### clangdelta.py
 
-### Normalization Passes
-
-**lower_bytes** / **lower_individual_bytes**
-Reduces byte values (e.g., 'Z' -> 'A' -> '0' -> '\0').
-
-**standard_substitutions**
-Common replacements: "true" -> "1", "false" -> "0", etc.
-
-**line_sorter**
-Sorts lines to make duplicates adjacent (helps delete_duplicates).
-
-## Sequence Passes (sequences.py)
-
-**block_deletion(min, max)**
-Deletes contiguous blocks of elements.
-```
-[a, b, c, d, e] with block_deletion(2, 3)
-Tries: [c, d, e], [a, d, e], [a, b, e], [a, b, c], etc.
-```
-
-**delete_duplicates**
-Removes all but one occurrence of duplicate elements.
-```
-[a, b, a, c, a] -> [a, b, c]
-```
-
-**delete_elements**
-Deletes individual elements one at a time.
-
-## Generic Language Passes (genericlanguages.py)
-
-**cut_comment_like_things**
-Removes comments in various syntaxes: `#...`, `//...`, `/*...*/`, `"""..."""`
-
-**reduce_integer_literals**
-Binary-searches integer literals toward 0.
-```
-"x = 12345" -> "x = 0" (if works) or smallest working value
-```
-
-**combine_expressions**
-Evaluates simple arithmetic.
-```
-"1 + 2" -> "3"
-```
-
-**normalize_identifiers**
-Renames identifiers to shorter versions.
-```
-"longVariableName" -> "a"
-```
-
-**merge_adjacent_strings**
-Removes whitespace between adjacent string quotes.
-```
-"'hello' 'world'" -> "'hello''world'" -> (later) "'helloworld'"
-```
-
-**simplify_brackets**
-Replaces bracket types: `{}` -> `[]` -> `()` (lexicographically smaller).
-
-## Python Passes (python.py)
-
-Uses libcst for AST-aware transformations.
-
-**lift_indented_constructs**
-Replaces `if/while/with` blocks with their body.
-```python
-if True:
-    x = 1
-# becomes:
-x = 1
-```
-
-**replace_bodies_with_ellipsis**
-Replaces block bodies with `...`.
-```python
-def foo():
-    complex_stuff()
-# becomes:
-def foo():
-    ...
-```
-
-**strip_annotations**
-Removes type annotations.
-```python
-def foo(x: int) -> str:
-# becomes:
-def foo(x):
-```
-
-**delete_statements** / **replace_statements_with_pass**
-Removes or replaces statements.
-
-## JSON Passes (json.py)
-
-**delete_identifiers**
-Removes dictionary keys throughout the JSON structure.
-
-## SAT Passes (sat.py)
-
-For DIMACS CNF files (SAT solver input).
-
-**delete_elements** (from sequences.py)
-Removes entire clauses from the formula.
-
-**delete_literals**
-Removes individual literals from clauses.
-
-**delete_single_terms**
-Removes single-literal clauses (unit clauses).
-
-**unit_propagate**
-Applies unit propagation to simplify the formula.
-```
-[[1], [-1, 2]] -> [[1], [2]]  (since 1 is forced true, -1 is false)
-```
-
-**force_literals**
-Tries forcing variables to specific values.
-
-**flip_literal_signs**
-Tries flipping the sign of literals.
-
-**combine_clauses** / **merge_literals**
-Combines or merges similar clauses.
-
-## C/C++ Pumps (clangdelta.py)
-
-These use creduce's clang_delta tool for semantic transformations.
-
-Notable transformations:
-- **simple-inliner**: Inline function calls (may increase size temporarily)
-- **remove-unused-function**: Delete unused functions
-- **rename-var**: Shorten variable names
-- **aggregate-to-scalar**: Decompose structs
-
-These are "pumps" because some (like inlining) can increase code size, enabling further reductions.
+C/C++ support via creduce's `clang_delta` tool. Unlike other passes, these are **pumps** - they may temporarily increase code size. For example, inlining a function makes code larger but may enable further reductions. Wraps clang_delta transformations like `simple-inliner`, `remove-unused-function`, and `rename-var`.
 
 ## Pass Ordering in ShrinkRay
 
-1. **initial_cuts**: Fast, high-value (comments, hollow, large blocks)
-2. **great_passes**: Core loop (line deletion, token deletion, lift_braces)
-3. **ok_passes**: When great_passes plateau (smaller blocks, normalization)
-4. **last_ditch_passes**: Expensive/low-yield (byte lowering, brackets)
+The `ShrinkRay` reducer organises passes into stages:
 
-Great passes loop until no progress, tracking successful passes to prioritize them.
+1. **initial_cuts**: Fast, high-value passes (comments, hollow, large blocks) with timeout-based cancellation
+2. **great_passes**: Core loop (line deletion, token deletion, lift_braces) - runs until no progress
+3. **ok_passes**: Run when great_passes plateau (smaller blocks, normalisation)
+4. **last_ditch_passes**: Expensive or low-yield passes (byte lowering, brackets)
+
+Great passes loop until no progress, tracking which passes succeeded to prioritise them on subsequent iterations.

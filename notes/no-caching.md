@@ -4,11 +4,14 @@ Historically most test-case reducers implement caching of their interestingness 
 so that if you generate the same test case variant multiple times you don't need to
 call the underlying interestingness test multiple times.
 
-Shrink Ray now has a limited form of caching in `BasicReductionProblem`: results are
-cached by content hash, but **the cache is cleared whenever a successful reduction is
-found**. This means the cache only helps when testing multiple candidates against the
+Shrink Ray currently has a limited form of caching in `BasicReductionProblem`: results
+are cached by content hash, but **the cache is cleared whenever a successful reduction
+is found**. This means the cache only helps when testing multiple candidates against the
 same base test case before any reduction succeeds. In fairly natural test cases I was
 noticing cache hit rates of literally 0%.
+
+**Note:** This caching should probably be removed (it was likely just forgotten).
+See [issue #31](https://github.com/DRMacIver/shrinkray/issues/31) for tracking.
 
 I suspect caching in general is not that useful for test-case reduction, but this is
 likely particularly the case with Shrink Ray which has a very large number of fine-grained

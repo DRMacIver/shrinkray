@@ -57,18 +57,11 @@ This doesn't test blocks sequentially. Instead:
 
 When multiple parallel tests succeed, all but one are "wasted" - the reduction was already achieved. `problem.stats.wasted_interesting_calls` tracks this.
 
-High parallelism on easy reductions = more waste. The system auto-tunes based on success rates.
+The system always runs at the maximum parallelism supported by the current reduction pass and the configured parallelism limit.
 
 ## Backpressure
 
-`LazyParallelMap` uses bounded queues to prevent unbounded work creation:
-```python
-self.send_channel, self.recv_channel = trio.open_memory_channel(
-    max_buffer_size=context.parallelism
-)
-```
-
-This limits in-flight work to `parallelism` items, preventing memory exhaustion on large inputs.
+`LazyParallelMap` uses bounded queues to prevent unbounded work creation. The channel buffer size is set to `parallelism`, which limits in-flight work and prevents memory exhaustion on large inputs.
 
 ## Structured Concurrency
 
@@ -84,9 +77,9 @@ Benefits:
 - Exception propagation
 - Clean resource cleanup
 
-### Cancellation in Passes
+### Cancellation in Reduction Stages
 
-Some passes (like `initial_cut`) use timeout-based cancellation:
+Some stages (like the initial cuts stage) use timeout-based cancellation:
 ```python
 async with trio.open_nursery() as nursery:
     @nursery.start_soon
@@ -102,17 +95,9 @@ async with trio.open_nursery() as nursery:
 
 ## The Merge Master Pattern
 
-`PatchApplier` coordinates parallel patch testing:
+The merge master pattern is how `PatchApplier` coordinates parallel patch testing while making progress. See [patching-system.md](patching-system.md) for a detailed explanation.
 
-1. **Controller** (`try_apply_patches`): Decides which patches to try
-2. **Workers**: Run interestingness tests in parallel
-3. **State synchronization**: Through `problem.current_test_case`
-
-When a patch succeeds:
-1. Problem state updates atomically
-2. Other workers' tests may now be invalid (testing old version)
-3. Workers check `problem.current_test_case` before reporting success
-4. Invalid successes are logged as "wasted"
+The key benefit is that we can run concurrently *while making progress*. Normally, parallelism in reduction is embarrassingly parallel only when failing to reduce - whenever you make progress, you have to throw away your parallel work because the test case changed. The merge master pattern allows near-linear speedups from parallelism even while actively reducing.
 
 ## Parallelism Limits
 
@@ -131,11 +116,4 @@ This prevents overwhelming the system with subprocess spawns.
 
 ## Random Ordering
 
-Patches are shuffled before testing:
-```python
-if context.random is not None:
-    patches = list(patches)
-    context.random.shuffle(patches)
-```
-
-This prevents systematic bias and improves parallelism utilization when early patches tend to fail.
+Patches are shuffled before testing using `context.random`. This helps avoid repeating work: if a pass runs multiple times and patches fail, shuffling means we're less likely to try the same patches in the same order and waste effort on patches that failed last time.

@@ -8,9 +8,9 @@ The central abstraction is `ReductionProblem[T]` from `problem.py`. This represe
 
 ### Key Properties
 
-- **current_test_case**: The best-known interesting test case
+- **current_test_case**: The best known-interesting test case (may temporarily differ during backtracking from pumped test cases)
 - **is_interesting(test_case) -> bool**: Async predicate that tests if a candidate preserves the bug
-- **sort_key(test_case)**: Returns a comparable key for ordering - defaults to shortlex ordering
+- **sort_key(test_case)**: Returns a comparable key for ordering - defaults to shortlex ordering. Also used as a heuristic for how good a reduction pass is: passes that reduce `sort_key` (especially size) are much more valuable than non-size-reducing passes.
 - **size(test_case) -> int**: Returns the size of a test case (for metrics)
 
 ### Shortlex Ordering
@@ -19,7 +19,9 @@ Shrink Ray uses shortlex ordering: `(length, lexicographic_value)`. This means:
 1. Shorter test cases are always preferred
 2. Among equal-length test cases, lexicographically smaller is preferred
 
-This is crucial for **reproducibility** - regardless of which reduction path is taken, the final result should be the same minimal test case.
+This is crucial for **normalisation** - the idea that every interestingness test should ideally have a single canonical minimal result. See "One Test to Rule Them All" by Alex Groce and Josie Holmes for background on this concept.
+
+Note: shortlex is somewhat arbitrary. The "short" part is important (smaller test cases are genuinely better), but the "lex" tiebreaker is just a convention inherited from Hypothesis (where it makes more sense). Many other orderings might be better; this just hasn't been explored yet.
 
 ### Callbacks and Statistics
 
@@ -94,4 +96,4 @@ Manages parallelism using Trio. Key methods:
 - `map(fn, items)`: Parallel map with lazy evaluation
 - `filter(predicate, items)`: Parallel filter
 - `find_first_value(items, predicate)`: Find first item satisfying predicate
-- `find_large_integer(predicate)`: Binary search for largest n where predicate(n) holds
+- `find_large_integer(predicate)`: Find an n such that `predicate(n)` is true and `predicate(n+1)` is false. Note: this only finds the boundary where the predicate transitions from true to false; if the predicate is not monotonic, this may not be the largest n for which it holds.

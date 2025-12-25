@@ -6,6 +6,19 @@ on:
     branches: [main]
 
 jobs:
+  action-lint:
+    name: Lint GitHub Actions
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@v1
+
   lint:
     # creduce package is broken on Ubuntu 24.04, and
     # it's slow and painful to build creduce ourselves

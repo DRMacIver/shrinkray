@@ -694,7 +694,7 @@ def test_keyboard_interrupt_handling(basic_shrink_target, tmp_path):
         )
         # Should have raised KeyboardInterrupt
         if result.exception is not None:
-            assert isinstance(result.exception, (KeyboardInterrupt, SystemExit))
+            assert isinstance(result.exception, KeyboardInterrupt | SystemExit)
 
 
 def test_timeout_zero_converts_to_infinity(tmpdir, monkeypatch):

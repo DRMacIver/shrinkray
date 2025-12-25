@@ -1,3 +1,7 @@
+import re
+from string import ascii_lowercase, ascii_uppercase
+from unittest.mock import MagicMock, PropertyMock
+
 import pytest
 
 from shrinkray.passes.definitions import ParseError
@@ -7,14 +11,17 @@ from shrinkray.passes.genericlanguages import (
     Substring,
     combine_expressions,
     cut_comment_like_things,
+    cut_comments,
     iter_indices,
     merge_adjacent_strings,
     normalize_identifiers,
     reduce_integer_literals,
+    regex_pass,
     replace_falsey_with_zero,
     shortlex,
     simplify_brackets,
 )
+from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
 
 
@@ -258,9 +265,7 @@ def test_normalize_identifiers_identifier_disappears():
 
 def test_regex_pass_with_compiled_pattern():
     """Test regex_pass with an already compiled pattern."""
-    import re
 
-    from shrinkray.passes.genericlanguages import regex_pass
 
     # Create a pass with a pre-compiled pattern
     pattern = re.compile(rb"[0-9]+")
@@ -290,7 +295,6 @@ def test_reduce_integer_early_termination():
 
 def test_cut_comments_no_end_found():
     """Test cut_comments when include_end=True but end marker not found."""
-    from shrinkray.passes.genericlanguages import cut_comments
 
     # Test with include_end=True and no end marker
     result = reduce_with(
@@ -304,7 +308,6 @@ def test_cut_comments_no_end_found():
 
 def test_cut_comments_no_end_include_false():
     """Test cut_comments when include_end=False and end not found."""
-    from shrinkray.passes.genericlanguages import cut_comments
 
     # Test with include_end=False and no end marker - should cut to end
     result = reduce_with(
@@ -323,7 +326,6 @@ def test_normalize_identifiers_all_letters_used():
     the inner loop completes without breaking, triggering the 221->220 branch.
     """
     # Create a source with all 26 lowercase and 26 uppercase letters as identifiers
-    from string import ascii_lowercase, ascii_uppercase
 
     all_letters = " ".join(ascii_lowercase + ascii_uppercase).encode("ascii")
     result = reduce_with(
@@ -342,10 +344,7 @@ async def test_normalize_identifiers_target_disappears():
     in the original source is no longer present when we try to process it.
     This can happen in concurrent scenarios or with modified problem classes.
     """
-    from unittest.mock import MagicMock, PropertyMock
 
-    from shrinkray.passes.genericlanguages import normalize_identifiers
-    from shrinkray.work import WorkContext
 
     # Create a mock problem that changes its current_test_case
     mock_problem = MagicMock()

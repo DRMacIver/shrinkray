@@ -6,7 +6,17 @@ These tests do NOT require minisat and can run anywhere.
 import pytest
 
 from shrinkray.passes.definitions import DumpError, ParseError
-from shrinkray.passes.sat import DimacsCNF
+from shrinkray.passes.sat import (
+    BooleanEquivalence,
+    DimacsCNF,
+    Inconsistent,
+    NegatingMap,
+    UnionFind,
+    UnitPropagator,
+    combine_clauses,
+    merge_literals,
+)
+from tests.helpers import reduce_with
 
 
 def test_dimacs_parse_with_comments():
@@ -104,7 +114,6 @@ def test_dimacs_roundtrip():
 
 def test_boolean_equivalence_find_zero_error():
     """Test BooleanEquivalence.find raises on zero."""
-    from shrinkray.passes.sat import BooleanEquivalence
 
     be = BooleanEquivalence()
     with pytest.raises(ValueError, match="Invalid variable"):
@@ -113,7 +122,6 @@ def test_boolean_equivalence_find_zero_error():
 
 def test_boolean_equivalence_merge_same():
     """Test BooleanEquivalence.merge with same values."""
-    from shrinkray.passes.sat import BooleanEquivalence
 
     be = BooleanEquivalence()
     be.merge(1, 1)  # Should be a no-op
@@ -122,7 +130,6 @@ def test_boolean_equivalence_merge_same():
 
 def test_boolean_equivalence_merge_contradiction():
     """Test BooleanEquivalence.merge with contradicting values."""
-    from shrinkray.passes.sat import BooleanEquivalence, Inconsistent
 
     be = BooleanEquivalence()
     be.merge(1, 2)
@@ -134,7 +141,6 @@ def test_boolean_equivalence_merge_contradiction():
 
 def test_negating_map_iter():
     """Test NegatingMap iteration."""
-    from shrinkray.passes.sat import NegatingMap
 
     nm = NegatingMap()
     nm[1] = 2
@@ -152,7 +158,6 @@ def test_negating_map_iter():
 
 def test_unit_propagator_inconsistent_units():
     """Test UnitPropagator with contradicting units."""
-    from shrinkray.passes.sat import Inconsistent, UnitPropagator
 
     # Should raise Inconsistent because 1 and -1 can't both be true
     with pytest.raises(Inconsistent):
@@ -161,7 +166,6 @@ def test_unit_propagator_inconsistent_units():
 
 def test_unit_propagator_empty_clause():
     """Test UnitPropagator with empty clause."""
-    from shrinkray.passes.sat import Inconsistent, UnitPropagator
 
     with pytest.raises(Inconsistent, match="empty clause"):
         UnitPropagator([[]])
@@ -169,7 +173,6 @@ def test_unit_propagator_empty_clause():
 
 def test_union_find_merge_same():
     """Test UnionFind.merge with same elements."""
-    from shrinkray.passes.sat import UnionFind
 
     uf = UnionFind()
     uf.merge(1, 1)  # Should be a no-op
@@ -179,7 +182,6 @@ def test_union_find_merge_same():
 
 def test_union_find_initial_merges():
     """Test UnionFind with initial merges in constructor."""
-    from shrinkray.passes.sat import UnionFind
 
     uf = UnionFind(initial_merges=[(1, 2), (3, 4)])
     assert uf.find(1) == uf.find(2)
@@ -188,14 +190,12 @@ def test_union_find_initial_merges():
 
 def test_dimacs_cnf_name():
     """Test DimacsCNF.name property."""
-    from shrinkray.passes.sat import DimacsCNF
 
     assert DimacsCNF.name == "DimacsCNF"
 
 
 def test_union_find_repr():
     """Test UnionFind.__repr__ shows component count."""
-    from shrinkray.passes.sat import UnionFind
 
     uf: UnionFind[int] = UnionFind()
     uf.find(1)
@@ -207,7 +207,6 @@ def test_union_find_repr():
 
 def test_negating_map_repr():
     """Test NegatingMap.__repr__ shows both positive and negative keys."""
-    from shrinkray.passes.sat import NegatingMap
 
     nm = NegatingMap()
     nm[1] = 2
@@ -222,7 +221,6 @@ def test_negating_map_repr():
 
 def test_unit_propagator_duplicate_unit():
     """Test UnitPropagator handles unit clauses appearing multiple times."""
-    from shrinkray.passes.sat import UnitPropagator
 
     # [1] forces 1 as a unit, and [1, 2] becomes satisfied (contains unit 1)
     up = UnitPropagator([[1], [1, 2]])
@@ -236,7 +234,6 @@ def test_boolean_equivalence_inconsistent_merge():
 
     This covers the path where merge_literals catches Inconsistent.
     """
-    from shrinkray.passes.sat import BooleanEquivalence, Inconsistent
 
     be = BooleanEquivalence()
     be.merge(1, 2)  # 1 = 2
@@ -251,8 +248,6 @@ def test_merge_literals_runs_on_sat():
 
     This exercises the merge_literals pass to try to hit the conflict path.
     """
-    from shrinkray.passes.sat import merge_literals
-    from tests.helpers import reduce_with
 
     # SAT with clauses that could trigger merge conflicts
     sat = [[1, 2], [2, 3], [-1, -2], [-2, -3]]
@@ -267,8 +262,6 @@ def test_combine_clauses_runs_on_sat():
 
     This exercises the combine_clauses pass with shared literals.
     """
-    from shrinkray.passes.sat import combine_clauses
-    from tests.helpers import reduce_with
 
     # SAT with clauses sharing literals (so they might be combined)
     sat = [[1, 2], [1, 3], [2, 3], [1, 2, 3]]
@@ -280,7 +273,6 @@ def test_combine_clauses_runs_on_sat():
 
 def test_unit_propagator_propagation_chain():
     """Test UnitPropagator propagation chain through multiple clauses."""
-    from shrinkray.passes.sat import UnitPropagator
 
     # [1] forces 1, [-1, 2] forces 2, [-2, 1] is satisfied by 1
     up = UnitPropagator([[1], [-1, 2], [-2, 1]])
@@ -293,7 +285,6 @@ def test_union_find_components_with_singletons():
 
     Exercises the skip path in components() when a component has only one element.
     """
-    from shrinkray.passes.sat import UnionFind
 
     uf: UnionFind[int] = UnionFind()
     uf.find(1)  # Add singleton
@@ -312,8 +303,6 @@ def test_merge_literals_with_contradiction_detection():
 
     Exercises the Inconsistent->Conflict path in merge_literals.
     """
-    from shrinkray.passes.sat import merge_literals
-    from tests.helpers import reduce_with
 
     # SAT with potential for merge conflicts (has both 2 and -2 in clauses with shared literals)
     sat = [[1, 2, 3], [1, -2, 3], [2, 3]]
@@ -334,7 +323,6 @@ def test_unit_propagator_removes_negated_units_from_clauses():
     When a unit [1] is propagated, any clause containing -1 should have
     that literal removed.
     """
-    from shrinkray.passes.sat import UnitPropagator
 
     # [1] is a unit clause, so 1 must be true
     # [-1, 2, 3] contains -1 (negation of unit 1) which should be removed

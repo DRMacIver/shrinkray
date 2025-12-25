@@ -1,6 +1,10 @@
 """Tests for pass definitions and Format class."""
 
-from shrinkray.passes.definitions import Format, ParseError
+from random import Random
+
+from shrinkray.passes.definitions import Format, ParseError, compose
+from shrinkray.problem import BasicReductionProblem
+from shrinkray.work import Volume, WorkContext
 
 
 class SimpleFormat(Format[str, int]):
@@ -37,12 +41,6 @@ def test_format_is_valid_for_unparseable():
 
 async def test_compose_returns_early_on_parse_error():
     """Test that compose returns early when parsing fails after problem changes."""
-    from random import Random
-
-    from shrinkray.passes.definitions import compose
-    from shrinkray.problem import BasicReductionProblem
-    from shrinkray.work import Volume, WorkContext
-
     # Create a format that parses strings starting with "VALID:" successfully
     class SelectiveFormat(Format[str, str]):
         def parse(self, input: str) -> str:

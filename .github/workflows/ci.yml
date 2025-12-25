@@ -15,19 +15,25 @@ jobs:
       actions: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - name: Run zizmor
-        uses: zizmorcore/zizmor-action@v0.3.0
+        uses: zizmorcore/zizmor-action@e639db99335bc9038abc0e066dfcd72e23d26fb4 # v0.3.0
 
   lint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
         with:
           version: "latest"
       - name: Set up Python ${{ matrix.python-version }}
@@ -42,6 +48,8 @@ jobs:
         run: uv run basedpyright src tests
 
   test:
+    permissions:
+      contents: read
     strategy:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
@@ -49,9 +57,11 @@ jobs:
         os: [ubuntu-22.04, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
         with:
           version: "latest"
       - name: Set up Python ${{ matrix.python-version }}
@@ -81,15 +91,19 @@ jobs:
         run: uv run pytest tests/ -m "not slow" -q
 
   slow-tests:
+    permissions:
+      contents: read
     strategy:
       matrix:
         # creduce package is broken on Ubuntu 24.04, so we use 22.04
         os: [ubuntu-22.04, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
         with:
           version: "latest"
       - name: Set up Python 3.14

@@ -179,17 +179,29 @@ Removes dictionary keys throughout the JSON structure.
 
 For DIMACS CNF files (SAT solver input).
 
-**delete_clauses**
-Removes clauses from the formula.
+**delete_elements** (from sequences.py)
+Removes entire clauses from the formula.
 
-**delete_variables**
-Removes variables, simplifying clauses that contain them.
+**delete_literals**
+Removes individual literals from clauses.
+
+**delete_single_terms**
+Removes single-literal clauses (unit clauses).
 
 **unit_propagate**
 Applies unit propagation to simplify the formula.
 ```
 [[1], [-1, 2]] -> [[1], [2]]  (since 1 is forced true, -1 is false)
 ```
+
+**force_literals**
+Tries forcing variables to specific values.
+
+**flip_literal_signs**
+Tries flipping the sign of literals.
+
+**combine_clauses** / **merge_literals**
+Combines or merges similar clauses.
 
 ## C/C++ Pumps (clangdelta.py)
 

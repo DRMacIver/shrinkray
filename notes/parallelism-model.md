@@ -116,10 +116,12 @@ When a patch succeeds:
 
 ## Parallelism Limits
 
-The `is_interesting_limiter` (a `trio.CapacityLimiter`) limits concurrent interestingness tests:
+The `is_interesting_limiter` (a `trio.CapacityLimiter`) in `ShrinkRayState` limits concurrent interestingness tests:
 ```python
-self.is_interesting_limiter = trio.CapacityLimiter(max(parallelism, 1))
+# In ShrinkRayState.__attrs_post_init__():
+self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
 
+# In ShrinkRayState.is_interesting():
 async def is_interesting(self, test_case):
     async with self.is_interesting_limiter:
         return await self.run_for_exit_code(test_case) == 0

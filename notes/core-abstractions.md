@@ -21,11 +21,11 @@ Shrink Ray uses shortlex ordering: `(length, lexicographic_value)`. This means:
 
 This is crucial for **reproducibility** - regardless of which reduction path is taken, the final result should be the same minimal test case.
 
-### Reduction Events
+### Callbacks and Statistics
 
-The problem tracks statistics and fires events:
-- `on_reduce`: Called whenever a smaller interesting test case is found
-- `stats`: Tracks calls, cache hits, reductions, timing
+The problem tracks statistics and supports callbacks:
+- `on_reduce(callback)`: Register a callback to be called whenever a smaller interesting test case is found
+- `stats`: Property returning `ReductionStats` with calls, reductions, timing info
 
 ### Views
 
@@ -76,7 +76,17 @@ A pump is like a pass but can **temporarily increase** test case size:
 
 Example: `clang_delta` can inline a function (making code larger) which then allows other passes to delete more code.
 
-The pump returns a (possibly larger) test case, and the reducer runs passes on it using `backtrack()` to try to reduce it below the original size.
+The pump returns a (possibly larger) test case. The `Reducer` class has a `backtrack()` context manager that temporarily switches to reducing from this larger test case:
+
+```python
+# In Reducer.pump():
+pumped = await pump(self.target)  # Get larger test case
+with self.backtrack(pumped):      # Temporarily switch target
+    await self.run_great_passes() # Try to reduce it
+    # If result is smaller than original, it's kept
+```
+
+The `Reducer.backtrack()` context manager internally calls `problem.backtrack()` which creates a new `BasicReductionProblem` starting from the pumped test case.
 
 ## WorkContext
 

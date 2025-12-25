@@ -44,26 +44,28 @@ The core engine that applies patches in parallel with intelligent merging.
 
 ### Merge Master Pattern
 
-When applying multiple patches:
-1. Try to apply all patches at once
-2. If that fails, binary-search to find a maximal compatible subset
-3. Apply that subset, record which patches succeeded
-4. Repeat with remaining patches
+Workers call `try_apply_patch()` in parallel. When a patch succeeds its interestingness test, it goes into a merge queue. One worker becomes the "merge master" and processes the queue:
+
+1. Try to apply all queued patches at once
+2. If that fails, use `find_large_integer` to binary-search for how many patches from the front of the queue can be applied together
+3. Apply that subset, notify waiting workers of success/failure
+4. Repeat until queue is empty
 
 ```python
-async def try_apply_patches(patches):
-    combined = combine_all(patches)
-    if await is_interesting(apply(combined, target)):
-        return True  # All patches work together
-    else:
-        return await find_maximal_subset(patches)
+# Simplified from __possibly_become_merge_master():
+async def can_merge(k):
+    attempted_patch = combine(base_patch, *queue[:k])
+    return await problem.is_reduction(apply(attempted_patch, initial))
+
+if await can_merge(len(queue)):
+    merged = len(queue)  # All patches work together
+else:
+    merged = await work.find_large_integer(can_merge)
 ```
 
 ### Binary Search for Maximal Sets
 
-`find_maximal_set` uses binary search: if patches `[0:mid]` work, try `[0:mid2]` where `mid2 > mid`. If they don't work, try `[0:mid2]` where `mid2 < mid`.
-
-This finds a large working subset in O(log n) interestingness tests.
+`find_large_integer` uses binary search: if `can_merge(k)` is true, try larger k; if false, try smaller k. This finds a large working subset in O(log n) interestingness tests.
 
 ### The apply_patches Function
 

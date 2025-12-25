@@ -84,4 +84,4 @@ it's actually been given (although it does have access to this information when 
       but for something with quite strict syntactic correctness requirements like a programming language, I think the
       early steps largely just waste time.
 
-[^4]: In fact currently Shrink Ray has no passes where conflicts are possible, but redundancy still is.
+[^4]: Some passes (e.g., SAT literal merging) can have conflicts when combining patches would create an inconsistency.

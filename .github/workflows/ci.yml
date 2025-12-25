@@ -1,27 +1,30 @@
 name: CI
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   lint:
+    # creduce package is broken on Ubuntu 24.04, and
+    # it's slow and painful to build creduce ourselves
+    # in CI, so we run on an older version.
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v4
-    - name: Install uv
-      uses: astral-sh/setup-uv@v3
-      with:
-        version: "latest"
-    - name: Set up Python
-      run: uv python install 3.13
-    - name: Install dependencies
-      run: uv sync --extra dev
-    - name: Run ruff check
-      run: uv run ruff check src tests
-    - name: Run type checking
-      run: uv run basedpyright src tests
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      - name: Set up Python
+        run: uv python install 3.13
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Run ruff check
+        run: uv run ruff check src tests
+      - name: Run type checking
+        run: uv run basedpyright src tests
 
   test:
     runs-on: ubuntu-22.04
@@ -29,50 +32,50 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
     steps:
-    - uses: actions/checkout@v4
-    - name: Install uv
-      uses: astral-sh/setup-uv@v3
-      with:
-        version: "latest"
-    - name: Set up Python ${{ matrix.python-version }}
-      run: uv python install ${{ matrix.python-version }}
-    - name: Pin Python version
-      run: uv python pin ${{ matrix.python-version }}
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y minisat creduce
-    - name: Install Python dependencies
-      run: uv sync --extra dev
-    - name: Run fast tests with coverage
-      # We hit weird bugs with coverage on 3.14 that we've (ironically)
-      # not yet adequately minimised to reproduce and file upstream, so
-      # we disable coverage on 3.14 for now.
-      if: matrix.python-version != '3.14'
-      run: |
-        uv run coverage run -m pytest tests/ -m "not slow" -q
-        uv run coverage report --show-missing --fail-under=100
-    - name: Run fast tests without coverage (Python 3.14)
-      if: matrix.python-version == '3.14'
-      run: uv run pytest tests/ -m "not slow" -q
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Pin Python version
+        run: uv python pin ${{ matrix.python-version }}
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisat creduce
+      - name: Install Python dependencies
+        run: uv sync --extra dev
+      - name: Run fast tests with coverage
+        # We hit weird bugs with coverage on 3.14 that we've (ironically)
+        # not yet adequately minimised to reproduce and file upstream, so
+        # we disable coverage on 3.14 for now.
+        if: matrix.python-version != '3.14'
+        run: |
+          uv run coverage run -m pytest tests/ -m "not slow" -q
+          uv run coverage report --show-missing --fail-under=100
+      - name: Run fast tests without coverage (Python 3.14)
+        if: matrix.python-version == '3.14'
+        run: uv run pytest tests/ -m "not slow" -q
 
   slow-tests:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v4
-    - name: Install uv
-      uses: astral-sh/setup-uv@v3
-      with:
-        version: "latest"
-    - name: Set up Python 3.14
-      run: uv python install 3.14
-    - name: Pin Python version
-      run: uv python pin 3.14
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y minisat creduce
-    - name: Install Python dependencies
-      run: uv sync --extra dev
-    - name: Run slow tests
-      run: uv run pytest tests/ -m slow -v
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      - name: Set up Python 3.14
+        run: uv python install 3.14
+      - name: Pin Python version
+        run: uv python pin 3.14
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisat creduce
+      - name: Install Python dependencies
+        run: uv sync --extra dev
+      - name: Run slow tests
+        run: uv run pytest tests/ -m slow -v

@@ -61,14 +61,14 @@ def test_to_blocks_small_input():
 
 def test_to_blocks_exactly_80_bytes():
     data = b"A" * 80
-    result = to_blocks(data)
+    result = to_blocks(data, block_size=80)
     assert len(result) == 1
     assert result[0] == "41" * 80
 
 
 def test_to_blocks_splits_at_80_bytes():
     data = b"A" * 160
-    result = to_blocks(data)
+    result = to_blocks(data, block_size=80)
     assert len(result) == 2
     assert result[0] == "41" * 80
     assert result[1] == "41" * 80
@@ -76,7 +76,7 @@ def test_to_blocks_splits_at_80_bytes():
 
 def test_to_blocks_partial_last_block():
     data = b"A" * 100
-    result = to_blocks(data)
+    result = to_blocks(data, block_size=80)
     assert len(result) == 2
     assert result[0] == "41" * 80
     assert result[1] == "41" * 20
@@ -118,7 +118,7 @@ def test_format_diff_starts_at_first_hunk():
 
 def test_format_diff_truncates_long_diff():
     diff_lines = ["@@ -1,1 +1,1 @@"] + [f"line{i}" for i in range(600)]
-    result = format_diff(diff_lines)
+    result = format_diff(diff_lines, max_lines=500)
     lines = result.split("\n")
     # format_diff stops after 501 lines and appends "..."
     assert len(lines) == 502

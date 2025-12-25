@@ -1143,3 +1143,312 @@ sys.exit(1)
     assert result.returncode != 0
     combined_output = result.stdout + result.stderr
     assert "Debug output from failing script" in combined_output
+
+
+# === Happy path integration tests ===
+#
+# These tests verify that reduction completes successfully for various
+# combinations of UI type, file vs directory mode, and other options.
+# They use a simple interestingness test (> 1 byte) and small test cases
+# to keep execution time fast.
+
+
+@pytest.fixture
+def simple_file_target(tmp_path):
+    """Create a simple file target with an interestingness test that accepts > 1 byte."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")  # 11 bytes
+
+    script = tmp_path / "test.sh"
+    script.write_text(
+        """#!/bin/bash
+# Interesting if file has more than 1 byte
+[ "$(wc -c < "$1")" -gt 1 ]
+"""
+    )
+    script.chmod(0o755)
+
+    return ShrinkTarget(test_case=str(target), interestingness_test=str(script))
+
+
+@pytest.fixture
+def simple_directory_target(tmp_path):
+    """Create a simple directory target with an interestingness test."""
+    target = tmp_path / "mydir"
+    target.mkdir()
+    (target / "a.txt").write_text("hello")  # 5 bytes
+    (target / "b.txt").write_text("world")  # 5 bytes
+
+    script = tmp_path / "test.sh"
+    script.write_text(
+        """#!/bin/bash
+# Interesting if a.txt exists and has content
+[ -f "$1/a.txt" ] && [ -s "$1/a.txt" ]
+"""
+    )
+    script.chmod(0o755)
+
+    return ShrinkTarget(test_case=str(target), interestingness_test=str(script))
+
+
+@pytest.mark.slow
+def test_happy_path_basic_ui_single_file(simple_file_target):
+    """Test successful reduction with basic UI and single file."""
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            simple_file_target.interestingness_test,
+            simple_file_target.test_case,
+            "--ui=basic",
+            "--parallelism=1",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    # File should be reduced but still > 1 byte
+    with open(simple_file_target.test_case) as f:
+        content = f.read()
+    assert len(content) > 1
+    assert len(content) < 11  # Should be smaller than original
+
+
+@pytest.mark.slow
+def test_happy_path_basic_ui_directory(simple_directory_target):
+    """Test successful reduction with basic UI and directory."""
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            simple_directory_target.interestingness_test,
+            simple_directory_target.test_case,
+            "--ui=basic",
+            "--input-type=arg",
+            "--parallelism=1",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    # a.txt should still exist with some content
+    a_path = pathlib.Path(simple_directory_target.test_case) / "a.txt"
+    assert a_path.exists()
+    assert a_path.stat().st_size > 0
+
+
+def test_happy_path_tui_single_file(simple_file_target, monkeypatch):
+    """Test that TUI path is exercised for single file reduction.
+
+    Uses mocking to verify TUI is called without actually running the full TUI
+    (which doesn't exit cleanly in non-interactive mode).
+    """
+    from unittest.mock import MagicMock
+
+    mock_run_textual_ui = MagicMock()
+    monkeypatch.setattr("shrinkray.tui.run_textual_ui", mock_run_textual_ui)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            simple_file_target.interestingness_test,
+            simple_file_target.test_case,
+            "--ui=textual",
+            "--parallelism=1",
+        ],
+    )
+
+    assert mock_run_textual_ui.called
+    assert result.exit_code == 0
+
+
+def test_happy_path_tui_directory(simple_directory_target, monkeypatch):
+    """Test that TUI path is exercised for directory reduction.
+
+    Uses mocking to verify TUI is called without actually running the full TUI.
+    """
+    from unittest.mock import MagicMock
+
+    mock_run_textual_ui = MagicMock()
+    monkeypatch.setattr("shrinkray.tui.run_textual_ui", mock_run_textual_ui)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            simple_directory_target.interestingness_test,
+            simple_directory_target.test_case,
+            "--ui=textual",
+            "--input-type=arg",
+            "--parallelism=1",
+        ],
+    )
+
+    assert mock_run_textual_ui.called
+    assert result.exit_code == 0
+
+
+@pytest.mark.slow
+def test_trivial_is_not_error_basic_ui(tmp_path):
+    """Test --trivial-is-not-error flag with basic UI."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    # This test accepts everything including empty files
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0\n")
+    script.chmod(0o755)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            str(script),
+            str(target),
+            "--ui=basic",
+            "--trivial-is-not-error",
+            "--parallelism=1",
+        ],
+    )
+
+    # Should succeed even though result is trivial
+    assert result.exit_code == 0
+
+
+@pytest.mark.slow
+def test_trivial_is_error_basic_ui(tmp_path):
+    """Test that trivial result is an error by default with basic UI."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    # This test accepts everything including empty files
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0\n")
+    script.chmod(0o755)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            str(script),
+            str(target),
+            "--ui=basic",
+            "--parallelism=1",
+        ],
+    )
+
+    # Should fail because result is trivial
+    assert result.exit_code != 0
+
+
+def test_trivial_is_not_error_tui(tmp_path, monkeypatch):
+    """Test --trivial-is-not-error flag with TUI path.
+
+    Uses mocking to verify the TUI is invoked with correct parameters.
+    """
+    from unittest.mock import MagicMock
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0\n")
+    script.chmod(0o755)
+
+    mock_run_textual_ui = MagicMock()
+    monkeypatch.setattr("shrinkray.tui.run_textual_ui", mock_run_textual_ui)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            str(script),
+            str(target),
+            "--ui=textual",
+            "--trivial-is-not-error",
+            "--parallelism=1",
+        ],
+    )
+
+    assert mock_run_textual_ui.called
+    assert result.exit_code == 0
+
+
+@pytest.mark.slow
+def test_happy_path_with_parallelism(simple_file_target):
+    """Test successful reduction with parallelism > 1."""
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            simple_file_target.interestingness_test,
+            simple_file_target.test_case,
+            "--ui=basic",
+            "--parallelism=2",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    with open(simple_file_target.test_case) as f:
+        content = f.read()
+    assert len(content) > 1
+    assert len(content) < 11
+
+
+@pytest.mark.slow
+def test_happy_path_in_place_single_file(tmp_path, monkeypatch):
+    """Test successful reduction with --in-place and single file."""
+    monkeypatch.chdir(tmp_path)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    script = tmp_path / "test.sh"
+    script.write_text(
+        """#!/bin/bash
+[ "$(wc -c < "$1")" -gt 1 ]
+"""
+    )
+    script.chmod(0o755)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            str(script),
+            str(target),
+            "--ui=basic",
+            "--in-place",
+            "--parallelism=1",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    content = target.read_text()
+    assert len(content) > 1
+    assert len(content) < 11
+
+
+@pytest.mark.slow
+def test_happy_path_formatter_none(simple_file_target):
+    """Test successful reduction with --formatter=none."""
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            simple_file_target.interestingness_test,
+            simple_file_target.test_case,
+            "--ui=basic",
+            "--formatter=none",
+            "--parallelism=1",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    with open(simple_file_target.test_case) as f:
+        content = f.read()
+    assert len(content) > 1

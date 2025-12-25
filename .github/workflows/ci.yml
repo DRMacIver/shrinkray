@@ -20,27 +20,7 @@ jobs:
         uses: zizmorcore/zizmor-action@v1
 
   lint:
-    # creduce package is broken on Ubuntu 24.04, and
-    # it's slow and painful to build creduce ourselves
-    # in CI, so we run on an older version.
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
-        with:
-          version: "latest"
-      - name: Set up Python
-        run: uv python install 3.13
-      - name: Install dependencies
-        run: uv sync --extra dev
-      - name: Run ruff check
-        run: uv run ruff check src tests
-      - name: Run type checking
-        run: uv run basedpyright src tests
-
-  test:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
@@ -54,10 +34,38 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
       - name: Pin Python version
         run: uv python pin ${{ matrix.python-version }}
-      - name: Install system dependencies
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Run ruff check
+        run: uv run ruff check src tests
+      - name: Run type checking
+        run: uv run basedpyright src tests
+
+  test:
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+        # creduce package is broken on Ubuntu 24.04, so we use 22.04
+        os: [ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Pin Python version
+        run: uv python pin ${{ matrix.python-version }}
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y minisat creduce
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install minisat creduce
       - name: Install Python dependencies
         run: uv sync --extra dev
       - name: Run fast tests with coverage
@@ -73,7 +81,11 @@ jobs:
         run: uv run pytest tests/ -m "not slow" -q
 
   slow-tests:
-    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        # creduce package is broken on Ubuntu 24.04, so we use 22.04
+        os: [ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -84,10 +96,14 @@ jobs:
         run: uv python install 3.14
       - name: Pin Python version
         run: uv python pin 3.14
-      - name: Install system dependencies
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y minisat creduce
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install minisat creduce
       - name: Install Python dependencies
         run: uv sync --extra dev
       - name: Run slow tests

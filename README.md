@@ -54,17 +54,13 @@ It's designed to be highly parallel, and work with a very wide variety of format
 
 Shrink Ray uses calendar versioning (calver) in the format YY.M.D (e.g., 25.12.26 for December 26, 2025).
 
-New releases are published **automatically every day** if there are any changes to the source code since the previous release. This means:
+New releases are (in theory, this is still something of a work in progress) published automatically every day if there are any changes to the source code since the previous release.
 
-- You can rely on frequent updates with bug fixes and improvements
-- Version numbers indicate when the code was released, not semantic compatibility
-- The latest release is always close to the main branch
-
-This continuous release model ensures you always have access to the latest improvements without waiting for manual releases.
+Shrinkray makes no particularly strong backwards compatibility guarantees. I aim to keep its behaviour relatively stable between releases, but for example will not be particularly shy about dropping old versions of Python or adding new dependencies. The basic workflow of running a simple reduction will rarely, if ever, change, but the UI is likely to be continuously evolving for some time.
 
 ## Installation
 
-Shrink Ray requires Python 3.12 or later, and can be installed using pip.
+Shrink Ray requires Python 3.12 or later, and can be installed using pip or uv like any other python package.
 
 You can install the latest release from PyPI or run directly from the main branch:
 

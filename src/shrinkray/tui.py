@@ -387,9 +387,10 @@ class PassStatsScreen(ModalScreen[None]):
     """
 
     BINDINGS = [
-        ("escape,q", "dismiss", "Close"),
+        ("escape,q,p", "dismiss", "Close"),
         ("space", "toggle_disable", "Toggle Enable"),
         ("c", "skip_current", "Skip Pass"),
+        ("h", "show_help", "Help"),
     ]
 
     pass_stats: reactive[list[PassStatsData]] = reactive(list)
@@ -406,7 +407,7 @@ class PassStatsScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label(
-                "Pass Statistics - [space] toggle, [c] skip pass, [q] close",
+                "Pass Statistics - [space] toggle, [c] skip, [h] help, [q] close",
                 id="stats-header",
             )
             yield DataTable(id="pass-stats-table")
@@ -562,6 +563,10 @@ class PassStatsScreen(ModalScreen[None]):
         """Skip the current pass via the client."""
         if self._app._client is not None:
             await self._app._client.skip_current_pass()
+
+    def action_show_help(self) -> None:
+        """Show the help screen."""
+        self._app.push_screen(HelpScreen())
 
 
 class ShrinkRayApp(App[None]):

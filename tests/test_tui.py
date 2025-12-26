@@ -1929,6 +1929,164 @@ def test_action_show_pass_stats_opens_modal():
     asyncio.run(run())
 
 
+def test_pass_stats_modal_closes_with_p_key():
+    """Test that pressing 'p' while in pass stats modal closes it."""
+
+    async def run():
+        updates = [
+            ProgressUpdate(
+                status="Test",
+                size=100,
+                original_size=200,
+                calls=10,
+                reductions=5,
+                pass_stats=[
+                    PassStatsData(
+                        pass_name="test_pass",
+                        bytes_deleted=50,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=10,
+                        successful_reductions=1,
+                        success_rate=100.0,
+                    )
+                ],
+                current_pass_name="test_pass",
+                disabled_passes=[],
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                # Press 'p' to open the pass stats modal
+                await pilot.press("p")
+                await pilot.pause()
+
+                # Check that PassStatsScreen is on the screen stack
+                assert any(
+                    isinstance(screen, PassStatsScreen)
+                    for screen in app.screen_stack
+                )
+
+                # Press 'p' again to close the modal
+                await pilot.press("p")
+                await pilot.pause()
+
+                # Modal should be closed
+                assert not any(
+                    isinstance(screen, PassStatsScreen)
+                    for screen in app.screen_stack
+                )
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_modal_shows_help_with_h_key():
+    """Test that pressing 'h' while in pass stats modal opens help screen."""
+
+    async def run():
+        updates = [
+            ProgressUpdate(
+                status="Test",
+                size=100,
+                original_size=200,
+                calls=10,
+                reductions=5,
+                pass_stats=[
+                    PassStatsData(
+                        pass_name="test_pass",
+                        bytes_deleted=50,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=10,
+                        successful_reductions=1,
+                        success_rate=100.0,
+                    )
+                ],
+                current_pass_name="test_pass",
+                disabled_passes=[],
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                # Press 'p' to open the pass stats modal
+                await pilot.press("p")
+                await pilot.pause()
+
+                # Check that PassStatsScreen is on the screen stack
+                assert any(
+                    isinstance(screen, PassStatsScreen)
+                    for screen in app.screen_stack
+                )
+
+                # Press 'h' to open help
+                await pilot.press("h")
+                await pilot.pause()
+
+                # HelpScreen should now be on the stack
+                assert any(
+                    isinstance(screen, HelpScreen)
+                    for screen in app.screen_stack
+                )
+
+                # PassStatsScreen should still be there (underneath)
+                assert any(
+                    isinstance(screen, PassStatsScreen)
+                    for screen in app.screen_stack
+                )
+
+                # Close help screen
+                await pilot.press("q")
+                await pilot.pause()
+
+                # Close pass stats screen
+                await pilot.press("q")
+                await pilot.pause()
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
 def test_pass_stats_screen_with_empty_stats():
     """Test PassStatsScreen initialization with no stats returns empty list."""
     from unittest.mock import Mock

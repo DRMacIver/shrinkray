@@ -4,6 +4,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Run daily at 06:00 UTC
+    - cron: '0 6 * * *'
 
 jobs:
   action-lint:
@@ -55,6 +58,8 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
         # creduce package is broken on Ubuntu 24.04, so we use 22.04
         os: [ubuntu-22.04, macos-latest]
+        # Test with both newest deps (highest) and oldest supported deps (lowest-direct)
+        resolution: [highest, lowest-direct]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -77,18 +82,40 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install minisat creduce
       - name: Install Python dependencies
+        run: uv sync --extra dev --resolution ${{ matrix.resolution }}
+      - name: Run fast tests
+        run: uv run pytest tests/ -m "not slow" -q
+
+  coverage:
+    permissions:
+      contents: read
+    # creduce package is broken on Ubuntu 24.04, so we use 22.04
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          version: "latest"
+      # We use 3.13 for coverage because we hit weird bugs with coverage on 3.14
+      # that we've (ironically) not yet adequately minimised to reproduce and
+      # file upstream.
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+      - name: Pin Python version
+        run: uv python pin 3.13
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisat creduce
+      - name: Install Python dependencies
         run: uv sync --extra dev
       - name: Run fast tests with coverage
-        # We hit weird bugs with coverage on 3.14 that we've (ironically)
-        # not yet adequately minimised to reproduce and file upstream, so
-        # we disable coverage on 3.14 for now.
-        if: matrix.python-version != '3.14'
         run: |
           uv run coverage run -m pytest tests/ -m "not slow" -q
           uv run coverage report --show-missing --fail-under=100
-      - name: Run fast tests without coverage (Python 3.14)
-        if: matrix.python-version == '3.14'
-        run: uv run pytest tests/ -m "not slow" -q
 
   slow-tests:
     permissions:
@@ -126,7 +153,7 @@ jobs:
   auto-release:
     # Only run on main branch, after all CI checks pass
     if: github.ref == 'refs/heads/main'
-    needs: [action-lint, lint, test, slow-tests]
+    needs: [action-lint, lint, test, coverage, slow-tests]
     runs-on: ubuntu-22.04
     permissions:
       contents: write  # Needed to push commits and tags

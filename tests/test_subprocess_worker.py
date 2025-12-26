@@ -1543,3 +1543,155 @@ async def test_worker_run_with_none_progress_update():
 
     output_data = output.data.decode("utf-8")
     assert len(output_data) >= 0
+
+
+# === Pass Control Tests ===
+
+
+def test_worker_handle_disable_pass_no_pass_name():
+    """Test disable_pass handler with missing pass_name."""
+    worker = ReducerWorker()
+
+    response = worker._handle_disable_pass("test-id", {})
+    assert response.error == "pass_name is required"
+
+
+def test_worker_handle_disable_pass_empty_pass_name():
+    """Test disable_pass handler with empty pass_name."""
+    worker = ReducerWorker()
+
+    response = worker._handle_disable_pass("test-id", {"pass_name": ""})
+    assert response.error == "pass_name is required"
+
+
+def test_worker_handle_disable_pass_no_reducer():
+    """Test disable_pass handler when reducer is None."""
+    worker = ReducerWorker()
+    worker.reducer = None
+
+    response = worker._handle_disable_pass("test-id", {"pass_name": "hollow"})
+    assert response.error == "Reducer does not support pass control"
+
+
+def test_worker_handle_disable_pass_success():
+    """Test disable_pass handler success case."""
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.disable_pass = Mock()
+
+    response = worker._handle_disable_pass("test-id", {"pass_name": "hollow"})
+    assert response.result == {"status": "disabled", "pass_name": "hollow"}
+    worker.reducer.disable_pass.assert_called_once_with("hollow")
+
+
+def test_worker_handle_enable_pass_no_pass_name():
+    """Test enable_pass handler with missing pass_name."""
+    worker = ReducerWorker()
+
+    response = worker._handle_enable_pass("test-id", {})
+    assert response.error == "pass_name is required"
+
+
+def test_worker_handle_enable_pass_empty_pass_name():
+    """Test enable_pass handler with empty pass_name."""
+    worker = ReducerWorker()
+
+    response = worker._handle_enable_pass("test-id", {"pass_name": ""})
+    assert response.error == "pass_name is required"
+
+
+def test_worker_handle_enable_pass_no_reducer():
+    """Test enable_pass handler when reducer is None."""
+    worker = ReducerWorker()
+    worker.reducer = None
+
+    response = worker._handle_enable_pass("test-id", {"pass_name": "hollow"})
+    assert response.error == "Reducer does not support pass control"
+
+
+def test_worker_handle_enable_pass_success():
+    """Test enable_pass handler success case."""
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.enable_pass = Mock()
+
+    response = worker._handle_enable_pass("test-id", {"pass_name": "hollow"})
+    assert response.result == {"status": "enabled", "pass_name": "hollow"}
+    worker.reducer.enable_pass.assert_called_once_with("hollow")
+
+
+def test_worker_handle_skip_pass_no_reducer():
+    """Test skip_pass handler when reducer is None."""
+    worker = ReducerWorker()
+    worker.reducer = None
+
+    response = worker._handle_skip_pass("test-id")
+    assert response.error == "Reducer does not support pass control"
+
+
+def test_worker_handle_skip_pass_success():
+    """Test skip_pass handler success case."""
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.skip_current_pass = Mock()
+
+    response = worker._handle_skip_pass("test-id")
+    assert response.result == {"status": "skipped"}
+    worker.reducer.skip_current_pass.assert_called_once()
+
+
+@pytest.mark.trio
+async def test_worker_handle_command_disable_pass():
+    """Test handle_command dispatches to disable_pass handler."""
+    from unittest.mock import Mock
+
+    from shrinkray.subprocess.protocol import Request
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.disable_pass = Mock()
+
+    request = Request(id="test-id", command="disable_pass", params={"pass_name": "hollow"})
+    response = await worker.handle_command(request)
+
+    assert response.result == {"status": "disabled", "pass_name": "hollow"}
+
+
+@pytest.mark.trio
+async def test_worker_handle_command_enable_pass():
+    """Test handle_command dispatches to enable_pass handler."""
+    from unittest.mock import Mock
+
+    from shrinkray.subprocess.protocol import Request
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.enable_pass = Mock()
+
+    request = Request(id="test-id", command="enable_pass", params={"pass_name": "hollow"})
+    response = await worker.handle_command(request)
+
+    assert response.result == {"status": "enabled", "pass_name": "hollow"}
+
+
+@pytest.mark.trio
+async def test_worker_handle_command_skip_pass():
+    """Test handle_command dispatches to skip_pass handler."""
+    from unittest.mock import Mock
+
+    from shrinkray.subprocess.protocol import Request
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.skip_current_pass = Mock()
+
+    request = Request(id="test-id", command="skip_pass", params={})
+    response = await worker.handle_command(request)
+
+    assert response.result == {"status": "skipped"}

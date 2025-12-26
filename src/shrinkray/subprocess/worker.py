@@ -104,6 +104,7 @@ class ReducerWorker:
             response = await self.handle_command(request)
             await self.emit(response)
         except Exception as e:
+            traceback.print_exc()
             await self.emit(Response(id="", error=str(e)))
 
     async def handle_command(self, request: Request) -> Response:
@@ -117,6 +118,12 @@ class ReducerWorker:
             return self._handle_status(request.id)
         elif command == "cancel":
             return self._handle_cancel(request.id)
+        elif command == "disable_pass":
+            return self._handle_disable_pass(request.id, params)
+        elif command == "enable_pass":
+            return self._handle_enable_pass(request.id, params)
+        elif command == "skip_pass":
+            return self._handle_skip_pass(request.id)
         else:
             return Response(id=request.id, error=f"Unknown command: {command}")
 
@@ -236,6 +243,35 @@ class ReducerWorker:
         self.running = False
         return Response(id=request_id, result={"status": "cancelled"})
 
+    def _handle_disable_pass(self, request_id: str, params: dict) -> Response:
+        """Disable a reduction pass by name."""
+        pass_name = params.get("pass_name", "")
+        if not pass_name:
+            return Response(id=request_id, error="pass_name is required")
+
+        if self.reducer is not None and hasattr(self.reducer, "disable_pass"):
+            self.reducer.disable_pass(pass_name)
+            return Response(id=request_id, result={"status": "disabled", "pass_name": pass_name})
+        return Response(id=request_id, error="Reducer does not support pass control")
+
+    def _handle_enable_pass(self, request_id: str, params: dict) -> Response:
+        """Enable a previously disabled reduction pass."""
+        pass_name = params.get("pass_name", "")
+        if not pass_name:
+            return Response(id=request_id, error="pass_name is required")
+
+        if self.reducer is not None and hasattr(self.reducer, "enable_pass"):
+            self.reducer.enable_pass(pass_name)
+            return Response(id=request_id, result={"status": "enabled", "pass_name": pass_name})
+        return Response(id=request_id, error="Reducer does not support pass control")
+
+    def _handle_skip_pass(self, request_id: str) -> Response:
+        """Skip the currently running pass."""
+        if self.reducer is not None and hasattr(self.reducer, "skip_current_pass"):
+            self.reducer.skip_current_pass()
+            return Response(id=request_id, result={"status": "skipped"})
+        return Response(id=request_id, error="Reducer does not support pass control")
+
     def _get_content_preview(self) -> tuple[str, bool]:
         """Get a preview of the current test case content."""
         if self.problem is None:
@@ -335,6 +371,11 @@ class ReducerWorker:
                     if ps.test_evaluations > 0
                 ]
 
+        # Get disabled passes
+        disabled_passes: list[str] = []
+        if self.reducer is not None and hasattr(self.reducer, "disabled_passes"):
+            disabled_passes = list(self.reducer.disabled_passes)
+
         return ProgressUpdate(
             status=self.reducer.status if self.reducer else "",
             size=stats.current_test_case_size,
@@ -352,6 +393,7 @@ class ReducerWorker:
             hex_mode=hex_mode,
             pass_stats=pass_stats_list,
             current_pass_name=current_pass_name,
+            disabled_passes=disabled_passes,
         )
 
     async def emit_progress_updates(self) -> None:
@@ -393,6 +435,7 @@ class ReducerWorker:
             await self.emit(Response(id="", error=error_message))
         except* Exception as e:
             # Catch any other exception during reduction and emit as error
+            traceback.print_exc()
             await self.emit(Response(id="", error=str(e.exceptions[0])))
         finally:
             self._cancel_scope = None

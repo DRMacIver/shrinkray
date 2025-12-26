@@ -1532,3 +1532,199 @@ async def test_shrinkray_tracks_pass_stats(parallelism):
     # Success rate should be between 0 and 100
     for stats in all_stats:
         assert 0 <= stats.success_rate <= 100
+
+
+# === Pass Control Tests ===
+
+
+def test_disable_pass():
+    """Test that disable_pass adds pass to disabled set."""
+
+    async def run():
+        async def is_interesting(x):
+            return b"t" in x
+
+        work = WorkContext(parallelism=1)
+        problem = BasicReductionProblem(b"test", is_interesting, work)
+        reducer = ShrinkRay(target=problem)
+
+        reducer.disable_pass("hollow")
+        assert "hollow" in reducer.disabled_passes
+        assert reducer.is_pass_disabled("hollow")
+
+    trio.run(run)
+
+
+def test_enable_pass():
+    """Test that enable_pass removes pass from disabled set."""
+
+    async def run():
+        async def is_interesting(x):
+            return b"t" in x
+
+        work = WorkContext(parallelism=1)
+        problem = BasicReductionProblem(b"test", is_interesting, work)
+        reducer = ShrinkRay(target=problem)
+
+        reducer.disable_pass("hollow")
+        assert reducer.is_pass_disabled("hollow")
+
+        reducer.enable_pass("hollow")
+        assert "hollow" not in reducer.disabled_passes
+        assert not reducer.is_pass_disabled("hollow")
+
+    trio.run(run)
+
+
+def test_enable_pass_not_disabled():
+    """Test that enable_pass is safe to call on non-disabled pass."""
+
+    async def run():
+        async def is_interesting(x):
+            return b"t" in x
+
+        work = WorkContext(parallelism=1)
+        problem = BasicReductionProblem(b"test", is_interesting, work)
+        reducer = ShrinkRay(target=problem)
+
+        # Should not raise
+        reducer.enable_pass("hollow")
+        assert not reducer.is_pass_disabled("hollow")
+
+    trio.run(run)
+
+
+async def test_disabled_pass_is_skipped():
+    """Test that a disabled pass is skipped during reduction."""
+    async def is_interesting(x):
+        return b"t" in x
+
+    work = WorkContext(parallelism=1)
+
+    runs = []
+
+    async def tracking_pass(p):
+        runs.append("tracking_pass")
+        # Make a small reduction
+        if len(p.current_test_case) > 1:
+            await p.is_interesting(p.current_test_case[:-1])
+
+    problem = BasicReductionProblem(b"test", is_interesting, work)
+    reducer = ShrinkRay(target=problem)
+    reducer.great_passes = [tracking_pass]
+    reducer.ok_passes = []
+    reducer.last_ditch_passes = []
+    reducer.initial_cuts = []
+    # Note: pumps is a property that defaults to empty when clang_delta is None
+
+    # Disable the pass
+    reducer.disable_pass("tracking_pass")
+
+    await reducer.run()
+
+    # The pass should not have been run
+    assert runs == []
+
+
+async def test_skip_current_pass_without_active_scope():
+    """Test that skip_current_pass is safe when no pass is running."""
+    async def is_interesting(x):
+        return b"t" in x
+
+    work = WorkContext(parallelism=1)
+    problem = BasicReductionProblem(b"test", is_interesting, work)
+    reducer = ShrinkRay(target=problem)
+
+    # Should not raise when called outside of a pass
+    reducer.skip_current_pass()
+    assert reducer._skip_requested is True
+
+
+async def test_disable_pass_while_running_skips_it():
+    """Test that disabling a pass while it's running skips it."""
+    async def is_interesting(x):
+        return b"t" in x
+
+    work = WorkContext(parallelism=1)
+
+    skip_happened = []
+
+    async def slow_pass(p):
+        # Signal that we started
+        skip_happened.append("started")
+        # Wait a bit to give time for the disable call
+        await trio.sleep(0.1)
+        # If we get here, we weren't skipped
+        skip_happened.append("completed")
+
+    problem = BasicReductionProblem(b"test", is_interesting, work)
+    reducer = ShrinkRay(target=problem)
+    reducer.great_passes = [slow_pass]
+    reducer.ok_passes = []
+    reducer.last_ditch_passes = []
+    reducer.initial_cuts = []
+    # Note: pumps is a property that defaults to empty when clang_delta is None
+
+    async with trio.open_nursery() as nursery:
+
+        async def disable_after_start():
+            # Wait for the pass to start
+            while "started" not in skip_happened:
+                await trio.sleep(0.01)
+            # Disable it (should skip because it's the current pass)
+            reducer.disable_pass("slow_pass")
+
+        nursery.start_soon(disable_after_start)
+        await reducer.run()
+        nursery.cancel_scope.cancel()
+
+    # Pass should have started but not completed (because it was cancelled)
+    assert "started" in skip_happened
+    # The pass was cancelled before it could complete
+    assert "completed" not in skip_happened
+
+
+async def test_reducer_continues_when_passes_skipped():
+    """Test that reducer continues when passes were skipped and no progress made."""
+    async def is_interesting(x):
+        return b"t" in x
+
+    work = WorkContext(parallelism=1)
+
+    run_count = [0]
+
+    async def counting_pass(p):
+        run_count[0] += 1
+        if run_count[0] == 1:
+            # On first run, we'll be skipped externally
+            await trio.sleep(0.5)  # Long enough to be skipped
+        # On second run, just return (no progress)
+
+    problem = BasicReductionProblem(b"test", is_interesting, work)
+    reducer = ShrinkRay(target=problem)
+    reducer.great_passes = [counting_pass]
+    reducer.ok_passes = []
+    reducer.last_ditch_passes = []
+    reducer.initial_cuts = []
+    # Note: pumps is a property that defaults to empty when clang_delta is None
+
+    async with trio.open_nursery() as nursery:
+
+        async def skip_first_run():
+            # Wait for the first run to start
+            while run_count[0] < 1:
+                await trio.sleep(0.01)
+            await trio.sleep(0.05)  # Wait a bit more
+            # Skip the current pass
+            reducer.skip_current_pass()
+
+        nursery.start_soon(skip_first_run)
+
+        # Run with a timeout to prevent infinite loop if test fails
+        with trio.move_on_after(2.0):
+            await reducer.run()
+
+        nursery.cancel_scope.cancel()
+
+    # Should have run at least twice (once skipped, once full)
+    assert run_count[0] >= 2

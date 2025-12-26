@@ -107,6 +107,9 @@ class ReductionClientProtocol(Protocol):
         trivial_is_error: bool = True,
     ) -> Response: ...
     async def cancel(self) -> Response: ...
+    async def disable_pass(self, pass_name: str) -> Response: ...
+    async def enable_pass(self, pass_name: str) -> Response: ...
+    async def skip_current_pass(self) -> Response: ...
     async def close(self) -> None: ...
 
     @property
@@ -300,6 +303,61 @@ class ContentPreview(Static):
         )
 
 
+class HelpScreen(ModalScreen[None]):
+    """Modal screen showing keyboard shortcuts help."""
+
+    CSS = """
+    HelpScreen {
+        align: center middle;
+    }
+
+    HelpScreen > Vertical {
+        width: 60;
+        height: auto;
+        max-height: 80%;
+        background: $panel;
+        border: thick $primary;
+        padding: 1 2;
+    }
+
+    HelpScreen #help-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    HelpScreen .help-section {
+        margin-bottom: 1;
+    }
+
+    HelpScreen .help-key {
+        color: $accent;
+    }
+    """
+
+    BINDINGS = [
+        ("escape,q,h", "dismiss", "Close"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Keyboard Shortcuts", id="help-title")
+            yield Static("")
+            yield Static("[bold]Main Screen[/bold]", classes="help-section")
+            yield Static("  [green]h[/green]     Show this help")
+            yield Static("  [green]p[/green]     Open pass statistics")
+            yield Static("  [green]c[/green]     Skip current pass")
+            yield Static("  [green]q[/green]     Quit application")
+            yield Static("")
+            yield Static("[bold]Pass Statistics Screen[/bold]", classes="help-section")
+            yield Static("  [green]↑/↓[/green]   Navigate passes")
+            yield Static("  [green]space[/green] Toggle pass enabled/disabled")
+            yield Static("  [green]c[/green]     Skip current pass")
+            yield Static("  [green]q[/green]     Close modal")
+            yield Static("")
+            yield Static("[dim]Press any key to close[/dim]")
+
+
 class PassStatsScreen(ModalScreen[None]):
     """Modal screen showing pass statistics in a table."""
 
@@ -330,20 +388,27 @@ class PassStatsScreen(ModalScreen[None]):
 
     BINDINGS = [
         ("escape,q", "dismiss", "Close"),
+        ("space", "toggle_disable", "Toggle Enable"),
+        ("c", "skip_current", "Skip Pass"),
     ]
 
     pass_stats: reactive[list[PassStatsData]] = reactive(list)
-    current_pass_name: str = ""
+    current_pass_name: reactive[str] = reactive("")
+    disabled_passes: reactive[set[str]] = reactive(set)
 
     def __init__(self, app: "ShrinkRayApp") -> None:
         super().__init__()
         self._app = app
         self.pass_stats = app._latest_pass_stats.copy()
         self.current_pass_name = app._current_pass_name
+        self.disabled_passes = set(app._disabled_passes)
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label("Pass Statistics (Press ESC or Q to close)", id="stats-header")
+            yield Label(
+                "Pass Statistics - [space] toggle, [c] skip pass, [q] close",
+                id="stats-header",
+            )
             yield DataTable(id="pass-stats-table")
             yield Static(
                 f"Showing {len(self.pass_stats)} passes in run order",
@@ -357,6 +422,7 @@ class PassStatsScreen(ModalScreen[None]):
         table.cursor_type = "row"
 
         table.add_columns(
+            "Enabled",
             "Pass Name",
             "Runs",
             "Bytes Deleted",
@@ -381,19 +447,35 @@ class PassStatsScreen(ModalScreen[None]):
         table.clear()
 
         if not self.pass_stats:
-            table.add_row("No pass data yet", "-", "-", "-", "-", "-")
+            table.add_row("-", "No pass data yet", "-", "-", "-", "-", "-")
         else:
             for ps in self.pass_stats:
                 is_current = ps.pass_name == self.current_pass_name
+                is_disabled = ps.pass_name in self.disabled_passes
                 bytes_str = humanize.naturalsize(ps.bytes_deleted, binary=True)
-                # Use bold text for currently running pass
-                if is_current:
-                    name = Text(ps.pass_name, style="bold")
-                    runs = Text(str(ps.call_count), style="bold")
-                    bytes_del = Text(bytes_str, style="bold")
-                    tests = Text(f"{ps.test_evaluations:,}", style="bold")
-                    reductions = Text(str(ps.successful_reductions), style="bold")
-                    success = Text(f"{ps.success_rate:.1f}%", style="bold")
+
+                # Checkbox for enabled/disabled
+                if is_disabled:
+                    checkbox = Text("[ ]", style="dim")
+                else:
+                    checkbox = Text("[✓]", style="green")
+
+                # Determine styling: bold for current, dim for disabled
+                if is_disabled:
+                    style = "dim strike"
+                elif is_current:
+                    style = "bold"
+                else:
+                    style = ""
+
+                # Apply styling
+                if style:
+                    name = Text(ps.pass_name, style=style)
+                    runs = Text(str(ps.call_count), style=style)
+                    bytes_del = Text(bytes_str, style=style)
+                    tests = Text(f"{ps.test_evaluations:,}", style=style)
+                    reductions = Text(str(ps.successful_reductions), style=style)
+                    success = Text(f"{ps.success_rate:.1f}%", style=style)
                 else:
                     name = ps.pass_name
                     runs = str(ps.call_count)
@@ -402,7 +484,7 @@ class PassStatsScreen(ModalScreen[None]):
                     reductions = str(ps.successful_reductions)
                     success = f"{ps.success_rate:.1f}%"
 
-                table.add_row(name, runs, bytes_del, tests, reductions, success)
+                table.add_row(checkbox, name, runs, bytes_del, tests, reductions, success)
 
         # Restore cursor and scroll position after rebuilding
         # Only restore if the saved position is still valid
@@ -412,16 +494,74 @@ class PassStatsScreen(ModalScreen[None]):
         table.scroll_y = saved_scroll_y
 
     def _refresh_data(self) -> None:
-        """Refresh data from the app."""
+        """Refresh data from the app.
+
+        Note: We don't update disabled_passes from the worker because
+        the local state is the source of truth. This avoids flicker when
+        the user toggles a pass but the worker hasn't confirmed yet.
+        """
         new_stats = self._app._latest_pass_stats.copy()
         new_current = self._app._current_pass_name
         if new_stats != self.pass_stats or new_current != self.current_pass_name:
             self.pass_stats = new_stats
             self.current_pass_name = new_current
             self._update_table_data()
-            # Update footer
+            # Update footer with disabled count
+            disabled_count = len(self.disabled_passes)
+            if disabled_count > 0:
+                footer_text = f"Showing {len(self.pass_stats)} passes ({disabled_count} disabled)"
+            else:
+                footer_text = f"Showing {len(self.pass_stats)} passes in run order"
             footer = self.query_one("#stats-footer", Static)
-            footer.update(f"Showing {len(self.pass_stats)} passes in run order")
+            footer.update(footer_text)
+
+    def _get_selected_pass_name(self) -> str | None:
+        """Get the pass name from the currently selected row."""
+        table = self.query_one(DataTable)
+        if table.row_count == 0:
+            return None
+        cursor_row = table.cursor_coordinate.row
+        if cursor_row >= len(self.pass_stats):
+            return None
+        return self.pass_stats[cursor_row].pass_name
+
+    def action_toggle_disable(self) -> None:
+        """Toggle the disabled state of the selected pass."""
+        pass_name = self._get_selected_pass_name()
+        if pass_name is None:
+            return
+
+        if pass_name in self.disabled_passes:
+            # Enable the pass - update UI immediately, send command in background
+            # Create new set to trigger reactive update
+            self.disabled_passes = self.disabled_passes - {pass_name}
+            self._update_table_data()
+            self._app.run_worker(self._send_enable_pass(pass_name))
+        else:
+            # Disable the pass - update UI immediately, send command in background
+            # Create new set to trigger reactive update
+            self.disabled_passes = self.disabled_passes | {pass_name}
+            self._update_table_data()
+            self._app.run_worker(self._send_disable_pass(pass_name))
+
+    async def _send_disable_pass(self, pass_name: str) -> None:
+        """Send disable command to the subprocess (fire and forget)."""
+        if self._app._client is not None:
+            await self._app._client.disable_pass(pass_name)
+
+    async def _send_enable_pass(self, pass_name: str) -> None:
+        """Send enable command to the subprocess (fire and forget)."""
+        if self._app._client is not None:
+            await self._app._client.enable_pass(pass_name)
+
+    def action_skip_current(self) -> None:
+        """Skip the currently running pass."""
+        self._app.run_worker(self._skip_pass())
+
+    async def _skip_pass(self) -> None:
+        """Skip the current pass via the client."""
+        if self._app._client is not None:
+            await self._app._client.skip_current_pass()
 
 
 class ShrinkRayApp(App[None]):
@@ -454,6 +594,8 @@ class ShrinkRayApp(App[None]):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("p", "show_pass_stats", "Pass Stats"),
+        ("c", "skip_current_pass", "Skip Pass"),
+        ("h", "show_help", "Help"),
     ]
 
     ENABLE_COMMAND_PALETTE = False
@@ -496,12 +638,14 @@ class ShrinkRayApp(App[None]):
         self._theme = theme
         self._latest_pass_stats: list[PassStatsData] = []
         self._current_pass_name: str = ""
+        self._disabled_passes: list[str] = []
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical(id="main-container"):
             yield Label(
-                "Shrink Ray - Press 'q' to quit, 'p' for pass stats", id="status-label"
+                "Shrink Ray - [h] help, [p] passes, [c] skip pass, [q] quit",
+                id="status-label",
             )
             with Vertical(id="stats-container"):
                 yield StatsDisplay(id="stats-display")
@@ -569,6 +713,16 @@ class ShrinkRayApp(App[None]):
                 content_preview.update_content(update.content_preview, update.hex_mode)
                 self._latest_pass_stats = update.pass_stats
                 self._current_pass_name = update.current_pass_name
+                self._disabled_passes = update.disabled_passes
+
+                # Check if all passes are disabled
+                if self._latest_pass_stats and self._disabled_passes:
+                    all_pass_names = {ps.pass_name for ps in self._latest_pass_stats}
+                    if all_pass_names and all_pass_names <= set(self._disabled_passes):
+                        self.update_status(
+                            "Reduction paused (all passes disabled) - "
+                            "[p] to re-enable passes"
+                        )
 
                 if self._client.is_completed:
                     break
@@ -610,6 +764,20 @@ class ShrinkRayApp(App[None]):
     def action_show_pass_stats(self) -> None:
         """Show the pass statistics modal."""
         self.push_screen(PassStatsScreen(self))
+
+    def action_show_help(self) -> None:
+        """Show the help modal."""
+        self.push_screen(HelpScreen())
+
+    def action_skip_current_pass(self) -> None:
+        """Skip the currently running pass."""
+        if self._client and not self._completed:
+            self.run_worker(self._skip_pass())
+
+    async def _skip_pass(self) -> None:
+        """Skip the current pass via the client."""
+        if self._client is not None:
+            await self._client.skip_current_pass()
 
     @property
     def is_completed(self) -> bool:
@@ -704,7 +872,14 @@ def run_textual_ui(
             trivial_is_error=trivial_is_error,
         )
 
-    error = asyncio.run(validate())
+    try:
+        error = asyncio.run(validate())
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if error:
         print(f"Error: {error}", file=sys.stderr)

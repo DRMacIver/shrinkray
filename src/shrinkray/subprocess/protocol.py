@@ -54,6 +54,8 @@ class ProgressUpdate:
     pass_stats: list["PassStatsData"] = field(default_factory=list)
     # Currently running pass name (for highlighting)
     current_pass_name: str = ""
+    # List of disabled pass names
+    disabled_passes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -114,6 +116,7 @@ def serialize(msg: Request | Response | ProgressUpdate) -> str:
                     for ps in msg.pass_stats
                 ],
                 "current_pass_name": msg.current_pass_name,
+                "disabled_passes": msg.disabled_passes,
             },
         }
     else:
@@ -161,6 +164,7 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
             hex_mode=d.get("hex_mode", False),
             pass_stats=pass_stats_data,
             current_pass_name=d.get("current_pass_name", ""),
+            disabled_passes=d.get("disabled_passes", []),
         )
 
     # Check for response (has "result" or "error" field)

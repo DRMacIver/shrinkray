@@ -11,6 +11,7 @@ from binaryornot.helpers import is_binary_string
 
 from shrinkray.problem import InvalidInitialExample
 from shrinkray.subprocess.protocol import (
+    PassStatsData,
     ProgressUpdate,
     Request,
     Response,
@@ -109,23 +110,21 @@ class ReducerWorker:
 
     async def handle_command(self, request: Request) -> Response:
         """Handle a command request and return a response."""
-        command = request.command
-        params = request.params
-
-        if command == "start":
-            return await self._handle_start(request.id, params)
-        elif command == "status":
-            return self._handle_status(request.id)
-        elif command == "cancel":
-            return self._handle_cancel(request.id)
-        elif command == "disable_pass":
-            return self._handle_disable_pass(request.id, params)
-        elif command == "enable_pass":
-            return self._handle_enable_pass(request.id, params)
-        elif command == "skip_pass":
-            return self._handle_skip_pass(request.id)
-        else:
-            return Response(id=request.id, error=f"Unknown command: {command}")
+        match request.command:
+            case "start":
+                return await self._handle_start(request.id, request.params)
+            case "status":
+                return self._handle_status(request.id)
+            case "cancel":
+                return self._handle_cancel(request.id)
+            case "disable_pass":
+                return self._handle_disable_pass(request.id, request.params)
+            case "enable_pass":
+                return self._handle_enable_pass(request.id, request.params)
+            case "skip_pass":
+                return self._handle_skip_pass(request.id)
+            case _:
+                return Response(id=request.id, error=f"Unknown command: {request.command}")
 
     async def _handle_start(self, request_id: str, params: dict) -> Response:
         """Start the reduction process."""
@@ -344,8 +343,6 @@ class ReducerWorker:
         pass_stats_list = []
         current_pass_name = ""
         if self.reducer is not None:
-            from shrinkray.subprocess.protocol import PassStatsData
-
             # Get the currently running pass name
             current_pass = self.reducer.current_reduction_pass
             if current_pass is not None:
@@ -362,7 +359,7 @@ class ReducerWorker:
                         pass_name=ps.pass_name,
                         bytes_deleted=ps.bytes_deleted,
                         non_size_reductions=ps.non_size_reductions,
-                        call_count=ps.call_count,
+                        run_count=ps.run_count,
                         test_evaluations=ps.test_evaluations,
                         successful_reductions=ps.successful_reductions,
                         success_rate=ps.success_rate,
@@ -372,9 +369,10 @@ class ReducerWorker:
                 ]
 
         # Get disabled passes
-        disabled_passes: list[str] = []
         if self.reducer is not None and hasattr(self.reducer, "disabled_passes"):
             disabled_passes = list(self.reducer.disabled_passes)
+        else:
+            disabled_passes = []
 
         return ProgressUpdate(
             status=self.reducer.status if self.reducer else "",

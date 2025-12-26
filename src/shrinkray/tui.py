@@ -472,14 +472,14 @@ class PassStatsScreen(ModalScreen[None]):
                 # Apply styling
                 if style:
                     name = Text(ps.pass_name, style=style)
-                    runs = Text(str(ps.call_count), style=style)
+                    runs = Text(str(ps.run_count), style=style)
                     bytes_del = Text(bytes_str, style=style)
                     tests = Text(f"{ps.test_evaluations:,}", style=style)
                     reductions = Text(str(ps.successful_reductions), style=style)
                     success = Text(f"{ps.success_rate:.1f}%", style=style)
                 else:
                     name = ps.pass_name
-                    runs = str(ps.call_count)
+                    runs = str(ps.run_count)
                     bytes_del = bytes_str
                     tests = f"{ps.test_evaluations:,}"
                     reductions = str(ps.successful_reductions)

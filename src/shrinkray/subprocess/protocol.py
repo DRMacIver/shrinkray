@@ -65,7 +65,7 @@ class PassStatsData:
     pass_name: str
     bytes_deleted: int
     non_size_reductions: int
-    call_count: int
+    run_count: int
     test_evaluations: int
     successful_reductions: int
     success_rate: float
@@ -108,7 +108,7 @@ def serialize(msg: Request | Response | ProgressUpdate) -> str:
                         "pass_name": ps.pass_name,
                         "bytes_deleted": ps.bytes_deleted,
                         "non_size_reductions": ps.non_size_reductions,
-                        "call_count": ps.call_count,
+                        "run_count": ps.run_count,
                         "test_evaluations": ps.test_evaluations,
                         "successful_reductions": ps.successful_reductions,
                         "success_rate": ps.success_rate,
@@ -140,7 +140,7 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
                     pass_name=ps_dict["pass_name"],
                     bytes_deleted=ps_dict["bytes_deleted"],
                     non_size_reductions=ps_dict["non_size_reductions"],
-                    call_count=ps_dict["call_count"],
+                    run_count=ps_dict["run_count"],
                     test_evaluations=ps_dict["test_evaluations"],
                     successful_reductions=ps_dict["successful_reductions"],
                     success_rate=ps_dict["success_rate"],

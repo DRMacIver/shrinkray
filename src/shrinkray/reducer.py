@@ -143,10 +143,9 @@ class PassStats:
     pass_name: str
     bytes_deleted: int = 0
     non_size_reductions: int = 0
-    call_count: int = 0
+    run_count: int = 0
     test_evaluations: int = 0
     successful_reductions: int = 0
-    order: int = 0  # Track insertion order for stable display
 
     @property
     def success_rate(self) -> float:
@@ -158,22 +157,22 @@ class PassStats:
 
 @define
 class PassStatsTracker:
-    """Tracks statistics for all reduction passes."""
+    """Tracks statistics for all reduction passes.
+
+    Python 3.7+ dicts maintain insertion order, so stats are returned
+    in the order passes were first run.
+    """
 
     _stats: dict[str, PassStats] = attrs.Factory(dict)
-    _next_order: int = 0
 
     def get_or_create(self, pass_name: str) -> PassStats:
         if pass_name not in self._stats:
-            self._stats[pass_name] = PassStats(
-                pass_name=pass_name, order=self._next_order
-            )
-            self._next_order += 1
+            self._stats[pass_name] = PassStats(pass_name=pass_name)
         return self._stats[pass_name]
 
     def get_stats_in_order(self) -> list[PassStats]:
         """Get stats in the order passes were first run."""
-        return sorted(self._stats.values(), key=lambda s: s.order)
+        return list(self._stats.values())
 
 
 class SkipPass(Exception):
@@ -331,7 +330,7 @@ class ShrinkRay(Reducer[bytes]):
             # Get or create stats entry for this pass
             assert self.pass_stats is not None  # Always set by Factory
             stats_entry = self.pass_stats.get_or_create(pass_name)
-            stats_entry.call_count += 1
+            stats_entry.run_count += 1
 
             # Set current pass stats on the problem for real-time updates
             self.target.current_pass_stats = stats_entry

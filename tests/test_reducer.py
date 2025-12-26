@@ -1507,7 +1507,7 @@ def test_pass_stats_creation():
     assert stats.pass_name == "test_pass"
     assert stats.bytes_deleted == 0
     assert stats.non_size_reductions == 0
-    assert stats.call_count == 0
+    assert stats.run_count == 0
     assert stats.test_evaluations == 0
     assert stats.successful_reductions == 0
     assert stats.success_rate == 0.0
@@ -1589,7 +1589,7 @@ async def test_shrinkray_tracks_pass_stats(parallelism):
     all_stats = reducer.pass_stats.get_stats_in_order()
     total_bytes_deleted = sum(ps.bytes_deleted for ps in all_stats)
     assert total_bytes_deleted > 0
-    assert all_stats[0].call_count > 0
+    assert all_stats[0].run_count > 0
 
     # Success rate should be between 0 and 100
     for stats in all_stats:

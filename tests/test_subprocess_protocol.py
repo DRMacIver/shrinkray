@@ -145,7 +145,7 @@ def test_progress_update_with_pass_stats():
             pass_name="test_pass",
             bytes_deleted=100,
             non_size_reductions=2,
-            call_count=5,
+            run_count=5,
             test_evaluations=50,
             successful_reductions=3,
             success_rate=60.0,
@@ -169,7 +169,7 @@ def test_progress_update_with_pass_stats():
     assert deserialized.pass_stats[0].pass_name == "test_pass"
     assert deserialized.pass_stats[0].bytes_deleted == 100
     assert deserialized.pass_stats[0].non_size_reductions == 2
-    assert deserialized.pass_stats[0].call_count == 5
+    assert deserialized.pass_stats[0].run_count == 5
     assert deserialized.pass_stats[0].test_evaluations == 50
     assert deserialized.pass_stats[0].successful_reductions == 3
     assert deserialized.pass_stats[0].success_rate == 60.0
@@ -193,7 +193,7 @@ def test_progress_update_with_multiple_pass_stats():
             pass_name="hollow",
             bytes_deleted=500,
             non_size_reductions=0,
-            call_count=3,
+            run_count=3,
             test_evaluations=100,
             successful_reductions=2,
             success_rate=66.7,
@@ -202,7 +202,7 @@ def test_progress_update_with_multiple_pass_stats():
             pass_name="delete_duplicates",
             bytes_deleted=200,
             non_size_reductions=1,
-            call_count=4,
+            run_count=4,
             test_evaluations=80,
             successful_reductions=3,
             success_rate=75.0,

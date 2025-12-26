@@ -19,6 +19,7 @@ from datetime import timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
+    Protocol,
     TypeVar,
     cast,
 )
@@ -36,6 +37,19 @@ if TYPE_CHECKING:
 
 S = TypeVar("S")
 T = TypeVar("T")
+
+
+class PassStatsProtocol(Protocol):
+    """Protocol for pass statistics tracking.
+
+    This allows problem.py to track stats without importing from reducer.py,
+    avoiding circular dependencies.
+    """
+
+    test_evaluations: int
+    successful_reductions: int
+    bytes_deleted: int
+    non_size_reductions: int
 
 
 def shortlex[SizedT: Sized](value: SizedT) -> tuple[int, SizedT]:
@@ -163,7 +177,7 @@ class ReductionProblem[T](ABC):
 
     work: WorkContext
     # Track current pass stats for real-time updates (set by reducer)
-    current_pass_stats: Any = None
+    current_pass_stats: PassStatsProtocol | None = None
 
     def __attrs_post_init__(self) -> None:
         # Cache of View objects for each Format, to avoid re-parsing
@@ -396,9 +410,8 @@ class BasicReductionProblem(ReductionProblem[T]):
                 if self.current_pass_stats is not None:
                     self.current_pass_stats.successful_reductions += 1
                     size_diff = self.size(self.current_test_case) - self.size(test_case)
-                    if size_diff > 0:
-                        self.current_pass_stats.bytes_deleted += size_diff
-                    else:
+                    self.current_pass_stats.bytes_deleted += size_diff
+                    if size_diff == 0:
                         # Same size but lexicographically smaller
                         self.current_pass_stats.non_size_reductions += 1
 

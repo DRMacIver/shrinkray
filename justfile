@@ -50,7 +50,7 @@ docs:
 # Run the default CI checks (lint, tests)
 ci: lint test
 
-# Update version to calver (YY.M.D)
+# Update version to calver (YY.M.D.N)
 release-version:
     python scripts/release.py
 

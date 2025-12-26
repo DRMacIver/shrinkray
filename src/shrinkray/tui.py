@@ -6,15 +6,17 @@ from datetime import timedelta
 from typing import Literal, Protocol
 
 import humanize
+from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.reactive import reactive
+from textual.screen import ModalScreen
 from textual.theme import Theme
-from textual.widgets import Footer, Header, Label, Static
+from textual.widgets import DataTable, Footer, Header, Label, Static
 
 from shrinkray.subprocess.client import SubprocessClient
-from shrinkray.subprocess.protocol import ProgressUpdate, Response
+from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
 
 
 ThemeMode = Literal["auto", "dark", "light"]
@@ -298,6 +300,130 @@ class ContentPreview(Static):
         )
 
 
+class PassStatsScreen(ModalScreen[None]):
+    """Modal screen showing pass statistics in a table."""
+
+    CSS = """
+    PassStatsScreen {
+        align: center middle;
+    }
+
+    PassStatsScreen > Vertical {
+        width: 90%;
+        height: 85%;
+        background: $panel;
+        border: thick $primary;
+    }
+
+    PassStatsScreen DataTable {
+        height: 1fr;
+    }
+
+    PassStatsScreen #stats-footer {
+        dock: bottom;
+        height: auto;
+        padding: 1;
+        background: $panel;
+        text-align: center;
+    }
+    """
+
+    BINDINGS = [
+        ("escape,q", "dismiss", "Close"),
+    ]
+
+    pass_stats: reactive[list[PassStatsData]] = reactive(list)
+    current_pass_name: str = ""
+
+    def __init__(self, app: "ShrinkRayApp") -> None:
+        super().__init__()
+        self._app = app
+        self.pass_stats = app._latest_pass_stats.copy()
+        self.current_pass_name = app._current_pass_name
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Pass Statistics (Press ESC or Q to close)", id="stats-header")
+            yield DataTable(id="pass-stats-table")
+            yield Static(
+                f"Showing {len(self.pass_stats)} passes in run order",
+                id="stats-footer",
+            )
+
+    def on_mount(self) -> None:
+        table = self.query_one(DataTable)
+
+        # Select entire rows, not individual cells
+        table.cursor_type = "row"
+
+        table.add_columns(
+            "Pass Name",
+            "Runs",
+            "Bytes Deleted",
+            "Tests",
+            "Reductions",
+            "Success %",
+        )
+
+        self._update_table_data()
+
+        # Set up periodic refresh (every 500ms)
+        self.set_interval(0.5, self._refresh_data)
+
+    def _update_table_data(self) -> None:
+        """Update the table with current pass stats."""
+        table = self.query_one(DataTable)
+
+        # Save cursor position and scroll position before clearing
+        saved_cursor = table.cursor_coordinate
+        saved_scroll_y = table.scroll_y
+
+        table.clear()
+
+        if not self.pass_stats:
+            table.add_row("No pass data yet", "-", "-", "-", "-", "-")
+        else:
+            for ps in self.pass_stats:
+                is_current = ps.pass_name == self.current_pass_name
+                bytes_str = humanize.naturalsize(ps.bytes_deleted, binary=True)
+                # Use bold text for currently running pass
+                if is_current:
+                    name = Text(ps.pass_name, style="bold")
+                    runs = Text(str(ps.call_count), style="bold")
+                    bytes_del = Text(bytes_str, style="bold")
+                    tests = Text(f"{ps.test_evaluations:,}", style="bold")
+                    reductions = Text(str(ps.successful_reductions), style="bold")
+                    success = Text(f"{ps.success_rate:.1f}%", style="bold")
+                else:
+                    name = ps.pass_name
+                    runs = str(ps.call_count)
+                    bytes_del = bytes_str
+                    tests = f"{ps.test_evaluations:,}"
+                    reductions = str(ps.successful_reductions)
+                    success = f"{ps.success_rate:.1f}%"
+
+                table.add_row(name, runs, bytes_del, tests, reductions, success)
+
+        # Restore cursor and scroll position after rebuilding
+        # Only restore if the saved position is still valid
+        row_count = table.row_count
+        if row_count > 0 and saved_cursor.row < row_count:
+            table.cursor_coordinate = saved_cursor
+        table.scroll_y = saved_scroll_y
+
+    def _refresh_data(self) -> None:
+        """Refresh data from the app."""
+        new_stats = self._app._latest_pass_stats.copy()
+        new_current = self._app._current_pass_name
+        if new_stats != self.pass_stats or new_current != self.current_pass_name:
+            self.pass_stats = new_stats
+            self.current_pass_name = new_current
+            self._update_table_data()
+            # Update footer
+            footer = self.query_one("#stats-footer", Static)
+            footer.update(f"Showing {len(self.pass_stats)} passes in run order")
+
+
 class ShrinkRayApp(App[None]):
     """Textual app for Shrink Ray."""
 
@@ -327,6 +453,7 @@ class ShrinkRayApp(App[None]):
 
     BINDINGS = [
         ("q", "quit", "Quit"),
+        ("p", "show_pass_stats", "Pass Stats"),
     ]
 
     ENABLE_COMMAND_PALETTE = False
@@ -367,11 +494,15 @@ class ShrinkRayApp(App[None]):
         self._owns_client = client is None
         self._completed = False
         self._theme = theme
+        self._latest_pass_stats: list[PassStatsData] = []
+        self._current_pass_name: str = ""
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical(id="main-container"):
-            yield Label("Shrink Ray - Press 'q' to quit", id="status-label")
+            yield Label(
+                "Shrink Ray - Press 'q' to quit, 'p' for pass stats", id="status-label"
+            )
             with Vertical(id="stats-container"):
                 yield StatsDisplay(id="stats-display")
             with VerticalScroll(id="content-container"):
@@ -436,6 +567,8 @@ class ShrinkRayApp(App[None]):
             async for update in self._client.get_progress_updates():
                 stats_display.update_stats(update)
                 content_preview.update_content(update.content_preview, update.hex_mode)
+                self._latest_pass_stats = update.pass_stats
+                self._current_pass_name = update.current_pass_name
 
                 if self._client.is_completed:
                     break
@@ -473,6 +606,10 @@ class ShrinkRayApp(App[None]):
             except Exception:
                 pass  # Process may have already exited
         self.exit()
+
+    def action_show_pass_stats(self) -> None:
+        """Show the pass statistics modal."""
+        self.push_screen(PassStatsScreen(self))
 
     @property
     def is_completed(self) -> bool:

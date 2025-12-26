@@ -304,6 +304,37 @@ class ReducerWorker:
             )
             effective_parallelism = average_parallelism * (1.0 - wasteage)
 
+        # Collect pass statistics in run order (only those with test evaluations)
+        pass_stats_list = []
+        current_pass_name = ""
+        if self.reducer is not None:
+            from shrinkray.subprocess.protocol import PassStatsData
+
+            # Get the currently running pass name
+            current_pass = self.reducer.current_reduction_pass
+            if current_pass is not None:
+                current_pass_name = getattr(current_pass, "__name__", "")
+
+            # Get all stats in the order they were first run
+            pass_stats = self.reducer.pass_stats
+            if pass_stats is not None:
+                all_stats = pass_stats.get_stats_in_order()
+
+                # Only include passes that have made at least one test evaluation
+                pass_stats_list = [
+                    PassStatsData(
+                        pass_name=ps.pass_name,
+                        bytes_deleted=ps.bytes_deleted,
+                        non_size_reductions=ps.non_size_reductions,
+                        call_count=ps.call_count,
+                        test_evaluations=ps.test_evaluations,
+                        successful_reductions=ps.successful_reductions,
+                        success_rate=ps.success_rate,
+                    )
+                    for ps in all_stats
+                    if ps.test_evaluations > 0
+                ]
+
         return ProgressUpdate(
             status=self.reducer.status if self.reducer else "",
             size=stats.current_test_case_size,
@@ -319,6 +350,8 @@ class ReducerWorker:
             time_since_last_reduction=stats.time_since_last_reduction(),
             content_preview=content_preview,
             hex_mode=hex_mode,
+            pass_stats=pass_stats_list,
+            current_pass_name=current_pass_name,
         )
 
     async def emit_progress_updates(self) -> None:

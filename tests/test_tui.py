@@ -8,8 +8,8 @@ from collections.abc import AsyncIterator
 import pytest
 from textual.widgets import Label
 
-from shrinkray.subprocess.protocol import ProgressUpdate, Response
-from shrinkray.tui import ContentPreview, ShrinkRayApp, StatsDisplay
+from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
+from shrinkray.tui import ContentPreview, PassStatsScreen, ShrinkRayApp, StatsDisplay
 
 
 class FakeReductionClient:
@@ -1718,3 +1718,100 @@ def test_run_textual_ui_prints_validation_message(capsys):
 
     captured = capsys.readouterr()
     assert "Validating initial example" in captured.out
+
+
+# =============================================================================
+# PassStatsScreen tests
+# =============================================================================
+
+
+def test_pass_stats_screen_creation():
+    """Test PassStatsScreen can be created with stats."""
+    from unittest.mock import Mock
+
+    stats = [
+        PassStatsData(
+            pass_name="hollow",
+            bytes_deleted=500,
+            non_size_reductions=0,
+            call_count=3,
+            test_evaluations=100,
+            successful_reductions=2,
+            success_rate=66.7,
+        )
+    ]
+
+    mock_app = Mock()
+    mock_app._latest_pass_stats = stats
+
+    screen = PassStatsScreen(mock_app)
+    assert screen.pass_stats == stats
+
+
+def test_pass_stats_screen_empty():
+    """Test PassStatsScreen with no stats."""
+    from unittest.mock import Mock
+
+    mock_app = Mock()
+    mock_app._latest_pass_stats = []
+
+    screen = PassStatsScreen(mock_app)
+    assert screen.pass_stats == []
+
+
+def test_shrinkray_app_stores_pass_stats():
+    """Test that ShrinkRayApp stores pass stats from updates."""
+
+    async def run():
+        stats = [
+            PassStatsData(
+                pass_name="test",
+                bytes_deleted=100,
+                non_size_reductions=0,
+                call_count=1,
+                test_evaluations=10,
+                successful_reductions=1,
+                success_rate=100.0,
+            )
+        ]
+
+        updates = [
+            ProgressUpdate(
+                status="Test",
+                size=100,
+                original_size=200,
+                calls=5,
+                reductions=2,
+                pass_stats=stats,
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates)
+        await client.start()
+
+        # Create a temp file for the app
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            # Run briefly to process at least one update
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                # Check stats were stored
+                assert len(app._latest_pass_stats) == 1
+                assert app._latest_pass_stats[0].pass_name == "test"
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())

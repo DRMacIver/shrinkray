@@ -162,6 +162,8 @@ class ReductionProblem[T](ABC):
     """
 
     work: WorkContext
+    # Track current pass stats for real-time updates (set by reducer)
+    current_pass_stats: Any = None
 
     def __attrs_post_init__(self) -> None:
         # Cache of View objects for each Format, to avoid re-parsing
@@ -377,6 +379,11 @@ class BasicReductionProblem(ReductionProblem[T]):
         self.__is_interesting_cache[cache_key] = result
         self.stats.failed_reductions += 1
         self.stats.calls += 1
+
+        # Update current pass stats if a pass is running
+        if self.current_pass_stats is not None:
+            self.current_pass_stats.test_evaluations += 1
+
         if result:
             self.stats.interesting_calls += 1
             if self.sort_key(test_case) < self.sort_key(self.current_test_case):
@@ -384,6 +391,17 @@ class BasicReductionProblem(ReductionProblem[T]):
                 self.stats.failed_reductions -= 1
                 self.stats.reductions += 1
                 self.stats.time_of_last_reduction = time.time()
+
+                # Update current pass stats for reductions
+                if self.current_pass_stats is not None:
+                    self.current_pass_stats.successful_reductions += 1
+                    size_diff = self.size(self.current_test_case) - self.size(test_case)
+                    if size_diff > 0:
+                        self.current_pass_stats.bytes_deleted += size_diff
+                    else:
+                        # Same size but lexicographically smaller
+                        self.current_pass_stats.non_size_reductions += 1
+
                 self.stats.current_test_case_size = self.size(test_case)
                 self.__current = test_case
                 for f in self.__on_reduce_callbacks:

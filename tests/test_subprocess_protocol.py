@@ -3,6 +3,7 @@
 import pytest
 
 from shrinkray.subprocess.protocol import (
+    PassStatsData,
     ProgressUpdate,
     Request,
     Response,
@@ -135,6 +136,97 @@ def test_progress_update_roundtrip():
     assert deserialized.original_size == original.original_size
     assert deserialized.calls == original.calls
     assert deserialized.reductions == original.reductions
+
+
+def test_progress_update_with_pass_stats():
+    """Test serialization/deserialization of pass stats."""
+    pass_stats = [
+        PassStatsData(
+            pass_name="test_pass",
+            bytes_deleted=100,
+            non_size_reductions=2,
+            call_count=5,
+            test_evaluations=50,
+            successful_reductions=3,
+            success_rate=60.0,
+        )
+    ]
+
+    update = ProgressUpdate(
+        status="Testing",
+        size=100,
+        original_size=200,
+        calls=10,
+        reductions=5,
+        pass_stats=pass_stats,
+    )
+
+    serialized = serialize(update)
+    deserialized = deserialize(serialized)
+
+    assert isinstance(deserialized, ProgressUpdate)
+    assert len(deserialized.pass_stats) == 1
+    assert deserialized.pass_stats[0].pass_name == "test_pass"
+    assert deserialized.pass_stats[0].bytes_deleted == 100
+    assert deserialized.pass_stats[0].non_size_reductions == 2
+    assert deserialized.pass_stats[0].call_count == 5
+    assert deserialized.pass_stats[0].test_evaluations == 50
+    assert deserialized.pass_stats[0].successful_reductions == 3
+    assert deserialized.pass_stats[0].success_rate == 60.0
+
+
+def test_progress_update_backward_compatibility():
+    """Test that old messages without pass_stats still deserialize."""
+    # Simulate old-style message without pass_stats field
+    line = '{"type":"progress","data":{"status":"Running","size":100,"original_size":200,"calls":5,"reductions":2}}'
+
+    deserialized = deserialize(line)
+
+    assert isinstance(deserialized, ProgressUpdate)
+    assert deserialized.pass_stats == []  # Empty list by default
+
+
+def test_progress_update_with_multiple_pass_stats():
+    """Test ProgressUpdate with multiple pass stats."""
+    pass_stats = [
+        PassStatsData(
+            pass_name="hollow",
+            bytes_deleted=500,
+            non_size_reductions=0,
+            call_count=3,
+            test_evaluations=100,
+            successful_reductions=2,
+            success_rate=66.7,
+        ),
+        PassStatsData(
+            pass_name="delete_duplicates",
+            bytes_deleted=200,
+            non_size_reductions=1,
+            call_count=4,
+            test_evaluations=80,
+            successful_reductions=3,
+            success_rate=75.0,
+        ),
+    ]
+
+    update = ProgressUpdate(
+        status="Running",
+        size=300,
+        original_size=1000,
+        calls=20,
+        reductions=8,
+        pass_stats=pass_stats,
+    )
+
+    serialized = serialize(update)
+    deserialized = deserialize(serialized)
+
+    assert isinstance(deserialized, ProgressUpdate)
+    assert len(deserialized.pass_stats) == 2
+    assert deserialized.pass_stats[0].pass_name == "hollow"
+    assert deserialized.pass_stats[0].bytes_deleted == 500
+    assert deserialized.pass_stats[1].pass_name == "delete_duplicates"
+    assert deserialized.pass_stats[1].bytes_deleted == 200
 
 
 # === Bytes encoding tests ===

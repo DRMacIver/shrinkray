@@ -7,6 +7,8 @@ from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import (
     BasicReducer,
     KeyProblem,
+    PassStats,
+    PassStatsTracker,
     Reducer,
     RestartPass,
     ShrinkRay,
@@ -1430,3 +1432,103 @@ async def test_initial_cut_watcher_multiple_iterations(autojump_clock):
 
     # Progress should have been made
     assert problem.current_size < initial_size, "Should have made progress"
+
+
+# =============================================================================
+# Pass Statistics Tests
+# =============================================================================
+
+
+def test_pass_stats_creation():
+    """Test PassStats dataclass initialization."""
+    stats = PassStats(pass_name="test_pass")
+    assert stats.pass_name == "test_pass"
+    assert stats.bytes_deleted == 0
+    assert stats.non_size_reductions == 0
+    assert stats.call_count == 0
+    assert stats.test_evaluations == 0
+    assert stats.successful_reductions == 0
+    assert stats.success_rate == 0.0
+
+
+def test_pass_stats_success_rate():
+    """Test success rate calculation based on test evaluations."""
+    stats = PassStats(pass_name="test_pass")
+    stats.test_evaluations = 100
+    stats.successful_reductions = 30
+    assert stats.success_rate == 30.0
+
+
+def test_pass_stats_success_rate_zero_evaluations():
+    """Test success rate with zero test evaluations."""
+    stats = PassStats(pass_name="test_pass")
+    assert stats.success_rate == 0.0
+
+
+def test_pass_stats_tracker_get_or_create():
+    """Test tracker creates new entries."""
+    tracker = PassStatsTracker()
+    stats1 = tracker.get_or_create("pass_a")
+    stats2 = tracker.get_or_create("pass_a")
+    assert stats1 is stats2  # Same instance
+
+
+def test_pass_stats_tracker_insertion_order():
+    """Test stats are returned in insertion order."""
+    tracker = PassStatsTracker()
+
+    stats_a = tracker.get_or_create("pass_a")
+    stats_a.bytes_deleted = 100
+
+    stats_b = tracker.get_or_create("pass_b")
+    stats_b.bytes_deleted = 500
+
+    stats_c = tracker.get_or_create("pass_c")
+    stats_c.bytes_deleted = 200
+
+    ordered_stats = tracker.get_stats_in_order()
+    # Should be in order of creation, not sorted by bytes
+    assert ordered_stats[0].pass_name == "pass_a"
+    assert ordered_stats[1].pass_name == "pass_b"
+    assert ordered_stats[2].pass_name == "pass_c"
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+async def test_shrinkray_tracks_pass_stats(parallelism):
+    """Test that ShrinkRay tracks pass statistics during reduction."""
+    work = WorkContext(parallelism=parallelism)
+
+    # Simple test: remove 'x' characters
+    initial = b"xxxx\nxxxx\n"
+
+    async def is_interesting(tc: bytes) -> bool:
+        # Interesting if has at least one 'x'
+        return b"x" in tc
+
+    problem = BasicReductionProblem(
+        initial=initial,
+        is_interesting=is_interesting,
+        work=work,
+    )
+
+    reducer = ShrinkRay(target=problem)
+
+    # Run a few passes
+    await problem.setup()
+
+    # Run initial cuts (should find deletions)
+    await reducer.initial_cut()
+
+    # Check that stats were tracked
+    assert reducer.pass_stats is not None
+    assert len(reducer.pass_stats._stats) > 0
+
+    # At least one pass should have deleted bytes
+    all_stats = reducer.pass_stats.get_stats_in_order()
+    total_bytes_deleted = sum(ps.bytes_deleted for ps in all_stats)
+    assert total_bytes_deleted > 0
+    assert all_stats[0].call_count > 0
+
+    # Success rate should be between 0 and 100
+    for stats in all_stats:
+        assert 0 <= stats.success_rate <= 100

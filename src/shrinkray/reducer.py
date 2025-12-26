@@ -56,6 +56,11 @@ from shrinkray.problem import ReductionProblem, ReductionStats, shortlex
 class Reducer[T](ABC):
     target: ReductionProblem[T]
 
+    # Optional pass statistics tracking (implemented by ShrinkRay)
+    pass_stats: "PassStatsTracker | None" = attrs.field(default=None, init=False)
+    # Optional current pass tracking (implemented by ShrinkRay)
+    current_reduction_pass: "ReductionPass[T] | None" = attrs.field(default=None, init=False)
+
     @contextmanager
     def backtrack(self, restart: T) -> Generator[None, None, None]:
         current = self.target
@@ -118,13 +123,53 @@ class RestartPass(Exception):
 
 
 @define
+class PassStats:
+    """Statistics for a single reduction pass."""
+
+    pass_name: str
+    bytes_deleted: int = 0
+    non_size_reductions: int = 0
+    call_count: int = 0
+    test_evaluations: int = 0
+    successful_reductions: int = 0
+    order: int = 0  # Track insertion order for stable display
+
+    @property
+    def success_rate(self) -> float:
+        """Percentage of test evaluations that led to a reduction."""
+        if self.test_evaluations == 0:
+            return 0.0
+        return (self.successful_reductions / self.test_evaluations) * 100.0
+
+
+@define
+class PassStatsTracker:
+    """Tracks statistics for all reduction passes."""
+
+    _stats: dict[str, PassStats] = attrs.Factory(dict)
+    _next_order: int = 0
+
+    def get_or_create(self, pass_name: str) -> PassStats:
+        if pass_name not in self._stats:
+            self._stats[pass_name] = PassStats(
+                pass_name=pass_name, order=self._next_order
+            )
+            self._next_order += 1
+        return self._stats[pass_name]
+
+    def get_stats_in_order(self) -> list[PassStats]:
+        """Get stats in the order passes were first run."""
+        return sorted(self._stats.values(), key=lambda s: s.order)
+
+
+@define
 class ShrinkRay(Reducer[bytes]):
     clang_delta: ClangDelta | None = None
 
-    current_reduction_pass: ReductionPass[bytes] | None = None
     current_pump: ReductionPump[bytes] | None = None
 
     unlocked_ok_passes: bool = False
+    pass_stats: PassStatsTracker | None = attrs.Factory(PassStatsTracker)
 
     initial_cuts: list[ReductionPass[bytes]] = attrs.Factory(
         lambda: [
@@ -225,9 +270,21 @@ class ShrinkRay(Reducer[bytes]):
         try:
             assert self.current_reduction_pass is None
             self.current_reduction_pass = rp
+
+            # Get or create stats entry for this pass
+            pass_name = rp.__name__
+            assert self.pass_stats is not None  # Always set by Factory
+            stats_entry = self.pass_stats.get_or_create(pass_name)
+            stats_entry.call_count += 1
+
+            # Set current pass stats on the problem for real-time updates
+            self.target.current_pass_stats = stats_entry
+
             await rp(self.target)
+
         finally:
             self.current_reduction_pass = None
+            self.target.current_pass_stats = None
 
     async def pump(self, rp: ReductionPump[bytes]) -> None:
         try:

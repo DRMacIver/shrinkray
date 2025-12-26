@@ -186,6 +186,7 @@ jobs:
         if: steps.changes.outputs.has_changes == 'true'
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+          DRY_RUN: "1"  # TODO: Remove this after testing
         run: |
           # Configure PyPI token
           cat > ~/.pypirc <<EOF

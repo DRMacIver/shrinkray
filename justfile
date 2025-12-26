@@ -52,7 +52,7 @@ ci: lint test
 
 # Update version to calver (YY.M.D.N)
 release-version:
-    python scripts/release.py
+    python scripts/release.py {{ if env("DRY_RUN", "") != "" { "--dry-run" } else { "" } }}
 
 # Build package for release
 release-build:
@@ -60,7 +60,7 @@ release-build:
 
 # Publish package to PyPI
 release-publish:
-    uv publish
+    uv publish {{ if env("DRY_RUN", "") != "" { "--dry-run" } else { "" } }}
 
 # Full release: update version, build, and publish
 release: release-version release-build release-publish

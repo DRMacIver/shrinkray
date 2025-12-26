@@ -76,12 +76,13 @@ jobs:
           else
             echo "Latest release: $LATEST_TAG"
 
-            # Check if there are changes in src/ since the tag
-            if git diff --quiet "$LATEST_TAG" HEAD -- src/; then
-              echo "No changes in src/ since $LATEST_TAG"
+            # Check if there are changes in src/ or pyproject.toml since the tag
+            if git diff --quiet "$LATEST_TAG" HEAD -- src/ pyproject.toml; then
+              echo "No changes in src/ or pyproject.toml since $LATEST_TAG"
               echo "has_changes=false" >> $GITHUB_OUTPUT
             else
-              echo "Changes found in src/ since $LATEST_TAG"
+              echo "Changes found since $LATEST_TAG:"
+              git diff --stat "$LATEST_TAG" HEAD -- src/ pyproject.toml
               echo "has_changes=true" >> $GITHUB_OUTPUT
             fi
           fi

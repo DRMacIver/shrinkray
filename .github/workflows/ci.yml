@@ -58,6 +58,7 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
         # creduce package is broken on Ubuntu 24.04, so we use 22.04
         os: [ubuntu-22.04, macos-latest]
+        # Test with both newest deps (highest) and oldest supported deps (lowest-direct)
         resolution: [highest, lowest-direct]
     runs-on: ${{ matrix.os }}
     steps:
@@ -98,6 +99,9 @@ jobs:
         uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
         with:
           version: "latest"
+      # We use 3.13 for coverage because we hit weird bugs with coverage on 3.14
+      # that we've (ironically) not yet adequately minimised to reproduce and
+      # file upstream.
       - name: Set up Python 3.13
         run: uv python install 3.13
       - name: Pin Python version

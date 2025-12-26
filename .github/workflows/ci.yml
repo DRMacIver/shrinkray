@@ -184,6 +184,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Clean working directory
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          # Discard any changes made by uv sync (e.g., lock file updates)
+          git checkout -- .
+
       - name: Update version and create tag
         if: steps.changes.outputs.has_changes == 'true'
         run: just release-version

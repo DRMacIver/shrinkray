@@ -18,6 +18,25 @@ The goal is to achieve software quality beyond what a single person working part
 - **Don't give up on hard things** - When something seems difficult (like covering certain code paths), get creative. Refactor for testability, use Hypothesis for property-based testing, run subprocesses and gather coverage, write generators to produce edge-case inputs. Persistence matters more than speed.
 - **Self-review before presenting work** - Before committing or presenting code, review it critically: "Is this sloppy? Did I take shortcuts? If I were reviewing someone else's PR with this code, what would I flag?" This catches many issues before they waste the maintainer's time.
 
+### Avoid Suppressions
+
+Never use these as shortcuts - they're code smells that indicate a problem to fix:
+
+- **`# type: ignore`** - Fix the type error properly. Use proper type annotations, add type guards, or refactor to make types work. If you're adding `type: ignore`, ask yourself why the code is confusing the type checker and fix that.
+- **`# pragma: no cover`** - Write a test that covers the code. If coverage is hard to achieve, refactor for testability (extract methods, use dependency injection, etc.).
+- **`# pragma: no branch`** - Same as above - find a way to exercise the branch.
+- **`# noqa`** - Fix the lint error. If the linter is wrong, it's usually a sign the code could be clearer.
+
+When tempted to add a suppression, instead:
+1. Understand why the tool is complaining
+2. Fix the underlying issue (refactor, add types, write tests)
+3. Only if the tool is genuinely wrong AND there's no cleaner solution, consider suppression - but this should be rare
+
+**Allowed exceptions** (where suppression is acceptable):
+- `# noqa: B027` for intentionally empty methods on abstract classes that serve as optional override hooks (no better alternative exists)
+
+If you encounter a case where suppression seems genuinely necessary and principled, ask the maintainer about adding it to this list.
+
 ### Commits
 
 - Make small, logically self-contained commits

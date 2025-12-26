@@ -3543,7 +3543,7 @@ def test_pass_stats_screen_cursor_position_out_of_bounds():
                     assert table.cursor_coordinate.row == 2
 
                     # Now reduce the pass_stats to only 1 item
-                    screen.pass_stats = [  # type: ignore[attr-defined]
+                    screen.pass_stats = [
                         PassStatsData(
                             pass_name="pass1",
                             bytes_deleted=100,
@@ -3557,10 +3557,10 @@ def test_pass_stats_screen_cursor_position_out_of_bounds():
 
                     # Call _update_table_data - cursor row (2) >= row_count (1)
                     # This should trigger the branch where cursor is NOT restored
-                    screen._update_table_data()  # type: ignore[attr-defined]
+                    screen._update_table_data()
 
                     # The table should now have only 1 row, cursor should be at 0
-                    assert table.row_count == 1  # type: ignore[attr-defined]
+                    assert table.row_count == 1
 
                 await pilot.press("q")  # Close screen
                 await pilot.press("q")  # Quit app
@@ -3613,7 +3613,7 @@ def test_pass_stats_screen_get_selected_empty_table():
                         type(table), "row_count", new_callable=PropertyMock
                     ) as mock_rc:
                         mock_rc.return_value = 0
-                        result = screen._get_selected_pass_name()  # type: ignore[attr-defined]
+                        result = screen._get_selected_pass_name()
                         assert result is None
 
                 await pilot.press("q")

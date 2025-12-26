@@ -1,5 +1,6 @@
 import random
-from typing import Callable, Iterable, TypeVar
+from collections.abc import Callable, Iterable
+from typing import TypeVar
 
 import trio
 
@@ -8,6 +9,7 @@ from shrinkray.passes.python import is_python
 from shrinkray.problem import BasicReductionProblem, default_sort_key
 from shrinkray.reducer import BasicReducer, ShrinkRay
 from shrinkray.work import WorkContext
+
 
 T = TypeVar("T")
 
@@ -45,7 +47,7 @@ def reduce(
     initial: bytes,
     is_interesting: Callable[[bytes], bool],
     parallelism: int = 1,
-) -> T:
+) -> bytes:
     async def acondition(x: bytes) -> bool:
         await trio.lowlevel.checkpoint()
         return is_interesting(x)
@@ -99,7 +101,7 @@ def assert_no_blockers(
         for initial in candidates:
             if len(initial) < lower_bound or not is_interesting(initial):
                 continue
-            problem: BasicReductionProblem[T] = BasicReductionProblem(
+            problem: BasicReductionProblem[bytes] = BasicReductionProblem(
                 initial=initial,
                 is_interesting=acondition,
                 work=WorkContext(parallelism=1),

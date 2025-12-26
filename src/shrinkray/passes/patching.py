@@ -1,24 +1,22 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from random import Random
-from typing import Any, Callable, Generic, Iterable, Sequence, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 import trio
 
 from shrinkray.problem import ReductionProblem
 
-Seq = TypeVar("Seq", bound=Sequence[Any])
-T = TypeVar("T")
 
-PatchType = TypeVar("PatchType")
-TargetType = TypeVar("TargetType")
+Seq = TypeVar("Seq", bound=Sequence[Any])
 
 
 class Conflict(Exception):
     pass
 
 
-class Patches(Generic[PatchType, TargetType], ABC):
+class Patches[PatchType, TargetType](ABC):
     @property
     @abstractmethod
     def empty(self) -> PatchType: ...
@@ -33,7 +31,7 @@ class Patches(Generic[PatchType, TargetType], ABC):
     def size(self, patch: PatchType) -> int: ...
 
 
-class SetPatches(Patches[frozenset[T], TargetType]):
+class SetPatches[T, TargetType](Patches[frozenset[T], TargetType]):
     def __init__(self, apply: Callable[[frozenset[T], TargetType], TargetType]):
         self.__apply = apply
 
@@ -54,7 +52,7 @@ class SetPatches(Patches[frozenset[T], TargetType]):
         return len(patch)
 
 
-class ListPatches(Patches[list[T], TargetType]):
+class ListPatches[T, TargetType](Patches[list[T], TargetType]):
     def __init__(self, apply: Callable[[list[T], TargetType], TargetType]):
         self.__apply = apply
 
@@ -75,7 +73,7 @@ class ListPatches(Patches[list[T], TargetType]):
         return len(patch)
 
 
-class PatchApplier(Generic[PatchType, TargetType], ABC):
+class PatchApplier[PatchType, TargetType]:
     def __init__(
         self,
         patches: Patches[PatchType, TargetType],
@@ -102,16 +100,17 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
                 to_merge = len(self.__merge_queue)
 
                 async def can_merge(k):
-                    if k > to_merge:
-                        return False
+                    # find_large_integer doubles each time, and
+                    # if we call it then we know that can_merge(to_merge)
+                    # is False, so we should never hit this.
+                    assert k <= 2 * to_merge
                     try:
                         attempted_patch = self.__patches.combine(
-                            base_patch, *[p for _, p, _ in self.__merge_queue[:k]]
+                            base_patch,
+                            *[p for _, p, _ in self.__merge_queue[:k]],
                         )
                     except Conflict:
                         return False
-                    if attempted_patch == base_patch:
-                        return True
                     with_patch_applied = self.__patches.apply(
                         attempted_patch, self.__initial_test_case
                     )
@@ -160,18 +159,6 @@ class PatchApplier(Generic[PatchType, TargetType], ABC):
         sort_key = (self.__tick, self.__problem.sort_key(with_patch_applied))
         self.__tick += 1
 
-        # If there is no merge currently going on and nothing has changed under
-        # us, we apply a fast path where we just update the patch immediately.
-        if not self.__merge_lock.locked() and (
-            self.__current_patch == initial_patch
-            and len(self.__merge_queue) == 1
-            and self.__merge_queue[0][1] == patch
-            and self.__problem.sort_key(with_patch_applied)
-            <= self.__problem.sort_key(self.__problem.current_test_case)
-        ):
-            self.__current_patch = combined_patch
-            return True
-
         self.__merge_queue.append((sort_key, patch, send_merge_result))
 
         # If nobody else is merging the queue, that's our job now. This will
@@ -196,15 +183,18 @@ class Completed(Exception):
     pass
 
 
-async def apply_patches(
+async def apply_patches[PatchType, TargetType](
     problem: ReductionProblem[TargetType],
     patch_info: Patches[PatchType, TargetType],
     patches: Iterable[PatchType],
 ) -> None:
-    if await problem.is_interesting(
-        patch_info.apply(patch_info.combine(*patches), problem.current_test_case)
-    ):
-        return
+    try:
+        if await problem.is_interesting(
+            patch_info.apply(patch_info.combine(*patches), problem.current_test_case)
+        ):
+            return
+    except Conflict:
+        pass
 
     applier = PatchApplier(patch_info, problem)
 
@@ -218,10 +208,10 @@ async def apply_patches(
     send_patches.close()
 
     async with trio.open_nursery() as nursery:
-        for _ in range(problem.work.parallelism):
+        for _i in range(problem.work.parallelism):
 
             @nursery.start_soon
-            async def _():
+            async def worker() -> None:
                 while True:
                     try:
                         patch = await receive_patches.receive()
@@ -252,7 +242,7 @@ class LazyMutableRange:
         return result
 
 
-def lazy_shuffle(seq: Sequence[T], rnd: Random) -> Iterable[T]:
+def lazy_shuffle[T](seq: Sequence[T], rnd: Random) -> Iterable[T]:
     indices = LazyMutableRange(len(seq))
     while indices:
         j = len(indices) - 1

@@ -12,3 +12,8 @@
 __pycache__/
 .vscode
 scratch
+.venv*
+# Claude Code - ignore settings but keep commands
+.claude/*
+!.claude/commands/
+snapshot_report.html

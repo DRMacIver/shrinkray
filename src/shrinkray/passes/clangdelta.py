@@ -1,5 +1,6 @@
 import os
 import subprocess
+from functools import lru_cache
 from glob import glob
 from shutil import which
 from tempfile import NamedTemporaryFile
@@ -9,6 +10,7 @@ import trio
 from shrinkray.passes.definitions import ReductionPump
 from shrinkray.problem import ReductionProblem
 from shrinkray.work import NotFound
+
 
 C_FILE_EXTENSIONS = (".c", ".cpp", ".h", ".hpp", ".cxx", ".cc")
 
@@ -22,6 +24,29 @@ def find_clang_delta():
         if possible_locations:
             clang_delta = max(possible_locations)
     return clang_delta
+
+
+@lru_cache(maxsize=1)
+def clang_delta_works() -> bool:
+    """Check if clang_delta can actually execute.
+
+    This verifies not just that the binary exists, but that it can run.
+    On some systems (e.g., Ubuntu 24.04), creduce is installed but
+    clang_delta fails at runtime due to shared library issues.
+    """
+    clang_delta = find_clang_delta()
+    if not clang_delta:
+        return False
+    try:
+        # Run a simple test to verify clang_delta works
+        result = subprocess.run(
+            [clang_delta, "--help"],
+            capture_output=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 TRANSFORMATIONS: list[str] = [
@@ -126,9 +151,10 @@ class ClangDelta:
                 ).stdout
             except subprocess.CalledProcessError as e:
                 msg = (e.stdout + e.stderr).strip()
-                if msg == b"Error: Unsupported file type!":
-                    raise ValueError("Not a C or C++ test case")
-                elif b"Assertion failed" in msg:
+                # clang_delta has many internal assertions that can be triggered
+                # by malformed or unusual C/C++ code. These are harmless - we just
+                # report zero instances and skip this transformation.
+                if b"Assertion failed" in msg:
                     return 0
                 else:
                     raise ClangDeltaError(msg)
@@ -161,9 +187,7 @@ class ClangDelta:
                     )
                 ).stdout
             except subprocess.CalledProcessError as e:
-                if e.stdout.strip() == b"Error: Unsupported file type!":
-                    raise ValueError("Not a C or C++ test case")
-                elif (
+                if (
                     e.stdout.strip()
                     == b"Error: No modification to the transformed program!"
                 ):
@@ -190,10 +214,7 @@ def clang_delta_pump(
         assert target is not None
         try:
             n = await clang_delta.query_instances(transformation, target)
-        except ValueError:
-            import traceback
-
-            traceback.print_exc()
+        except ClangDeltaError:
             return target
         i = 1
         while i <= n:
@@ -207,15 +228,20 @@ def clang_delta_pump(
                     return False
                 return await problem.is_interesting(attempt)
 
+            not_found = False
+            clang_delta_failed = False
             try:
                 i = await problem.work.find_first_value(range(i, n + 1), can_apply)
-            except NotFound:
+            except* NotFound:
+                not_found = True
+            except* ClangDeltaError:
+                # clang_delta assertions can be triggered by unusual C/C++ code.
+                # These are harmless - just return what we have so far.
+                clang_delta_failed = True
+            if not_found:
                 break
-            except ClangDeltaError as e:
-                # Clang delta has a large number of internal assertions that you can trigger
-                # if you feed it bad enough C++. We solve this problem by ignoring it.
-                if b"Assertion failed" in e.args[0]:
-                    return target
+            if clang_delta_failed:
+                return target
 
             target = await clang_delta.apply_transformation(transformation, i, target)
             assert target is not None

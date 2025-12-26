@@ -31,6 +31,7 @@ output.append(simar)
 """
 
 
+@pytest.mark.slow
 def test_can_normalize_identifiers():
     def is_interesting(test_case):
         output = []

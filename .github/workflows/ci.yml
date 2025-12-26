@@ -1,28 +1,124 @@
 name: CI
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
 jobs:
-  test:
+  action-lint:
+    name: Lint GitHub Actions
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@e639db99335bc9038abc0e066dfcd72e23d26fb4 # v0.3.0
+
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
-    - uses: actions/checkout@v4
-    - name: Install uv
-      uses: astral-sh/setup-uv@v3
-      with:
-        version: "latest"
-    - name: Set up Python ${{ matrix.python-version }}
-      run: uv python install ${{ matrix.python-version }}
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y minisat
-    - name: Install Python dependencies
-      run: uv sync --extra dev
-    - name: Run tests
-      run: uv run python -m pytest tests/
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          version: "latest"
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Pin Python version
+        run: uv python pin ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Run ruff check
+        run: uv run ruff check src tests
+      - name: Run type checking
+        run: uv run basedpyright src tests
+
+  test:
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+        # creduce package is broken on Ubuntu 24.04, so we use 22.04
+        os: [ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          version: "latest"
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Pin Python version
+        run: uv python pin ${{ matrix.python-version }}
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisat creduce
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install minisat creduce
+      - name: Install Python dependencies
+        run: uv sync --extra dev
+      - name: Run fast tests with coverage
+        # We hit weird bugs with coverage on 3.14 that we've (ironically)
+        # not yet adequately minimised to reproduce and file upstream, so
+        # we disable coverage on 3.14 for now.
+        if: matrix.python-version != '3.14'
+        run: |
+          uv run coverage run -m pytest tests/ -m "not slow" -q
+          uv run coverage report --show-missing --fail-under=100
+      - name: Run fast tests without coverage (Python 3.14)
+        if: matrix.python-version == '3.14'
+        run: uv run pytest tests/ -m "not slow" -q
+
+  slow-tests:
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        # creduce package is broken on Ubuntu 24.04, so we use 22.04
+        os: [ubuntu-22.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          version: "latest"
+      - name: Set up Python 3.14
+        run: uv python install 3.14
+      - name: Pin Python version
+        run: uv python pin 3.14
+      - name: Install system dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisat creduce
+      - name: Install system dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install minisat creduce
+      - name: Install Python dependencies
+        run: uv sync --extra dev
+      - name: Run slow tests
+        run: uv run pytest tests/ -m slow -v

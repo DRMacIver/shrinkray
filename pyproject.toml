@@ -10,16 +10,17 @@ readme = "README.md"
 classifiers = [
     "Development Status :: 4 - Beta",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "click>=8.0.1",
     "chardet>=5.2.0",
     "trio>=0.28.0",
-    "urwid>=2.2.3",
+    "textual>=0.47.0",
     "humanize>=4.9.0",
     "libcst>=1.1.0",
     "exceptiongroup>=1.2.0",
     "binaryornot>=0.4.4",
+    "black",
 ]
 
 [project.urls]
@@ -30,16 +31,23 @@ Changelog = "https://github.com/DRMacIver/shrinkray/releases"
 
 [project.scripts]
 shrinkray = "shrinkray.__main__:main"
+shrinkray-worker = "shrinkray.__main__:worker_main"
 
 [project.optional-dependencies]
 dev = [
+    "coverage>=7.13.0",
     "hypothesis>=6.92.1",
     "hypothesmith>=0.3.1",
-    "black",
     "pytest",
     "pytest-trio",
+    "pytest-asyncio",
+    "pytest-textual-snapshot",
     "coverage[toml]",
     "pygments",
+    "basedpyright",
+    "ruff",
+    "pexpect>=4.9.0",
+    "pyte>=0.8.2",
 ]
 
 [tool.setuptools.packages.find]
@@ -47,28 +55,57 @@ where = ["src"]
 
 [tool.coverage.paths]
 source = ["src", "*/site-packages"]
-tests = ["tests", "*/tests"]
 
 [tool.coverage.run]
 branch = true
-source = ["shrinkray", "tests"]
+source = ["shrinkray"]
+# Use ctrace core instead of sysmon to avoid Python 3.14 async for branch bug
+core = "ctrace"
 
 [tool.coverage.report]
 show_missing = true
 fail_under = 100
 
-[tool.isort]
-profile = "black"
-force_single_line = false
-lines_after_imports = 2
+[tool.ruff]
+line-length = 88
+target-version = "py312"
 
-[tool.mypy]
-strict = true
-warn_unreachable = true
-pretty = true
-show_column_numbers = true
-show_error_context = true
-disable_error_code = ["import-untyped"]
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "C4", "UP"]
+ignore = [
+    "E501",  # line too long - handled by formatter
+    "B007",  # unused loop variable
+    "B023",  # function definition in loop
+    "B904",  # raise without from - intentional in some exception handling
+    "C408",  # unnecessary dict() call - sometimes more readable
+    "UP031", # use format specifiers - % format is fine
+    "B018",  # useless expression - sometimes intentional for side effects
+    "C403",  # unnecessary list comprehension - sometimes more readable
+    "UP022", # prefer capture_output - explicit is fine
+]
+
+[tool.ruff.lint.isort]
+force-single-line = false
+lines-after-imports = 2
+
+[tool.basedpyright]
+include = ["src", "tests"]
+exclude = ["build", "bugs", ".venv", ".venv2"]
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+# These are too noisy with third-party libraries that lack type stubs
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUnknownParameterType = false
+reportMissingParameterType = false
+reportUnknownArgumentType = false
+reportUnknownLambdaType = false
+# These are often false positives or stylistic
+reportUnusedFunction = false
+reportMissingTypeArgument = false
+reportPrivateUsage = false  # Tests need to access private attributes
+reportIncompatibleMethodOverride = false  # Often false positives with textual
+reportUnnecessaryIsInstance = false  # Needed for runtime type checking of untrusted input
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

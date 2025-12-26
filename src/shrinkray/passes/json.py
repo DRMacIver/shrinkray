@@ -81,6 +81,12 @@ class DeleteIdentifiers(Patches[frozenset[str], Any]):
 
 
 async def delete_identifiers(problem: ReductionProblem[Any]):
+    """Remove object keys from JSON structures.
+
+    Finds all string keys used in any nested object and tries to remove
+    them. When a key is removed, it's deleted from all objects that
+    contain it throughout the JSON tree.
+    """
     identifiers = gather_identifiers(problem.current_test_case)
 
     await apply_patches(

@@ -1,14 +1,24 @@
+"""Core abstractions for test-case reduction.
+
+This module defines the fundamental interfaces for reduction problems:
+
+- ReductionProblem[T]: The central abstraction representing a reduction task
+- BasicReductionProblem[T]: A concrete implementation with caching and callbacks
+- View[S, T]: A problem wrapper that parses through a Format
+
+The key insight is that all reduction is about finding the smallest test case
+that satisfies an "interestingness" predicate. The problem abstraction hides
+the details of caching, parallelism, and state management.
+"""
+
 import hashlib
 import time
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable, Sized
 from datetime import timedelta
 from typing import (
     TYPE_CHECKING,
     Any,
-    Awaitable,
-    Callable,
-    Generic,
-    Optional,
     TypeVar,
     cast,
 )
@@ -20,6 +30,7 @@ from humanize import naturalsize, precisedelta
 
 from shrinkray.work import WorkContext
 
+
 if TYPE_CHECKING:
     from shrinkray.passes.definitions import Format
 
@@ -27,12 +38,28 @@ S = TypeVar("S")
 T = TypeVar("T")
 
 
-def shortlex(value: Any) -> Any:
+def shortlex[SizedT: Sized](value: SizedT) -> tuple[int, SizedT]:
+    """Return a comparison key for shortlex ordering.
+
+    Shortlex ordering compares first by length, then lexicographically.
+    This ensures shorter test cases are always preferred, and among
+    equal-length test cases, lexicographically smaller ones win.
+
+    This ordering is crucial for reproducibility: regardless of which
+    reduction path is taken, the final result should be the same minimal
+    test case.
+
+    Example:
+        >>> shortlex(b"aa") < shortlex(b"aaa")  # shorter wins
+        True
+        >>> shortlex(b"ab") < shortlex(b"ba")   # same length, lex order
+        True
+    """
     return (len(value), value)
 
 
 def default_sort_key(value: Any):
-    if isinstance(value, (str, bytes)):
+    if isinstance(value, str | bytes):
         return shortlex(value)
     else:
         return shortlex(repr(value))
@@ -111,15 +138,55 @@ class ReductionStats:
 
 
 @define(slots=False)
-class ReductionProblem(Generic[T], ABC):
+class ReductionProblem[T](ABC):
+    """Abstract base class representing a test-case reduction task.
+
+    A ReductionProblem encapsulates everything needed to reduce a test case:
+    - The current best-known interesting test case
+    - A predicate to test if candidates are "interesting" (trigger the bug)
+    - An ordering to determine which test cases are "smaller"
+
+    Reduction passes work by generating candidate test cases and calling
+    is_interesting() on them. When a smaller interesting test case is found,
+    current_test_case is automatically updated.
+
+    The problem maintains a cache of interestingness results and tracks
+    statistics about the reduction process.
+
+    Subclasses must implement:
+    - current_test_case: Property returning the current best test case
+    - is_interesting(test_case): Async method testing if a candidate works
+    - sort_key(test_case): Returns a comparable key for ordering
+    - size(test_case): Returns the size of a test case
+    - display(value): Returns a human-readable representation
+    """
+
     work: WorkContext
 
     def __attrs_post_init__(self) -> None:
+        # Cache of View objects for each Format, to avoid re-parsing
         self.__view_cache: dict[Any, ReductionProblem[Any]] = {}
 
     def view(
         self, format: "Format[T, S] | type[Format[T, S]]"
     ) -> "ReductionProblem[S]":
+        """Create a view of this problem through a Format.
+
+        A View wraps this problem, parsing the current test case through
+        the format's parse() method and serializing candidates back through
+        dumps(). This allows format-specific passes to work on structured
+        data while the underlying problem operates on bytes.
+
+        Example:
+            # Work on lines instead of raw bytes
+            line_problem = byte_problem.view(Split(b"\\n"))
+
+            # Work on JSON structure
+            json_problem = byte_problem.view(JSON)
+
+        Views are cached: calling view() with the same format returns the
+        same View object, avoiding redundant parsing.
+        """
         try:
             return cast(ReductionProblem[S], self.__view_cache[format])
         except KeyError:
@@ -136,17 +203,32 @@ class ReductionProblem(Generic[T], ABC):
 
         return cast(ReductionProblem[S], self.__view_cache.setdefault(format, result))
 
-    async def setup(self) -> None:
-        pass
+    async def setup(self) -> None:  # noqa: B027
+        """Initialize the problem before reduction begins.
 
-    @abstractproperty
+        Subclasses may override this to perform validation or initialization.
+        The default implementation does nothing.
+        """
+
+    @property
+    @abstractmethod
     def current_test_case(self) -> T: ...
+
+    @property
+    @abstractmethod
+    def stats(self) -> ReductionStats: ...
 
     @abstractmethod
     async def is_interesting(self, test_case: T) -> bool:
         pass
 
     async def is_reduction(self, test_case: T) -> bool:
+        """Check if test_case would be a valid reduction from current state.
+
+        A valid reduction is an interesting test case that is smaller than
+        the current one (according to sort_key). This is a convenience method
+        that short-circuits if the candidate is larger.
+        """
         if test_case == self.current_test_case:
             return True
         if self.sort_key(test_case) > self.sort_key(self.current_test_case):
@@ -168,6 +250,23 @@ class ReductionProblem(Generic[T], ABC):
     def display(self, value: T) -> str: ...
 
     def backtrack(self, new_test_case: T) -> "ReductionProblem[T]":
+        """Create a new problem starting from a different test case.
+
+        This is used by reduction pumps to try larger test cases temporarily.
+        The new problem shares the same is_interesting predicate but starts
+        from new_test_case instead of current_test_case.
+
+        If reduction succeeds and the result is smaller than the original
+        current_test_case, it can be adopted into the main problem.
+
+        Example:
+            # Pump inlines a function, making code larger
+            pumped = await pump(problem)  # Returns larger test case
+            backtracked = problem.backtrack(pumped)
+            # Try to reduce the larger test case
+            await run_passes(backtracked)
+            # If result is smaller than original, keep it
+        """
         return BasicReductionProblem(
             initial=new_test_case,
             is_interesting=self.is_interesting,
@@ -193,6 +292,20 @@ def default_cache_key(value: Any) -> str:
 
 
 class BasicReductionProblem(ReductionProblem[T]):
+    """Concrete implementation of ReductionProblem for in-memory reduction.
+
+    This is the main implementation used by Shrink Ray. It provides:
+    - Caching of interestingness results (by content hash)
+    - Statistics tracking (calls, cache hits, timing)
+    - Callbacks for reduction events
+    - Automatic cache clearing when a reduction succeeds
+
+    The cache clearing is a practical choice: when we find a smaller test case,
+    cached results for candidates derived from the old test case are no longer
+    useful (we're now reducing from a different starting point). Clearing the
+    cache saves memory and avoids serving stale cache entries that won't help.
+    """
+
     def __init__(
         self,
         initial: T,
@@ -201,7 +314,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         sort_key: Callable[[T], Any] = default_sort_key,
         size: Callable[[T], int] = default_size,
         display: Callable[[T], str] = default_display,
-        stats: Optional[ReductionStats] = None,
+        stats: ReductionStats | None = None,
         cache_key: Callable[[Any], str] = default_cache_key,
     ):
         super().__init__(work=work)
@@ -210,11 +323,11 @@ class BasicReductionProblem(ReductionProblem[T]):
         self.__size = size
         self.__display = display
         if stats is None:
-            self.stats = ReductionStats()
-            self.stats.initial_test_case_size = self.size(initial)
-            self.stats.current_test_case_size = self.size(initial)
+            self._stats = ReductionStats()
+            self._stats.initial_test_case_size = self.size(initial)
+            self._stats.current_test_case_size = self.size(initial)
         else:
-            self.stats = stats
+            self._stats = stats
 
         self.__is_interesting_cache: dict[str, bool] = {}
         self.__cache_key = cache_key
@@ -235,6 +348,10 @@ class BasicReductionProblem(ReductionProblem[T]):
     def display(self, value: T) -> str:
         return self.__display(value)
 
+    @property
+    def stats(self) -> ReductionStats:
+        return self._stats
+
     def sort_key(self, test_case: T) -> Any:
         return self.__sort_key(test_case)
 
@@ -246,31 +363,31 @@ class BasicReductionProblem(ReductionProblem[T]):
         call `fn` with the new value. Note that these are called outside the lock."""
         self.__on_reduce_callbacks.append(callback)
 
-    async def is_interesting(self, value: T) -> bool:
-        """Returns true if this value is interesting."""
+    async def is_interesting(self, test_case: T) -> bool:
+        """Returns true if this test_case is interesting."""
         await trio.lowlevel.checkpoint()
-        if value == self.current_test_case:
+        if test_case == self.current_test_case:
             return True
-        cache_key = self.__cache_key(value)
+        cache_key = self.__cache_key(test_case)
         try:
             return self.__is_interesting_cache[cache_key]
         except KeyError:
             pass
-        result = await self.__is_interesting(value)
+        result = await self.__is_interesting(test_case)
         self.__is_interesting_cache[cache_key] = result
         self.stats.failed_reductions += 1
         self.stats.calls += 1
         if result:
             self.stats.interesting_calls += 1
-            if self.sort_key(value) < self.sort_key(self.current_test_case):
+            if self.sort_key(test_case) < self.sort_key(self.current_test_case):
                 self.__is_interesting_cache.clear()
                 self.stats.failed_reductions -= 1
                 self.stats.reductions += 1
                 self.stats.time_of_last_reduction = time.time()
-                self.stats.current_test_case_size = self.size(value)
-                self.__current = value
+                self.stats.current_test_case_size = self.size(test_case)
+                self.__current = test_case
                 for f in self.__on_reduce_callbacks:
-                    await f(value)
+                    await f(test_case)
             else:
                 self.stats.wasted_interesting_calls += 1
         return result
@@ -280,14 +397,32 @@ class BasicReductionProblem(ReductionProblem[T]):
         return self.__current
 
 
-class View(ReductionProblem[T], Generic[S, T]):
+class View[S, T](ReductionProblem[T]):
+    """A view of a ReductionProblem through a parse/dump transformation.
+
+    View wraps an underlying problem, presenting it as a different type.
+    For example, a problem over bytes can be viewed as a problem over
+    lists of lines, or JSON structures, or AST nodes.
+
+    The View:
+    - Parses the underlying problem's test case on access
+    - Dumps candidates back to the underlying type for testing
+    - Caches the parsed representation for efficiency
+    - Delegates interestingness testing to the underlying problem
+
+    The caching is subtle: when the underlying problem's test case changes,
+    the View re-parses it. But it only updates its cached value if the new
+    parsed value is "smaller" (according to sort_key), to maintain
+    monotonicity of reduction.
+    """
+
     def __init__(
         self,
         problem: ReductionProblem[S],
         parse: Callable[[S], T],
         dump: Callable[[T], S],
-        work: Optional[WorkContext] = None,
-        sort_key: Optional[Callable[[T], Any]] = None,
+        work: WorkContext | None = None,
+        sort_key: Callable[[T], Any] | None = None,
     ):
         super().__init__(work=work or problem.work)
         self.__problem = problem
@@ -304,7 +439,7 @@ class View(ReductionProblem[T], Generic[S, T]):
 
     @property
     def stats(self) -> ReductionStats:
-        return self.__problem.stats  # type: ignore
+        return self.__problem.stats
 
     @property
     def current_test_case(self) -> T:
@@ -319,7 +454,12 @@ class View(ReductionProblem[T], Generic[S, T]):
         return self.__current
 
     async def is_interesting(self, test_case: T) -> bool:
-        return await self.__problem.is_interesting(self.__dump(test_case))
+        from shrinkray.passes.definitions import DumpError
+
+        try:
+            return await self.__problem.is_interesting(self.__dump(test_case))
+        except DumpError:
+            return False
 
     def sort_key(self, test_case: T) -> Any:
         if self.__sort_key is not None:

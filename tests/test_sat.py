@@ -2,15 +2,17 @@ import operator
 import os
 import subprocess
 import tempfile
+from collections.abc import Callable
 from shutil import which
-from typing import Callable
 
 import pytest
-from hypothesis import assume, example, given, settings, strategies as st
+from hypothesis import assume, example, given, settings
+from hypothesis import strategies as st
 
 from shrinkray.passes.sat import SAT, SAT_PASSES, DimacsCNF
 
 from .helpers import reduce_with
+
 
 HAS_MINISAT = which("minisat") is not None
 pytestmark = pytest.mark.skipif(not HAS_MINISAT, reason="not installed")
@@ -150,7 +152,20 @@ def test_shrink_to_one_single_literal_clause(clauses):
     assert result == [[1]]
 
 
-@pytest.mark.parametrize("n", range(2, 11))
+@pytest.mark.parametrize(
+    "n",
+    [
+        2,
+        3,
+        4,
+        5,
+        pytest.param(6, marks=pytest.mark.slow),
+        pytest.param(7, marks=pytest.mark.slow),
+        pytest.param(8, marks=pytest.mark.slow),
+        pytest.param(9, marks=pytest.mark.slow),
+        pytest.param(10, marks=pytest.mark.slow),
+    ],
+)
 def test_can_shrink_chain_to_two(n):
     chain = [[-i, i + 1] for i in range(1, n + 1)]
 
@@ -170,6 +185,7 @@ def test_can_shrink_chain_to_two(n):
     assert shrunk == [[-1, n]]
 
 
+@pytest.mark.slow
 @sat_settings
 @given(unsatisfiable_clauses())
 def test_reduces_unsatisfiable_to_trivial(unsat):
@@ -186,6 +202,7 @@ def test_reduces_unsatisfiable_to_trivial(unsat):
     ]
 
 
+@pytest.mark.slow
 @sat_settings
 @example([[-1], [-2], [-3], [-4, -5], [4, 5], [-6], [4, -5]])
 @given(has_unique_solution())

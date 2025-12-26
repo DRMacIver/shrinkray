@@ -1,5 +1,26 @@
+"""Byte-level reduction passes.
+
+This module provides reduction passes that operate on raw bytes.
+These are the foundation of Shrink Ray's reduction strategy, as
+all file formats ultimately reduce to bytes.
+
+Key passes:
+- hollow: Keeps only start/end of bracketed regions
+- lift_braces: Replaces {...} with its content
+- debracket: Removes matching bracket pairs
+- delete_byte_spans: Deletes contiguous byte ranges
+- short_deletions: Deletes small (1-10 byte) sequences
+- remove_indents/remove_whitespace: Whitespace normalization
+- lower_bytes: Reduces byte values toward 0
+- lexeme_based_deletions: Deletes between repeated patterns
+
+Formats:
+- Split(delimiter): Parses bytes into list of segments
+- Tokenize(): Parses bytes into tokens (identifiers, numbers, etc.)
+"""
+
 from collections import defaultdict, deque
-from typing import Sequence
+from collections.abc import Sequence
 
 from attrs import define
 
@@ -9,6 +30,8 @@ from shrinkray.passes.patching import Cuts, Patches, apply_patches
 
 @define(frozen=True)
 class Encoding(Format[bytes, str]):
+    """Format that decodes/encodes bytes using a character encoding."""
+
     encoding: str
 
     def __repr__(self) -> str:
@@ -27,6 +50,18 @@ class Encoding(Format[bytes, str]):
 
 @define(frozen=True)
 class Split(Format[bytes, list[bytes]]):
+    """Format that splits bytes by a delimiter.
+
+    This enables sequence-based passes to work on lines, statements, etc.
+
+    Example:
+        # Delete duplicate lines
+        compose(Split(b"\\n"), delete_duplicates)
+
+        # Delete blocks of 1-10 semicolon-separated statements
+        compose(Split(b";"), block_deletion(1, 10))
+    """
+
     splitter: bytes
 
     def __repr__(self) -> str:
@@ -44,6 +79,16 @@ class Split(Format[bytes, list[bytes]]):
 
 
 def find_ngram_endpoints(value: bytes) -> list[tuple[int, list[int]]]:
+    """Find repeated byte patterns and their positions.
+
+    This is used by lexeme_based_deletions to identify regions between
+    repeated patterns that might be deletable. For example, in code like:
+        print("hello"); print("world"); print("test")
+    The repeated "print" patterns suggest the semicolon-separated regions
+    might be independently deletable.
+
+    Returns a list of (ngram_length, [positions]) tuples.
+    """
     if len(set(value)) <= 1:
         return []
     queue: deque[tuple[int, Sequence[int]]] = deque([(0, range(len(value)))])
@@ -80,12 +125,24 @@ def find_ngram_endpoints(value: bytes) -> list[tuple[int, list[int]]]:
 
 
 def tokenize(text: bytes) -> list[bytes]:
+    """Split bytes into tokens: identifiers, numbers, and other characters.
+
+    This is a simple tokenizer that groups:
+    - Identifiers: [A-Za-z][A-Za-z0-9_]*
+    - Numbers: [0-9]+ (with optional decimal point)
+    - Spaces: runs of spaces
+    - Everything else: individual characters
+
+    Example:
+        tokenize(b"foo = 123") -> [b"foo", b" ", b"=", b" ", b"123"]
+    """
     result: list[bytes] = []
     i = 0
     while i < len(text):
         c = bytes([text[i]])
         j = i + 1
         if b"A" <= c <= b"z":
+            # Identifier: consume alphanumeric and underscore
             while j < len(text) and (
                 b"A"[0] <= text[j] <= b"z"[0]
                 or text[j] == b"_"[0]
@@ -93,11 +150,13 @@ def tokenize(text: bytes) -> list[bytes]:
             ):
                 j += 1
         elif b"0" <= c <= b"9":
+            # Number: consume digits and decimal point
             while j < len(text) and (
                 text[j] == b"."[0] or b"0"[0] <= text[j] <= b"9"[0]
             ):
                 j += 1
         elif c == b" ":
+            # Space run: consume consecutive spaces
             while j < len(text) and (text[j] == b" "[0]):
                 j += 1
         result.append(text[i:j])
@@ -112,11 +171,25 @@ MAX_DELETE_INTERVAL = 8
 async def lexeme_based_deletions(
     problem: ReductionProblem[bytes], min_size: int = 8
 ) -> None:
+    """Delete regions between repeated byte patterns.
+
+    This pass finds repeated patterns (like repeated keywords or punctuation)
+    and tries to delete the regions between them. For code like:
+
+        print("a"); print("b"); print("c")
+
+    The repeated "print(" pattern suggests each print statement might be
+    independently deletable. This pass identifies such regions and tries
+    to delete them.
+
+    Only regions >= min_size bytes are considered to avoid tiny deletions.
+    """
     intervals_by_k: dict[int, set[tuple[int, int]]] = defaultdict(set)
 
     for k, endpoints in find_ngram_endpoints(problem.current_test_case):
         intervals_by_k[k].update(zip(endpoints, endpoints[1:], strict=False))
 
+    # Sort by ngram length (longer patterns first) then by interval size
     intervals_to_delete = [
         t
         for _, intervals in sorted(intervals_by_k.items(), reverse=True)
@@ -132,10 +205,21 @@ async def delete_intervals(
     intervals_to_delete: list[tuple[int, int]],
     shuffle: bool = False,
 ) -> None:
+    """Try to delete each of the given byte intervals.
+
+    Each interval (start, end) represents a contiguous region to try deleting.
+    The patch applier will find which intervals can be deleted independently
+    and combine compatible deletions.
+    """
     await apply_patches(problem, Cuts(), [[t] for t in intervals_to_delete])
 
 
 def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:
+    """Find all intervals enclosed by matching brace pairs.
+
+    Given a two-byte brace string like b"{}", returns intervals for content
+    between each matched open/close pair. Handles nesting correctly.
+    """
     open, close = brace
     intervals: list[tuple[int, int]] = []
     stack: list[int] = []
@@ -151,6 +235,16 @@ def brace_intervals(target: bytes, brace: bytes) -> list[tuple[int, int]]:
 
 
 async def debracket(problem: ReductionProblem[bytes]) -> None:
+    """Remove matching bracket pairs, keeping their content.
+
+    Example transformations:
+        "(x + y)" -> "x + y"
+        "[1, 2]" -> "1, 2"
+        "{foo}" -> "foo"
+
+    This is useful when brackets become unnecessary after other reductions,
+    e.g., if a function call was simplified to just its first argument.
+    """
     cuts = [
         [(u - 1, u), (v, v + 1)]
         for brackets in [b"{}", b"()", b"[]"]
@@ -164,6 +258,10 @@ async def debracket(problem: ReductionProblem[bytes]) -> None:
 
 
 def quote_intervals(target: bytes) -> list[tuple[int, int]]:
+    """Find all intervals enclosed by matching quote pairs.
+
+    Returns intervals between consecutive single or double quotes.
+    """
     indices: dict[int, list[int]] = defaultdict(list)
     for i, c in enumerate(target):
         indices[c].append(i)
@@ -178,6 +276,20 @@ def quote_intervals(target: bytes) -> list[tuple[int, int]]:
 
 
 async def hollow(problem: ReductionProblem[bytes]) -> None:
+    """Delete the contents of bracketed and quoted regions.
+
+    Example transformations:
+        '{"lots": "of json"}' -> '{}'
+        "[1, 2, 3, 4, 5]" -> "[]"
+        '"long string here"' -> '""'
+
+    This is one of the most effective early passes: it quickly removes
+    large chunks of content from structured data, keeping only the
+    "skeleton" of brackets and quotes.
+
+    Intervals are sorted by size (smallest first) to maximize the chance
+    of finding independent deletions that can be combined.
+    """
     target = problem.current_test_case
     intervals: list[tuple[int, int]] = []
     for b in [
@@ -194,6 +306,15 @@ async def hollow(problem: ReductionProblem[bytes]) -> None:
 
 
 async def short_deletions(problem: ReductionProblem[bytes]) -> None:
+    """Try deleting every small (1-10 byte) substring.
+
+    This is a brute-force pass that tries all possible small deletions.
+    It's expensive but effective for cleaning up small syntax elements
+    that other passes miss.
+
+    Example: After other passes simplify "foo(x, y)" to "foo(x)", this
+    pass might find that deleting ", y" or "x, " works.
+    """
     target = problem.current_test_case
     await delete_intervals(
         problem,
@@ -206,6 +327,19 @@ async def short_deletions(problem: ReductionProblem[bytes]) -> None:
 
 
 async def lift_braces(problem: ReductionProblem[bytes]) -> None:
+    """Replace outer braces with inner braces' content.
+
+    For nested braces like {A{B}C}, this tries to replace the outer
+    braces with just the inner content: {A{B}C} -> {B}
+
+    Example transformations:
+        "if (x) { if (y) { z } }" -> "if (x) { z }"
+        "{ outer { inner } more }" -> "{ inner }"
+
+    This is useful for eliminating wrapper blocks while keeping the
+    essential nested structure. It complements debracket (which removes
+    brackets entirely) and hollow (which empties brackets).
+    """
     target = problem.current_test_case
 
     open_brace, close_brace = b"{}"
@@ -214,6 +348,7 @@ async def lift_braces(problem: ReductionProblem[bytes]) -> None:
 
     results: list[tuple[int, int, list[tuple[int, int]]]] = []
 
+    # Track brace nesting and record parent-child relationships
     for i, c in enumerate(target):
         if c == open_brace:
             start_stack.append(i)
@@ -227,6 +362,7 @@ async def lift_braces(problem: ReductionProblem[bytes]) -> None:
             if end > start:
                 results.append((start, end, children))
 
+    # For each parent-child pair, try deleting parent content around child
     cuts: list[list[tuple[int, int]]] = []
     for start, end, children in results:
         for child_start, child_end in children:
@@ -252,6 +388,12 @@ class Tokenize(Format[bytes, list[bytes]]):
 
 
 async def delete_byte_spans(problem: ReductionProblem[bytes]) -> None:
+    """Delete spans between occurrences of the same byte value.
+
+    For each byte value that appears multiple times, tries to delete
+    regions from the start to the first occurrence, between consecutive
+    occurrences, and from the last occurrence to the end.
+    """
     indices: dict[int, list[int]] = defaultdict(list)
     target = problem.current_test_case
     for i, c in enumerate(target):
@@ -269,6 +411,11 @@ async def delete_byte_spans(problem: ReductionProblem[bytes]) -> None:
 
 
 async def remove_indents(problem: ReductionProblem[bytes]) -> None:
+    """Remove leading spaces from lines.
+
+    Finds runs of spaces following newlines and tries to delete them.
+    Useful for normalizing indentation in code.
+    """
     target = problem.current_test_case
     spans: list[list[tuple[int, int]]] = []
 
@@ -288,6 +435,12 @@ async def remove_indents(problem: ReductionProblem[bytes]) -> None:
 
 
 async def remove_whitespace(problem: ReductionProblem[bytes]) -> None:
+    """Collapse runs of whitespace.
+
+    Finds consecutive whitespace characters and tries to remove all but
+    the first, or all but the first two. Complements remove_indents by
+    handling whitespace anywhere in the file.
+    """
     target = problem.current_test_case
     spans: list[list[tuple[int, int]]] = []
 
@@ -332,6 +485,11 @@ class NewlineReplacer(Patches[frozenset[int], bytes]):
 
 
 async def replace_space_with_newlines(problem: ReductionProblem[bytes]) -> None:
+    """Replace spaces and tabs with newlines.
+
+    Tries replacing each space or tab with a newline. This can help
+    normalize formatting and may enable other line-based reductions.
+    """
     await apply_patches(
         problem,
         NewlineReplacer(),
@@ -372,6 +530,12 @@ class ByteReplacement(Patches[ReplacementPatch, bytes]):
 
 
 async def lower_bytes(problem: ReductionProblem[bytes]) -> None:
+    """Globally replace byte values with smaller ones.
+
+    For each distinct byte value in the input, tries replacing all
+    occurrences with smaller values (0, 1, half, value-1, whitespace).
+    Also tries replacing pairs of bytes with the same smaller value.
+    """
     sources = sorted(set(problem.current_test_case))
 
     patches = [
@@ -417,6 +581,12 @@ class IndividualByteReplacement(Patches[ReplacementPatch, bytes]):
 
 
 async def lower_individual_bytes(problem: ReductionProblem[bytes]) -> None:
+    """Replace individual bytes at specific positions with smaller values.
+
+    Unlike lower_bytes (which replaces all occurrences of a byte value),
+    this tries reducing individual byte positions. Also handles carry-like
+    patterns where decrementing one byte allows the next to become 255.
+    """
     initial = problem.current_test_case
     patches = [
         {i: r}
@@ -434,18 +604,18 @@ async def lower_individual_bytes(problem: ReductionProblem[bytes]) -> None:
 RegionReplacementPatch = list[tuple[int, int, int]]
 
 
-class RegionReplacement(Patches[ReplacementPatch, bytes]):
+class RegionReplacement(Patches[RegionReplacementPatch, bytes]):
     @property
-    def empty(self) -> ReplacementPatch:
+    def empty(self) -> RegionReplacementPatch:
         return []
 
-    def combine(self, *patches: ReplacementPatch) -> ReplacementPatch:
-        result = []
+    def combine(self, *patches: RegionReplacementPatch) -> RegionReplacementPatch:
+        result: RegionReplacementPatch = []
         for p in patches:
             result.extend(p)
         return result
 
-    def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
+    def apply(self, patch: RegionReplacementPatch, target: bytes) -> bytes:
         result = bytearray(target)
         for i, j, d in patch:
             if d < result[i]:
@@ -453,11 +623,16 @@ class RegionReplacement(Patches[ReplacementPatch, bytes]):
                     result[k] = d
         return bytes(result)
 
-    def size(self, patch: ReplacementPatch) -> int:
+    def size(self, patch: RegionReplacementPatch) -> int:
         return 0
 
 
 async def short_replacements(problem: ReductionProblem[bytes]) -> None:
+    """Replace short regions with uniform byte values.
+
+    Tries replacing 1-4 byte regions with uniform values like 0, 1,
+    space, newline, or period. Useful for simplifying small sequences.
+    """
     target = problem.current_test_case
     patches = [
         [(i, j, c)]
@@ -505,7 +680,7 @@ async def sort_whitespace(problem: ReductionProblem[bytes]) -> None:
             i += 1
             continue
 
-        async def can_move_to_whitespace(k):
+        async def can_move_to_whitespace(k: int) -> bool:
             if i + k > len(problem.current_test_case):
                 return False
 
@@ -534,6 +709,11 @@ STANDARD_SUBSTITUTIONS = [(b"\0\0", b"\1"), (b"\0\0", b"\xff")]
 
 
 async def standard_substitutions(problem: ReductionProblem[bytes]):
+    """Apply standard byte sequence substitutions.
+
+    Tries some specific byte sequence replacements that are sometimes
+    helpful, primarily for handling edge cases in artificial test inputs.
+    """
     i = 0
     while i < len(problem.current_test_case):
         for k, v in STANDARD_SUBSTITUTIONS:
@@ -545,3 +725,30 @@ async def standard_substitutions(problem: ReductionProblem[bytes]):
                     break
         else:
             i += 1
+
+
+async def line_sorter(problem: ReductionProblem[bytes]):
+    """Sort lines into a more canonical order.
+
+    Uses insertion sort to reorder lines, swapping adjacent lines when
+    doing so maintains interestingness and produces a lexicographically
+    smaller result. This normalizes line order for reproducibility.
+    """
+    lines = problem.current_test_case.split(b"\n")
+    i = 1
+    while i < len(lines):
+        j = i
+        while j > 0:
+            u = lines[j - 1]
+            v = lines[j]
+            if v + u < u + v:
+                attempt = list(lines)
+                attempt[j - 1], attempt[j] = attempt[j], attempt[j - 1]
+                if not await problem.is_interesting(b"\n".join(attempt)):
+                    break
+                else:
+                    j -= 1
+                    lines = attempt
+            else:
+                break
+        i += 1

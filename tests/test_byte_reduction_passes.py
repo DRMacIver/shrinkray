@@ -2,7 +2,8 @@ import ast
 from collections import Counter
 
 import pytest
-from hypothesis import assume, example, given, strategies as st
+from hypothesis import assume, example, given
+from hypothesis import strategies as st
 
 from shrinkray.passes.bytes import (
     WHITESPACE,
@@ -18,7 +19,6 @@ from shrinkray.passes.patching import apply_patches
 from shrinkray.passes.python import is_python
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.work import WorkContext
-
 from tests.helpers import assert_reduces_to, reduce_with
 
 
@@ -45,6 +45,7 @@ def test_short_deletions_can_delete_brackets() -> None:
 @example(b"")
 @example(b"\x00")
 @example(b"\x00\x00")
+@example(b"aaab")  # Triggers branch 103->102 (overlapping indices skipped)
 @given(st.binary())
 def test_ngram_endpoints(b):
     find_ngram_endpoints(b)
@@ -188,7 +189,9 @@ def test_byte_reduction_example_3(parallelism):
 def lowering_problem(draw):
     initial = bytes(draw(st.lists(st.integers(0, 255), unique=True, min_size=1)))
     target = bytes([draw(st.integers(0, c)) for c in initial])
-    patches = draw(st.permutations([{c: d} for c, d in zip(initial, target, strict=True)]))
+    patches = draw(
+        st.permutations([{c: d} for c, d in zip(initial, target, strict=True)])
+    )
 
     if len(initial) > 1:
         n_pair_patches = draw(st.integers(0, len(initial) * (len(initial) - 1)))

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
-from typing import Any, Generic, Iterable, Optional, TypeVar
+from typing import Any
 
 import attrs
 import trio
@@ -15,6 +15,7 @@ from shrinkray.passes.bytes import (
     hollow,
     lexeme_based_deletions,
     lift_braces,
+    line_sorter,
     lower_bytes,
     lower_individual_bytes,
     remove_indents,
@@ -23,8 +24,17 @@ from shrinkray.passes.bytes import (
     short_deletions,
     standard_substitutions,
 )
-from shrinkray.passes.clangdelta import C_FILE_EXTENSIONS, ClangDelta, clang_delta_pumps
-from shrinkray.passes.definitions import Format, ReductionPass, ReductionPump, compose
+from shrinkray.passes.clangdelta import (
+    C_FILE_EXTENSIONS,
+    ClangDelta,
+    clang_delta_pumps,
+)
+from shrinkray.passes.definitions import (
+    Format,
+    ReductionPass,
+    ReductionPump,
+    compose,
+)
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
     cut_comment_like_things,
@@ -39,14 +49,11 @@ from shrinkray.passes.patching import PatchApplier, Patches
 from shrinkray.passes.python import PYTHON_PASSES, is_python
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
-from shrinkray.problem import ReductionProblem, shortlex
-
-S = TypeVar("S")
-T = TypeVar("T")
+from shrinkray.problem import ReductionProblem, ReductionStats, shortlex
 
 
 @define
-class Reducer(Generic[T], ABC):
+class Reducer[T](ABC):
     target: ReductionProblem[T]
 
     @contextmanager
@@ -67,13 +74,21 @@ class Reducer(Generic[T], ABC):
 
 
 @define
-class BasicReducer(Reducer[T]):
+class BasicReducer[T](Reducer[T]):
     reduction_passes: Iterable[ReductionPass[T]]
     pumps: Iterable[ReductionPump[T]] = ()
-    status: str = "Starting up"
+    _status: str = "Starting up"
 
     def __attrs_post_init__(self) -> None:
         self.reduction_passes = list(self.reduction_passes)
+
+    @property
+    def status(self) -> str:
+        return self._status
+
+    @status.setter
+    def status(self, value: str) -> None:
+        self._status = value
 
     async def run_pass(self, rp: ReductionPass[T]) -> None:
         await rp(self.target)
@@ -104,10 +119,10 @@ class RestartPass(Exception):
 
 @define
 class ShrinkRay(Reducer[bytes]):
-    clang_delta: Optional[ClangDelta] = None
+    clang_delta: ClangDelta | None = None
 
-    current_reduction_pass: Optional[ReductionPass[bytes]] = None
-    current_pump: Optional[ReductionPump[bytes]] = None
+    current_reduction_pass: ReductionPass[bytes] | None = None
+    current_pump: ReductionPump[bytes] | None = None
 
     unlocked_ok_passes: bool = False
 
@@ -131,13 +146,13 @@ class ShrinkRay(Reducer[bytes]):
             remove_indents,
             hollow,
             lift_braces,
-            delete_byte_spans,
             debracket,
         ]
     )
 
     ok_passes: list[ReductionPass[bytes]] = attrs.Factory(
         lambda: [
+            delete_byte_spans,
             compose(Split(b"\n"), block_deletion(11, 20)),
             remove_indents,
             remove_whitespace,
@@ -149,6 +164,7 @@ class ShrinkRay(Reducer[bytes]):
             lexeme_based_deletions,
             short_deletions,
             normalize_identifiers,
+            line_sorter,
         ]
     )
 
@@ -177,13 +193,13 @@ class ShrinkRay(Reducer[bytes]):
             SAT_PASSES,
         )
 
-    def register_format_specific_pass(
+    def register_format_specific_pass[T](
         self, format: Format[bytes, T], passes: Iterable[ReductionPass[T]]
     ):
         if format.is_valid(self.target.current_test_case):
             composed = [compose(format, p) for p in passes]
-            self.great_passes[:0] = composed
-            self.initial_cuts[:0] = composed
+            self.great_passes.extend(composed)
+            self.initial_cuts.extend(composed)
 
     @property
     def pumps(self) -> Iterable[ReductionPump[bytes]]:
@@ -237,8 +253,24 @@ class ShrinkRay(Reducer[bytes]):
             self.current_pump = None
 
     async def run_great_passes(self) -> None:
-        for rp in self.great_passes:
-            await self.run_pass(rp)
+        current = self.great_passes
+        while True:
+            prev = self.target.current_test_case
+            successful = []
+            for rp in current:
+                size = self.target.current_size
+                await self.run_pass(rp)
+                if self.target.current_size < size:
+                    successful.append(rp)
+            if self.target.current_test_case == prev:
+                if len(current) == len(self.great_passes):
+                    break
+                else:
+                    current = self.great_passes
+            elif not successful:
+                current = self.great_passes
+            else:
+                current = successful
 
     async def run_ok_passes(self) -> None:
         for rp in self.ok_passes:
@@ -374,6 +406,10 @@ class KeyProblem(ReductionProblem[bytes]):
     def current_test_case(self) -> bytes:
         return self.base_problem.current_test_case[self.key]
 
+    @property
+    def stats(self) -> ReductionStats:
+        return self.base_problem.stats
+
     async def is_interesting(self, test_case: bytes) -> bool:
         return await self.applier.try_apply_patch({self.key: test_case})
 
@@ -389,7 +425,7 @@ class KeyProblem(ReductionProblem[bytes]):
 
 @define
 class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
-    clang_delta: Optional[ClangDelta] = None
+    clang_delta: ClangDelta | None = None
 
     async def run(self):
         prev = None

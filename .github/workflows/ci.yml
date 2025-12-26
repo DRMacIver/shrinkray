@@ -136,6 +136,9 @@ jobs:
           fetch-depth: 0  # Need full history to compare with tags
           persist-credentials: true  # Need to push
 
+      - name: Install just
+        uses: extractions/setup-just@dd310ad5a97d8e7b41571f691f3c97e08765a2a0 # v2
+
       - name: Install uv
         uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
         with:

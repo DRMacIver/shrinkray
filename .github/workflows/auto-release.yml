@@ -1,0 +1,93 @@
+name: Auto Release
+
+on:
+  schedule:
+    # Run daily at 10:00 UTC
+    - cron: '0 10 * * *'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write  # Needed to push commits and tags
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0  # Need full history to compare with tags
+          persist-credentials: true  # Need to push
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Pin Python version
+        run: uv python pin 3.14
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisat creduce
+
+      - name: Install Python dependencies
+        run: uv sync --extra dev
+
+      - name: Run lint
+        run: |
+          uv run ruff check src tests
+          uv run basedpyright src tests
+
+      - name: Run all tests
+        run: uv run pytest tests/ -q
+
+      - name: Check for changes since last release
+        id: changes
+        run: |
+          # Get the latest release tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No previous release found, will create first release"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "Latest release: $LATEST_TAG"
+
+            # Check if there are changes in src/ since the tag
+            if git diff --quiet "$LATEST_TAG" HEAD -- src/; then
+              echo "No changes in src/ since $LATEST_TAG"
+              echo "has_changes=false" >> $GITHUB_OUTPUT
+            else
+              echo "Changes found in src/ since $LATEST_TAG"
+              echo "has_changes=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Configure git
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create release
+        if: steps.changes.outputs.has_changes == 'true'
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          # Configure PyPI token
+          cat > ~/.pypirc <<EOF
+          [pypi]
+          username = __token__
+          password = $PYPI_TOKEN
+          EOF
+          chmod 600 ~/.pypirc
+
+          # Run the release
+          just release
+
+      - name: Clean up credentials
+        if: always()
+        run: rm -f ~/.pypirc

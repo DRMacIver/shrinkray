@@ -50,15 +50,23 @@ Most test-case reducers only work well on a few formats. Shrink Ray is designed 
 
 It's designed to be highly parallel, and work with a very wide variety of formats, through a mix of good generic algorithms and format-specific reduction passes.
 
-Currently shrink ray is a "prerelease" version in the sense that there is no official release yet and you're expected to just run off main (don't worry this is easy to do), as it's a bit experimental.
+## Versioning and Releases
 
-That being said this probably doesn't matter that much for the question of whether to use it. It's in the nature of test-case reduction that it doesn't matter all that much if it's bad, because it's still going to do a bunch of work that you didn't have to do by hand. Try it out, see if it works. If it doesn't, please tell me and I'll make it work better.
+Shrink Ray uses calendar versioning (calver) in the format YY.M.D (e.g., 25.12.26 for December 26, 2025).
+
+New releases are published **automatically every day** if there are any changes to the source code since the previous release. This means:
+
+- You can rely on frequent updates with bug fixes and improvements
+- Version numbers indicate when the code was released, not semantic compatibility
+- The latest release is always close to the main branch
+
+This continuous release model ensures you always have access to the latest improvements without waiting for manual releases.
 
 ## Installation
 
-Shrink Ray requires Python 3.11 or later, and can be installed using pip.
+Shrink Ray requires Python 3.12 or later, and can be installed using pip.
 
-Official releases for shrink ray are infrequent, and I recommend running off main. You can install it as follows:
+You can install the latest release from PyPI or run directly from the main branch:
 
 ```
 pipx install shrinkray
@@ -68,8 +76,8 @@ pipx install git+https://github.com/DRMacIver/shrinkray.git
 
 (if you don't have or want [pipx](https://pypa.github.io/pipx/) you could also do this with pip or `uv pip` and it would work fine)
 
-Shrink Ray requires Python 3.11 or later and won't work on earlier versions. If everything is working correctly, it should refuse to install
-on versions it's incompatible with. If you do not have Python 3.11 installed, I recommend [pyenv](https://github.com/pyenv/pyenv) for managing
+Shrink Ray requires Python 3.12 or later and won't work on earlier versions. If everything is working correctly, it should refuse to install
+on versions it's incompatible with. If you do not have Python 3.12 installed, I recommend [pyenv](https://github.com/pyenv/pyenv) for managing
 Python installs.
 
 If you want to use it from the git repo directly, you can do the following:

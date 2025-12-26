@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Release script for shrinkray.
 
-Updates version to calver (YY.M.D), builds package, and publishes to PyPI.
+Updates version to calver (YY.M.D.N), builds package, and publishes to PyPI.
+N is the release number for the day (0 for first release, 1 for second, etc.).
 """
 
 import re
@@ -12,12 +13,38 @@ from pathlib import Path
 
 
 def get_calver() -> str:
-    """Generate calver version string in YY.M.D format."""
+    """Generate calver version string in YY.M.D.N format.
+
+    N is the release number for the day (0 for first, 1 for second, etc.).
+    """
     now = datetime.now()
     year = now.strftime("%y")
     month = str(now.month)  # No leading zero
     day = str(now.day)  # No leading zero
-    return f"{year}.{month}.{day}"
+    base_version = f"{year}.{month}.{day}"
+
+    # Find existing tags for today
+    result = run_command(["git", "tag", "-l", f"v{base_version}.*"], check=False)
+
+    if result.returncode != 0 or not result.stdout.strip():
+        # No releases today yet, start at 0
+        return f"{base_version}.0"
+
+    # Parse existing release numbers for today
+    release_numbers = []
+    for tag in result.stdout.strip().split("\n"):
+        # Tag format is v{year}.{month}.{day}.{release_number}
+        match = re.match(rf"^v{re.escape(base_version)}\.(\d+)$", tag)
+        if match:
+            release_numbers.append(int(match.group(1)))
+
+    if not release_numbers:
+        # Tags exist but none match our pattern, start at 0
+        return f"{base_version}.0"
+
+    # Next release number is max + 1
+    next_release = max(release_numbers) + 1
+    return f"{base_version}.{next_release}"
 
 
 def run_command(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:

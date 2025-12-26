@@ -52,9 +52,9 @@ It's designed to be highly parallel, and work with a very wide variety of format
 
 ## Versioning and Releases
 
-Shrink Ray uses calendar versioning (calver) in the format YY.M.D (e.g., 25.12.26 for December 26, 2025).
+Shrink Ray uses calendar versioning (calver) in the format YY.M.D.N (e.g., 25.12.26.0 for the first release on December 26, 2025, 25.12.26.1 for the second, etc.).
 
-New releases are (in theory, this is still something of a work in progress) published automatically every day if there are any changes to the source code since the previous release.
+New releases are published automatically when changes are pushed to main if there are any changes to the source code or pyproject.toml since the previous release.
 
 Shrinkray makes no particularly strong backwards compatibility guarantees. I aim to keep its behaviour relatively stable between releases, but for example will not be particularly shy about dropping old versions of Python or adding new dependencies. The basic workflow of running a simple reduction will rarely, if ever, change, but the UI is likely to be continuously evolving for some time.
 

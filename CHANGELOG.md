@@ -1,6 +1,6 @@
 # Changelog
 
-*Shrinkray uses [calender versioning](https://calver.org/), YY-MM-micro.*
+*Shrinkray uses [calendar versioning](https://calver.org/), YY.M.D.N (where N is the release number for that day).*
 
 ## Version 25.9.1
 

@@ -2,12 +2,14 @@ name: Auto Release
 
 on:
   schedule:
-    # Run daily at 10:00 UTC
+    # Run daily at 10:00 UTC on main branch
     - cron: '0 10 * * *'
-  workflow_dispatch:  # Allow manual triggering
+  workflow_dispatch:  # Allow manual triggering from main only
 
 jobs:
   build:
+    # Only run on main branch
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     permissions:
       contents: write  # Needed to push commits and tags

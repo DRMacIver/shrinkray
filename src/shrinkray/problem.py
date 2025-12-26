@@ -49,7 +49,6 @@ class PassStatsProtocol(Protocol):
     test_evaluations: int
     successful_reductions: int
     bytes_deleted: int
-    non_size_reductions: int
 
 
 def shortlex[SizedT: Sized](value: SizedT) -> tuple[int, SizedT]:
@@ -411,9 +410,6 @@ class BasicReductionProblem(ReductionProblem[T]):
                     self.current_pass_stats.successful_reductions += 1
                     size_diff = self.size(self.current_test_case) - self.size(test_case)
                     self.current_pass_stats.bytes_deleted += size_diff
-                    if size_diff == 0:
-                        # Same size but lexicographically smaller
-                        self.current_pass_stats.non_size_reductions += 1
 
                 self.stats.current_test_case_size = self.size(test_case)
                 self.__current = test_case

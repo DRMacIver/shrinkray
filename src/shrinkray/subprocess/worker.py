@@ -242,11 +242,24 @@ class ReducerWorker:
         self.running = False
         return Response(id=request_id, result={"status": "cancelled"})
 
+    def _get_known_pass_names(self) -> set[str]:
+        """Get the set of known pass names from pass stats."""
+        if self.reducer is None or self.reducer.pass_stats is None:
+            return set()
+        return set(self.reducer.pass_stats._stats.keys())
+
     def _handle_disable_pass(self, request_id: str, params: dict) -> Response:
         """Disable a reduction pass by name."""
         pass_name = params.get("pass_name", "")
         if not pass_name:
             return Response(id=request_id, error="pass_name is required")
+
+        known_passes = self._get_known_pass_names()
+        if known_passes and pass_name not in known_passes:
+            return Response(
+                id=request_id,
+                error=f"Unknown pass '{pass_name}'. Known passes: {sorted(known_passes)}",
+            )
 
         if self.reducer is not None and hasattr(self.reducer, "disable_pass"):
             self.reducer.disable_pass(pass_name)
@@ -258,6 +271,13 @@ class ReducerWorker:
         pass_name = params.get("pass_name", "")
         if not pass_name:
             return Response(id=request_id, error="pass_name is required")
+
+        known_passes = self._get_known_pass_names()
+        if known_passes and pass_name not in known_passes:
+            return Response(
+                id=request_id,
+                error=f"Unknown pass '{pass_name}'. Known passes: {sorted(known_passes)}",
+            )
 
         if self.reducer is not None and hasattr(self.reducer, "enable_pass"):
             self.reducer.enable_pass(pass_name)
@@ -358,7 +378,6 @@ class ReducerWorker:
                     PassStatsData(
                         pass_name=ps.pass_name,
                         bytes_deleted=ps.bytes_deleted,
-                        non_size_reductions=ps.non_size_reductions,
                         run_count=ps.run_count,
                         test_evaluations=ps.test_evaluations,
                         successful_reductions=ps.successful_reductions,

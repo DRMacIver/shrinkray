@@ -234,7 +234,6 @@ def update_with_pass_stats() -> ProgressUpdate:
             PassStatsData(
                 pass_name="hollow",
                 bytes_deleted=2500,
-                non_size_reductions=0,
                 run_count=5,
                 test_evaluations=100,
                 successful_reductions=3,
@@ -243,7 +242,6 @@ def update_with_pass_stats() -> ProgressUpdate:
             PassStatsData(
                 pass_name="delete_lines",
                 bytes_deleted=1500,
-                non_size_reductions=2,
                 run_count=3,
                 test_evaluations=80,
                 successful_reductions=2,
@@ -252,7 +250,6 @@ def update_with_pass_stats() -> ProgressUpdate:
             PassStatsData(
                 pass_name="lift_braces",
                 bytes_deleted=1000,
-                non_size_reductions=0,
                 run_count=2,
                 test_evaluations=50,
                 successful_reductions=1,

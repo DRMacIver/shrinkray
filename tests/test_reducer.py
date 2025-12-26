@@ -1506,7 +1506,6 @@ def test_pass_stats_creation():
     stats = PassStats(pass_name="test_pass")
     assert stats.pass_name == "test_pass"
     assert stats.bytes_deleted == 0
-    assert stats.non_size_reductions == 0
     assert stats.run_count == 0
     assert stats.test_evaluations == 0
     assert stats.successful_reductions == 0

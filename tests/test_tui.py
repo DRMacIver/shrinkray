@@ -1773,7 +1773,6 @@ def test_pass_stats_screen_creation():
         PassStatsData(
             pass_name="hollow",
             bytes_deleted=500,
-            non_size_reductions=0,
             run_count=3,
             test_evaluations=100,
             successful_reductions=2,
@@ -1811,7 +1810,6 @@ def test_shrinkray_app_stores_pass_stats():
             PassStatsData(
                 pass_name="test",
                 bytes_deleted=100,
-                non_size_reductions=0,
                 run_count=1,
                 test_evaluations=10,
                 successful_reductions=1,
@@ -1869,7 +1867,6 @@ def test_action_show_pass_stats_opens_modal():
             PassStatsData(
                 pass_name="test",
                 bytes_deleted=100,
-                non_size_reductions=0,
                 run_count=1,
                 test_evaluations=10,
                 successful_reductions=1,
@@ -1944,7 +1941,6 @@ def test_pass_stats_modal_closes_with_p_key():
                     PassStatsData(
                         pass_name="test_pass",
                         bytes_deleted=50,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=10,
                         successful_reductions=1,
@@ -2016,7 +2012,6 @@ def test_pass_stats_modal_shows_help_with_h_key():
                     PassStatsData(
                         pass_name="test_pass",
                         bytes_deleted=50,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=10,
                         successful_reductions=1,
@@ -2113,7 +2108,6 @@ def test_pass_stats_screen_disabled_passes_styling():
         PassStatsData(
             pass_name="disabled_pass",
             bytes_deleted=100,
-            non_size_reductions=0,
             run_count=1,
             test_evaluations=10,
             successful_reductions=1,
@@ -2180,7 +2174,6 @@ def test_pass_stats_modal_toggle_disable():
             PassStatsData(
                 pass_name="hollow",
                 bytes_deleted=100,
-                non_size_reductions=0,
                 run_count=1,
                 test_evaluations=10,
                 successful_reductions=1,
@@ -2246,7 +2239,6 @@ def test_pass_stats_modal_skip_current():
             PassStatsData(
                 pass_name="hollow",
                 bytes_deleted=100,
-                non_size_reductions=0,
                 run_count=1,
                 test_evaluations=10,
                 successful_reductions=1,
@@ -2370,7 +2362,6 @@ def test_pass_stats_modal_non_current_non_disabled_pass():
             PassStatsData(
                 pass_name="hollow",
                 bytes_deleted=100,
-                non_size_reductions=0,
                 run_count=1,
                 test_evaluations=10,
                 successful_reductions=1,
@@ -2379,7 +2370,6 @@ def test_pass_stats_modal_non_current_non_disabled_pass():
             PassStatsData(
                 pass_name="delete_lines",
                 bytes_deleted=50,
-                non_size_reductions=0,
                 run_count=2,
                 test_evaluations=20,
                 successful_reductions=1,
@@ -2448,7 +2438,6 @@ def test_pass_stats_modal_toggle_enable():
             PassStatsData(
                 pass_name="hollow",
                 bytes_deleted=100,
-                non_size_reductions=0,
                 run_count=1,
                 test_evaluations=10,
                 successful_reductions=1,
@@ -2516,7 +2505,6 @@ def test_pass_stats_screen_refresh_updates_data():
         PassStatsData(
             pass_name="hollow",
             bytes_deleted=100,
-            non_size_reductions=0,
             run_count=1,
             test_evaluations=10,
             successful_reductions=1,
@@ -2541,7 +2529,6 @@ def test_pass_stats_screen_refresh_updates_data():
         PassStatsData(
             pass_name="hollow",
             bytes_deleted=200,  # Changed
-            non_size_reductions=0,
             run_count=2,  # Changed
             test_evaluations=20,  # Changed
             successful_reductions=2,  # Changed
@@ -2640,7 +2627,6 @@ def test_skip_current_pass_from_main_screen():
             PassStatsData(
                 pass_name="hollow",
                 bytes_deleted=100,
-                non_size_reductions=0,
                 run_count=1,
                 test_evaluations=10,
                 successful_reductions=1,
@@ -2704,7 +2690,6 @@ def test_pass_stats_modal_refresh_triggers_update():
             PassStatsData(
                 pass_name="hollow",
                 bytes_deleted=100,
-                non_size_reductions=0,
                 run_count=1,
                 test_evaluations=10,
                 successful_reductions=1,
@@ -2734,7 +2719,6 @@ def test_pass_stats_modal_refresh_triggers_update():
                     PassStatsData(
                         pass_name="delete_lines",
                         bytes_deleted=10,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=5,
                         successful_reductions=1,
@@ -2890,7 +2874,6 @@ def test_pass_stats_screen_direct_method_calls():
         PassStatsData(
             pass_name="hollow",
             bytes_deleted=100,
-            non_size_reductions=0,
             run_count=1,
             test_evaluations=10,
             successful_reductions=1,
@@ -2967,7 +2950,6 @@ def test_pass_stats_screen_refresh_data_updates():
                     PassStatsData(
                         pass_name="test_pass",
                         bytes_deleted=100,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=10,
                         successful_reductions=1,
@@ -2994,7 +2976,6 @@ def test_pass_stats_screen_refresh_data_updates():
                         PassStatsData(
                             pass_name="test_pass",
                             bytes_deleted=200,  # Changed
-                            non_size_reductions=0,
                             run_count=2,  # Changed
                             test_evaluations=20,
                             successful_reductions=2,
@@ -3022,7 +3003,7 @@ def test_pass_stats_screen_refresh_data_updates():
 
 
 def test_pass_stats_screen_refresh_data_with_disabled_passes():
-    """Test _refresh_data updates footer with disabled count (line 512)."""
+    """Test _refresh_data updates footer with disabled count."""
 
     async def run():
         fake_client = FakeReductionClient(updates=[])
@@ -3046,7 +3027,6 @@ def test_pass_stats_screen_refresh_data_with_disabled_passes():
                     PassStatsData(
                         pass_name="pass1",
                         bytes_deleted=100,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=10,
                         successful_reductions=1,
@@ -3055,7 +3035,6 @@ def test_pass_stats_screen_refresh_data_with_disabled_passes():
                     PassStatsData(
                         pass_name="pass2",
                         bytes_deleted=50,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=5,
                         successful_reductions=0,
@@ -3085,7 +3064,6 @@ def test_pass_stats_screen_refresh_data_with_disabled_passes():
                         PassStatsData(
                             pass_name="pass1",
                             bytes_deleted=150,  # Changed
-                            non_size_reductions=0,
                             run_count=2,
                             test_evaluations=15,
                             successful_reductions=1,
@@ -3094,7 +3072,6 @@ def test_pass_stats_screen_refresh_data_with_disabled_passes():
                         PassStatsData(
                             pass_name="pass2",
                             bytes_deleted=50,
-                            non_size_reductions=0,
                             run_count=1,
                             test_evaluations=5,
                             successful_reductions=0,
@@ -3122,7 +3099,7 @@ def test_pass_stats_screen_refresh_data_with_disabled_passes():
 
 
 def test_pass_stats_screen_get_selected_pass_name_empty_table():
-    """Test _get_selected_pass_name returns None for empty table (line 522)."""
+    """Test _get_selected_pass_name returns None for empty table."""
 
     async def run():
         fake_client = FakeReductionClient(updates=[])
@@ -3199,7 +3176,6 @@ def test_pass_stats_screen_action_toggle_disable():
                     PassStatsData(
                         pass_name="my_pass",
                         bytes_deleted=100,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=10,
                         successful_reductions=1,
@@ -3267,7 +3243,6 @@ def test_pass_stats_screen_async_methods():
                     PassStatsData(
                         pass_name="a_pass",
                         bytes_deleted=100,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=10,
                         successful_reductions=1,
@@ -3301,7 +3276,7 @@ def test_pass_stats_screen_async_methods():
 
 
 def test_pass_stats_screen_action_skip_current():
-    """Test action_skip_current method (line 559)."""
+    """Test action_skip_current method."""
 
     async def run():
         fake_client = FakeReductionClient(updates=[])
@@ -3324,7 +3299,6 @@ def test_pass_stats_screen_action_skip_current():
                     PassStatsData(
                         pass_name="running_pass",
                         bytes_deleted=100,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=10,
                         successful_reductions=1,
@@ -3357,7 +3331,7 @@ def test_pass_stats_screen_action_skip_current():
 
 
 def test_app_action_skip_current_pass():
-    """Test ShrinkRayApp.action_skip_current_pass (line 775)."""
+    """Test ShrinkRayApp.action_skip_current_pass."""
 
     async def run():
         # Use an infinite updates client so we can test during reduction
@@ -3458,7 +3432,7 @@ def test_pass_stats_screen_async_methods_no_client():
 
 
 def test_app_skip_pass_no_client():
-    """Test ShrinkRayApp._skip_pass when client is None (line 779)."""
+    """Test ShrinkRayApp._skip_pass when client is None."""
 
     async def run():
         with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
@@ -3523,7 +3497,6 @@ def test_all_passes_disabled_shows_message():
                     PassStatsData(
                         pass_name="pass1",
                         bytes_deleted=100,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=10,
                         successful_reductions=1,
@@ -3532,7 +3505,6 @@ def test_all_passes_disabled_shows_message():
                     PassStatsData(
                         pass_name="pass2",
                         bytes_deleted=50,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=5,
                         successful_reductions=0,
@@ -3591,7 +3563,6 @@ def test_check_all_passes_disabled_partial():
                     PassStatsData(
                         pass_name="pass1",
                         bytes_deleted=100,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=10,
                         successful_reductions=1,
@@ -3600,7 +3571,6 @@ def test_check_all_passes_disabled_partial():
                     PassStatsData(
                         pass_name="pass2",
                         bytes_deleted=50,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=5,
                         successful_reductions=0,
@@ -3627,7 +3597,7 @@ def test_check_all_passes_disabled_partial():
 
 
 def test_pass_stats_screen_cursor_position_out_of_bounds():
-    """Test _update_table_data when cursor is beyond new row count (line 492->494)."""
+    """Test _update_table_data when cursor is beyond new row count."""
 
     async def run():
         fake_client = FakeReductionClient(updates=[])
@@ -3651,7 +3621,6 @@ def test_pass_stats_screen_cursor_position_out_of_bounds():
                     PassStatsData(
                         pass_name="pass1",
                         bytes_deleted=100,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=10,
                         successful_reductions=1,
@@ -3660,7 +3629,6 @@ def test_pass_stats_screen_cursor_position_out_of_bounds():
                     PassStatsData(
                         pass_name="pass2",
                         bytes_deleted=50,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=5,
                         successful_reductions=0,
@@ -3669,7 +3637,6 @@ def test_pass_stats_screen_cursor_position_out_of_bounds():
                     PassStatsData(
                         pass_name="pass3",
                         bytes_deleted=25,
-                        non_size_reductions=0,
                         run_count=1,
                         test_evaluations=3,
                         successful_reductions=0,
@@ -3705,7 +3672,6 @@ def test_pass_stats_screen_cursor_position_out_of_bounds():
                         PassStatsData(
                             pass_name="pass1",
                             bytes_deleted=100,
-                            non_size_reductions=0,
                             run_count=1,
                             test_evaluations=10,
                             successful_reductions=1,
@@ -3731,7 +3697,7 @@ def test_pass_stats_screen_cursor_position_out_of_bounds():
 
 
 def test_pass_stats_screen_get_selected_empty_table():
-    """Test _get_selected_pass_name when table has 0 rows (line 522)."""
+    """Test _get_selected_pass_name when table has 0 rows."""
     from unittest.mock import PropertyMock, patch
 
     async def run():

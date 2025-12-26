@@ -1580,10 +1580,29 @@ def test_worker_handle_disable_pass_success():
     worker = ReducerWorker()
     worker.reducer = Mock()
     worker.reducer.disable_pass = Mock()
+    # Mock pass_stats with the pass name in _stats
+    worker.reducer.pass_stats._stats = {"hollow": Mock()}
 
     response = worker._handle_disable_pass("test-id", {"pass_name": "hollow"})
     assert response.result == {"status": "disabled", "pass_name": "hollow"}
     worker.reducer.disable_pass.assert_called_once_with("hollow")
+
+
+def test_worker_handle_disable_pass_unknown_pass():
+    """Test disable_pass handler with unknown pass name."""
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.disable_pass = Mock()
+    # Mock pass_stats with only known passes
+    worker.reducer.pass_stats._stats = {"hollow": Mock(), "delete_lines": Mock()}
+
+    response = worker._handle_disable_pass("test-id", {"pass_name": "unknown_pass"})
+    assert response.error is not None
+    assert "Unknown pass 'unknown_pass'" in response.error
+    assert "hollow" in response.error  # Should list known passes
+    worker.reducer.disable_pass.assert_not_called()
 
 
 def test_worker_handle_enable_pass_no_pass_name():
@@ -1618,10 +1637,29 @@ def test_worker_handle_enable_pass_success():
     worker = ReducerWorker()
     worker.reducer = Mock()
     worker.reducer.enable_pass = Mock()
+    # Mock pass_stats with the pass name in _stats
+    worker.reducer.pass_stats._stats = {"hollow": Mock()}
 
     response = worker._handle_enable_pass("test-id", {"pass_name": "hollow"})
     assert response.result == {"status": "enabled", "pass_name": "hollow"}
     worker.reducer.enable_pass.assert_called_once_with("hollow")
+
+
+def test_worker_handle_enable_pass_unknown_pass():
+    """Test enable_pass handler with unknown pass name."""
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.enable_pass = Mock()
+    # Mock pass_stats with only known passes
+    worker.reducer.pass_stats._stats = {"hollow": Mock(), "delete_lines": Mock()}
+
+    response = worker._handle_enable_pass("test-id", {"pass_name": "unknown_pass"})
+    assert response.error is not None
+    assert "Unknown pass 'unknown_pass'" in response.error
+    assert "hollow" in response.error  # Should list known passes
+    worker.reducer.enable_pass.assert_not_called()
 
 
 def test_worker_handle_skip_pass_no_reducer():
@@ -1656,6 +1694,8 @@ async def test_worker_handle_command_disable_pass():
     worker = ReducerWorker()
     worker.reducer = Mock()
     worker.reducer.disable_pass = Mock()
+    # Mock pass_stats with the pass name in _stats
+    worker.reducer.pass_stats._stats = {"hollow": Mock()}
 
     request = Request(id="test-id", command="disable_pass", params={"pass_name": "hollow"})
     response = await worker.handle_command(request)
@@ -1673,6 +1713,8 @@ async def test_worker_handle_command_enable_pass():
     worker = ReducerWorker()
     worker.reducer = Mock()
     worker.reducer.enable_pass = Mock()
+    # Mock pass_stats with the pass name in _stats
+    worker.reducer.pass_stats._stats = {"hollow": Mock()}
 
     request = Request(id="test-id", command="enable_pass", params={"pass_name": "hollow"})
     response = await worker.handle_command(request)

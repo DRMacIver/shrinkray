@@ -142,7 +142,6 @@ class PassStats:
 
     pass_name: str
     bytes_deleted: int = 0
-    non_size_reductions: int = 0
     run_count: int = 0
     test_evaluations: int = 0
     successful_reductions: int = 0

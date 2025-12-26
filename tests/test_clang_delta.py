@@ -314,7 +314,7 @@ async def test_query_instances_raises_clang_delta_error():
 async def test_query_instances_handles_assertion_failure():
     """Test query_instances returns 0 when clang_delta hits an assertion.
 
-    Exercises the assertion failure path in query_instances (line 158).
+    Exercises the assertion failure handling in query_instances.
     """
     cd = ClangDelta(find_clang_delta())
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from shrinkray.subprocess.protocol import ProgressUpdate
+from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate
 from shrinkray.tui import ShrinkRayApp
 
 
@@ -41,6 +41,21 @@ class FakeReductionClientForSnapshots:
 
         self._completed = True
         return Response(id="cancel", result={"status": "cancelled"})
+
+    async def disable_pass(self, pass_name: str):
+        from shrinkray.subprocess.protocol import Response
+
+        return Response(id="disable", result={"status": "disabled", "pass_name": pass_name})
+
+    async def enable_pass(self, pass_name: str):
+        from shrinkray.subprocess.protocol import Response
+
+        return Response(id="enable", result={"status": "enabled", "pass_name": pass_name})
+
+    async def skip_current_pass(self):
+        from shrinkray.subprocess.protocol import Response
+
+        return Response(id="skip", result={"status": "skipped"})
 
     async def close(self) -> None:
         pass
@@ -195,3 +210,67 @@ def test_wide_terminal(snap_compare, mid_reduction_update):
     """Snapshot test with wider terminal."""
     app = make_app_with_updates([mid_reduction_update])
     assert snap_compare(app, terminal_size=(160, 50))
+
+
+@pytest.fixture
+def update_with_pass_stats() -> ProgressUpdate:
+    """A progress update with pass statistics."""
+    return ProgressUpdate(
+        status="Running hollow",
+        size=5000,
+        original_size=10000,
+        calls=150,
+        reductions=25,
+        interesting_calls=50,
+        wasted_calls=10,
+        runtime=30.5,
+        parallel_workers=4,
+        average_parallelism=3.8,
+        effective_parallelism=3.5,
+        time_since_last_reduction=2.5,
+        content_preview="Line 1\nLine 3\nLine 5",
+        hex_mode=False,
+        pass_stats=[
+            PassStatsData(
+                pass_name="hollow",
+                bytes_deleted=2500,
+                run_count=5,
+                test_evaluations=100,
+                successful_reductions=3,
+                success_rate=3.0,
+            ),
+            PassStatsData(
+                pass_name="delete_lines",
+                bytes_deleted=1500,
+                run_count=3,
+                test_evaluations=80,
+                successful_reductions=2,
+                success_rate=2.5,
+            ),
+            PassStatsData(
+                pass_name="lift_braces",
+                bytes_deleted=1000,
+                run_count=2,
+                test_evaluations=50,
+                successful_reductions=1,
+                success_rate=2.0,
+            ),
+        ],
+        current_pass_name="hollow",
+        disabled_passes=[],
+    )
+
+
+async def test_pass_stats_modal(snap_compare, update_with_pass_stats):
+    """Snapshot test for the pass statistics modal."""
+
+    async def interact(pilot):
+        # Wait a moment for the app to start
+        await pilot.pause()
+        # Press 'p' to open the pass stats modal
+        await pilot.press("p")
+        # Wait for the modal to render
+        await pilot.pause()
+
+    app = make_app_with_updates([update_with_pass_stats])
+    assert snap_compare(app, terminal_size=(120, 40), run_before=interact)

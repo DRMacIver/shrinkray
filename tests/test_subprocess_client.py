@@ -993,3 +993,90 @@ def test_subprocess_client_handle_message_with_already_done_future():
         assert future.result() == "already done"
 
     asyncio.run(run())
+
+
+# === Pass Control Tests ===
+
+
+def test_subprocess_client_disable_pass_when_completed():
+    """Test disable_pass returns early when reduction is already completed."""
+
+    async def run():
+        client = SubprocessClient()
+        client._completed = True
+
+        response = await client.disable_pass("hollow")
+        assert response.result == {"status": "already_completed"}
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_disable_pass_exception():
+    """Test disable_pass handles send_command exception."""
+    from unittest.mock import AsyncMock
+
+    async def run():
+        client = SubprocessClient()
+        client._completed = False
+        client.send_command = AsyncMock(side_effect=Exception("Connection failed"))
+
+        response = await client.disable_pass("hollow")
+        assert response.error == "Failed to disable pass"
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_enable_pass_when_completed():
+    """Test enable_pass returns early when reduction is already completed."""
+
+    async def run():
+        client = SubprocessClient()
+        client._completed = True
+
+        response = await client.enable_pass("hollow")
+        assert response.result == {"status": "already_completed"}
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_enable_pass_exception():
+    """Test enable_pass handles send_command exception."""
+    from unittest.mock import AsyncMock
+
+    async def run():
+        client = SubprocessClient()
+        client._completed = False
+        client.send_command = AsyncMock(side_effect=Exception("Connection failed"))
+
+        response = await client.enable_pass("hollow")
+        assert response.error == "Failed to enable pass"
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_skip_current_pass_when_completed():
+    """Test skip_current_pass returns early when reduction is already completed."""
+
+    async def run():
+        client = SubprocessClient()
+        client._completed = True
+
+        response = await client.skip_current_pass()
+        assert response.result == {"status": "already_completed"}
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_skip_current_pass_exception():
+    """Test skip_current_pass handles send_command exception."""
+    from unittest.mock import AsyncMock
+
+    async def run():
+        client = SubprocessClient()
+        client._completed = False
+        client.send_command = AsyncMock(side_effect=Exception("Connection failed"))
+
+        response = await client.skip_current_pass()
+        assert response.error == "Failed to skip pass"
+
+    asyncio.run(run())

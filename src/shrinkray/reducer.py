@@ -56,6 +56,11 @@ from shrinkray.problem import ReductionProblem, ReductionStats, shortlex
 class Reducer[T](ABC):
     target: ReductionProblem[T]
 
+    # Optional pass statistics tracking (implemented by ShrinkRay)
+    pass_stats: "PassStatsTracker | None" = attrs.field(default=None, init=False)
+    # Optional current pass tracking (implemented by ShrinkRay)
+    current_reduction_pass: "ReductionPass[T] | None" = attrs.field(default=None, init=False)
+
     @contextmanager
     def backtrack(self, restart: T) -> Generator[None, None, None]:
         current = self.target
@@ -71,6 +76,20 @@ class Reducer[T](ABC):
     @property
     def status(self) -> str:
         return ""
+
+    @property
+    def disabled_passes(self) -> set[str]:
+        """Set of disabled pass names. Override in subclasses for pass control."""
+        return set()
+
+    def disable_pass(self, pass_name: str) -> None:  # noqa: B027
+        """Disable a pass by name. Override in subclasses for pass control."""
+
+    def enable_pass(self, pass_name: str) -> None:  # noqa: B027
+        """Enable a pass by name. Override in subclasses for pass control."""
+
+    def skip_current_pass(self) -> None:  # noqa: B027
+        """Skip the currently running pass. Override in subclasses for pass control."""
 
 
 @define
@@ -118,13 +137,87 @@ class RestartPass(Exception):
 
 
 @define
+class PassStats:
+    """Statistics for a single reduction pass."""
+
+    pass_name: str
+    bytes_deleted: int = 0
+    run_count: int = 0
+    test_evaluations: int = 0
+    successful_reductions: int = 0
+
+    @property
+    def success_rate(self) -> float:
+        """Percentage of test evaluations that led to a reduction."""
+        if self.test_evaluations == 0:
+            return 0.0
+        return (self.successful_reductions / self.test_evaluations) * 100.0
+
+
+@define
+class PassStatsTracker:
+    """Tracks statistics for all reduction passes.
+
+    Python 3.7+ dicts maintain insertion order, so stats are returned
+    in the order passes were first run.
+    """
+
+    _stats: dict[str, PassStats] = attrs.Factory(dict)
+
+    def get_or_create(self, pass_name: str) -> PassStats:
+        if pass_name not in self._stats:
+            self._stats[pass_name] = PassStats(pass_name=pass_name)
+        return self._stats[pass_name]
+
+    def get_stats_in_order(self) -> list[PassStats]:
+        """Get stats in the order passes were first run."""
+        return list(self._stats.values())
+
+
+class SkipPass(Exception):
+    """Raised to skip the current pass."""
+
+    pass
+
+
+@define
 class ShrinkRay(Reducer[bytes]):
     clang_delta: ClangDelta | None = None
 
-    current_reduction_pass: ReductionPass[bytes] | None = None
     current_pump: ReductionPump[bytes] | None = None
 
     unlocked_ok_passes: bool = False
+    pass_stats: PassStatsTracker | None = attrs.Factory(PassStatsTracker)
+
+    # Pass control: disabled passes and skip functionality
+    disabled_passes: set[str] = attrs.Factory(set)
+    _skip_requested: bool = attrs.field(default=False, init=False)
+    _current_pass_scope: "trio.CancelScope | None" = attrs.field(default=None, init=False)
+    _passes_were_skipped: bool = attrs.field(default=False, init=False)
+
+    def disable_pass(self, pass_name: str) -> None:
+        """Disable a pass by name. If it's currently running, skip it."""
+        self.disabled_passes.add(pass_name)
+        # If this pass is currently running, skip it
+        if (
+            self.current_reduction_pass is not None
+            and self.current_reduction_pass.__name__ == pass_name
+        ):
+            self.skip_current_pass()
+
+    def enable_pass(self, pass_name: str) -> None:
+        """Enable a previously disabled pass."""
+        self.disabled_passes.discard(pass_name)
+
+    def is_pass_disabled(self, pass_name: str) -> bool:
+        """Check if a pass is disabled."""
+        return pass_name in self.disabled_passes
+
+    def skip_current_pass(self) -> None:
+        """Request to skip the currently running pass."""
+        self._skip_requested = True
+        if self._current_pass_scope is not None:
+            self._current_pass_scope.cancel()
 
     initial_cuts: list[ReductionPass[bytes]] = attrs.Factory(
         lambda: [
@@ -222,12 +315,39 @@ class ShrinkRay(Reducer[bytes]):
                 return f"Running reduction pump {self.current_pump.__name__}"
 
     async def run_pass(self, rp: ReductionPass[bytes]) -> None:
+        pass_name = rp.__name__
+
+        # Skip if pass is disabled
+        if self.is_pass_disabled(pass_name):
+            return
+
         try:
             assert self.current_reduction_pass is None
             self.current_reduction_pass = rp
-            await rp(self.target)
+            self._skip_requested = False
+
+            # Get or create stats entry for this pass
+            assert self.pass_stats is not None  # Always set by Factory
+            stats_entry = self.pass_stats.get_or_create(pass_name)
+            stats_entry.run_count += 1
+
+            # Set current pass stats on the problem for real-time updates
+            self.target.current_pass_stats = stats_entry
+
+            # Run the pass with a cancel scope that can be externally cancelled
+            with trio.CancelScope() as scope:
+                self._current_pass_scope = scope
+                await rp(self.target)
+
+            # If the pass was cancelled/skipped, mark that passes were skipped
+            if scope.cancelled_caught:
+                self._passes_were_skipped = True
+
         finally:
             self.current_reduction_pass = None
+            self.target.current_pass_stats = None
+            self._current_pass_scope = None
+            self._skip_requested = False
 
     async def pump(self, rp: ReductionPump[bytes]) -> None:
         try:
@@ -357,6 +477,9 @@ class ShrinkRay(Reducer[bytes]):
         await self.initial_cut()
 
         while True:
+            # Reset skip tracking for this iteration
+            self._passes_were_skipped = False
+
             prev = self.target.current_test_case
             await self.run_some_passes()
             if self.target.current_test_case != prev:
@@ -364,7 +487,10 @@ class ShrinkRay(Reducer[bytes]):
             for pump in self.pumps:
                 await self.pump(pump)
             if self.target.current_test_case == prev:
-                break
+                # Only terminate if no passes were skipped
+                # If passes were skipped, we need another full run to be sure
+                if not self._passes_were_skipped:
+                    break
 
 
 class UpdateKeys(Patches[dict[str, bytes], dict[str, bytes]]):

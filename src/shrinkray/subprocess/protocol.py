@@ -50,6 +50,24 @@ class ProgressUpdate:
     content_preview: str = ""
     # Whether content is hex mode
     hex_mode: bool = False
+    # Pass statistics (only passes with test evaluations)
+    pass_stats: list["PassStatsData"] = field(default_factory=list)
+    # Currently running pass name (for highlighting)
+    current_pass_name: str = ""
+    # List of disabled pass names
+    disabled_passes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PassStatsData:
+    """Statistics for a single pass (serializable)."""
+
+    pass_name: str
+    bytes_deleted: int
+    run_count: int
+    test_evaluations: int
+    successful_reductions: int
+    success_rate: float
 
 
 def serialize(msg: Request | Response | ProgressUpdate) -> str:
@@ -84,6 +102,19 @@ def serialize(msg: Request | Response | ProgressUpdate) -> str:
                 "time_since_last_reduction": msg.time_since_last_reduction,
                 "content_preview": msg.content_preview,
                 "hex_mode": msg.hex_mode,
+                "pass_stats": [
+                    {
+                        "pass_name": ps.pass_name,
+                        "bytes_deleted": ps.bytes_deleted,
+                        "run_count": ps.run_count,
+                        "test_evaluations": ps.test_evaluations,
+                        "successful_reductions": ps.successful_reductions,
+                        "success_rate": ps.success_rate,
+                    }
+                    for ps in msg.pass_stats
+                ],
+                "current_pass_name": msg.current_pass_name,
+                "disabled_passes": msg.disabled_passes,
             },
         }
     else:
@@ -98,6 +129,21 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
     # Check for progress update (has "type" field)
     if data.get("type") == "progress":
         d = data["data"]
+
+        # Parse pass stats
+        pass_stats_data = []
+        for ps_dict in d.get("pass_stats", []):
+            pass_stats_data.append(
+                PassStatsData(
+                    pass_name=ps_dict["pass_name"],
+                    bytes_deleted=ps_dict["bytes_deleted"],
+                    run_count=ps_dict["run_count"],
+                    test_evaluations=ps_dict["test_evaluations"],
+                    successful_reductions=ps_dict["successful_reductions"],
+                    success_rate=ps_dict["success_rate"],
+                )
+            )
+
         return ProgressUpdate(
             status=d["status"],
             size=d["size"],
@@ -113,6 +159,9 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
             time_since_last_reduction=d.get("time_since_last_reduction", 0.0),
             content_preview=d.get("content_preview", ""),
             hex_mode=d.get("hex_mode", False),
+            pass_stats=pass_stats_data,
+            current_pass_name=d.get("current_pass_name", ""),
+            disabled_passes=d.get("disabled_passes", []),
         )
 
     # Check for response (has "result" or "error" field)

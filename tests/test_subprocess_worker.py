@@ -1543,3 +1543,314 @@ async def test_worker_run_with_none_progress_update():
 
     output_data = output.data.decode("utf-8")
     assert len(output_data) >= 0
+
+
+# === Pass Control Tests ===
+
+
+def test_worker_handle_disable_pass_no_pass_name():
+    """Test disable_pass handler with missing pass_name."""
+    worker = ReducerWorker()
+
+    response = worker._handle_disable_pass("test-id", {})
+    assert response.error == "pass_name is required"
+
+
+def test_worker_handle_disable_pass_empty_pass_name():
+    """Test disable_pass handler with empty pass_name."""
+    worker = ReducerWorker()
+
+    response = worker._handle_disable_pass("test-id", {"pass_name": ""})
+    assert response.error == "pass_name is required"
+
+
+def test_worker_handle_disable_pass_no_reducer():
+    """Test disable_pass handler when reducer is None."""
+    worker = ReducerWorker()
+    worker.reducer = None
+
+    response = worker._handle_disable_pass("test-id", {"pass_name": "hollow"})
+    assert response.error == "Reducer does not support pass control"
+
+
+def test_worker_handle_disable_pass_success():
+    """Test disable_pass handler success case."""
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.disable_pass = Mock()
+    # Mock pass_stats with the pass name in _stats
+    worker.reducer.pass_stats._stats = {"hollow": Mock()}
+
+    response = worker._handle_disable_pass("test-id", {"pass_name": "hollow"})
+    assert response.result == {"status": "disabled", "pass_name": "hollow"}
+    worker.reducer.disable_pass.assert_called_once_with("hollow")
+
+
+def test_worker_handle_disable_pass_unknown_pass():
+    """Test disable_pass handler with unknown pass name."""
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.disable_pass = Mock()
+    # Mock pass_stats with only known passes
+    worker.reducer.pass_stats._stats = {"hollow": Mock(), "delete_lines": Mock()}
+
+    response = worker._handle_disable_pass("test-id", {"pass_name": "unknown_pass"})
+    assert response.error is not None
+    assert "Unknown pass 'unknown_pass'" in response.error
+    assert "hollow" in response.error  # Should list known passes
+    worker.reducer.disable_pass.assert_not_called()
+
+
+def test_worker_handle_enable_pass_no_pass_name():
+    """Test enable_pass handler with missing pass_name."""
+    worker = ReducerWorker()
+
+    response = worker._handle_enable_pass("test-id", {})
+    assert response.error == "pass_name is required"
+
+
+def test_worker_handle_enable_pass_empty_pass_name():
+    """Test enable_pass handler with empty pass_name."""
+    worker = ReducerWorker()
+
+    response = worker._handle_enable_pass("test-id", {"pass_name": ""})
+    assert response.error == "pass_name is required"
+
+
+def test_worker_handle_enable_pass_no_reducer():
+    """Test enable_pass handler when reducer is None."""
+    worker = ReducerWorker()
+    worker.reducer = None
+
+    response = worker._handle_enable_pass("test-id", {"pass_name": "hollow"})
+    assert response.error == "Reducer does not support pass control"
+
+
+def test_worker_handle_enable_pass_success():
+    """Test enable_pass handler success case."""
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.enable_pass = Mock()
+    # Mock pass_stats with the pass name in _stats
+    worker.reducer.pass_stats._stats = {"hollow": Mock()}
+
+    response = worker._handle_enable_pass("test-id", {"pass_name": "hollow"})
+    assert response.result == {"status": "enabled", "pass_name": "hollow"}
+    worker.reducer.enable_pass.assert_called_once_with("hollow")
+
+
+def test_worker_handle_enable_pass_unknown_pass():
+    """Test enable_pass handler with unknown pass name."""
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.enable_pass = Mock()
+    # Mock pass_stats with only known passes
+    worker.reducer.pass_stats._stats = {"hollow": Mock(), "delete_lines": Mock()}
+
+    response = worker._handle_enable_pass("test-id", {"pass_name": "unknown_pass"})
+    assert response.error is not None
+    assert "Unknown pass 'unknown_pass'" in response.error
+    assert "hollow" in response.error  # Should list known passes
+    worker.reducer.enable_pass.assert_not_called()
+
+
+def test_worker_handle_skip_pass_no_reducer():
+    """Test skip_pass handler when reducer is None."""
+    worker = ReducerWorker()
+    worker.reducer = None
+
+    response = worker._handle_skip_pass("test-id")
+    assert response.error == "Reducer does not support pass control"
+
+
+def test_worker_handle_skip_pass_success():
+    """Test skip_pass handler success case."""
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.skip_current_pass = Mock()
+
+    response = worker._handle_skip_pass("test-id")
+    assert response.result == {"status": "skipped"}
+    worker.reducer.skip_current_pass.assert_called_once()
+
+
+@pytest.mark.trio
+async def test_worker_handle_command_disable_pass():
+    """Test handle_command dispatches to disable_pass handler."""
+    from unittest.mock import Mock
+
+    from shrinkray.subprocess.protocol import Request
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.disable_pass = Mock()
+    # Mock pass_stats with the pass name in _stats
+    worker.reducer.pass_stats._stats = {"hollow": Mock()}
+
+    request = Request(id="test-id", command="disable_pass", params={"pass_name": "hollow"})
+    response = await worker.handle_command(request)
+
+    assert response.result == {"status": "disabled", "pass_name": "hollow"}
+
+
+@pytest.mark.trio
+async def test_worker_handle_command_enable_pass():
+    """Test handle_command dispatches to enable_pass handler."""
+    from unittest.mock import Mock
+
+    from shrinkray.subprocess.protocol import Request
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.enable_pass = Mock()
+    # Mock pass_stats with the pass name in _stats
+    worker.reducer.pass_stats._stats = {"hollow": Mock()}
+
+    request = Request(id="test-id", command="enable_pass", params={"pass_name": "hollow"})
+    response = await worker.handle_command(request)
+
+    assert response.result == {"status": "enabled", "pass_name": "hollow"}
+
+
+@pytest.mark.trio
+async def test_worker_handle_command_skip_pass():
+    """Test handle_command dispatches to skip_pass handler."""
+    from unittest.mock import Mock
+
+    from shrinkray.subprocess.protocol import Request
+
+    worker = ReducerWorker()
+    worker.reducer = Mock()
+    worker.reducer.skip_current_pass = Mock()
+
+    request = Request(id="test-id", command="skip_pass", params={})
+    response = await worker.handle_command(request)
+
+    assert response.result == {"status": "skipped"}
+
+
+# === _build_progress_update edge cases ===
+
+
+@pytest.mark.trio
+async def test_build_progress_update_with_reducer_none():
+    """Test _build_progress_update when reducer is None (346->375, 376->379)."""
+    import time
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = None
+
+    # Need to set up problem for _build_progress_update (it returns None if problem is None)
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 100
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = time.time()
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.5)
+    worker.problem.current_test_case = b"test content"
+
+    # Set up state for parallel workers calculation
+    worker.state = Mock()
+    worker.state.parallel_tasks_running = 2
+
+    # Build progress update with reducer=None
+    update = await worker._build_progress_update()
+
+    # Should still return a valid ProgressUpdate
+    assert update is not None
+    assert update.pass_stats == []
+    assert update.disabled_passes == []
+    assert update.current_pass_name == ""
+
+
+@pytest.mark.trio
+async def test_build_progress_update_with_reducer_pass_stats_none():
+    """Test _build_progress_update when reducer.pass_stats is None (356->375)."""
+    import time
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+
+    # Mock reducer with pass_stats=None
+    worker.reducer = Mock()
+    worker.reducer.pass_stats = None
+    worker.reducer.current_reduction_pass = None
+    worker.reducer.status = "Running"
+    worker.reducer.disabled_passes = set()
+
+    # Set up problem
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 100
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = time.time()
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.5)
+    worker.problem.current_test_case = b"test content"
+
+    # Set up state
+    worker.state = Mock()
+    worker.state.parallel_tasks_running = 2
+
+    # Build progress update
+    update = await worker._build_progress_update()
+
+    assert update is not None
+    assert update.pass_stats == []
+
+
+@pytest.mark.trio
+async def test_build_progress_update_with_reducer_no_disabled_passes_attr():
+    """Test _build_progress_update when reducer lacks disabled_passes attribute."""
+    import time
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+
+    # Mock reducer without disabled_passes attribute
+    worker.reducer = Mock(spec=["pass_stats", "current_reduction_pass", "status"])
+    worker.reducer.pass_stats = None
+    worker.reducer.current_reduction_pass = None
+    worker.reducer.status = "Running"
+    # Note: no disabled_passes attribute
+
+    # Set up problem
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 100
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = time.time()
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.5)
+    worker.problem.current_test_case = b"test content"
+
+    # Set up state
+    worker.state = Mock()
+    worker.state.parallel_tasks_running = 2
+
+    # Build progress update - should not crash even without disabled_passes
+    update = await worker._build_progress_update()
+
+    assert update is not None
+    assert update.disabled_passes == []

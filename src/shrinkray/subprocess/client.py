@@ -2,6 +2,7 @@
 
 import asyncio
 import sys
+import traceback
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -58,6 +59,7 @@ class SubprocessClient:
                     if line:
                         await self._handle_message(line.decode("utf-8"))
             except Exception:
+                traceback.print_exc()
                 break
 
     async def _handle_message(self, line: str) -> None:
@@ -65,6 +67,7 @@ class SubprocessClient:
         try:
             msg = deserialize(line)
         except Exception:
+            traceback.print_exc()
             return
 
         if isinstance(msg, ProgressUpdate):
@@ -167,6 +170,36 @@ class SubprocessClient:
         except Exception:
             return Response(id="", result={"status": "cancelled"})
 
+    async def disable_pass(self, pass_name: str) -> Response:
+        """Disable a reduction pass by name."""
+        if self._completed:
+            return Response(id="", result={"status": "already_completed"})
+        try:
+            return await self.send_command("disable_pass", {"pass_name": pass_name})
+        except Exception:
+            traceback.print_exc()
+            return Response(id="", error="Failed to disable pass")
+
+    async def enable_pass(self, pass_name: str) -> Response:
+        """Enable a previously disabled reduction pass."""
+        if self._completed:
+            return Response(id="", result={"status": "already_completed"})
+        try:
+            return await self.send_command("enable_pass", {"pass_name": pass_name})
+        except Exception:
+            traceback.print_exc()
+            return Response(id="", error="Failed to enable pass")
+
+    async def skip_current_pass(self) -> Response:
+        """Skip the currently running pass."""
+        if self._completed:
+            return Response(id="", result={"status": "already_completed"})
+        try:
+            return await self.send_command("skip_pass")
+        except Exception:
+            traceback.print_exc()
+            return Response(id="", error="Failed to skip pass")
+
     async def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]:
         """Yield progress updates as they arrive."""
         while not self._completed:
@@ -200,7 +233,7 @@ class SubprocessClient:
                 try:
                     self._process.stdin.close()
                 except Exception:
-                    pass
+                    traceback.print_exc()
             # Only terminate if still running
             if self._process.returncode is None:
                 try:

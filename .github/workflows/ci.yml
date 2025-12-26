@@ -157,16 +157,22 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write  # Needed to push commits and tags
+      id-token: write  # Needed for trusted publishing to PyPI
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0  # Need full history to compare with tags
+          fetch-tags: true  # Explicitly fetch all tags
           persist-credentials: true  # Need to push
+
+      - name: Install just
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
 
       - name: Install uv
         uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
         with:
           version: "latest"
+          enable-cache: false  # Disable cache to prevent cache-poisoning in release job
 
       - name: Set up Python
         run: uv python install 3.14
@@ -206,22 +212,20 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Create release
+      - name: Clean working directory
         if: steps.changes.outputs.has_changes == 'true'
-        env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: |
-          # Configure PyPI token
-          cat > ~/.pypirc <<EOF
-          [pypi]
-          username = __token__
-          password = $PYPI_TOKEN
-          EOF
-          chmod 600 ~/.pypirc
+          # Discard any changes made by uv sync (e.g., lock file updates)
+          git checkout -- .
 
-          # Run the release
-          just release
+      - name: Update version and create tag
+        if: steps.changes.outputs.has_changes == 'true'
+        run: just release-version
 
-      - name: Clean up credentials
-        if: always()
-        run: rm -f ~/.pypirc
+      - name: Build package
+        if: steps.changes.outputs.has_changes == 'true'
+        run: just release-build
+
+      - name: Publish to PyPI
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0

@@ -17,6 +17,35 @@ jobs:
           fetch-depth: 0  # Need full history to compare with tags
           persist-credentials: true  # Need to push
 
+      - name: Check CI status
+        run: |
+          # Get the latest commit SHA
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo "Checking CI status for commit: $COMMIT_SHA"
+
+          # Check if CI workflow passed for this commit
+          gh api repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs \
+            --jq '.check_runs[] | select(.name | test("^(lint|test|slow-tests|Lint GitHub Actions)")) | {name: .name, status: .status, conclusion: .conclusion}' \
+            > check_runs.json
+
+          cat check_runs.json
+
+          # Check if any required checks failed or are pending
+          if jq -e '.conclusion == "failure" or .conclusion == "cancelled" or .status == "in_progress"' check_runs.json > /dev/null; then
+            echo "CI checks have not all passed yet"
+            exit 1
+          fi
+
+          # Verify we have some check runs (not an empty result)
+          if [ ! -s check_runs.json ]; then
+            echo "No CI check runs found for this commit"
+            exit 1
+          fi
+
+          echo "All CI checks passed"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Install uv
         uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
         with:
@@ -28,21 +57,8 @@ jobs:
       - name: Pin Python version
         run: uv python pin 3.14
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y minisat creduce
-
       - name: Install Python dependencies
         run: uv sync --extra dev
-
-      - name: Run lint
-        run: |
-          uv run ruff check src tests
-          uv run basedpyright src tests
-
-      - name: Run all tests
-        run: uv run pytest tests/ -q
 
       - name: Check for changes since last release
         id: changes

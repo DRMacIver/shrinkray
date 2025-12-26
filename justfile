@@ -49,3 +49,19 @@ docs:
 
 # Run the default CI checks (lint, tests)
 ci: lint test
+
+# Update version to calver (YY.M.D)
+release-version:
+    python scripts/release.py
+
+# Build package for release
+release-build:
+    uv build
+
+# Publish package to PyPI
+release-publish:
+    uv publish
+
+# Full release: update version, build, and publish
+release: release-version release-build release-publish
+    @echo "Release complete!"

@@ -20,7 +20,7 @@ dependencies = [
     "libcst>=1.1.0",
     "exceptiongroup>=1.2.0",
     "binaryornot>=0.4.4",
-    "black",
+    "black>=24.1.0",
 ]
 
 [project.urls]
@@ -35,17 +35,17 @@ shrinkray-worker = "shrinkray.__main__:worker_main"
 
 [project.optional-dependencies]
 dev = [
-    "coverage>=7.13.0",
+    "coverage>=7.4.0",
     "hypothesis>=6.92.1",
     "hypothesmith>=0.3.1",
-    "pytest",
-    "pytest-trio",
-    "pytest-asyncio",
-    "pytest-textual-snapshot",
-    "coverage[toml]",
-    "pygments",
-    "basedpyright",
-    "ruff",
+    "pytest>=8.0.0",
+    "pytest-trio>=0.8.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-textual-snapshot>=1.0.0",
+    "coverage[toml]>=7.4.0",
+    "pygments>=2.17.0",
+    "basedpyright>=1.1.0",
+    "ruff>=0.1.0",
     "pexpect>=4.9.0",
     "pyte>=0.8.2",
 ]

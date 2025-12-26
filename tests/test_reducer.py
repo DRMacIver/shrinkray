@@ -68,6 +68,37 @@ def test_reducer_status_default():
     assert reducer.status == ""
 
 
+def test_reducer_base_class_pass_control_defaults():
+    """Test that base Reducer class has default no-op pass control methods."""
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    # Create a concrete subclass that doesn't override pass control
+    class TestReducer(Reducer[bytes]):
+        async def run(self):
+            pass
+
+    reducer = TestReducer(target=problem)
+
+    # Base class disabled_passes returns empty set
+    assert reducer.disabled_passes == set()
+
+    # Base class methods are no-ops (don't raise)
+    reducer.disable_pass("test")
+    reducer.enable_pass("test")
+    reducer.skip_current_pass()
+
+    reducer = TestReducer(target=problem)
+    assert reducer.status == ""
+
+
 # =============================================================================
 # BasicReducer tests
 # =============================================================================
@@ -874,6 +905,37 @@ async def test_shrinkray_run_single_byte_finds_smaller():
 
     # Should have reduced to bytes([5]) - the smallest acceptable single byte
     assert problem.current_test_case == bytes([5])
+
+
+async def test_shrinkray_run_single_byte_no_smaller():
+    """Test ShrinkRay.run when c=0 is interesting (branch 474->477).
+
+    The branch 474->477 happens when range(c) is empty, i.e., c=0.
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        # Empty is not interesting
+        if x == b"":
+            return False
+        # Byte 0 is interesting - this triggers the branch where range(0) is empty
+        if len(x) == 1:
+            return x[0] == 0
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    # Should have reduced to bytes([0]) since:
+    # - bytes([0]) is interesting
+    # - The inner loop range(0) is empty, so we return immediately
+    assert problem.current_test_case == bytes([0])
 
 
 async def test_shrinkray_pump_no_change():

@@ -716,13 +716,7 @@ class ShrinkRayApp(App[None]):
                 self._disabled_passes = update.disabled_passes
 
                 # Check if all passes are disabled
-                if self._latest_pass_stats and self._disabled_passes:
-                    all_pass_names = {ps.pass_name for ps in self._latest_pass_stats}
-                    if all_pass_names and all_pass_names <= set(self._disabled_passes):
-                        self.update_status(
-                            "Reduction paused (all passes disabled) - "
-                            "[p] to re-enable passes"
-                        )
+                self._check_all_passes_disabled()
 
                 if self._client.is_completed:
                     break
@@ -744,6 +738,15 @@ class ShrinkRayApp(App[None]):
         finally:
             if self._owns_client and self._client:
                 await self._client.close()
+
+    def _check_all_passes_disabled(self) -> None:
+        """Check if all passes are disabled and show a message if so."""
+        if self._latest_pass_stats and self._disabled_passes:
+            all_pass_names = {ps.pass_name for ps in self._latest_pass_stats}
+            if all_pass_names and all_pass_names <= set(self._disabled_passes):
+                self.update_status(
+                    "Reduction paused (all passes disabled) - " "[p] to re-enable passes"
+                )
 
     def update_status(self, message: str) -> None:
         """Update the status label."""

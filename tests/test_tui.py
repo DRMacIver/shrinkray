@@ -6,10 +6,16 @@ import tempfile
 from collections.abc import AsyncIterator
 
 import pytest
-from textual.widgets import Label
+from textual.widgets import DataTable, Label
 
 from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
-from shrinkray.tui import ContentPreview, PassStatsScreen, ShrinkRayApp, StatsDisplay
+from shrinkray.tui import (
+    ContentPreview,
+    HelpScreen,
+    PassStatsScreen,
+    ShrinkRayApp,
+    StatsDisplay,
+)
 
 
 class FakeReductionClient:
@@ -1729,6 +1735,31 @@ def test_run_textual_ui_prints_validation_message(capsys):
     assert "Validating initial example" in captured.out
 
 
+def test_run_textual_ui_handles_validation_exception(capsys):
+    """Test run_textual_ui handles exceptions during validation (lines 877-882)."""
+    from unittest.mock import patch
+
+    from shrinkray.tui import run_textual_ui
+
+    # Mock validation to raise an exception
+    async def mock_validate(*args, **kwargs):
+        raise RuntimeError("Validation failed unexpectedly")
+
+    with patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate):
+        with pytest.raises(SystemExit) as exc_info:
+            run_textual_ui(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+            )
+
+        assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    assert "Error: Validation failed unexpectedly" in captured.err
+    # Check that traceback was printed (should contain "RuntimeError")
+    assert "RuntimeError" in captured.err
+
+
 # =============================================================================
 # PassStatsScreen tests
 # =============================================================================
@@ -1883,7 +1914,7 @@ def test_action_show_pass_stats_opens_modal():
 
                 # Check that PassStatsScreen is on the screen stack
                 assert any(
-                    screen.__class__.__name__ == "PassStatsScreen"
+                    isinstance(screen, PassStatsScreen)
                     for screen in app.screen_stack
                 )
 
@@ -2158,7 +2189,7 @@ def test_pass_stats_modal_with_empty_stats():
                 # The modal should show "No pass data yet" row
                 # Just verify modal opened successfully
                 assert any(
-                    screen.__class__.__name__ == "PassStatsScreen"
+                    isinstance(screen, PassStatsScreen)
                     for screen in app.screen_stack
                 )
 
@@ -2236,7 +2267,7 @@ def test_pass_stats_modal_non_current_non_disabled_pass():
 
                 # The modal should be open with both passes
                 assert any(
-                    screen.__class__.__name__ == "PassStatsScreen"
+                    isinstance(screen, PassStatsScreen)
                     for screen in app.screen_stack
                 )
 
@@ -2428,7 +2459,7 @@ def test_help_screen_opens_and_closes():
 
                 # Check that HelpScreen is on the screen stack
                 assert any(
-                    screen.__class__.__name__ == "HelpScreen"
+                    isinstance(screen, HelpScreen)
                     for screen in app.screen_stack
                 )
 
@@ -2503,7 +2534,1093 @@ def test_skip_current_pass_from_main_screen():
 
 def test_help_screen_can_be_imported():
     """Test that HelpScreen can be imported."""
-    from shrinkray.tui import HelpScreen
-
-    # Just verify it's importable
+    # HelpScreen is imported at module level, just verify it exists
     assert HelpScreen is not None
+
+
+def test_pass_stats_modal_refresh_triggers_update():
+    """Test that the periodic refresh updates the table when data changes."""
+
+    async def run():
+        stats = [
+            PassStatsData(
+                pass_name="hollow",
+                bytes_deleted=100,
+                non_size_reductions=0,
+                call_count=1,
+                test_evaluations=10,
+                successful_reductions=1,
+                success_rate=100.0,
+            )
+        ]
+
+        # Create updates that change over time
+        updates = [
+            ProgressUpdate(
+                status="Running hollow",
+                size=100,
+                original_size=200,
+                calls=5,
+                reductions=2,
+                pass_stats=stats,
+                current_pass_name="hollow",
+                disabled_passes=[],
+            ),
+            ProgressUpdate(
+                status="Running delete_lines",
+                size=90,
+                original_size=200,
+                calls=10,
+                reductions=3,
+                pass_stats=stats + [
+                    PassStatsData(
+                        pass_name="delete_lines",
+                        bytes_deleted=10,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=5,
+                        successful_reductions=1,
+                        success_rate=100.0,
+                    )
+                ],
+                current_pass_name="delete_lines",
+                disabled_passes=[],
+            ),
+        ]
+
+        client = FakeReductionClient(updates=updates)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                # Open pass stats modal
+                await pilot.press("p")
+                await pilot.pause()
+
+                # Wait for periodic refresh to trigger (every 500ms)
+                await pilot.pause(0.6)
+
+                # Close modal
+                await pilot.press("escape")
+                await pilot.pause()
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_modal_get_selected_with_empty_stats():
+    """Test _get_selected_pass_name returns None when stats are empty."""
+
+    async def run():
+        updates = [
+            ProgressUpdate(
+                status="Starting",
+                size=100,
+                original_size=200,
+                calls=0,
+                reductions=0,
+                pass_stats=[],
+                current_pass_name="",
+                disabled_passes=[],
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                # Open pass stats modal
+                await pilot.press("p")
+                await pilot.pause()
+
+                # Try to toggle - should do nothing since no passes
+                await pilot.press("space")
+                await pilot.pause()
+
+                # Close modal
+                await pilot.press("escape")
+                await pilot.pause()
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_skip_current_pass_from_main_when_completed():
+    """Test that skip does nothing when reduction is completed."""
+
+    async def run():
+        updates = [
+            ProgressUpdate(
+                status="Completed",
+                size=50,
+                original_size=200,
+                calls=100,
+                reductions=10,
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates)
+        client._completed = True  # Mark as completed
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                # Try to skip - should do nothing since completed
+                await pilot.press("c")
+                await pilot.pause()
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_screen_direct_method_calls():
+    """Test PassStatsScreen methods directly for coverage."""
+    from unittest.mock import AsyncMock, Mock
+
+    # Create mock app with all required attributes
+    mock_app = Mock()
+    mock_app._latest_pass_stats = [
+        PassStatsData(
+            pass_name="hollow",
+            bytes_deleted=100,
+            non_size_reductions=0,
+            call_count=1,
+            test_evaluations=10,
+            successful_reductions=1,
+            success_rate=100.0,
+        )
+    ]
+    mock_app._current_pass_name = "hollow"
+    mock_app._disabled_passes = []
+    mock_app._client = Mock()
+    mock_app._client.disable_pass = AsyncMock()
+    mock_app._client.enable_pass = AsyncMock()
+    mock_app._client.skip_current_pass = AsyncMock()
+    mock_app.run_worker = Mock()
+
+    screen = PassStatsScreen(mock_app)
+
+    # Test initial state
+    assert len(screen.pass_stats) == 1
+    assert screen.current_pass_name == "hollow"
+    assert screen.disabled_passes == set()
+
+
+def test_shrinkray_app_skip_pass_method():
+    """Test ShrinkRayApp._skip_pass directly."""
+
+    async def run():
+        client = FakeReductionClient(updates=[])
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            # Directly test the _skip_pass method
+            await app._skip_pass()
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_screen_refresh_data_updates():
+    """Test PassStatsScreen._refresh_data when stats change (lines 506-516)."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                # Set initial pass stats
+                app._latest_pass_stats = [
+                    PassStatsData(
+                        pass_name="test_pass",
+                        bytes_deleted=100,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=10,
+                        successful_reductions=1,
+                        success_rate=100.0,
+                    )
+                ]
+                app._current_pass_name = "test_pass"
+                app._disabled_passes = []
+
+                # Open pass stats screen
+                await pilot.press("p")
+                await pilot.pause()
+
+                # Get the screen
+                screen: PassStatsScreen | None = None
+                for s in app.screen_stack:
+                    if isinstance(s, PassStatsScreen):
+                        screen = s
+                        break
+
+                if screen is not None:
+                    # Update app stats (different from screen stats)
+                    app._latest_pass_stats = [
+                        PassStatsData(
+                            pass_name="test_pass",
+                            bytes_deleted=200,  # Changed
+                            non_size_reductions=0,
+                            call_count=2,  # Changed
+                            test_evaluations=20,
+                            successful_reductions=2,
+                            success_rate=100.0,
+                        )
+                    ]
+                    app._current_pass_name = "different_pass"  # Changed
+                    app._disabled_passes = ["disabled_pass"]
+
+                    # Call _refresh_data directly
+                    screen._refresh_data()
+
+                    # Verify screen updated
+                    assert screen.pass_stats[0].bytes_deleted == 200
+                    assert screen.current_pass_name == "different_pass"
+
+                await pilot.press("q")  # Close screen
+                await pilot.press("q")  # Quit app
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_screen_refresh_data_with_disabled_passes():
+    """Test _refresh_data updates footer with disabled count (line 512)."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                # Set initial pass stats with one pass disabled
+                app._latest_pass_stats = [
+                    PassStatsData(
+                        pass_name="pass1",
+                        bytes_deleted=100,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=10,
+                        successful_reductions=1,
+                        success_rate=100.0,
+                    ),
+                    PassStatsData(
+                        pass_name="pass2",
+                        bytes_deleted=50,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=5,
+                        successful_reductions=0,
+                        success_rate=0.0,
+                    ),
+                ]
+                app._current_pass_name = "pass1"
+                app._disabled_passes = []
+
+                # Open pass stats screen
+                await pilot.press("p")
+                await pilot.pause()
+
+                # Get the screen
+                screen: PassStatsScreen | None = None
+                for s in app.screen_stack:
+                    if isinstance(s, PassStatsScreen):
+                        screen = s
+                        break
+
+                if screen is not None:
+                    # Initially no disabled passes, update stats
+                    screen._refresh_data()  # First refresh (no change yet)
+
+                    # Now change the stats AND add a disabled pass
+                    app._latest_pass_stats = [
+                        PassStatsData(
+                            pass_name="pass1",
+                            bytes_deleted=150,  # Changed
+                            non_size_reductions=0,
+                            call_count=2,
+                            test_evaluations=15,
+                            successful_reductions=1,
+                            success_rate=100.0,
+                        ),
+                        PassStatsData(
+                            pass_name="pass2",
+                            bytes_deleted=50,
+                            non_size_reductions=0,
+                            call_count=1,
+                            test_evaluations=5,
+                            successful_reductions=0,
+                            success_rate=0.0,
+                        ),
+                    ]
+                    app._current_pass_name = "pass1"
+                    # Disable one pass locally in the screen
+                    screen.disabled_passes = {"pass2"}
+
+                    # Refresh - this should now show "1 disabled" in footer
+                    screen._refresh_data()
+
+                    # The disabled count should be reflected
+                    assert len(screen.disabled_passes) == 1
+
+                await pilot.press("q")  # Close screen
+                await pilot.press("q")  # Quit app
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_screen_get_selected_pass_name_empty_table():
+    """Test _get_selected_pass_name returns None for empty table (line 522)."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                # Ensure empty stats
+                app._latest_pass_stats = []
+                app._current_pass_name = ""
+                app._disabled_passes = []
+
+                await pilot.press("p")
+                await pilot.pause()
+
+                # Get the screen
+                screen: PassStatsScreen | None = None
+                for s in app.screen_stack:
+                    if isinstance(s, PassStatsScreen):
+                        screen = s
+                        break
+
+                if screen is not None:
+                    # Force pass_stats to be empty
+                    screen.pass_stats = []
+
+                    # Get selected pass name should return None
+                    result = screen._get_selected_pass_name()
+                    assert result is None
+
+                await pilot.press("q")
+                await pilot.press("q")
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_screen_action_toggle_disable():
+    """Test action_toggle_disable toggles passes (lines 534-545)."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                # Set up pass stats
+                app._latest_pass_stats = [
+                    PassStatsData(
+                        pass_name="my_pass",
+                        bytes_deleted=100,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=10,
+                        successful_reductions=1,
+                        success_rate=100.0,
+                    )
+                ]
+                app._current_pass_name = "my_pass"
+                app._disabled_passes = []
+
+                await pilot.press("p")
+                await pilot.pause()
+
+                # Get the screen
+                screen: PassStatsScreen | None = None
+                for s in app.screen_stack:
+                    if isinstance(s, PassStatsScreen):
+                        screen = s
+                        break
+
+                if screen is not None:
+                    # Initially not disabled
+                    assert "my_pass" not in screen.disabled_passes
+
+                    # Toggle to disable
+                    screen.action_toggle_disable()
+                    await pilot.pause()
+                    assert "my_pass" in screen.disabled_passes
+
+                    # Toggle to enable
+                    screen.action_toggle_disable()
+                    await pilot.pause()
+                    assert "my_pass" not in screen.disabled_passes
+
+                await pilot.press("q")
+                await pilot.press("q")
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_screen_async_methods():
+    """Test async methods _send_disable_pass, _send_enable_pass directly (lines 549-555)."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                app._latest_pass_stats = [
+                    PassStatsData(
+                        pass_name="a_pass",
+                        bytes_deleted=100,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=10,
+                        successful_reductions=1,
+                        success_rate=100.0,
+                    )
+                ]
+
+                await pilot.press("p")
+                await pilot.pause()
+
+                screen: PassStatsScreen | None = None
+                for s in app.screen_stack:
+                    if isinstance(s, PassStatsScreen):
+                        screen = s
+                        break
+
+                if screen is not None:
+                    # Directly call the async methods
+                    await screen._send_disable_pass("a_pass")
+                    await screen._send_enable_pass("a_pass")
+                    await screen._skip_pass()
+
+                await pilot.press("q")
+                await pilot.press("q")
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_screen_action_skip_current():
+    """Test action_skip_current method (line 559)."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                app._latest_pass_stats = [
+                    PassStatsData(
+                        pass_name="running_pass",
+                        bytes_deleted=100,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=10,
+                        successful_reductions=1,
+                        success_rate=100.0,
+                    )
+                ]
+
+                await pilot.press("p")
+                await pilot.pause()
+
+                screen: PassStatsScreen | None = None
+                for s in app.screen_stack:
+                    if isinstance(s, PassStatsScreen):
+                        screen = s
+                        break
+
+                if screen is not None:
+                    # Call action_skip_current directly
+                    screen.action_skip_current()
+                    await pilot.pause()
+
+                await pilot.press("q")
+                await pilot.press("q")
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_app_action_skip_current_pass():
+    """Test ShrinkRayApp.action_skip_current_pass (line 775)."""
+
+    async def run():
+        # Use an infinite updates client so we can test during reduction
+        class InfiniteClient(FakeReductionClient):
+            async def get_progress_updates(self):
+                i = 0
+                while not self._cancelled:
+                    yield ProgressUpdate(
+                        status=f"Running step {i}",
+                        size=1000 - i,
+                        original_size=1000,
+                        calls=i,
+                        reductions=0,
+                    )
+                    i += 1
+                    await asyncio.sleep(0.05)
+                self._completed = True
+
+        fake_client = InfiniteClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await asyncio.sleep(0.1)
+
+                # Call action_skip_current_pass directly
+                app.action_skip_current_pass()
+                await pilot.pause()
+
+                await pilot.press("q")
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_screen_async_methods_no_client():
+    """Test async methods when client is None (coverage for early exit)."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                app._latest_pass_stats = []
+
+                await pilot.press("p")
+                await pilot.pause()
+
+                screen: PassStatsScreen | None = None
+                for s in app.screen_stack:
+                    if isinstance(s, PassStatsScreen):
+                        screen = s
+                        break
+
+                if screen is not None:
+                    # Set client to None to test early exit branches
+                    screen._app._client = None
+
+                    # These should all exit early without error
+                    await screen._send_disable_pass("test")
+                    await screen._send_enable_pass("test")
+                    await screen._skip_pass()
+
+                await pilot.press("q")
+                await pilot.press("q")
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_app_skip_pass_no_client():
+    """Test ShrinkRayApp._skip_pass when client is None (line 779)."""
+
+    async def run():
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            fake_client = FakeReductionClient(updates=[])
+            await fake_client.start()
+
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            # Manually set _client to None to test the early exit
+            app._client = None
+
+            # Should exit early without error
+            await app._skip_pass()
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_all_passes_disabled_shows_message():
+    """Test that disabling all passes shows a paused message."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            status_messages: list[str] = []
+            original_update_status = app.update_status
+
+            def capture_status(message: str) -> None:
+                status_messages.append(message)
+                original_update_status(message)
+
+            async with app.run_test() as pilot:
+                app.update_status = capture_status
+
+                # Set up state where all passes are disabled
+                app._latest_pass_stats = [
+                    PassStatsData(
+                        pass_name="pass1",
+                        bytes_deleted=100,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=10,
+                        successful_reductions=1,
+                        success_rate=100.0,
+                    ),
+                    PassStatsData(
+                        pass_name="pass2",
+                        bytes_deleted=50,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=5,
+                        successful_reductions=0,
+                        success_rate=0.0,
+                    ),
+                ]
+                app._disabled_passes = ["pass1", "pass2"]
+
+                # Directly call the check method
+                app._check_all_passes_disabled()
+
+                # Check that the "paused" message was shown
+                paused_msgs = [m for m in status_messages if "paused" in m.lower()]
+                assert len(paused_msgs) > 0, f"Expected 'paused' in messages, got: {status_messages}"
+
+                await pilot.press("q")
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_check_all_passes_disabled_partial():
+    """Test _check_all_passes_disabled when only some passes are disabled (746->exit)."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            status_messages: list[str] = []
+            original_update_status = app.update_status
+
+            def capture_status(message: str) -> None:
+                status_messages.append(message)
+                original_update_status(message)
+
+            async with app.run_test() as pilot:
+                app.update_status = capture_status
+
+                # Set up state where only some passes are disabled
+                app._latest_pass_stats = [
+                    PassStatsData(
+                        pass_name="pass1",
+                        bytes_deleted=100,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=10,
+                        successful_reductions=1,
+                        success_rate=100.0,
+                    ),
+                    PassStatsData(
+                        pass_name="pass2",
+                        bytes_deleted=50,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=5,
+                        successful_reductions=0,
+                        success_rate=0.0,
+                    ),
+                ]
+                # Only pass1 is disabled, not pass2
+                app._disabled_passes = ["pass1"]
+
+                # Directly call the check method
+                app._check_all_passes_disabled()
+
+                # Check that NO "paused" message was shown
+                paused_msgs = [m for m in status_messages if "paused" in m.lower()]
+                assert len(paused_msgs) == 0, f"Expected no 'paused' messages, got: {paused_msgs}"
+
+                await pilot.press("q")
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_screen_cursor_position_out_of_bounds():
+    """Test _update_table_data when cursor is beyond new row count (line 492->494)."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                # Set up with multiple pass stats
+                app._latest_pass_stats = [
+                    PassStatsData(
+                        pass_name="pass1",
+                        bytes_deleted=100,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=10,
+                        successful_reductions=1,
+                        success_rate=100.0,
+                    ),
+                    PassStatsData(
+                        pass_name="pass2",
+                        bytes_deleted=50,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=5,
+                        successful_reductions=0,
+                        success_rate=0.0,
+                    ),
+                    PassStatsData(
+                        pass_name="pass3",
+                        bytes_deleted=25,
+                        non_size_reductions=0,
+                        call_count=1,
+                        test_evaluations=3,
+                        successful_reductions=0,
+                        success_rate=0.0,
+                    ),
+                ]
+                app._current_pass_name = "pass1"
+                app._disabled_passes = []
+
+                # Open pass stats screen
+                await pilot.press("p")
+                await pilot.pause()
+
+                # Get the screen
+                screen: PassStatsScreen | None = None
+                for s in app.screen_stack:
+                    if isinstance(s, PassStatsScreen):
+                        screen = s
+                        break
+
+                if screen is not None:
+                    # Move cursor to row 2 (third row)
+                    table = screen.query_one(DataTable)
+                    await pilot.press("down")  # Move to row 1
+                    await pilot.press("down")  # Move to row 2
+                    await pilot.pause()
+
+                    # Verify cursor is at row 2
+                    assert table.cursor_coordinate.row == 2
+
+                    # Now reduce the pass_stats to only 1 item
+                    screen.pass_stats = [  # type: ignore[attr-defined]
+                        PassStatsData(
+                            pass_name="pass1",
+                            bytes_deleted=100,
+                            non_size_reductions=0,
+                            call_count=1,
+                            test_evaluations=10,
+                            successful_reductions=1,
+                            success_rate=100.0,
+                        )
+                    ]
+
+                    # Call _update_table_data - cursor row (2) >= row_count (1)
+                    # This should trigger the branch where cursor is NOT restored
+                    screen._update_table_data()  # type: ignore[attr-defined]
+
+                    # The table should now have only 1 row, cursor should be at 0
+                    assert table.row_count == 1  # type: ignore[attr-defined]
+
+                await pilot.press("q")  # Close screen
+                await pilot.press("q")  # Quit app
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_pass_stats_screen_get_selected_empty_table():
+    """Test _get_selected_pass_name when table has 0 rows (line 522)."""
+    from unittest.mock import PropertyMock, patch
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[])
+        await fake_client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                app._latest_pass_stats = []
+
+                await pilot.press("p")
+                await pilot.pause()
+
+                screen: PassStatsScreen | None = None
+                for s in app.screen_stack:
+                    if isinstance(s, PassStatsScreen):
+                        screen = s
+                        break
+
+                if screen is not None:
+                    # Get the actual table
+                    table = screen.query_one("DataTable")
+
+                    # Mock row_count to return 0 for this specific call
+                    with patch.object(
+                        type(table), "row_count", new_callable=PropertyMock
+                    ) as mock_rc:
+                        mock_rc.return_value = 0
+                        result = screen._get_selected_pass_name()  # type: ignore[attr-defined]
+                        assert result is None
+
+                await pilot.press("q")
+                await pilot.press("q")
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())

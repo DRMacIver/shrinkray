@@ -1695,3 +1695,120 @@ async def test_worker_handle_command_skip_pass():
     response = await worker.handle_command(request)
 
     assert response.result == {"status": "skipped"}
+
+
+# === _build_progress_update edge cases ===
+
+
+@pytest.mark.trio
+async def test_build_progress_update_with_reducer_none():
+    """Test _build_progress_update when reducer is None (346->375, 376->379)."""
+    import time
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+    worker.reducer = None
+
+    # Need to set up problem for _build_progress_update (it returns None if problem is None)
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 100
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = time.time()
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.5)
+    worker.problem.current_test_case = b"test content"
+
+    # Set up state for parallel workers calculation
+    worker.state = Mock()
+    worker.state.parallel_tasks_running = 2
+
+    # Build progress update with reducer=None
+    update = await worker._build_progress_update()
+
+    # Should still return a valid ProgressUpdate
+    assert update is not None
+    assert update.pass_stats == []
+    assert update.disabled_passes == []
+    assert update.current_pass_name == ""
+
+
+@pytest.mark.trio
+async def test_build_progress_update_with_reducer_pass_stats_none():
+    """Test _build_progress_update when reducer.pass_stats is None (356->375)."""
+    import time
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+
+    # Mock reducer with pass_stats=None
+    worker.reducer = Mock()
+    worker.reducer.pass_stats = None
+    worker.reducer.current_reduction_pass = None
+    worker.reducer.status = "Running"
+    worker.reducer.disabled_passes = set()
+
+    # Set up problem
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 100
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = time.time()
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.5)
+    worker.problem.current_test_case = b"test content"
+
+    # Set up state
+    worker.state = Mock()
+    worker.state.parallel_tasks_running = 2
+
+    # Build progress update
+    update = await worker._build_progress_update()
+
+    assert update is not None
+    assert update.pass_stats == []
+
+
+@pytest.mark.trio
+async def test_build_progress_update_with_reducer_no_disabled_passes_attr():
+    """Test _build_progress_update when reducer lacks disabled_passes attribute."""
+    import time
+    from unittest.mock import Mock
+
+    worker = ReducerWorker()
+
+    # Mock reducer without disabled_passes attribute
+    worker.reducer = Mock(spec=["pass_stats", "current_reduction_pass", "status"])
+    worker.reducer.pass_stats = None
+    worker.reducer.current_reduction_pass = None
+    worker.reducer.status = "Running"
+    # Note: no disabled_passes attribute
+
+    # Set up problem
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 100
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = time.time()
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.5)
+    worker.problem.current_test_case = b"test content"
+
+    # Set up state
+    worker.state = Mock()
+    worker.state.parallel_tasks_running = 2
+
+    # Build progress update - should not crash even without disabled_passes
+    update = await worker._build_progress_update()
+
+    assert update is not None
+    assert update.disabled_passes == []

@@ -7,6 +7,8 @@ from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import (
     BasicReducer,
     KeyProblem,
+    PassStats,
+    PassStatsTracker,
     Reducer,
     RestartPass,
     ShrinkRay,
@@ -61,6 +63,37 @@ def test_reducer_status_default():
     class TestReducer(Reducer[bytes]):
         async def run(self):
             pass
+
+    reducer = TestReducer(target=problem)
+    assert reducer.status == ""
+
+
+def test_reducer_base_class_pass_control_defaults():
+    """Test that base Reducer class has default no-op pass control methods."""
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    # Create a concrete subclass that doesn't override pass control
+    class TestReducer(Reducer[bytes]):
+        async def run(self):
+            pass
+
+    reducer = TestReducer(target=problem)
+
+    # Base class disabled_passes returns empty set
+    assert reducer.disabled_passes == set()
+
+    # Base class methods are no-ops (don't raise)
+    reducer.disable_pass("test")
+    reducer.enable_pass("test")
+    reducer.skip_current_pass()
 
     reducer = TestReducer(target=problem)
     assert reducer.status == ""
@@ -874,6 +907,37 @@ async def test_shrinkray_run_single_byte_finds_smaller():
     assert problem.current_test_case == bytes([5])
 
 
+async def test_shrinkray_run_single_byte_no_smaller():
+    """Test ShrinkRay.run when c=0 is interesting (branch 474->477).
+
+    The branch 474->477 happens when range(c) is empty, i.e., c=0.
+    """
+    from shrinkray.reducer import ShrinkRay
+
+    async def is_interesting(x):
+        # Empty is not interesting
+        if x == b"":
+            return False
+        # Byte 0 is interesting - this triggers the branch where range(0) is empty
+        if len(x) == 1:
+            return x[0] == 0
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    # Should have reduced to bytes([0]) since:
+    # - bytes([0]) is interesting
+    # - The inner loop range(0) is empty, so we return immediately
+    assert problem.current_test_case == bytes([0])
+
+
 async def test_shrinkray_pump_no_change():
     """Test ShrinkRay.pump returns early when pumped equals current."""
     from shrinkray.reducer import ShrinkRay
@@ -1430,3 +1494,298 @@ async def test_initial_cut_watcher_multiple_iterations(autojump_clock):
 
     # Progress should have been made
     assert problem.current_size < initial_size, "Should have made progress"
+
+
+# =============================================================================
+# Pass Statistics Tests
+# =============================================================================
+
+
+def test_pass_stats_creation():
+    """Test PassStats dataclass initialization."""
+    stats = PassStats(pass_name="test_pass")
+    assert stats.pass_name == "test_pass"
+    assert stats.bytes_deleted == 0
+    assert stats.run_count == 0
+    assert stats.test_evaluations == 0
+    assert stats.successful_reductions == 0
+    assert stats.success_rate == 0.0
+
+
+def test_pass_stats_success_rate():
+    """Test success rate calculation based on test evaluations."""
+    stats = PassStats(pass_name="test_pass")
+    stats.test_evaluations = 100
+    stats.successful_reductions = 30
+    assert stats.success_rate == 30.0
+
+
+def test_pass_stats_success_rate_zero_evaluations():
+    """Test success rate with zero test evaluations."""
+    stats = PassStats(pass_name="test_pass")
+    assert stats.success_rate == 0.0
+
+
+def test_pass_stats_tracker_get_or_create():
+    """Test tracker creates new entries."""
+    tracker = PassStatsTracker()
+    stats1 = tracker.get_or_create("pass_a")
+    stats2 = tracker.get_or_create("pass_a")
+    assert stats1 is stats2  # Same instance
+
+
+def test_pass_stats_tracker_insertion_order():
+    """Test stats are returned in insertion order."""
+    tracker = PassStatsTracker()
+
+    stats_a = tracker.get_or_create("pass_a")
+    stats_a.bytes_deleted = 100
+
+    stats_b = tracker.get_or_create("pass_b")
+    stats_b.bytes_deleted = 500
+
+    stats_c = tracker.get_or_create("pass_c")
+    stats_c.bytes_deleted = 200
+
+    ordered_stats = tracker.get_stats_in_order()
+    # Should be in order of creation, not sorted by bytes
+    assert ordered_stats[0].pass_name == "pass_a"
+    assert ordered_stats[1].pass_name == "pass_b"
+    assert ordered_stats[2].pass_name == "pass_c"
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+async def test_shrinkray_tracks_pass_stats(parallelism):
+    """Test that ShrinkRay tracks pass statistics during reduction."""
+    work = WorkContext(parallelism=parallelism)
+
+    # Simple test: remove 'x' characters
+    initial = b"xxxx\nxxxx\n"
+
+    async def is_interesting(tc: bytes) -> bool:
+        # Interesting if has at least one 'x'
+        return b"x" in tc
+
+    problem = BasicReductionProblem(
+        initial=initial,
+        is_interesting=is_interesting,
+        work=work,
+    )
+
+    reducer = ShrinkRay(target=problem)
+
+    # Run a few passes
+    await problem.setup()
+
+    # Run initial cuts (should find deletions)
+    await reducer.initial_cut()
+
+    # Check that stats were tracked
+    assert reducer.pass_stats is not None
+    assert len(reducer.pass_stats._stats) > 0
+
+    # At least one pass should have deleted bytes
+    all_stats = reducer.pass_stats.get_stats_in_order()
+    total_bytes_deleted = sum(ps.bytes_deleted for ps in all_stats)
+    assert total_bytes_deleted > 0
+    assert all_stats[0].run_count > 0
+
+    # Success rate should be between 0 and 100
+    for stats in all_stats:
+        assert 0 <= stats.success_rate <= 100
+
+
+# === Pass Control Tests ===
+
+
+def test_disable_pass():
+    """Test that disable_pass adds pass to disabled set."""
+
+    async def run():
+        async def is_interesting(x):
+            return b"t" in x
+
+        work = WorkContext(parallelism=1)
+        problem = BasicReductionProblem(b"test", is_interesting, work)
+        reducer = ShrinkRay(target=problem)
+
+        reducer.disable_pass("hollow")
+        assert "hollow" in reducer.disabled_passes
+        assert reducer.is_pass_disabled("hollow")
+
+    trio.run(run)
+
+
+def test_enable_pass():
+    """Test that enable_pass removes pass from disabled set."""
+
+    async def run():
+        async def is_interesting(x):
+            return b"t" in x
+
+        work = WorkContext(parallelism=1)
+        problem = BasicReductionProblem(b"test", is_interesting, work)
+        reducer = ShrinkRay(target=problem)
+
+        reducer.disable_pass("hollow")
+        assert reducer.is_pass_disabled("hollow")
+
+        reducer.enable_pass("hollow")
+        assert "hollow" not in reducer.disabled_passes
+        assert not reducer.is_pass_disabled("hollow")
+
+    trio.run(run)
+
+
+def test_enable_pass_not_disabled():
+    """Test that enable_pass is safe to call on non-disabled pass."""
+
+    async def run():
+        async def is_interesting(x):
+            return b"t" in x
+
+        work = WorkContext(parallelism=1)
+        problem = BasicReductionProblem(b"test", is_interesting, work)
+        reducer = ShrinkRay(target=problem)
+
+        # Should not raise
+        reducer.enable_pass("hollow")
+        assert not reducer.is_pass_disabled("hollow")
+
+    trio.run(run)
+
+
+async def test_disabled_pass_is_skipped():
+    """Test that a disabled pass is skipped during reduction."""
+    async def is_interesting(x):
+        return b"t" in x
+
+    work = WorkContext(parallelism=1)
+
+    runs = []
+
+    async def tracking_pass(p):
+        runs.append("tracking_pass")
+        # Make a small reduction
+        if len(p.current_test_case) > 1:
+            await p.is_interesting(p.current_test_case[:-1])
+
+    problem = BasicReductionProblem(b"test", is_interesting, work)
+    reducer = ShrinkRay(target=problem)
+    reducer.great_passes = [tracking_pass]
+    reducer.ok_passes = []
+    reducer.last_ditch_passes = []
+    reducer.initial_cuts = []
+    # Note: pumps is a property that defaults to empty when clang_delta is None
+
+    # Disable the pass
+    reducer.disable_pass("tracking_pass")
+
+    await reducer.run()
+
+    # The pass should not have been run
+    assert runs == []
+
+
+async def test_skip_current_pass_without_active_scope():
+    """Test that skip_current_pass is safe when no pass is running."""
+    async def is_interesting(x):
+        return b"t" in x
+
+    work = WorkContext(parallelism=1)
+    problem = BasicReductionProblem(b"test", is_interesting, work)
+    reducer = ShrinkRay(target=problem)
+
+    # Should not raise when called outside of a pass
+    reducer.skip_current_pass()
+    assert reducer._skip_requested is True
+
+
+async def test_disable_pass_while_running_skips_it():
+    """Test that disabling a pass while it's running skips it."""
+    async def is_interesting(x):
+        return b"t" in x
+
+    work = WorkContext(parallelism=1)
+
+    skip_happened = []
+
+    async def slow_pass(p):
+        # Signal that we started
+        skip_happened.append("started")
+        # Wait a bit to give time for the disable call
+        await trio.sleep(0.1)
+        # If we get here, we weren't skipped
+        skip_happened.append("completed")
+
+    problem = BasicReductionProblem(b"test", is_interesting, work)
+    reducer = ShrinkRay(target=problem)
+    reducer.great_passes = [slow_pass]
+    reducer.ok_passes = []
+    reducer.last_ditch_passes = []
+    reducer.initial_cuts = []
+    # Note: pumps is a property that defaults to empty when clang_delta is None
+
+    async with trio.open_nursery() as nursery:
+
+        async def disable_after_start():
+            # Wait for the pass to start
+            while "started" not in skip_happened:
+                await trio.sleep(0.01)
+            # Disable it (should skip because it's the current pass)
+            reducer.disable_pass("slow_pass")
+
+        nursery.start_soon(disable_after_start)
+        await reducer.run()
+        nursery.cancel_scope.cancel()
+
+    # Pass should have started but not completed (because it was cancelled)
+    assert "started" in skip_happened
+    # The pass was cancelled before it could complete
+    assert "completed" not in skip_happened
+
+
+async def test_reducer_continues_when_passes_skipped():
+    """Test that reducer continues when passes were skipped and no progress made."""
+    async def is_interesting(x):
+        return b"t" in x
+
+    work = WorkContext(parallelism=1)
+
+    run_count = [0]
+
+    async def counting_pass(p):
+        run_count[0] += 1
+        if run_count[0] == 1:
+            # On first run, we'll be skipped externally
+            await trio.sleep(0.5)  # Long enough to be skipped
+        # On second run, just return (no progress)
+
+    problem = BasicReductionProblem(b"test", is_interesting, work)
+    reducer = ShrinkRay(target=problem)
+    reducer.great_passes = [counting_pass]
+    reducer.ok_passes = []
+    reducer.last_ditch_passes = []
+    reducer.initial_cuts = []
+    # Note: pumps is a property that defaults to empty when clang_delta is None
+
+    async with trio.open_nursery() as nursery:
+
+        async def skip_first_run():
+            # Wait for the first run to start
+            while run_count[0] < 1:
+                await trio.sleep(0.01)
+            await trio.sleep(0.05)  # Wait a bit more
+            # Skip the current pass
+            reducer.skip_current_pass()
+
+        nursery.start_soon(skip_first_run)
+
+        # Run with a timeout to prevent infinite loop if test fails
+        with trio.move_on_after(2.0):
+            await reducer.run()
+
+        nursery.cancel_scope.cancel()
+
+    # Should have run at least twice (once skipped, once full)
+    assert run_count[0] >= 2

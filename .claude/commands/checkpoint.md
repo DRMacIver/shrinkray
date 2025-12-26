@@ -10,13 +10,18 @@ Perform a complete quality checkpoint before committing.
 
 1. **Lint**: Run `just lint` and fix any issues found
 2. **Test**: Run relevant tests (`just test` or specific test files if changes are focused)
-3. **Self-review**: Review all changes critically:
+3. **Check for suppressions**: Search for and remove any shortcuts:
+   ```bash
+   git diff HEAD --unified=0 | grep -E "(type: ignore|pragma: no cover|pragma: no branch|noqa)"
+   ```
+   If any found, fix properly instead of suppressing.
+4. **Self-review**: Review all changes critically:
    - Is this sloppy? Did I take shortcuts?
    - Are there type errors being suppressed instead of fixed?
    - Are there tests missing for new code paths?
    - If I were reviewing someone else's PR with this code, what would I flag?
-4. **Fix issues**: Address anything found in self-review
-5. **Commit**: Create a small, logically self-contained commit with a clear message
+5. **Fix issues**: Address anything found in self-review
+6. **Commit**: Create a small, logically self-contained commit with a clear message
 
 ## Commit Message Format
 

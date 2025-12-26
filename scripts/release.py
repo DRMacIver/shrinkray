@@ -23,7 +23,17 @@ def get_calver() -> str:
 def run_command(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
     """Run a shell command and return the result."""
     print(f"Running: {' '.join(cmd)}")
-    return subprocess.run(cmd, check=check, capture_output=True, text=True)
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        if result.stdout:
+            print(result.stdout)
+        if check:
+            sys.exit(result.returncode)
+
+    return result
 
 
 def check_git_status() -> None:
@@ -89,8 +99,15 @@ def create_release_commit_and_tag(version: str) -> None:
     run_command(["git", "tag", "-a", tag_name, "-m", f"Release {version}"])
     print(f"Created tag {tag_name}")
 
-    # Push commit and tag
-    run_command(["git", "push"])
+    # Push commit and tag (set upstream if needed)
+    result = run_command(["git", "push"], check=False)
+    if result.returncode != 0:
+        # Try setting upstream
+        branch_result = run_command(["git", "branch", "--show-current"], check=True)
+        branch = branch_result.stdout.strip()
+        print(f"Setting upstream for branch {branch}")
+        run_command(["git", "push", "--set-upstream", "origin", branch])
+
     run_command(["git", "push", "--tags"])
     print(f"Pushed commit and tag to GitHub")
 

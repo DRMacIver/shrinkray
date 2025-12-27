@@ -44,7 +44,10 @@ from shrinkray.passes.genericlanguages import (
     replace_falsey_with_zero,
     simplify_brackets,
 )
-from shrinkray.passes.python import replace_bodies_with_ellipsis, strip_annotations
+from shrinkray.passes.python import (
+    replace_bodies_with_ellipsis,
+    strip_annotations,
+)
 from shrinkray.passes.sequences import (
     block_deletion,
     delete_duplicates,
@@ -52,7 +55,7 @@ from shrinkray.passes.sequences import (
     merged_intervals,
     with_deletions,
 )
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.problem import BasicReductionProblem, shortlex
 from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
 
@@ -266,6 +269,7 @@ def test_lower_bytes_to_zero(parallelism):
         b"\x05\x05\x05",
         lambda x: len(x) == 3,
         parallelism=parallelism,
+        sort_key=shortlex,
     )
     assert result == b"\x00\x00\x00"
 
@@ -276,6 +280,7 @@ def test_lower_bytes_to_minimum(parallelism):
         b"\x10",
         lambda x: len(x) == 1 and x[0] >= 5,
         parallelism=parallelism,
+        sort_key=shortlex,
     )
     assert result == b"\x05"
 
@@ -286,6 +291,7 @@ def test_lower_individual_bytes(parallelism):
         b"\x00\x10",
         lambda x: len(x) == 2 and x[0] == 0 and x[1] >= 5,
         parallelism=parallelism,
+        sort_key=shortlex,
     )
     assert result == b"\x00\x05"
 
@@ -1059,7 +1065,9 @@ async def test_strip_annotations_with_value():
         return b"x" in x and b"=" in x
 
     problem = BasicReductionProblem(
-        initial=code, is_interesting=is_interesting, work=WorkContext(parallelism=1)
+        initial=code,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
     )
 
     await strip_annotations(problem)
@@ -1080,7 +1088,9 @@ async def test_strip_annotations_without_value():
         return b"y = 1" in x
 
     problem = BasicReductionProblem(
-        initial=code, is_interesting=is_interesting, work=WorkContext(parallelism=1)
+        initial=code,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
     )
 
     await strip_annotations(problem)
@@ -1100,7 +1110,9 @@ async def test_libcst_transform_invalid_python():
         return True
 
     problem = BasicReductionProblem(
-        initial=code, is_interesting=is_interesting, work=WorkContext(parallelism=1)
+        initial=code,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
     )
 
     # Should not raise, should just return early
@@ -1135,7 +1147,9 @@ async def test_libcst_transform_reparsing_fails():
         return True
 
     problem = BasicReductionProblem(
-        initial=code, is_interesting=is_interesting, work=WorkContext(parallelism=1)
+        initial=code,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
     )
 
     with patch.object(libcst, "parse_module", side_effect=mock_parse):

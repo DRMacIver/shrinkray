@@ -6,8 +6,9 @@ import trio
 
 from shrinkray.passes.definitions import ReductionPass
 from shrinkray.passes.python import is_python
-from shrinkray.problem import BasicReductionProblem, default_sort_key
+from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import BasicReducer, ShrinkRay
+from shrinkray.state import sort_key_for_initial
 from shrinkray.work import WorkContext
 
 
@@ -19,7 +20,11 @@ def reduce_with(
     initial: T,
     is_interesting: Callable[[T], bool],
     parallelism: int = 1,
+    sort_key=None,
 ) -> T:
+    if sort_key is None:
+        sort_key = sort_key_for_initial(initial)
+
     async def acondition(x: T) -> bool:
         await trio.lowlevel.checkpoint()
         return is_interesting(x)
@@ -29,6 +34,7 @@ def reduce_with(
             initial=initial,
             is_interesting=acondition,
             work=WorkContext(parallelism=parallelism),
+            sort_key=sort_key,
         )
 
         reducer = BasicReducer(
@@ -47,7 +53,11 @@ def reduce(
     initial: bytes,
     is_interesting: Callable[[bytes], bool],
     parallelism: int = 1,
+    sort_key=None,
 ) -> bytes:
+    if sort_key is None:
+        sort_key = sort_key_for_initial(initial)
+
     async def acondition(x: bytes) -> bool:
         await trio.lowlevel.checkpoint()
         return is_interesting(x)
@@ -57,6 +67,7 @@ def reduce(
             initial=initial,
             is_interesting=acondition,
             work=WorkContext(parallelism=parallelism),
+            sort_key=sort_key,
         )
 
         reducer = ShrinkRay(
@@ -132,9 +143,10 @@ def assert_no_blockers(
 
 def direct_reductions(origin: bytes, *, parallelism=1) -> set[bytes]:
     children = set()
+    sort_key = sort_key_for_initial(origin)
 
     def is_interesting(b: bytes) -> bool:
-        if default_sort_key(b) < default_sort_key(origin):
+        if sort_key(b) < sort_key(origin):
             children.add(b)
         return b == origin
 
@@ -154,10 +166,13 @@ def assert_reduces_to(
     parallelism=1,
     language_restrictions=True,
     passes=None,
+    sort_key=None,
 ):
     if origin == target:
         raise AssertionError("A value cannot reduce to itself")
-    if default_sort_key(origin) < default_sort_key(target):
+    if sort_key is None:
+        sort_key = sort_key_for_initial(origin)
+    if sort_key(origin) < sort_key(target):
         raise AssertionError(
             f"It is impossible for {origin} to reduce to {target} as it is more reduced."
         )
@@ -170,12 +185,23 @@ def assert_reduces_to(
     def is_interesting(value: bytes) -> bool:
         if require_python and not is_python(value):
             return False
-        return default_sort_key(value) >= default_sort_key(target)
+        return sort_key(value) >= sort_key(target)
 
     if passes is None:
-        best = reduce(origin, is_interesting, parallelism=parallelism)
+        best = reduce(
+            origin,
+            is_interesting,
+            parallelism=parallelism,
+            sort_key=sort_key,
+        )
     else:
-        best = reduce_with(passes, origin, is_interesting, parallelism=parallelism)
+        best = reduce_with(
+            passes,
+            origin,
+            is_interesting,
+            parallelism=parallelism,
+            sort_key=sort_key,
+        )
 
     if best == target:
         return

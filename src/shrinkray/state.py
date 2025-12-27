@@ -41,7 +41,7 @@ def sort_key_for_initial(initial: Any) -> Callable[[Any], Any]:
             return shortlex
         else:
 
-            def natural_for_encoding(b: T) -> Any:
+            def natural_for_encoding(b: bytes) -> Any:
                 try:
                     s = b.decode(encoding)
                     return (0, natural_key(s))
@@ -49,8 +49,7 @@ def sort_key_for_initial(initial: Any) -> Callable[[Any], Any]:
                     return (1, shortlex(b))
 
             return natural_for_encoding
-    else:
-        assert isinstance(initial, dict)
+    elif isinstance(initial, dict):
         keys = sorted(initial, key=lambda k: shortlex(initial[k]), reverse=True)
         natural_keys = {k: sort_key_for_initial(v) for k, v in initial.items()}
 
@@ -80,6 +79,13 @@ def sort_key_for_initial(initial: Any) -> Callable[[Any], Any]:
             )
 
         return dict_sort_key
+    else:
+        # We don't use this branch in the main app, but this
+        # function is also used in tests.
+        def fallback_sort_key(s):
+            return natural_key(repr(s))
+
+        return fallback_sort_key
 
 
 class TimeoutExceededOnInitial(InvalidInitialExample):
@@ -647,6 +653,12 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
 
 class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     def setup_formatter(self): ...
+
+    @property
+    def extra_problem_kwargs(self) -> dict[str, Any]:
+        return {
+            "size": lambda tc: sum(len(v) for v in tc.values()),
+        }
 
     def new_reducer(
         self, problem: ReductionProblem[dict[str, bytes]]

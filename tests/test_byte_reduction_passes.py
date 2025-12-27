@@ -10,6 +10,7 @@ from shrinkray.passes.bytes import (
     ByteReplacement,
     debracket,
     find_ngram_endpoints,
+    line_sorter,
     lower_bytes,
     lower_individual_bytes,
     short_deletions,
@@ -17,7 +18,7 @@ from shrinkray.passes.bytes import (
 )
 from shrinkray.passes.patching import apply_patches
 from shrinkray.passes.python import is_python
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.problem import BasicReductionProblem, shortlex
 from shrinkray.work import WorkContext
 from tests.helpers import assert_reduces_to, reduce_with
 
@@ -182,6 +183,7 @@ def test_byte_reduction_example_3(parallelism):
         origin=b"1200\x00\x01\x02",
         target=b"120",
         parallelism=parallelism,
+        sort_key=shortlex,
     )
 
 
@@ -238,3 +240,13 @@ async def test_apply_byte_replacement_patches(lowering, parallelism):
     await apply_patches(trivial_problem, ByteReplacement(), patches)
 
     assert trivial_problem.current_test_case == target
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_line_sorting_can_put_shorter_line_first(parallelism):
+    assert_reduces_to(
+        origin=b"aaa\nbb",
+        target=b"bb\naaa",
+        parallelism=parallelism,
+        passes=[line_sorter],
+    )

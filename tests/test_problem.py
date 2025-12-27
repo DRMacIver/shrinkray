@@ -50,8 +50,16 @@ def test_shortlex_string():
 # =============================================================================
 
 
-def test_default_sort_key_ordering():
+def test_default_sort_key_bytes_ordering():
     assert default_sort_key(b"a") < default_sort_key(b"ab")
+
+
+def test_default_sort_key_string_ordering():
+    """default_sort_key uses natural_key for strings."""
+    # Shorter strings are preferred
+    assert default_sort_key("a") < default_sort_key("ab")
+    # Same length, character order matters
+    assert default_sort_key("a") < default_sort_key("b")
 
 
 # =============================================================================

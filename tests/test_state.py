@@ -7,12 +7,13 @@ import pytest
 import trio
 
 from shrinkray.cli import InputType
-from shrinkray.problem import InvalidInitialExample
+from shrinkray.problem import InvalidInitialExample, shortlex
 from shrinkray.state import (
     DYNAMIC_TIMEOUT_MIN,
     ShrinkRayDirectoryState,
     ShrinkRayStateSingleFile,
     TimeoutExceededOnInitial,
+    sort_key_for_initial,
 )
 from shrinkray.work import Volume
 
@@ -143,7 +144,6 @@ def test_directory_state_creates_reducer(directory_state):
 def test_directory_state_extra_problem_kwargs(directory_state):
     kwargs = directory_state.extra_problem_kwargs
     assert "size" in kwargs
-    assert "sort_key" in kwargs
 
 
 def test_directory_state_size_function(directory_state):
@@ -153,18 +153,66 @@ def test_directory_state_size_function(directory_state):
     assert size_fn(test_case) == 11  # 5 + 6
 
 
-def test_directory_state_sort_key_function(directory_state):
-    kwargs = directory_state.extra_problem_kwargs
-    sort_key_fn = kwargs["sort_key"]
+def test_directory_state_sort_key_from_initial(directory_state):
+    """Sort key is derived from initial test case via sort_key_for_initial."""
+    sort_key_fn = sort_key_for_initial(directory_state.initial)
 
     tc1 = {"a.txt": b"hi"}
     tc2 = {"a.txt": b"hello"}
     tc3 = {"a.txt": b"hi", "b.txt": b"x"}
 
-    # Fewer files should come first
-    assert sort_key_fn(tc1) < sort_key_fn(tc3)
     # Smaller total size should come first
     assert sort_key_fn(tc1) < sort_key_fn(tc2)
+    # Fewer total bytes wins even with more files
+    assert sort_key_fn(tc1) < sort_key_fn(tc3)
+
+
+def test_sort_key_for_initial_binary_data():
+    """sort_key_for_initial returns shortlex for binary (non-text) data."""
+    # Binary data that's not valid text
+    binary_data = bytes([0x80, 0x81, 0x82])
+    sort_key_fn = sort_key_for_initial(binary_data)
+
+    # Should be shortlex for binary data
+    assert sort_key_fn is shortlex
+
+
+def test_sort_key_for_initial_text_with_decode_error():
+    """sort_key_for_initial handles UnicodeDecodeError during comparison."""
+    # UTF-8 encoded text
+    text_data = b"hello"
+    sort_key_fn = sort_key_for_initial(text_data)
+
+    # Valid UTF-8 gets natural key
+    valid_result = sort_key_fn(b"hello")
+    assert valid_result[0] == 0  # Prefix 0 for successful decode
+
+    # Invalid UTF-8 gets shortlex fallback
+    invalid_data = bytes([0x80, 0x81, 0x82])
+    invalid_result = sort_key_fn(invalid_data)
+    assert invalid_result[0] == 1  # Prefix 1 for failed decode
+
+
+def test_sort_key_for_initial_dict_missing_key():
+    """sort_key_for_initial handles missing keys in dict comparisons."""
+    # Initial has keys a.txt and b.txt
+    initial = {"a.txt": b"file a", "b.txt": b"file b"}
+    sort_key_fn = sort_key_for_initial(initial)
+
+    # To test the missing key branch, we need two dicts with:
+    # - Same total size (so dict_total_size is equal)
+    # - Same number of keys (so len is equal)
+    # - One has a key the other doesn't, forcing key_sort_key to compare
+    tc1 = {"a.txt": b"xxxxx", "b.txt": b"yyyyy"}  # 10 bytes, 2 keys
+    tc2 = {"a.txt": b"xxxxxxxxxx", "c.txt": b""}  # 10 bytes, 2 keys, but b.txt missing
+
+    result1 = sort_key_fn(tc1)
+    result2 = sort_key_fn(tc2)
+
+    # tc2 is missing b.txt (which initial has), so when comparing key_sort_key
+    # for b.txt, tc2 returns (0,) for missing, tc1 returns (1, ...) for present.
+    # (0,) < (1, ...) so tc2 should come first
+    assert result2 < result1
 
 
 async def test_directory_state_write_creates_directory(tmp_path, directory_state):

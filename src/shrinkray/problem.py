@@ -97,7 +97,10 @@ class LazyChainedSortKey:
                 return True
             elif self_key > other_key:
                 return False
-        return True
+        # All comparison functions returned equal values for different inputs.
+        # This shouldn't happen with the current functions (natural_string_lex
+        # compares character-by-character) but if it does, neither is less.
+        return False
 
 
 NATURAL_CHARACTER_ORDER = (
@@ -106,8 +109,8 @@ NATURAL_CHARACTER_ORDER = (
 NATURAL_CHARACTER_ORDER_INDEX = {s: i for i, s in enumerate(NATURAL_CHARACTER_ORDER)}
 
 
-def character_index(c):
-    return NATURAL_CHARACTER_ORDER.get(c, len(NATURAL_CHARACTER_ORDER) + ord(c))
+def character_index(c: str) -> int:
+    return NATURAL_CHARACTER_ORDER_INDEX.get(c, len(NATURAL_CHARACTER_ORDER) + ord(c))
 
 
 def natural_string_lex(s):

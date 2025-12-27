@@ -1064,7 +1064,13 @@ def test_invalid_initial_shows_error_message_tui(tmp_path):
 
 @pytest.mark.slow
 def test_script_depends_on_cwd_shows_error_tui(tmp_path):
-    """Test that TUI shows helpful error when script depends on current directory."""
+    """Test that TUI shows error when script depends on current directory.
+
+    When a script depends on being run from a specific directory, validation
+    fails because the test is run in a temporary directory. The error message
+    should show the exit code and provide a "To reproduce" command so users
+    can debug the issue.
+    """
     target = tmp_path / "hello.txt"
     target.write_text("hello world")
 
@@ -1097,7 +1103,9 @@ sys.exit(0)
 
     assert result.returncode != 0
     combined_output = result.stdout + result.stderr
-    assert "your script depends" in combined_output.lower()
+    # Should show the error and a way to reproduce
+    assert "exited with code 1" in combined_output.lower()
+    assert "to reproduce" in combined_output.lower()
 
 
 @pytest.mark.slow

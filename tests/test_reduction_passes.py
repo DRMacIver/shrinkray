@@ -313,8 +313,20 @@ def test_standard_substitutions(parallelism):
         b"\x00\x00",
         lambda x: len(x) >= 1,
         parallelism=parallelism,
+        sort_key=shortlex,
     )
     assert result == b"\x01"
+
+
+def test_standard_substitutions_no_progress(parallelism):
+    result = reduce_with(
+        [standard_substitutions],
+        b"\x00\x00",
+        lambda x: len(x) == 2,
+        parallelism=parallelism,
+        sort_key=shortlex,
+    )
+    assert result == b"\x00\x00"
 
 
 def test_line_sorter(parallelism):

@@ -222,8 +222,8 @@ def test_simplify_brackets_square_to_parens():
 
 def test_normalize_identifiers_basic():
     result = reduce_with([normalize_identifiers], b"hello hello", lambda x: True)
-    # Tries uppercase first, then lowercase
-    assert result == b"A A"
+    # Tries lowercase first, then uppercase
+    assert result == b"a a"
 
 
 def test_normalize_identifiers_multiple():

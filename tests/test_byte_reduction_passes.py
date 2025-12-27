@@ -20,7 +20,7 @@ from shrinkray.passes.patching import apply_patches
 from shrinkray.passes.python import is_python
 from shrinkray.problem import BasicReductionProblem, shortlex
 from shrinkray.work import WorkContext
-from tests.helpers import assert_reduces_to, reduce_with
+from tests.helpers import assert_reduces_to, direct_reductions, reduce_with
 
 
 def is_hello(data: bytes) -> bool:
@@ -243,10 +243,40 @@ async def test_apply_byte_replacement_patches(lowering, parallelism):
 
 
 @pytest.mark.parametrize("parallelism", [1, 2])
-def test_line_sorting_can_put_shorter_line_first(parallelism):
+def test_line_sorting_can_put_shorter_line_first_natural(parallelism):
     assert_reduces_to(
         origin=b"aaa\nbb",
         target=b"bb\naaa",
         parallelism=parallelism,
         passes=[line_sorter],
     )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_line_sorting_can_put_shorter_line_first_shortlex(parallelism):
+    assert_reduces_to(
+        origin=b"bb\naaa",
+        target=b"aaa\nbb",
+        parallelism=parallelism,
+        passes=[line_sorter],
+        sort_key=shortlex,
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_line_sorting_does_not_change_already_sorted(parallelism):
+    reductions = direct_reductions(
+        origin=b"bb\naaa",
+        parallelism=parallelism,
+        passes=[line_sorter],
+    )
+    assert not reductions
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_line_sorting_no_progress(parallelism):
+    initial = b"aaa\nbb"
+    outcome = reduce_with(
+        [line_sorter], initial, lambda x: x == initial, parallelism=parallelism
+    )
+    assert initial == outcome

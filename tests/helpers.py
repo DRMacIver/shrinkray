@@ -141,16 +141,28 @@ def assert_no_blockers(
                 )
 
 
-def direct_reductions(origin: bytes, *, parallelism=1) -> set[bytes]:
+def direct_reductions(
+    origin: bytes, *, parallelism=1, sort_key=None, passes=None
+) -> set[bytes]:
     children = set()
-    sort_key = sort_key_for_initial(origin)
+    if sort_key is None:
+        sort_key = sort_key_for_initial(origin)
 
     def is_interesting(b: bytes) -> bool:
         if sort_key(b) < sort_key(origin):
             children.add(b)
         return b == origin
 
-    reduce(origin, is_interesting, parallelism=parallelism)
+    if passes is not None:
+        reduce_with(
+            passes,
+            origin,
+            is_interesting,
+            parallelism=parallelism,
+            sort_key=sort_key,
+        )
+    else:
+        reduce(origin, is_interesting, parallelism=parallelism, sort_key=sort_key)
 
     return children
 

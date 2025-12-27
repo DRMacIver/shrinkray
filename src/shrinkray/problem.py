@@ -31,6 +31,7 @@ import trio
 from attrs import define
 from humanize import naturalsize, precisedelta
 
+from shrinkray.formatting import try_decode
 from shrinkray.work import WorkContext
 
 
@@ -128,6 +129,60 @@ NATURAL_ORDERING_FUNCTIONS: list[Callable[[str], Any]] = [
 
 def natural_key(s: str) -> LazyChainedSortKey:
     return LazyChainedSortKey(functions=NATURAL_ORDERING_FUNCTIONS, value=s)
+
+
+def sort_key_for_initial(initial: Any) -> Callable[[Any], Any]:
+    if isinstance(initial, bytes):
+        encoding, _ = try_decode(initial)
+        if encoding is None:
+            return shortlex
+        else:
+
+            def natural_for_encoding(b: bytes) -> Any:
+                try:
+                    s = b.decode(encoding)
+                    return (0, natural_key(s))
+                except UnicodeDecodeError:
+                    return (1, shortlex(b))
+
+            return natural_for_encoding
+    elif isinstance(initial, dict):
+        keys = sorted(initial, key=lambda k: shortlex(initial[k]), reverse=True)
+        natural_keys = {k: sort_key_for_initial(v) for k, v in initial.items()}
+
+        def dict_total_size(s):
+            return sum(len(v) for v in s.values())
+
+        def key_sort_key(k):
+            def f(x):
+                try:
+                    v = x[k]
+                except KeyError:
+                    return (0,)
+                else:
+                    return (1, natural_keys[k](v))
+
+            return f
+
+        functions = [
+            dict_total_size,
+            len,
+        ] + [key_sort_key(k) for k in keys]
+
+        def dict_sort_key(v):
+            return LazyChainedSortKey(
+                functions=functions,
+                value=v,
+            )
+
+        return dict_sort_key
+    else:
+        # We don't use this branch in the main app, but this
+        # function is also used in tests.
+        def fallback_sort_key(s):
+            return natural_key(repr(s))
+
+        return fallback_sort_key
 
 
 # This really should return some sort of Comparable type, but Python

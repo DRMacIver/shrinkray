@@ -45,4 +45,4 @@ def test_can_normalize_identifiers():
         return output == [42]
 
     # Ideally we would reduce further than this, but it's tricky for now.
-    assert reduce(ASSIGNMENT_CHAIN, is_interesting) == b"A=42\noutput.append(A)"
+    assert reduce(ASSIGNMENT_CHAIN, is_interesting) == b"a=42\noutput.append(a)"

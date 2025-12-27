@@ -8,7 +8,7 @@ install:
 
 # Run tests with coverage enforcement (skips slow tests when no args given)
 test *args: install
-    uv run coverage run -m pytest tests/ {{ if args == "" { "-m 'not slow' --durations=10" } else { args } }}
+    uv run coverage run -m pytest {{ if args == "" { "tests  -m 'not slow' --durations=10" } else { args } }}
     {{ if args == "" { "uv run coverage report" } else { "" } }}
 
 # Run tests without coverage (faster for development)

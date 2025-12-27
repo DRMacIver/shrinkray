@@ -1,6 +1,7 @@
 """Tests for state management."""
 
 import os
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,6 +13,7 @@ from shrinkray.state import (
     DYNAMIC_TIMEOUT_MIN,
     ShrinkRayDirectoryState,
     ShrinkRayStateSingleFile,
+    TestOutputManager,
     TimeoutExceededOnInitial,
     sort_key_for_initial,
 )
@@ -1990,3 +1992,177 @@ async def test_volume_debug_inherits_stderr(tmp_path):
     # The actual stderr output would go to the parent process's stderr
     exit_code = await state.run_for_exit_code(b"hello")
     assert exit_code == 0
+
+
+# === TestOutputManager tests ===
+
+
+def test_output_manager_allocate_and_mark_completed(tmp_path):
+    """Test allocating output files and marking them completed."""
+    # Use min_display_seconds=0 to test basic behavior without display window
+    manager = TestOutputManager(output_dir=str(tmp_path), min_display_seconds=0)
+
+    # Allocate some files
+    test_id1, path1 = manager.allocate_output_file()
+    test_id2, path2 = manager.allocate_output_file()
+
+    assert test_id1 == 0
+    assert test_id2 == 1
+    assert path1 != path2
+
+    # Both should be active
+    assert manager.get_active_test_id() == 1  # Most recent
+    assert manager.get_current_output_path() == path2  # Most recent active
+
+    # Mark the first one completed
+    manager.mark_completed(test_id1)
+    assert manager.get_active_test_id() == 1  # Still have one active
+    assert manager.get_current_output_path() == path2
+
+    # Mark the second one completed
+    manager.mark_completed(test_id2)
+    assert manager.get_active_test_id() is None  # No more active
+    assert manager.get_current_output_path() == path2  # Most recent completed
+
+
+def test_output_manager_mark_completed_unknown_id(tmp_path):
+    """Test marking an unknown test_id as completed (no-op)."""
+    manager = TestOutputManager(output_dir=str(tmp_path))
+    # Should not raise - just no-op
+    manager.mark_completed(999)
+    assert manager.get_active_test_id() is None
+
+
+def test_output_manager_get_current_output_path_none(tmp_path):
+    """Test get_current_output_path when nothing allocated."""
+    manager = TestOutputManager(output_dir=str(tmp_path))
+    assert manager.get_current_output_path() is None
+
+
+def test_output_manager_cleanup_old_files(tmp_path):
+    """Test cleanup of files older than max_age."""
+    manager = TestOutputManager(
+        output_dir=str(tmp_path), max_files=100, max_age_seconds=0.1
+    )
+
+    # Allocate and complete some files
+    for _ in range(5):
+        test_id, path = manager.allocate_output_file()
+        # Create the file so it can be deleted
+        with open(path, "w") as f:
+            f.write("test")
+        manager.mark_completed(test_id)
+
+    # Wait for files to age
+    time.sleep(0.15)
+
+    # Allocate and complete one more - this triggers cleanup
+    test_id, path = manager.allocate_output_file()
+    with open(path, "w") as f:
+        f.write("test")
+    manager.mark_completed(test_id)
+
+    # Old files should have been cleaned up
+    assert len(manager._completed_outputs) == 1  # Only the recent one
+
+
+def test_output_manager_cleanup_excess_files(tmp_path):
+    """Test cleanup of excess files beyond max_files."""
+    manager = TestOutputManager(
+        output_dir=str(tmp_path), max_files=3, max_age_seconds=3600
+    )
+
+    # Allocate and complete more than max_files
+    for _ in range(5):
+        test_id, path = manager.allocate_output_file()
+        with open(path, "w") as f:
+            f.write("test")
+        manager.mark_completed(test_id)
+
+    # Should only keep max_files
+    assert len(manager._completed_outputs) == 3
+
+
+def test_output_manager_cleanup_all(tmp_path):
+    """Test cleanup_all removes all files."""
+    manager = TestOutputManager(output_dir=str(tmp_path))
+
+    # Allocate some files (some active, some completed)
+    test_id1, path1 = manager.allocate_output_file()
+    _, path2 = manager.allocate_output_file()  # test_id2 not used - it stays active
+    with open(path1, "w") as f:
+        f.write("test1")
+    with open(path2, "w") as f:
+        f.write("test2")
+
+    manager.mark_completed(test_id1)  # One completed
+
+    # Cleanup all
+    manager.cleanup_all()
+
+    # Should have no files tracked
+    assert len(manager._active_outputs) == 0
+    assert len(manager._completed_outputs) == 0
+    # Files should be deleted
+    assert not os.path.exists(path1)
+    assert not os.path.exists(path2)
+
+
+def test_output_manager_safe_delete_nonexistent(tmp_path):
+    """Test _safe_delete doesn't crash on nonexistent files."""
+    # Should not raise
+    TestOutputManager._safe_delete(str(tmp_path / "nonexistent.log"))
+
+
+def test_output_manager_display_window(tmp_path):
+    """Test that completed output stays visible for min_display_seconds."""
+    manager = TestOutputManager(
+        output_dir=str(tmp_path), min_display_seconds=0.5
+    )
+
+    # Allocate and complete a test
+    test_id1, path1 = manager.allocate_output_file()
+    with open(path1, "w") as f:
+        f.write("output1")
+    manager.mark_completed(test_id1)
+
+    # Start a new test immediately
+    test_id2, path2 = manager.allocate_output_file()
+    with open(path2, "w") as f:
+        f.write("output2")
+
+    # Should still show the completed test's output (within display window)
+    assert manager.get_current_output_path() == path1
+    # active_test_id should be None (showing completed, not running)
+    assert manager.get_active_test_id() is None
+
+    # Wait for display window to expire
+    time.sleep(0.6)
+
+    # Now should show the new active test
+    assert manager.get_current_output_path() == path2
+    assert manager.get_active_test_id() == test_id2
+
+
+def test_output_manager_display_window_no_new_test(tmp_path):
+    """Test display window behavior when no new test starts."""
+    manager = TestOutputManager(
+        output_dir=str(tmp_path), min_display_seconds=0.2
+    )
+
+    # Allocate and complete a test
+    test_id1, path1 = manager.allocate_output_file()
+    with open(path1, "w") as f:
+        f.write("output1")
+    manager.mark_completed(test_id1)
+
+    # Within display window: still shows path1, no active test
+    assert manager.get_current_output_path() == path1
+    assert manager.get_active_test_id() is None
+
+    # Wait for display window to expire
+    time.sleep(0.25)
+
+    # After display window: still shows path1 (fallback), still no active test
+    assert manager.get_current_output_path() == path1
+    assert manager.get_active_test_id() is None

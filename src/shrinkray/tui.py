@@ -11,7 +11,7 @@ import humanize
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.theme import Theme
@@ -313,6 +313,69 @@ class ContentPreview(Static):
         )
 
 
+class OutputPreview(Static):
+    """Widget to display test output preview."""
+
+    output_content = reactive("")
+    active_test_id: reactive[int | None] = reactive(None)
+    _last_update_time: float = 0.0
+    _last_seen_test_id: int | None = None  # Track last test ID for "completed" message
+
+    def update_output(self, content: str, test_id: int | None) -> None:
+        import time
+
+        # Throttle updates to every 200ms
+        now = time.time()
+        if now - self._last_update_time < 0.2:
+            return
+
+        self._last_update_time = now
+        self.output_content = content
+        # Track the last test ID we've seen (for showing in "completed" message)
+        if test_id is not None:
+            self._last_seen_test_id = test_id
+        self.active_test_id = test_id
+        self.refresh(layout=True)
+
+    def _get_available_lines(self) -> int:
+        """Get the number of lines available for display based on container size."""
+        try:
+            parent = self.parent
+            if parent and hasattr(parent, "size"):
+                parent_size = parent.size  # type: ignore[union-attr]
+                if parent_size.height > 0:
+                    return max(10, parent_size.height - 3)
+            if self.app and self.app.size.height > 0:
+                return max(10, self.app.size.height - 15)
+        except Exception:
+            pass
+        return 30
+
+    def render(self) -> str:
+        # Header line
+        if self.active_test_id is not None:
+            header = f"[green]Test #{self.active_test_id} running...[/green]"
+        elif self.output_content and self._last_seen_test_id is not None:
+            header = f"[dim]Test #{self._last_seen_test_id} completed[/dim]"
+        else:
+            header = "[dim]No test output yet...[/dim]"
+
+        if not self.output_content:
+            return header
+
+        available_lines = self._get_available_lines()
+        lines = self.output_content.split("\n")
+
+        # Show tail of output (most recent lines)
+        if len(lines) <= available_lines:
+            return f"{header}\n{self.output_content}"
+
+        # Truncate from the beginning
+        truncated_lines = lines[-(available_lines):]
+        skipped = len(lines) - available_lines
+        return f"{header}\n... ({skipped} earlier lines)\n" + "\n".join(truncated_lines)
+
+
 class HelpScreen(ModalScreen[None]):
     """Modal screen showing keyboard shortcuts help."""
 
@@ -610,10 +673,32 @@ class ShrinkRayApp(App[None]):
         margin: 0 1;
     }
 
+    #content-area {
+        height: 1fr;
+    }
+
     #content-container {
         border: solid blue;
         margin: 1;
-        height: 1fr;
+        padding: 1;
+        width: 1fr;
+        height: 100%;
+    }
+
+    #content-container:dark {
+        border: solid lightskyblue;
+    }
+
+    #output-container {
+        border: solid blue;
+        margin: 1;
+        padding: 1;
+        width: 1fr;
+        height: 100%;
+    }
+
+    #output-container:dark {
+        border: solid lightskyblue;
     }
     """
 
@@ -676,8 +761,13 @@ class ShrinkRayApp(App[None]):
             )
             with Vertical(id="stats-container"):
                 yield StatsDisplay(id="stats-display")
-            with VerticalScroll(id="content-container"):
-                yield ContentPreview(id="content-preview")
+            with Horizontal(id="content-area"):
+                with VerticalScroll(id="content-container") as content_scroll:
+                    content_scroll.border_title = "Recent Reductions"
+                    yield ContentPreview(id="content-preview")
+                with VerticalScroll(id="output-container") as output_scroll:
+                    output_scroll.border_title = "Test Output"
+                    yield OutputPreview(id="output-preview")
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -737,12 +827,16 @@ class ShrinkRayApp(App[None]):
             # Monitor progress (client is already started and reduction is running)
             stats_display = self.query_one("#stats-display", StatsDisplay)
             content_preview = self.query_one("#content-preview", ContentPreview)
+            output_preview = self.query_one("#output-preview", OutputPreview)
 
             async with aclosing(self._client.get_progress_updates()) as updates:
                 async for update in updates:
                     stats_display.update_stats(update)
                     content_preview.update_content(
                         update.content_preview, update.hex_mode
+                    )
+                    output_preview.update_output(
+                        update.test_output_preview, update.active_test_id
                     )
                     self._latest_pass_stats = update.pass_stats
                     self._current_pass_name = update.current_pass_name

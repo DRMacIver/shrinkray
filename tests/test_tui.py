@@ -18,6 +18,7 @@ from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Respons
 from shrinkray.tui import (
     ContentPreview,
     HelpScreen,
+    OutputPreview,
     PassStatsScreen,
     ShrinkRayApp,
     StatsDisplay,
@@ -316,6 +317,159 @@ def test_render_diff_no_changes_shows_truncated():
         assert "more lines" in rendered
     finally:
         widget._get_available_lines = original_method
+
+
+# === OutputPreview tests ===
+
+
+def test_output_preview_render_no_content():
+    """Test OutputPreview render with no content."""
+    widget = OutputPreview()
+    rendered = widget.render()
+    assert "No test output yet" in rendered
+
+
+def test_output_preview_render_with_active_test():
+    """Test OutputPreview render with an active test."""
+    widget = OutputPreview()
+    widget.output_content = "Some test output\nMore output"
+    widget.active_test_id = 5
+    rendered = widget.render()
+    assert "Test #5 running" in rendered
+    assert "Some test output" in rendered
+
+
+def test_output_preview_render_completed_test():
+    """Test OutputPreview render with completed test (no active test ID)."""
+    widget = OutputPreview()
+    widget.output_content = "Final output"
+    widget.active_test_id = None
+    widget._last_seen_test_id = 42  # Last test that was running
+    rendered = widget.render()
+    assert "Test #42 completed" in rendered
+    assert "Final output" in rendered
+
+
+def test_output_preview_render_truncates_long_output():
+    """Test OutputPreview truncates long output from beginning."""
+    widget = OutputPreview()
+    # Create content longer than available lines
+    lines = [f"Line {i}" for i in range(100)]
+    widget.output_content = "\n".join(lines)
+    widget.active_test_id = 1
+
+    # Mock _get_available_lines to return a small number
+    widget._get_available_lines = lambda: 10  # type: ignore
+
+    rendered = widget.render()
+    assert "earlier lines" in rendered
+    # Should show the last lines
+    assert "Line 99" in rendered
+
+
+def test_output_preview_update_output_throttling():
+    """Test that update_output throttles updates."""
+    widget = OutputPreview()
+
+    # First update should work
+    widget.update_output("first", 1)
+    assert widget.output_content == "first"
+
+    # Immediate second update should be throttled
+    widget.update_output("second", 2)
+    assert widget.output_content == "first"  # Still first due to throttling
+
+
+def test_output_preview_get_available_lines_fallback():
+    """Test _get_available_lines fallback when no parent."""
+    widget = OutputPreview()
+    # Widget has no parent or app, should return fallback
+    lines = widget._get_available_lines()
+    assert lines == 30  # Default fallback
+
+
+def test_output_preview_get_available_lines_with_parent():
+    """Test _get_available_lines with parent that has size."""
+    widget = OutputPreview()
+
+    # Mock parent with size via property patching
+    parent_mock = MagicMock()
+    parent_mock.size.height = 50
+
+    with patch.object(OutputPreview, "parent", new_callable=PropertyMock) as mock_parent:
+        mock_parent.return_value = parent_mock
+        lines = widget._get_available_lines()
+        assert lines == 47  # 50 - 3
+
+
+def test_output_preview_get_available_lines_with_app():
+    """Test _get_available_lines when parent has no size but app does."""
+    widget = OutputPreview()
+
+    # Mock parent without size attribute
+    parent_mock = MagicMock(spec=[])  # No size attr
+
+    # Mock app with size
+    app_mock = MagicMock()
+    app_mock.size.height = 40
+
+    with patch.object(
+        OutputPreview, "parent", new_callable=PropertyMock
+    ) as mock_parent, patch.object(
+        OutputPreview, "app", new_callable=PropertyMock
+    ) as mock_app:
+        mock_parent.return_value = parent_mock
+        mock_app.return_value = app_mock
+        lines = widget._get_available_lines()
+        assert lines == 25  # 40 - 15
+
+
+def test_output_preview_get_available_lines_parent_zero_height():
+    """Test _get_available_lines falls through when parent has zero height."""
+    widget = OutputPreview()
+
+    # Mock parent with size but height=0
+    parent_mock = MagicMock()
+    parent_mock.size.height = 0
+
+    # Mock app with valid size
+    app_mock = MagicMock()
+    app_mock.size.height = 30
+
+    with patch.object(
+        OutputPreview, "parent", new_callable=PropertyMock
+    ) as mock_parent, patch.object(
+        OutputPreview, "app", new_callable=PropertyMock
+    ) as mock_app:
+        mock_parent.return_value = parent_mock
+        mock_app.return_value = app_mock
+        lines = widget._get_available_lines()
+        # Should fall through to app check: 30 - 15 = 15
+        assert lines == 15
+
+
+def test_output_preview_get_available_lines_app_zero_height():
+    """Test _get_available_lines falls to default when app has zero height."""
+    widget = OutputPreview()
+
+    # Mock parent with size but height=0
+    parent_mock = MagicMock()
+    parent_mock.size.height = 0
+
+    # Mock app with zero height
+    app_mock = MagicMock()
+    app_mock.size.height = 0
+
+    with patch.object(
+        OutputPreview, "parent", new_callable=PropertyMock
+    ) as mock_parent, patch.object(
+        OutputPreview, "app", new_callable=PropertyMock
+    ) as mock_app:
+        mock_parent.return_value = parent_mock
+        mock_app.return_value = app_mock
+        lines = widget._get_available_lines()
+        # Should fall through to default
+        assert lines == 30
 
 
 # === ShrinkRayApp with fake client tests ===

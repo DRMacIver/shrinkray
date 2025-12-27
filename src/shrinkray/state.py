@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from abc import ABC, abstractmethod
+from collections import deque
 from datetime import timedelta
 from tempfile import TemporaryDirectory
 from typing import Any, TypeVar
@@ -58,6 +59,117 @@ def compute_dynamic_timeout(runtime: float) -> float:
     )
 
 
+@define
+class TestOutputManager:
+    """Manages temporary files for test output capture.
+
+    Allocates unique files for each test's stdout/stderr output,
+    tracks active and completed tests, and cleans up old files.
+    """
+
+    output_dir: str
+    max_files: int = 50
+    max_age_seconds: float = 60.0
+    min_display_seconds: float = 1.0  # Minimum time to show completed output
+
+    _sequence: int = 0
+    _active_outputs: dict[int, str] = {}
+    _completed_outputs: deque[tuple[int, str, float]] = deque()
+
+    def __attrs_post_init__(self) -> None:
+        # Initialize mutable defaults
+        self._active_outputs = {}
+        self._completed_outputs = deque()
+
+    def allocate_output_file(self) -> tuple[int, str]:
+        """Allocate a new output file for a test. Returns (test_id, file_path)."""
+        test_id = self._sequence
+        self._sequence += 1
+        file_path = os.path.join(self.output_dir, f"test_{test_id}.log")
+        self._active_outputs[test_id] = file_path
+        return test_id, file_path
+
+    def mark_completed(self, test_id: int) -> None:
+        """Mark a test as completed and move to completed queue."""
+        if test_id in self._active_outputs:
+            file_path = self._active_outputs.pop(test_id)
+            self._completed_outputs.append((test_id, file_path, time.time()))
+            self._cleanup_old_files()
+
+    def _cleanup_old_files(self) -> None:
+        """Remove old output files based on count and age limits."""
+        now = time.time()
+        # Remove files older than max_age_seconds
+        while (
+            self._completed_outputs
+            and now - self._completed_outputs[0][2] > self.max_age_seconds
+        ):
+            _, file_path, _ = self._completed_outputs.popleft()
+            self._safe_delete(file_path)
+        # Remove excess files beyond max_files
+        while len(self._completed_outputs) > self.max_files:
+            _, file_path, _ = self._completed_outputs.popleft()
+            self._safe_delete(file_path)
+
+    def _get_recent_completed(self) -> tuple[int, str] | None:
+        """Get most recently completed test if within display window."""
+        if not self._completed_outputs:
+            return None
+        test_id, file_path, completion_time = self._completed_outputs[-1]
+        if time.time() - completion_time < self.min_display_seconds:
+            return test_id, file_path
+        return None
+
+    def get_current_output_path(self) -> str | None:
+        """Get the most relevant output file path.
+
+        Prioritizes recently completed tests (within min_display_seconds)
+        to ensure output stays visible briefly after completion.
+        """
+        # First check for recently completed test that should stay visible
+        recent = self._get_recent_completed()
+        if recent is not None:
+            return recent[1]
+        # Then check for active tests
+        if self._active_outputs:
+            max_id = max(self._active_outputs.keys())
+            return self._active_outputs[max_id]
+        # Fall back to most recent completed (even if past display window)
+        if self._completed_outputs:
+            return self._completed_outputs[-1][1]
+        return None
+
+    def get_active_test_id(self) -> int | None:
+        """Get the currently running test ID, if any.
+
+        Returns None if a recently completed test is still in its
+        display window (to show "completed" status instead of "running").
+        """
+        # If a recently completed test is being displayed, return None
+        # to indicate we're showing completed output, not an active test
+        if self._get_recent_completed() is not None:
+            return None
+        if self._active_outputs:
+            return max(self._active_outputs.keys())
+        return None
+
+    def cleanup_all(self) -> None:
+        """Clean up all output files (called on shutdown)."""
+        for file_path in self._active_outputs.values():
+            self._safe_delete(file_path)
+        for _, file_path, _ in self._completed_outputs:
+            self._safe_delete(file_path)
+        self._active_outputs.clear()
+        self._completed_outputs.clear()
+
+    @staticmethod
+    def _safe_delete(path: str) -> None:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 @define(slots=False)
 class ShrinkRayState[TestCase](ABC):
     input_type: Any  # InputType from __main__
@@ -90,6 +202,9 @@ class ShrinkRayState[TestCase](ABC):
 
     # Stores the output from the last debug run
     _last_debug_output: str = ""
+
+    # Optional output manager for capturing test output (TUI mode)
+    output_manager: TestOutputManager | None = None
 
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
@@ -175,8 +290,17 @@ class ShrinkRayState[TestCase](ABC):
 
             return completed.returncode
 
-        # Check if we should stream output to stderr (volume=debug)
-        if self.volume == Volume.debug:
+        # Determine output handling
+        test_id: int | None = None
+        output_file_handle = None
+
+        if self.output_manager is not None:
+            # Capture output to a file for TUI display
+            test_id, output_path = self.output_manager.allocate_output_file()
+            output_file_handle = open(output_path, "wb")
+            kwargs["stdout"] = output_file_handle.fileno()
+            kwargs["stderr"] = subprocess.STDOUT  # Combine stderr into stdout
+        elif self.volume == Volume.debug:
             # Inherit stderr from parent process to stream output in real-time
             kwargs["stderr"] = None  # None means inherit
             kwargs["stdout"] = subprocess.DEVNULL
@@ -185,59 +309,66 @@ class ShrinkRayState[TestCase](ABC):
             kwargs["stdout"] = subprocess.DEVNULL
             kwargs["stderr"] = subprocess.DEVNULL
 
-        async with trio.open_nursery() as nursery:
+        try:
+            async with trio.open_nursery() as nursery:
 
-            def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
-                return trio.run_process(command, **kwargs, task_status=task_status)
+                def call_with_kwargs(task_status=trio.TASK_STATUS_IGNORED):  # type: ignore
+                    return trio.run_process(command, **kwargs, task_status=task_status)
 
-            start_time = time.time()
-            sp = await nursery.start(call_with_kwargs)
+                start_time = time.time()
+                sp = await nursery.start(call_with_kwargs)
 
-            try:
-                # Determine effective timeout for this call
-                if self.first_call:
-                    # For first call: use calibration timeout if dynamic, otherwise 10x explicit timeout
-                    if self.timeout is None:
-                        effective_timeout = DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT
+                try:
+                    # Determine effective timeout for this call
+                    if self.first_call:
+                        # For first call: use calibration timeout if dynamic, otherwise 10x explicit timeout
+                        if self.timeout is None:
+                            effective_timeout = DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT
+                        else:
+                            effective_timeout = self.timeout * 10
                     else:
-                        effective_timeout = self.timeout * 10
-                else:
-                    # For subsequent calls, timeout must be set (either explicit or computed)
-                    assert self.timeout is not None
-                    effective_timeout = self.timeout
+                        # For subsequent calls, timeout must be set (either explicit or computed)
+                        assert self.timeout is not None
+                        effective_timeout = self.timeout
 
-                with trio.move_on_after(effective_timeout):
-                    await sp.wait()
+                    with trio.move_on_after(effective_timeout):
+                        await sp.wait()
 
-                runtime = time.time() - start_time
+                    runtime = time.time() - start_time
 
-                if sp.returncode is None:
-                    # Process didn't terminate before timeout - kill it
-                    await self._interrupt_wait_and_kill(sp)
+                    if sp.returncode is None:
+                        # Process didn't terminate before timeout - kill it
+                        await self._interrupt_wait_and_kill(sp)
 
-                # Check for timeout violation (only when timeout is explicitly set)
-                if (
-                    self.timeout is not None
-                    and runtime >= self.timeout
-                    and self.first_call
-                ):
-                    raise TimeoutExceededOnInitial(
-                        timeout=self.timeout,
-                        runtime=runtime,
-                    )
-            finally:
-                if self.first_call:
-                    self.initial_exit_code = sp.returncode
-                    # Set dynamic timeout if not explicitly specified
-                    if self.timeout is None:
-                        runtime = time.time() - start_time
-                        self.timeout = compute_dynamic_timeout(runtime)
-                self.first_call = False
+                    # Check for timeout violation (only when timeout is explicitly set)
+                    if (
+                        self.timeout is not None
+                        and runtime >= self.timeout
+                        and self.first_call
+                    ):
+                        raise TimeoutExceededOnInitial(
+                            timeout=self.timeout,
+                            runtime=runtime,
+                        )
+                finally:
+                    if self.first_call:
+                        self.initial_exit_code = sp.returncode
+                        # Set dynamic timeout if not explicitly specified
+                        if self.timeout is None:
+                            runtime = time.time() - start_time
+                            self.timeout = compute_dynamic_timeout(runtime)
+                    self.first_call = False
 
-            result: int | None = sp.returncode
-            assert result is not None
+                result: int | None = sp.returncode
+                assert result is not None
 
-            return result
+                return result
+        finally:
+            # Clean up output file handle and mark test as completed
+            if output_file_handle is not None:
+                output_file_handle.close()
+            if test_id is not None and self.output_manager is not None:
+                self.output_manager.mark_completed(test_id)
 
     async def run_for_exit_code(self, test_case: TestCase, debug: bool = False) -> int:
         # Lazy import

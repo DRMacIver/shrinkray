@@ -76,6 +76,20 @@ def shortlex[SizedT: Sized](value: SizedT) -> tuple[int, SizedT]:
 
 @total_ordering
 class LazyChainedSortKey:
+    """A comparison key that lazily evaluates a chain of comparison functions.
+
+    This class provides an ordering that compares values by applying a sequence
+    of functions in order. The first function that produces different values
+    for two inputs determines the ordering. If all functions return equal
+    values, the inputs are considered equal.
+
+    This is used to implement the natural ordering for strings, which compares
+    by length, then average squared line length, then number of lines, etc.
+
+    The "lazy" aspect is that comparison functions are only evaluated until
+    one returns different values, avoiding unnecessary computation.
+    """
+
     def __init__(self, functions: list[Callable[[T], Any]], value: T):
         self.functions = functions
         self.value = value
@@ -104,6 +118,8 @@ class LazyChainedSortKey:
         return False
 
 
+# Natural character ordering: whitespace < digits < lowercase < uppercase.
+# Characters not in this string are sorted by ord() after all known characters.
 NATURAL_CHARACTER_ORDER = (
     string.whitespace + string.digits + string.ascii_lowercase + string.ascii_uppercase
 )
@@ -111,13 +127,33 @@ NATURAL_CHARACTER_ORDER_INDEX = {s: i for i, s in enumerate(NATURAL_CHARACTER_OR
 
 
 def character_index(c: str) -> int:
+    """Return the sorting index for a character in natural ordering.
+
+    Characters in NATURAL_CHARACTER_ORDER get their position in that string.
+    Unknown characters (punctuation, unicode, etc.) sort after all known
+    characters, ordered by their Unicode code point.
+    """
     return NATURAL_CHARACTER_ORDER_INDEX.get(c, len(NATURAL_CHARACTER_ORDER) + ord(c))
 
 
-def natural_string_lex(s):
+def natural_string_lex(s: str) -> list[int]:
+    """Convert a string to a list of character indices for lexicographic comparison.
+
+    This transforms the string so that comparing the resulting lists gives
+    the natural character ordering (whitespace < digits < lowercase < uppercase).
+    """
     return list(map(character_index, s))
 
 
+# The chain of comparison functions used for natural string ordering.
+# Each function is tried in sequence; the first that differs determines order.
+#
+# 1. Total length - shorter strings are always preferred
+# 2. Average squared line length - penalizes very long lines, preferring balanced code
+#    Formula: sum(len(line)²) / count(lines)²
+# 3. Number of lines - fewer lines is better (after accounting for balance)
+# 4. List of line lengths - lexicographically compare line length sequences
+# 5. Natural character order - whitespace < digits < lowercase < uppercase
 NATURAL_ORDERING_FUNCTIONS: list[Callable[[str], Any]] = [
     len,
     lambda s: sum(len(line) ** 2 for line in s.split("\n")) / len(s.split("\n")) ** 2,
@@ -128,10 +164,36 @@ NATURAL_ORDERING_FUNCTIONS: list[Callable[[str], Any]] = [
 
 
 def natural_key(s: str) -> LazyChainedSortKey:
+    """Return a comparison key for natural string ordering.
+
+    Natural ordering uses a chain of heuristics to determine which string
+    is "smaller" (more reduced). This is designed to produce human-readable
+    minimal test cases with balanced line lengths and natural character choices.
+
+    See NATURAL_ORDERING_FUNCTIONS for the complete ordering criteria.
+    """
     return LazyChainedSortKey(functions=NATURAL_ORDERING_FUNCTIONS, value=s)
 
 
 def sort_key_for_initial(initial: Any) -> Callable[[Any], Any]:
+    """Create a sort key function appropriate for the given initial value.
+
+    This examines the initial test case and returns a comparison function
+    that will be used to order all test cases during reduction.
+
+    For bytes:
+        - If decodable as text, uses natural ordering on the decoded string
+        - Falls back to shortlex for binary data that can't be decoded
+
+    For dicts:
+        - Orders by total size of values, then number of keys
+        - Then compares values for each key in order of largest-first
+
+    For other types:
+        - Falls back to natural ordering on repr()
+
+    The returned function can be used as a sort key or comparison key.
+    """
     if isinstance(initial, bytes):
         encoding, _ = try_decode(initial)
         if encoding is None:
@@ -185,10 +247,19 @@ def sort_key_for_initial(initial: Any) -> Callable[[Any], Any]:
         return fallback_sort_key
 
 
-# This really should return some sort of Comparable type, but Python
-# doesn't have a built in protocol for that, and it's a mess to
-# express properly.
 def default_sort_key(value: Any) -> Any:
+    """Return a comparison key for a value using type-appropriate ordering.
+
+    This is a simpler alternative to sort_key_for_initial that doesn't
+    examine the initial value to determine the best ordering.
+
+    - bytes: shortlex ordering (length, then lexicographic)
+    - str: natural ordering (length, line balance, character order)
+    - other: shortlex on repr()
+
+    Note: This really should return some sort of Comparable type, but Python
+    doesn't have a built-in protocol for that.
+    """
     if isinstance(value, bytes):
         return shortlex(value)
     elif isinstance(value, str):

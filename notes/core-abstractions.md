@@ -10,18 +10,44 @@ The central abstraction is `ReductionProblem[T]` from `problem.py`. This represe
 
 - **current_test_case**: The best known-interesting test case (may temporarily differ during backtracking from pumped test cases)
 - **is_interesting(test_case) -> bool**: Async predicate that tests if a candidate preserves the bug
-- **sort_key(test_case)**: Returns a comparable key for ordering - defaults to shortlex ordering. Also used as a heuristic for how good a reduction pass is: passes that reduce `sort_key` (especially size) are much more valuable than non-size-reducing passes.
+- **sort_key(test_case)**: Returns a comparable key for ordering. Also used as a heuristic for how good a reduction pass is: passes that reduce `sort_key` (especially size) are much more valuable than non-size-reducing passes.
 - **size(test_case) -> int**: Returns the size of a test case (for metrics)
 
-### Shortlex Ordering
+### Ordering Strategies
 
-Shrink Ray uses shortlex ordering: `(length, lexicographic_value)`. This means:
+Shrink Ray uses different ordering strategies depending on the type of test case:
+
+#### Natural Ordering (for text)
+
+For text-based test cases (bytes that decode as valid UTF-8), Shrink Ray uses a **natural ordering** that produces human-readable minimal results. This ordering uses a chain of heuristics:
+
+1. **Total length** - shorter strings are always preferred
+2. **Average squared line length** - penalizes very long lines, preferring balanced code
+   - Formula: `sum(len(line)²) / count(lines)²`
+   - This makes "well-formatted" code with balanced lines preferred over single-line messes
+3. **Number of lines** - fewer lines is better (after accounting for balance)
+4. **List of line lengths** - lexicographically compare line length sequences
+5. **Natural character order** - `whitespace < digits < lowercase < uppercase`
+   - Unknown characters (punctuation, unicode) sort after letters by Unicode code point
+
+This ordering is implemented via `LazyChainedSortKey`, which evaluates comparison functions lazily until one returns different values for the two inputs.
+
+#### Shortlex Ordering (for binary data)
+
+For binary data (bytes that can't be decoded as text), Shrink Ray uses **shortlex ordering**: `(length, lexicographic_value)`. This means:
 1. Shorter test cases are always preferred
 2. Among equal-length test cases, lexicographically smaller is preferred
 
-This is crucial for **normalisation** - the idea that every interestingness test should ideally have a single canonical minimal result. See "One Test to Rule Them All" by Alex Groce and Josie Holmes for background on this concept.
+#### Dict Ordering (for directories)
 
-Note: shortlex is somewhat arbitrary. The "short" part is important (smaller test cases are genuinely better), but the "lex" tiebreaker is just a convention inherited from Hypothesis (where it makes more sense). Many other orderings might be better; this just hasn't been explored yet.
+For dict-based test cases (used in directory reduction), ordering compares:
+1. Total size of all values
+2. Number of keys
+3. Values for each key (largest keys first), using the appropriate ordering for each value
+
+### Normalisation
+
+Consistent ordering is crucial for **normalisation** - the idea that every interestingness test should ideally have a single canonical minimal result. See "One Test to Rule Them All" by Alex Groce and Josie Holmes for background on this concept.
 
 ### Callbacks and Statistics
 

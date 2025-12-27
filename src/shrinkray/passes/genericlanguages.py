@@ -3,7 +3,7 @@ Module of reduction passes designed for "things that look like programming langu
 """
 
 import re
-from collections.abc import Callable, Sized
+from collections.abc import Callable
 from functools import wraps
 from string import ascii_lowercase, ascii_uppercase
 from typing import AnyStr
@@ -242,10 +242,6 @@ async def simplify_brackets(problem: ReductionProblem[bytes]) -> None:
 
 
 IDENTIFIER = re.compile(rb"(\b[A-Za-z][A-Za-z0-9_]*\b)|([0-9]+)")
-
-
-def shortlex[T: Sized](s: T) -> tuple[int, T]:
-    return (len(s), s)
 
 
 async def normalize_identifiers(problem: ReductionProblem[bytes]) -> None:

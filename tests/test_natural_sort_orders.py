@@ -2,7 +2,8 @@
 
 The natural sort order for strings uses a chain of heuristics:
 1. Total length (fewer characters is better)
-2. Sum of squared line lengths (penalizes long lines)
+2. Average squared line length (penalizes long lines)
+   Formula: sum(len(line)² for each line) / count(lines)²
 3. Number of lines (fewer lines is better)
 4. List of line lengths lexicographically (shorter lines first)
 5. Natural character order (whitespace < digits < lowercase < uppercase)
@@ -87,37 +88,38 @@ def test_length_shorter_always_wins_or_ties(a, b):
 
 
 # =============================================================================
-# Heuristic 2: Sum of Squared Line Lengths
+# Heuristic 2: Average Squared Line Length
 # =============================================================================
 
 
 def test_squared_balanced_lines_preferred():
     """Among equal-length strings, prefer those with balanced line lengths.
 
-    This heuristic minimizes sum(len(line)**2), which penalizes very long lines.
+    This heuristic minimizes average squared line length, which penalizes
+    very long lines. The formula is: sum(len(line)²) / count(lines)².
     """
     # Both have 7 chars total (including newlines)
-    # "aaa\naaa" has lines [3,3], sum of squares = 18
-    # "aa\naaaa" has lines [2,4], sum of squares = 20
+    # "aaa\naaa" has lines [3,3], avg sq = 18/4 = 4.5
+    # "aa\naaaa" has lines [2,4], avg sq = 20/4 = 5.0
     assert is_preferred("aaa\naaa", "aa\naaaa")
 
 
 def test_squared_one_long_line_vs_balanced():
-    # "aaaa\nbb" has lines [4,2], sum = 16+4 = 20, total = 7 chars
-    # "aaa\nbbb" has lines [3,3], sum = 9+9 = 18, total = 7 chars
+    # "aaaa\nbb" has lines [4,2], avg sq = 20/4 = 5.0, total = 7 chars
+    # "aaa\nbbb" has lines [3,3], avg sq = 18/4 = 4.5, total = 7 chars
     assert is_preferred("aaa\nbbb", "aaaa\nbb")
 
 
 def test_squared_multiple_short_lines_vs_one_long():
     # Both 11 chars
-    a = "aaaa\naaaa\na"  # 11 chars, sum = 16 + 16 + 1 = 33
-    b = "aaaaaaaaaa\n"  # 11 chars, sum = 100 + 0 = 100
+    a = "aaaa\naaaa\na"  # 11 chars, 3 lines, avg sq = 33/9 ≈ 3.67
+    b = "aaaaaaaaaa\n"  # 11 chars, 1 line, avg sq = 100/1 = 100
     assert len(a) == len(b) == 11
     assert is_preferred(a, b)
 
 
-def test_squared_same_sum_goes_to_line_count():
-    # "ab" vs "ba" - same length (2), same sum (4), same line count (1)
+def test_squared_same_avg_goes_to_line_count():
+    # "ab" vs "ba" - same length (2), same avg sq (4), same line count (1)
     # Goes to later heuristics (character order)
     assert is_preferred("ab", "ba")
 
@@ -128,14 +130,14 @@ def test_squared_same_sum_goes_to_line_count():
 
 
 def test_line_count_controlled_examples():
-    """Among strings with equal length and equal sum-of-squares, fewer lines wins.
+    """Among strings with equal length and equal avg-squared, fewer lines wins.
 
-    The constraint of equal sum + equal length + different line count is
+    The constraint of equal avg-sq + equal length + different line count is
     mathematically constrained, so we test what we can.
     """
-    # These don't have equal sums, so sum takes precedence
-    # [1,0,1] sum = 2, [2,1] sum = 5
-    # So "a\n\nb" is preferred (lower sum)
+    # These don't have equal avg-sq, so avg-sq takes precedence
+    # [1,0,1] avg sq = 2/9, [2,1] avg sq = 5/4
+    # So "a\n\nb" is preferred (lower avg sq)
     assert is_preferred("a\n\nb", "ab\nc")
 
 
@@ -146,7 +148,7 @@ def test_line_count_controlled_examples():
 
 def test_line_lengths_shorter_first_line_preferred():
     """Among equal strings up to heuristic 3, compare line lengths lexicographically."""
-    # Need same sum. [1,2] sum=5, [2,1] sum=5, both 2 lines
+    # Need same avg-sq. [1,2] avg sq = 5/4, [2,1] avg sq = 5/4, both 2 lines
     # "a\nbb" (4 chars) vs "aa\nb" (4 chars)
     # [1,2] < [2,1] lexicographically
     assert is_preferred("a\nbb", "aa\nb")
@@ -160,8 +162,8 @@ def test_line_lengths_lexicographic():
 
 
 def test_line_lengths_more_balanced_prefix_preferred():
-    # [0,3] vs [1,2] - [0,3] has sum 9, [1,2] has sum 5
-    # Sum differs! [1,2] has lower sum, so it's preferred
+    # [0,3] vs [1,2] - [0,3] has avg sq 9/4, [1,2] has avg sq 5/4
+    # Avg-sq differs! [1,2] has lower avg-sq, so it's preferred
     assert is_preferred("a\naa", "\naaa")
 
 
@@ -240,11 +242,11 @@ def test_interaction_length_beats_good_characters():
     assert is_preferred("~", "  ")
 
 
-def test_interaction_sum_of_squares_beats_line_count():
-    """Lower sum of squares beats fewer lines."""
-    # "ab\ncd\nef" (8 chars) has lines [2,2,2], sum=12, 3 lines
-    # "abcdefgh" (8 chars) has lines [8], sum=64, 1 line
-    # Lower sum wins, so the 3-line version is preferred
+def test_interaction_avg_squared_beats_line_count():
+    """Lower average squared line length beats fewer lines."""
+    # "ab\ncd\nef" (8 chars) has lines [2,2,2], avg sq = 12/9 ≈ 1.33, 3 lines
+    # "abcdefgh" (8 chars) has lines [8], avg sq = 64/1 = 64, 1 line
+    # Lower avg-sq wins, so the 3-line version is preferred
     assert is_preferred("ab\ncd\nef", "abcdefgh")
 
 
@@ -382,7 +384,8 @@ def test_newline_trailing_vs_leading_same_length():
     - "\\na".splitlines() = ['', 'a']   (2 lines)
     """
     # Both have length 2
-    # Same sum of squares (1), but different line counts!
+    # "a\n" has avg sq = 1/1 = 1, "\na" has avg sq = 1/4 = 0.25
+    # BUT "\na" has 2 lines while "a\n" has 1 line with different structure
     assert is_preferred("a\n", "\na")
 
 
@@ -400,9 +403,9 @@ def test_newline_leading_add_empty_lines():
 
 def test_newline_middle_create_splits():
     """Newlines in the middle always create splits."""
-    # "a\nb" has 2 lines: sum of squares = 1+1=2
-    # "ab\n" has 1 line: sum of squares = 4
-    # "a\nb" is preferred (lower sum)
+    # "a\nb" has 2 lines: avg sq = 2/4 = 0.5
+    # "ab\n" has 1 line: avg sq = 4/1 = 4
+    # "a\nb" is preferred (lower avg-sq)
     assert is_preferred("a\nb", "ab\n")
 
 
@@ -426,17 +429,17 @@ def test_minimal_single_char():
 
 def test_minimal_two_chars():
     """Newline gives different structure than two spaces."""
-    # "  ".split("\n") = ['  '], sum = 4
-    # " \n".split("\n") = [' ', ''], sum = 1
-    # So " \n" has lower sum!
+    # "  ".split("\n") = ['  '], avg sq = 4/1 = 4
+    # " \n".split("\n") = [' ', ''], avg sq = 1/4 = 0.25
+    # So " \n" has lower avg-sq!
     assert is_preferred(" \n", "  ")
 
 
 def test_minimal_three_chars_structure_matters():
     """At 3 chars, line structure can beat character quality."""
-    # "   " (3 spaces): lines ['   '], sum = 9
-    # "  \n" (2 spaces + newline): lines ['  '], sum = 4
-    # " \n " (space, newline, space): lines [' ', ' '], sum = 2
+    # "   " (3 spaces): lines ['   '], avg sq = 9/1 = 9
+    # "  \n" (2 spaces + newline): lines ['  '], avg sq = 4/1 = 4
+    # " \n " (space, newline, space): lines [' ', ' '], avg sq = 2/4 = 0.5
     assert is_preferred(" \n ", "  \n")
     assert is_preferred("  \n", "   ")
 
@@ -473,18 +476,18 @@ def test_chain_heuristic_1_length():
     assert is_preferred("!!!", "    ")
 
 
-def test_chain_heuristic_2_sum_of_squares():
-    """Sum of squared line lengths is second."""
+def test_chain_heuristic_2_avg_squared():
+    """Average squared line length is second."""
     # Same length, balanced beats unbalanced
-    a = "ab\ncd"  # 5 chars, lines [2,2], sum = 8
-    b = "abcd\n"  # 5 chars, lines [4], sum = 16
+    a = "ab\ncd"  # 5 chars, lines [2,2], avg sq = 8/4 = 2
+    b = "abcd\n"  # 5 chars, lines [4], avg sq = 16/1 = 16
     assert is_preferred(a, b)
 
 
 def test_chain_heuristic_4_line_lengths_list():
     """Line length list comparison is fourth."""
-    # Same length, same sum, same line count, different distribution
-    # [1,2] vs [2,1] - both sum to 5, both 2 lines
+    # Same length, same avg-sq, same line count, different distribution
+    # [1,2] vs [2,1] - both have avg sq = 5/4, both 2 lines
     a = "a\nbb"  # lines [1,2]
     b = "aa\nb"  # lines [2,1]
     assert is_preferred(a, b)

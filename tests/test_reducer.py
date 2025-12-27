@@ -386,8 +386,8 @@ def test_key_problem_size():
     assert kp.size(b"hi") == 2
 
 
-def test_key_problem_sort_key():
-    """Test KeyProblem.sort_key uses shortlex."""
+def test_key_problem_sort_key_for_text():
+    """Test KeyProblem.sort_key uses natural ordering for text files."""
 
     async def is_interesting(x):
         return True
@@ -401,7 +401,32 @@ def test_key_problem_sort_key():
     applier = PatchApplier(patches=UpdateKeys(), problem=base)
     kp = KeyProblem(base_problem=base, applier=applier, key="file1")
 
-    assert kp.sort_key(b"hello") == shortlex(b"hello")
+    # Text content uses natural ordering - verify it's consistent with itself
+    assert kp.sort_key(b"hello") == kp.sort_key(b"hello")
+    # Shorter is preferred
+    assert kp.sort_key(b"hi") < kp.sort_key(b"hello")
+
+
+def test_key_problem_sort_key_for_binary():
+    """Test KeyProblem.sort_key uses shortlex for binary files."""
+
+    async def is_interesting(x):
+        return True
+
+    # Use binary data that can't be decoded as any text encoding
+    # (invalid UTF-8: continuation bytes without start byte, then invalid sequences)
+    binary_data = bytes([0x80, 0x81, 0x82, 0xC0, 0xC1, 0xFE, 0xFF])
+    base = BasicReductionProblem(
+        initial={"file1": binary_data},
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    applier = PatchApplier(patches=UpdateKeys(), problem=base)
+    kp = KeyProblem(base_problem=base, applier=applier, key="file1")
+
+    # Binary content uses shortlex ordering
+    assert kp.sort_key(binary_data) == shortlex(binary_data)
 
 
 def test_key_problem_display():

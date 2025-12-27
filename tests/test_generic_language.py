@@ -18,9 +18,9 @@ from shrinkray.passes.genericlanguages import (
     reduce_integer_literals,
     regex_pass,
     replace_falsey_with_zero,
-    shortlex,
     simplify_brackets,
 )
+from shrinkray.problem import shortlex
 from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
 

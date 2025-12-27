@@ -10,7 +10,8 @@ The central abstraction is `ReductionProblem[T]` from `problem.py`. This represe
 
 - **current_test_case**: The best known-interesting test case (may temporarily differ during backtracking from pumped test cases)
 - **is_interesting(test_case) -> bool**: Async predicate that tests if a candidate preserves the bug
-- **sort_key(test_case)**: Returns a comparable key for ordering. Also used as a heuristic for how good a reduction pass is: passes that reduce `sort_key` (especially size) are much more valuable than non-size-reducing passes.
+- **sort_key(test_case)**: Returns a comparable key for ordering, ensuring reproducible minimal results
+- Note: The **size** of a test case is used as a heuristic for how good a reduction pass is: passes that reduce size are much more valuable than non-size-reducing passes.
 - **size(test_case) -> int**: Returns the size of a test case (for metrics)
 
 ### Ordering Strategies
@@ -19,7 +20,7 @@ Shrink Ray uses different ordering strategies depending on the type of test case
 
 #### Natural Ordering (for text)
 
-For text-based test cases (bytes that decode as valid UTF-8), Shrink Ray uses a **natural ordering** that produces human-readable minimal results. This ordering uses a chain of heuristics:
+For text-based test cases (bytes that decode as valid Unicode in any encoding), Shrink Ray uses a **natural ordering** that produces human-readable minimal results. This ordering uses a chain of heuristics:
 
 1. **Total length** - shorter strings are always preferred
 2. **Average squared line length** - penalizes very long lines, preferring balanced code

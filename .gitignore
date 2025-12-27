@@ -18,3 +18,5 @@ scratch
 .claude/*
 !.claude/commands/
 snapshot_report.html
+.DS_Store
+*.bak

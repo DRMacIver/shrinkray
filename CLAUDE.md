@@ -100,7 +100,7 @@ Shrink Ray is a multiformat test-case reducer built on Trio for async/parallelis
 **ReductionProblem[T]** (`problem.py`): The central interface representing a reduction task.
 - `current_test_case: T` - The current state being reduced
 - `is_interesting(test_case: T) -> bool` - Tests if a candidate triggers the bug
-- `sort_key(test_case: T)` - Shortlex ordering: (length, lexicographic) for reproducibility
+- `sort_key(test_case: T)` - Ordering for reproducibility (natural ordering for text, shortlex for binary)
 - Problems can be "viewed" through Formats to reduce structured data
 
 **Format[S, T]** (`problem.py`): Bridges bytes ↔ structured data.
@@ -172,7 +172,7 @@ Main Process (asyncio/textual)     Subprocess (trio)
 
 ### Key Design Decisions
 
-1. **Shortlex ordering**: Ensures reproducibility - same minimal result regardless of reduction path
+1. **Natural ordering**: Ensures reproducibility - same minimal result regardless of reduction path. Uses a multi-tier heuristic for text (length, average squared line length, line count, then character ordering) and shortlex for binary data.
 2. **Cache clearing on reduction**: When a smaller test case is found, old cached results are no longer useful (derived from old test case)
 3. **View caching**: `problem.view(format)` caches parsed views to avoid redundant parsing
 4. **Speculative parallelism**: Multiple candidates tested concurrently; first success wins, others are "wasted" but harmless

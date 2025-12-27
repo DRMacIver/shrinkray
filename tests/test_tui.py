@@ -24,7 +24,6 @@ from shrinkray.tui import (
     detect_terminal_theme,
     run_textual_ui,
 )
-from shrinkray.validation import ValidationResult
 
 
 class FakeReductionClient:
@@ -1455,14 +1454,8 @@ def test_cancel_exception_is_caught():
 def test_run_textual_ui_creates_and_runs_app():
     """Test run_textual_ui function creates app and calls run()."""
 
-    # Mock validation to pass without launching subprocess
-    mock_result = ValidationResult(success=True)
-
-    # Patch ShrinkRayApp and validation
-    with (
-        patch("shrinkray.tui.ShrinkRayApp") as mock_app_class,
-        patch("shrinkray.validation.run_validation", return_value=mock_result),
-    ):
+    # Patch ShrinkRayApp - validation is now done before run_textual_ui is called
+    with patch("shrinkray.tui.ShrinkRayApp") as mock_app_class:
         mock_app = MagicMock()
         mock_app.return_code = None  # Ensure no exit
         mock_app_class.return_value = mock_app
@@ -1556,39 +1549,13 @@ def test_completed_flag_during_iteration_breaks_loop():
     run_async(run_test())
 
 
-def test_run_textual_ui_prints_error_and_exits(capsys):
-    """Test run_textual_ui prints error to stderr and exits with code 1."""
-
-    # Mock validation to return an error
-    mock_result = ValidationResult(
-        success=False, error_message="Test validation error"
-    )
-
-    with patch("shrinkray.validation.run_validation", return_value=mock_result):
-        with pytest.raises(SystemExit) as exc_info:
-            run_textual_ui(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-            )
-
-        assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-    assert "Error: Test validation error" in captured.err
-
-
 def test_run_textual_ui_exits_with_app_return_code():
     """Test run_textual_ui exits with app.return_code when set."""
-
-    mock_result = ValidationResult(success=True)
 
     mock_app = MagicMock()
     mock_app.return_code = 42  # Non-zero return code
 
-    with (
-        patch("shrinkray.validation.run_validation", return_value=mock_result),
-        patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app),
-    ):
+    with patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app):
         with pytest.raises(SystemExit) as exc_info:
             run_textual_ui(
                 file_path="/tmp/test.txt",
@@ -1596,28 +1563,6 @@ def test_run_textual_ui_exits_with_app_return_code():
             )
 
         assert exc_info.value.code == 42
-
-
-def test_run_textual_ui_prints_starting_message(capsys):
-    """Test run_textual_ui prints messages to stderr during validation."""
-
-    mock_result = ValidationResult(success=True)
-
-    mock_app = MagicMock()
-    mock_app.return_code = None
-
-    with (
-        patch("shrinkray.validation.run_validation", return_value=mock_result),
-        patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app),
-    ):
-        run_textual_ui(
-            file_path="/tmp/test.txt",
-            test=["./test.sh"],
-        )
-
-    captured = capsys.readouterr()
-    # The "Starting reduction" message is printed after validation passes
-    assert "Starting reduction" in captured.err
 
 
 # =============================================================================

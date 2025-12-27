@@ -18,7 +18,11 @@ from textual.theme import Theme
 from textual.widgets import DataTable, Footer, Header, Label, Static
 
 from shrinkray.subprocess.client import SubprocessClient
-from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
+from shrinkray.subprocess.protocol import (
+    PassStatsData,
+    ProgressUpdate,
+    Response,
+)
 
 
 ThemeMode = Literal["auto", "dark", "light"]
@@ -179,11 +183,15 @@ class StatsDisplay(Static):
         # Runtime
         if self.runtime > 0:
             runtime_delta = timedelta(seconds=self.runtime)
-            lines.append(f"Total runtime: {humanize.precisedelta(runtime_delta)}")
+            lines.append(
+                f"Total runtime: {humanize.precisedelta(runtime_delta)}"
+            )
 
         # Call statistics
         if self.call_count > 0:
-            calls_per_sec = self.call_count / self.runtime if self.runtime > 0 else 0
+            calls_per_sec = (
+                self.call_count / self.runtime if self.runtime > 0 else 0
+            )
             interesting_pct = (self.interesting_calls / self.call_count) * 100
             wasted_pct = (self.wasted_calls / self.call_count) * 100
             lines.append(
@@ -351,7 +359,9 @@ class HelpScreen(ModalScreen[None]):
             yield Static("  [green]c[/green]     Skip current pass")
             yield Static("  [green]q[/green]     Quit application")
             yield Static("")
-            yield Static("[bold]Pass Statistics Screen[/bold]", classes="help-section")
+            yield Static(
+                "[bold]Pass Statistics Screen[/bold]", classes="help-section"
+            )
             yield Static("  [green]↑/↓[/green]   Navigate passes")
             yield Static("  [green]space[/green] Toggle pass enabled/disabled")
             yield Static("  [green]c[/green]     Skip current pass")
@@ -477,7 +487,9 @@ class PassStatsScreen(ModalScreen[None]):
                     runs = Text(str(ps.run_count), style=style)
                     bytes_del = Text(bytes_str, style=style)
                     tests = Text(f"{ps.test_evaluations:,}", style=style)
-                    reductions = Text(str(ps.successful_reductions), style=style)
+                    reductions = Text(
+                        str(ps.successful_reductions), style=style
+                    )
                     success = Text(f"{ps.success_rate:.1f}%", style=style)
                 else:
                     name = ps.pass_name
@@ -507,18 +519,21 @@ class PassStatsScreen(ModalScreen[None]):
         """
         new_stats = self._app._latest_pass_stats.copy()
         new_current = self._app._current_pass_name
-        if new_stats != self.pass_stats or new_current != self.current_pass_name:
+        if (
+            new_stats != self.pass_stats
+            or new_current != self.current_pass_name
+        ):
             self.pass_stats = new_stats
             self.current_pass_name = new_current
             self._update_table_data()
             # Update footer with disabled count
             disabled_count = len(self.disabled_passes)
             if disabled_count > 0:
-                footer_text = (
-                    f"Showing {len(self.pass_stats)} passes ({disabled_count} disabled)"
-                )
+                footer_text = f"Showing {len(self.pass_stats)} passes ({disabled_count} disabled)"
             else:
-                footer_text = f"Showing {len(self.pass_stats)} passes in run order"
+                footer_text = (
+                    f"Showing {len(self.pass_stats)} passes in run order"
+                )
             footer = self.query_one("#stats-footer", Static)
             footer.update(footer_text)
 
@@ -676,7 +691,9 @@ class ShrinkRayApp(App[None]):
             self.theme = "shrinkray-light"
         else:  # auto
             self.theme = (
-                "shrinkray-dark" if detect_terminal_theme() else "shrinkray-light"
+                "shrinkray-dark"
+                if detect_terminal_theme()
+                else "shrinkray-light"
             )
 
         self.title = "Shrink Ray"
@@ -741,7 +758,10 @@ class ShrinkRayApp(App[None]):
             # Check if there was an error from the worker
             if self._client.error_message:
                 # Exit immediately on error, printing the error message
-                self.exit(return_code=1, message=f"Error: {self._client.error_message}")
+                self.exit(
+                    return_code=1,
+                    message=f"Error: {self._client.error_message}",
+                )
                 return
             elif self._exit_on_completion:
                 self.exit()
@@ -820,31 +840,14 @@ def run_textual_ui(
     exit_on_completion: bool = True,
     theme: ThemeMode = "auto",
 ) -> None:
-    """Run the textual TUI."""
+    """Run the textual TUI.
+
+    Note: Validation must be done before calling this function.
+    The caller (main()) is responsible for running run_validation() first.
+    """
     import sys
 
-    from shrinkray.cli import InputType
-    from shrinkray.validation import run_validation
-
-    # Convert input_type string to InputType enum
-    input_type_enum = InputType[input_type]
-
-    # Validate initial example before showing TUI using trio
-    # This runs directly in main process, streaming output to stderr
-    result = run_validation(
-        file_path=file_path,
-        test=test,
-        input_type=input_type_enum,
-        in_place=in_place,
-    )
-
-    if not result.success:
-        print(f"\nError: {result.error_message}", file=sys.stderr)
-        sys.exit(1)
-
-    print("\nStarting reduction...", file=sys.stderr, flush=True)
-
-    # Validation passed - now show the TUI which will start a fresh client
+    # Start the TUI app - validation has already been done by main()
     app = ShrinkRayApp(
         file_path=file_path,
         test=test,

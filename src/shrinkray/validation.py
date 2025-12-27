@@ -10,6 +10,7 @@ import io
 import os
 import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -29,6 +30,8 @@ class ValidationResult:
     exit_code: int | None = None
     # Temp directories to clean up only on success
     temp_dirs: list[str] | None = None
+    # Whether formatter is usable (None if no formatter specified)
+    formatter_works: bool | None = None
 
 
 def _build_command(
@@ -119,44 +122,51 @@ async def _run_validation_test(
         )
         print(file=sys.stderr, flush=True)
 
-        # Build subprocess kwargs
-        kwargs: dict = {
-            "cwd": cwd,
-            "check": False,
-        }
-
-        # Try to stream output directly to stderr if possible
-        # This allows real-time output visibility for slow tests
-        # Falls back to capturing if stderr doesn't have a real file descriptor
-        # (e.g., when running under pytest with output capture)
-        try:
-            stderr_fd = sys.stderr.fileno()
-            kwargs["stdout"] = stderr_fd
-            kwargs["stderr"] = stderr_fd
-            capture_output = False
-        except (io.UnsupportedOperation, OSError):
-            kwargs["capture_stdout"] = True
-            kwargs["capture_stderr"] = True
-            capture_output = True
-
         # Handle stdin if needed
+        stdin_data: bytes | None = None
         if input_type.enabled(InputType.stdin) and not os.path.isdir(working):
             with open(working, "rb") as f:
-                kwargs["stdin"] = f.read()
-        else:
-            kwargs["stdin"] = b""
+                stdin_data = f.read()
 
-        # Run the process
-        result = await trio.run_process(command, **kwargs)
+        # Run subprocess with real-time output streaming
+        # We use subprocess.run in a thread because trio.run_process doesn't
+        # properly support file descriptor inheritance for streaming output.
+        def run_subprocess() -> subprocess.CompletedProcess[bytes]:
+            # Try to stream output directly to stderr if possible
+            # This allows real-time output visibility for slow tests
+            try:
+                stderr_fd = sys.stderr.fileno()
+                return subprocess.run(
+                    command,
+                    cwd=cwd,
+                    stdin=subprocess.DEVNULL if stdin_data is None else None,
+                    stdout=stderr_fd,
+                    stderr=stderr_fd,
+                    input=stdin_data,
+                    check=False,
+                )
+            except (io.UnsupportedOperation, OSError):
+                # Falls back to capturing if stderr doesn't have a real file
+                # descriptor (e.g., when running under pytest with capture)
+                return subprocess.run(
+                    command,
+                    cwd=cwd,
+                    stdin=subprocess.DEVNULL if stdin_data is None else None,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    input=stdin_data,
+                    check=False,
+                )
 
-        # If we captured output, print it now
-        if capture_output:
-            if result.stdout:
-                sys.stderr.buffer.write(result.stdout)
-                sys.stderr.flush()
-            if result.stderr:
-                sys.stderr.buffer.write(result.stderr)
-                sys.stderr.flush()
+        result = await trio.to_thread.run_sync(run_subprocess)
+
+        # If we captured output (fallback mode), print it now
+        if result.stdout:
+            sys.stderr.buffer.write(result.stdout)
+            sys.stderr.flush()
+        if result.stderr:
+            sys.stderr.buffer.write(result.stderr)
+            sys.stderr.flush()
 
         print(file=sys.stderr, flush=True)
         print(
@@ -192,22 +202,62 @@ async def _run_validation_test(
         )
 
 
+async def _run_formatter(
+    formatter_command: list[str],
+    content: bytes,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run the formatter command on content, streaming output to stderr."""
+
+    print("\nRunning formatter:", file=sys.stderr, flush=True)
+    print(
+        " ".join(shlex.quote(part) for part in formatter_command),
+        file=sys.stderr,
+        flush=True,
+    )
+
+    def run_subprocess() -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(
+            formatter_command,
+            input=content,
+            capture_output=True,
+            check=False,
+        )
+
+    result = await trio.to_thread.run_sync(run_subprocess)
+
+    # Show stderr from formatter if any
+    if result.stderr:
+        sys.stderr.buffer.write(result.stderr)
+        sys.stderr.flush()
+
+    print(
+        f"Formatter exit code: {result.returncode}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+    return result
+
+
 async def validate_initial_example(
     file_path: str,
     test: list[str],
     input_type: InputType,
     in_place: bool,
+    formatter_command: list[str] | None = None,
 ) -> ValidationResult:
     """Validate that the initial example passes the interestingness test.
 
     This runs directly in the main process using trio, streaming output
-    to stderr so users can see progress for slow tests.
+    to stderr so users can see progress for slow tests. Also checks the
+    formatter if one is specified.
 
     Args:
         file_path: Path to the file to reduce
         test: The interestingness test command
         input_type: How to pass input to the test
         in_place: Whether to run in the current directory
+        formatter_command: Optional formatter command to validate
 
     Returns:
         ValidationResult indicating success or failure with details.
@@ -235,23 +285,7 @@ async def validate_initial_example(
         filename=file_path,
     )
 
-    if result.success:
-        print(
-            "Initial validation passed.",
-            file=sys.stderr,
-            flush=True,
-        )
-        # Clean up temp directories on success
-        if result.temp_dirs:
-            for path in result.temp_dirs:
-                try:
-                    if os.path.isdir(path):
-                        shutil.rmtree(path)
-                    elif os.path.exists(path):
-                        os.unlink(path)
-                except Exception:
-                    pass  # Best effort cleanup
-    else:
+    if not result.success:
         # On failure, keep temp directories and tell user
         if result.temp_dirs:
             print(
@@ -261,8 +295,86 @@ async def validate_initial_example(
             )
             for path in result.temp_dirs:
                 print(f"  {path}", file=sys.stderr, flush=True)
+        return result
 
-    return result
+    # Clean up temp directories from initial test
+    if result.temp_dirs:
+        for path in result.temp_dirs:
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                elif os.path.exists(path):
+                    os.unlink(path)
+            except Exception:
+                pass  # Best effort cleanup
+
+    print("Initial validation passed.", file=sys.stderr, flush=True)
+
+    # Now check formatter if specified
+    formatter_works: bool | None = None
+    if formatter_command is not None:
+        formatter_result = await _run_formatter(formatter_command, initial_content)
+
+        if formatter_result.returncode != 0:
+            return ValidationResult(
+                success=False,
+                error_message=(
+                    "Formatter exited unexpectedly on initial test case. "
+                    "If this is expected, please run with --formatter=none.\n\n"
+                    f"Formatter stderr:\n{formatter_result.stderr.decode('utf-8', errors='replace').strip()}"
+                ),
+                exit_code=formatter_result.returncode,
+            )
+
+        reformatted = formatter_result.stdout
+
+        # If formatter changed the content, verify it's still interesting
+        if reformatted != initial_content:
+            print(
+                "\nChecking if formatted version is still interesting...",
+                file=sys.stderr,
+                flush=True,
+            )
+            formatted_result = await _run_validation_test(
+                test=test,
+                initial_content=reformatted,
+                base=base,
+                input_type=input_type,
+                in_place=in_place,
+                filename=file_path,
+            )
+
+            # Clean up temp dirs from formatted test
+            if formatted_result.temp_dirs:
+                for path in formatted_result.temp_dirs:
+                    try:
+                        if os.path.isdir(path):
+                            shutil.rmtree(path)
+                        elif os.path.exists(path):
+                            os.unlink(path)
+                    except Exception:
+                        pass
+
+            if not formatted_result.success:
+                return ValidationResult(
+                    success=False,
+                    error_message=(
+                        "Formatting initial test case made it uninteresting. "
+                        "If this is expected, please run with --formatter=none.\n\n"
+                        f"Formatter stderr:\n{formatter_result.stderr.decode('utf-8', errors='replace').strip()}"
+                    ),
+                    exit_code=formatted_result.exit_code,
+                )
+
+            print("Formatted version is also interesting.", file=sys.stderr, flush=True)
+
+        formatter_works = True
+
+    return ValidationResult(
+        success=True,
+        exit_code=0,
+        formatter_works=formatter_works,
+    )
 
 
 def run_validation(
@@ -270,6 +382,7 @@ def run_validation(
     test: list[str],
     input_type: InputType,
     in_place: bool,
+    formatter_command: list[str] | None = None,
 ) -> ValidationResult:
     """Run initial validation synchronously using trio.run().
 
@@ -277,10 +390,14 @@ def run_validation(
     It runs validation directly in the main process before any asyncio
     event loop is started.
     """
-    return trio.run(
-        validate_initial_example,
-        file_path,
-        test,
-        input_type,
-        in_place,
-    )
+
+    async def _run() -> ValidationResult:
+        return await validate_initial_example(
+            file_path,
+            test,
+            input_type,
+            in_place,
+            formatter_command,
+        )
+
+    return trio.run(_run)

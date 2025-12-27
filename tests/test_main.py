@@ -20,6 +20,7 @@ from click.testing import CliRunner
 
 from shrinkray.__main__ import main, worker_main
 from shrinkray.process import interrupt_wait_and_kill
+from shrinkray.validation import ValidationResult
 
 
 def format(s: str) -> str:
@@ -129,6 +130,8 @@ def test_gives_informative_error_when_script_does_not_work_outside_current_direc
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.py"
+    # This script only works when passed the exact target path as an argument
+    # When run from a temp directory with a relative path, it will fail
     script.write_text(
         f"""
 #!/usr/bin/env {sys.executable}
@@ -159,7 +162,8 @@ if sys.argv[1] != {repr(str(target))}:
             text=True,
         )
 
-    assert "your script depends" in excinfo.value.stderr
+    # Validation catches that the test failed when run from temp directory
+    assert "should return 0 for interesting test cases" in excinfo.value.stderr
 
 
 def test_prints_the_output_on_an_initially_uninteresting_test_case(tmpdir):
@@ -305,7 +309,8 @@ exit 1
         ],
     )
     assert result.exit_code != 0
-    assert "uninteresting test case" in result.stderr
+    # Validation now produces this error message
+    assert "should return 0 for interesting test cases" in result.stderr
 
 
 def test_error_when_test_not_executable(tmpdir):
@@ -834,11 +839,10 @@ def test_custom_backup_path_is_used(tmpdir, monkeypatch):
 
 
 def test_directory_mode_setup(tmp_path, monkeypatch):
-    """Fast test verifying directory mode setup logic including check_formatter call.
+    """Fast test verifying directory mode setup logic.
 
     This tests the directory mode initialization without running a full reduction.
     """
-
     # Create a test directory with files
     target = tmp_path / "mydir"
     target.mkdir()
@@ -851,11 +855,11 @@ def test_directory_mode_setup(tmp_path, monkeypatch):
 
     # Track what was passed to ShrinkRayDirectoryState
     captured_initial = []
-    mock_state_instance = MagicMock()
 
     def mock_dir_state_init(**kwargs):
         captured_initial.append(kwargs.get("initial"))
-        return mock_state_instance
+        # Exit early after capturing the initial dict
+        raise SystemExit(0)
 
     # Track copytree calls
     copytree_calls = []
@@ -865,21 +869,19 @@ def test_directory_mode_setup(tmp_path, monkeypatch):
         copytree_calls.append((src, dst))
         original_copytree(src, dst, **kwargs)
 
-    # Track trio.run calls
-    trio_run_calls = []
-
-    def mock_trio_run(coro):
-        trio_run_calls.append(coro)
-        # Exit after check_formatter is called
-        raise SystemExit(0)
+    # Mock validation to pass immediately
+    mock_validation_result = ValidationResult(success=True)
 
     with (
+        patch(
+            "shrinkray.validation.run_validation",
+            return_value=mock_validation_result,
+        ),
         patch(
             "shrinkray.__main__.ShrinkRayDirectoryState",
             side_effect=mock_dir_state_init,
         ),
         patch("shutil.copytree", tracking_copytree),
-        patch("shrinkray.__main__.trio.run", mock_trio_run),
     ):
         runner = CliRunner(catch_exceptions=False)
         try:
@@ -906,10 +908,6 @@ def test_directory_mode_setup(tmp_path, monkeypatch):
     assert "b.txt" in initial
     assert initial["a.txt"] == b"hello"
     assert initial["b.txt"] == b"world"
-
-    # Verify trio.run was called with check_formatter
-    assert len(trio_run_calls) == 1
-    assert trio_run_calls[0] == mock_state_instance.check_formatter
 
 
 @pytest.mark.slow

@@ -44,6 +44,7 @@ If you encounter a case where suppression seems genuinely necessary and principl
 - Commits are a good checkpoint for self-review
 - Just commit when ready - don't ask for permission
 - Use the `/checkpoint` skill to ensure consistent quality at each commit
+- **Always use `git add` with specific file paths** - Never use `git add -A`, `git add .`, or `git add <directory>`. Always list the specific files you intend to stage. This prevents accidentally committing unrelated files (test scripts, debug files, etc.).
 
 ### No Backward Compatibility
 

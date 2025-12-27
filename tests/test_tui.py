@@ -21,10 +21,10 @@ from shrinkray.tui import (
     PassStatsScreen,
     ShrinkRayApp,
     StatsDisplay,
-    _validate_initial_example,
     detect_terminal_theme,
     run_textual_ui,
 )
+from shrinkray.validation import ValidationResult
 
 
 class FakeReductionClient:
@@ -1456,13 +1456,12 @@ def test_run_textual_ui_creates_and_runs_app():
     """Test run_textual_ui function creates app and calls run()."""
 
     # Mock validation to pass without launching subprocess
-    async def mock_validate(*args, **kwargs):
-        return None
+    mock_result = ValidationResult(success=True)
 
     # Patch ShrinkRayApp and validation
     with (
         patch("shrinkray.tui.ShrinkRayApp") as mock_app_class,
-        patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate),
+        patch("shrinkray.validation.run_validation", return_value=mock_result),
     ):
         mock_app = MagicMock()
         mock_app.return_code = None  # Ensure no exit
@@ -1474,7 +1473,7 @@ def test_run_textual_ui_creates_and_runs_app():
             parallelism=4,
             timeout=2.0,
             seed=42,
-            input_type="bytes",
+            input_type="arg",
             in_place=True,
             formatter="clang-format",
             volume="quiet",
@@ -1492,7 +1491,7 @@ def test_run_textual_ui_creates_and_runs_app():
             parallelism=4,
             timeout=2.0,
             seed=42,
-            input_type="bytes",
+            input_type="arg",
             in_place=True,
             formatter="clang-format",
             volume="quiet",
@@ -1557,86 +1556,15 @@ def test_completed_flag_during_iteration_breaks_loop():
     run_async(run_test())
 
 
-def test_validate_initial_example_success(tmp_path):
-    """Test _validate_initial_example returns None on success."""
-
-    async def run_test():
-        mock_client = MagicMock()
-        mock_client.start = AsyncMock()
-        mock_client.start_reduction = AsyncMock(
-            return_value=Response(id="start", result={"status": "started"})
-        )
-        mock_client.cancel = AsyncMock(
-            return_value=Response(id="cancel", result={"status": "cancelled"})
-        )
-        mock_client.close = AsyncMock()
-
-        with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
-            result = await _validate_initial_example(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-                parallelism=1,
-                timeout=1.0,
-                seed=0,
-                input_type="all",
-                in_place=False,
-                formatter="none",
-                volume="quiet",
-                no_clang_delta=True,
-                clang_delta="",
-                trivial_is_error=True,
-            )
-
-        assert result is None
-        mock_client.start.assert_called_once()
-        mock_client.start_reduction.assert_called_once()
-        mock_client.cancel.assert_called_once()
-        mock_client.close.assert_called_once()
-
-    run_async(run_test())
-
-
-def test_validate_initial_example_returns_error():
-    """Test _validate_initial_example returns error message on failure."""
-
-    async def run_test():
-        mock_client = MagicMock()
-        mock_client.start = AsyncMock()
-        mock_client.start_reduction = AsyncMock(
-            return_value=Response(id="start", error="Interestingness test failed")
-        )
-        mock_client.close = AsyncMock()
-
-        with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
-            result = await _validate_initial_example(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-                parallelism=1,
-                timeout=1.0,
-                seed=0,
-                input_type="all",
-                in_place=False,
-                formatter="none",
-                volume="quiet",
-                no_clang_delta=True,
-                clang_delta="",
-                trivial_is_error=True,
-            )
-
-        assert result == "Interestingness test failed"
-        mock_client.close.assert_called_once()
-
-    run_async(run_test())
-
-
 def test_run_textual_ui_prints_error_and_exits(capsys):
     """Test run_textual_ui prints error to stderr and exits with code 1."""
 
     # Mock validation to return an error
-    async def mock_validate(*args, **kwargs):
-        return "Test validation error"
+    mock_result = ValidationResult(
+        success=False, error_message="Test validation error"
+    )
 
-    with patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate):
+    with patch("shrinkray.validation.run_validation", return_value=mock_result):
         with pytest.raises(SystemExit) as exc_info:
             run_textual_ui(
                 file_path="/tmp/test.txt",
@@ -1652,14 +1580,13 @@ def test_run_textual_ui_prints_error_and_exits(capsys):
 def test_run_textual_ui_exits_with_app_return_code():
     """Test run_textual_ui exits with app.return_code when set."""
 
-    async def mock_validate(*args, **kwargs):
-        return None
+    mock_result = ValidationResult(success=True)
 
     mock_app = MagicMock()
     mock_app.return_code = 42  # Non-zero return code
 
     with (
-        patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate),
+        patch("shrinkray.validation.run_validation", return_value=mock_result),
         patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app),
     ):
         with pytest.raises(SystemExit) as exc_info:
@@ -1671,17 +1598,16 @@ def test_run_textual_ui_exits_with_app_return_code():
         assert exc_info.value.code == 42
 
 
-def test_run_textual_ui_prints_validation_message(capsys):
-    """Test run_textual_ui prints validation message before validating."""
+def test_run_textual_ui_prints_starting_message(capsys):
+    """Test run_textual_ui prints messages to stderr during validation."""
 
-    async def mock_validate(*args, **kwargs):
-        return None
+    mock_result = ValidationResult(success=True)
 
     mock_app = MagicMock()
     mock_app.return_code = None
 
     with (
-        patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate),
+        patch("shrinkray.validation.run_validation", return_value=mock_result),
         patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app),
     ):
         run_textual_ui(
@@ -1690,29 +1616,8 @@ def test_run_textual_ui_prints_validation_message(capsys):
         )
 
     captured = capsys.readouterr()
-    assert "Validating initial example" in captured.out
-
-
-def test_run_textual_ui_handles_validation_exception(capsys):
-    """Test run_textual_ui handles exceptions during validation (lines 877-882)."""
-
-    # Mock validation to raise an exception
-    async def mock_validate(*args, **kwargs):
-        raise RuntimeError("Validation failed unexpectedly")
-
-    with patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate):
-        with pytest.raises(SystemExit) as exc_info:
-            run_textual_ui(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-            )
-
-        assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-    assert "Error: Validation failed unexpectedly" in captured.err
-    # Check that traceback was printed (should contain "RuntimeError")
-    assert "RuntimeError" in captured.err
+    # The "Starting reduction" message is printed after validation passes
+    assert "Starting reduction" in captured.err
 
 
 # =============================================================================

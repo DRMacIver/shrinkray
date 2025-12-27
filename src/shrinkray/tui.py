@@ -804,54 +804,6 @@ class ShrinkRayApp(App[None]):
         return self._completed
 
 
-async def _validate_initial_example(
-    file_path: str,
-    test: list[str],
-    parallelism: int | None,
-    timeout: float | None,
-    seed: int,
-    input_type: str,
-    in_place: bool,
-    formatter: str,
-    volume: str,
-    no_clang_delta: bool,
-    clang_delta: str,
-    trivial_is_error: bool,
-) -> str | None:
-    """Validate initial example before showing TUI.
-
-    Returns error_message if validation failed, None if it passed.
-    """
-    debug_mode = volume == "debug"
-    client = SubprocessClient(debug_mode=debug_mode)
-    try:
-        await client.start()
-
-        response = await client.start_reduction(
-            file_path=file_path,
-            test=test,
-            parallelism=parallelism,
-            timeout=timeout,
-            seed=seed,
-            input_type=input_type,
-            in_place=in_place,
-            formatter=formatter,
-            volume=volume,
-            no_clang_delta=no_clang_delta,
-            clang_delta=clang_delta,
-            trivial_is_error=trivial_is_error,
-        )
-
-        if response.error:
-            return response.error
-
-        # Validation passed - cancel this reduction since TUI will start fresh
-        await client.cancel()
-        return None
-    finally:
-        await client.close()
-
-
 def run_textual_ui(
     file_path: str,
     test: list[str],
@@ -869,40 +821,28 @@ def run_textual_ui(
     theme: ThemeMode = "auto",
 ) -> None:
     """Run the textual TUI."""
-    import asyncio
     import sys
 
-    print("Validating initial example...", flush=True)
+    from shrinkray.cli import InputType
+    from shrinkray.validation import run_validation
 
-    # Validate initial example before showing TUI
-    async def validate():
-        return await _validate_initial_example(
-            file_path=file_path,
-            test=test,
-            parallelism=parallelism,
-            timeout=timeout,
-            seed=seed,
-            input_type=input_type,
-            in_place=in_place,
-            formatter=formatter,
-            volume=volume,
-            no_clang_delta=no_clang_delta,
-            clang_delta=clang_delta,
-            trivial_is_error=trivial_is_error,
-        )
+    # Convert input_type string to InputType enum
+    input_type_enum = InputType[input_type]
 
-    try:
-        error = asyncio.run(validate())
-    except Exception as e:
-        import traceback
+    # Validate initial example before showing TUI using trio
+    # This runs directly in main process, streaming output to stderr
+    result = run_validation(
+        file_path=file_path,
+        test=test,
+        input_type=input_type_enum,
+        in_place=in_place,
+    )
 
-        traceback.print_exc()
-        print(f"Error: {e}", file=sys.stderr)
+    if not result.success:
+        print(f"\nError: {result.error_message}", file=sys.stderr)
         sys.exit(1)
 
-    if error:
-        print(f"Error: {error}", file=sys.stderr)
-        sys.exit(1)
+    print("\nStarting reduction...", file=sys.stderr, flush=True)
 
     # Validation passed - now show the TUI which will start a fresh client
     app = ShrinkRayApp(

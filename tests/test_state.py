@@ -1,9 +1,13 @@
 """Tests for state management."""
 
+import os
+from unittest.mock import MagicMock
+
 import pytest
 import trio
 
 from shrinkray.cli import InputType
+from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import (
     ShrinkRayDirectoryState,
     ShrinkRayStateSingleFile,
@@ -796,7 +800,6 @@ async def test_print_exit_message_trivial_error(tmp_path, capsys):
 
     Exercises the trivial result error path in print_exit_message.
     """
-    from unittest.mock import MagicMock
 
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")
@@ -837,7 +840,6 @@ async def test_print_exit_message_no_reduction(tmp_path, capsys):
 
     Exercises the 'no bytes deleted' message path in print_exit_message.
     """
-    from unittest.mock import MagicMock
 
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")
@@ -1117,7 +1119,6 @@ async def test_print_exit_message_formatting_increase(tmp_path, capsys):
 
     Exercises the formatting increase message path in print_exit_message.
     """
-    from unittest.mock import MagicMock
 
     # Create a formatter that adds content (increases size)
     formatter = tmp_path / "formatter.sh"
@@ -1164,7 +1165,6 @@ async def test_run_for_exit_code_in_place_basename(tmp_path):
 
     Exercises the in_place with basename input type path in run_for_exit_code.
     """
-    import os
 
     # Change to tmp_path so the script can find the file by basename
     original_cwd = os.getcwd()
@@ -1290,7 +1290,8 @@ async def test_report_error_flaky_test(tmp_path, capsys):
     # Call 1 (temp dir): exits 1 (fails)
     # Call 2 (cwd, local_exit_code): exits 0 (succeeds)
     # Call 3 (cwd, other_exit_code): exits 1 (different from 0 = flaky!)
-    script.write_text(f"""#!/bin/bash
+    script.write_text(
+        f"""#!/bin/bash
 COUNTER=$(cat "{counter_file}")
 COUNTER=$((COUNTER + 1))
 echo $COUNTER > "{counter_file}"
@@ -1301,7 +1302,8 @@ elif [ "$COUNTER" -eq 2 ]; then
 else
     exit 1  # Third call fails (other_exit_code, different from 0 = flaky!)
 fi
-""")
+"""
+    )
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1715,7 +1717,6 @@ async def test_build_error_message_includes_debug_output(tmp_path):
 
     Exercises the debug output inclusion in build_error_message.
     """
-    from shrinkray.problem import InvalidInitialExample
 
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\necho 'diagnostic output' >&2\nexit 1")
@@ -1756,9 +1757,6 @@ async def test_build_error_message_includes_debug_output(tmp_path):
 
 async def test_build_error_message_includes_cwd_debug_output(tmp_path):
     """Test build_error_message includes debug output from cwd run."""
-    import os
-
-    from shrinkray.problem import InvalidInitialExample
 
     # Create a counter file to track call count
     counter_file = tmp_path / ".call_count"

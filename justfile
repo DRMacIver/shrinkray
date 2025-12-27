@@ -18,6 +18,7 @@ test-quick *args:
 # Lint and type-check
 lint:
     uv run ruff check src tests
+    uv run python scripts/extra_lints.py
     uv run basedpyright src tests
 
 # Format code with ruff

@@ -271,20 +271,20 @@ def main(
     if not backup:
         backup = filename + os.extsep + "bak"
 
-    state_kwargs: dict[str, Any] = dict(
-        input_type=input_type,
-        in_place=in_place,
-        test=test,
-        timeout=timeout,
-        base=os.path.basename(filename),
-        parallelism=parallelism,
-        filename=filename,
-        formatter=formatter,
-        trivial_is_error=trivial_is_error,
-        seed=seed,
-        volume=volume,
-        clang_delta_executable=clang_delta_executable,
-    )
+    state_kwargs: dict[str, Any] = {
+        "input_type": input_type,
+        "in_place": in_place,
+        "test": test,
+        "timeout": timeout,
+        "base": os.path.basename(filename),
+        "parallelism": parallelism,
+        "filename": filename,
+        "formatter": formatter,
+        "trivial_is_error": trivial_is_error,
+        "seed": seed,
+        "volume": volume,
+        "clang_delta_executable": clang_delta_executable,
+    }
 
     state: ShrinkRayState[Any]
     ui: ShrinkRayUI[Any]

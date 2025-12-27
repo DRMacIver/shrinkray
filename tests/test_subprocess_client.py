@@ -6,6 +6,8 @@ Using asyncio.run() isolates these tests from the trio event loop.
 """
 
 import asyncio
+from contextlib import aclosing
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -187,8 +189,9 @@ def test_subprocess_client_get_progress_updates_stops_when_completed():
         client._completed = True
 
         updates = []
-        async for update in client.get_progress_updates():
-            updates.append(update)
+        async with aclosing(client.get_progress_updates()) as aiter:
+            async for update in aiter:
+                updates.append(update)
 
         # Should exit immediately since _completed is True
         assert updates == []
@@ -345,8 +348,9 @@ def test_subprocess_client_get_progress_updates_timeout():
 
         async def collect_updates():
             updates = []
-            async for update in client.get_progress_updates():
-                updates.append(update)
+            async with aclosing(client.get_progress_updates()) as aiter:
+                async for update in aiter:
+                    updates.append(update)
             return updates
 
         # Run both tasks concurrently - collect_updates will hit timeout
@@ -386,8 +390,6 @@ def test_subprocess_client_close_handles_timeout():
     """Test close handles process that doesn't terminate after SIGTERM."""
 
     async def run():
-        from unittest.mock import MagicMock
-
         client = SubprocessClient()
 
         # Create a mock process
@@ -440,8 +442,6 @@ def test_subprocess_client_close_handles_process_lookup_error():
     """Test close handles ProcessLookupError when process exits during close."""
 
     async def run():
-        from unittest.mock import MagicMock
-
         client = SubprocessClient()
 
         # Create a mock process that raises ProcessLookupError on terminate
@@ -465,8 +465,6 @@ def test_subprocess_client_read_output_handles_exception():
     """Test _read_output handles connection exceptions gracefully."""
 
     async def run():
-        from unittest.mock import MagicMock
-
         client = SubprocessClient()
 
         # Create a mock process with stdout that raises
@@ -503,8 +501,6 @@ def test_subprocess_client_read_output_handles_empty_lines():
     """Test _read_output handles empty lines between newlines."""
 
     async def run():
-        from unittest.mock import MagicMock
-
         client = SubprocessClient()
 
         # Create a mock process with stdout that returns data with empty lines
@@ -607,9 +603,6 @@ def test_subprocess_client_get_progress_updates_yields_update():
     async def run():
         client = SubprocessClient()
 
-        # Add an update to the queue
-        from shrinkray.subprocess.protocol import ProgressUpdate
-
         update = ProgressUpdate(
             status="running",
             size=100,
@@ -641,9 +634,10 @@ def test_subprocess_client_get_progress_updates_yields_update():
         updates = []
 
         async def collect():
-            async for u in client.get_progress_updates():
-                updates.append(u)
-                break  # Just get one update
+            async with aclosing(client.get_progress_updates()) as aiter:
+                async for u in aiter:
+                    updates.append(u)
+                    break  # Just get one update
 
         asyncio.create_task(mark_completed_after_first())
         await collect()
@@ -658,8 +652,6 @@ def test_subprocess_client_close_handles_no_stdin():
     """Test close handles case where stdin is None."""
 
     async def run():
-        from unittest.mock import MagicMock
-
         client = SubprocessClient()
 
         # Create mock process with no stdin
@@ -858,8 +850,6 @@ def test_subprocess_client_close_actually_kills_after_terminate_timeout():
     """
 
     async def run():
-        from unittest.mock import MagicMock, patch
-
         client = SubprocessClient()
 
         # Create a mock process
@@ -936,7 +926,6 @@ def test_subprocess_client_get_progress_updates_timeout_continue():
     This tests the timeout handling in the progress update loop - when no
     update is available within the timeout, it should continue looping.
     """
-    from unittest.mock import patch
 
     async def run():
         client = SubprocessClient()
@@ -957,8 +946,9 @@ def test_subprocess_client_get_progress_updates_timeout_continue():
             side_effect=mock_wait_for,
         ):
             updates = []
-            async for update in client.get_progress_updates():
-                updates.append(update)
+            async with aclosing(client.get_progress_updates()) as aiter:
+                async for update in aiter:
+                    updates.append(update)
 
         # Should have no updates (queue was never populated)
         assert updates == []
@@ -1013,7 +1003,6 @@ def test_subprocess_client_disable_pass_when_completed():
 
 def test_subprocess_client_disable_pass_exception():
     """Test disable_pass handles send_command exception."""
-    from unittest.mock import AsyncMock
 
     async def run():
         client = SubprocessClient()
@@ -1041,7 +1030,6 @@ def test_subprocess_client_enable_pass_when_completed():
 
 def test_subprocess_client_enable_pass_exception():
     """Test enable_pass handles send_command exception."""
-    from unittest.mock import AsyncMock
 
     async def run():
         client = SubprocessClient()
@@ -1069,7 +1057,6 @@ def test_subprocess_client_skip_current_pass_when_completed():
 
 def test_subprocess_client_skip_current_pass_exception():
     """Test skip_current_pass handles send_command exception."""
-    from unittest.mock import AsyncMock
 
     async def run():
         client = SubprocessClient()

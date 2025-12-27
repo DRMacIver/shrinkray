@@ -24,6 +24,36 @@ jobs:
       - name: Run zizmor
         uses: zizmorcore/zizmor-action@e639db99335bc9038abc0e066dfcd72e23d26fb4 # v0.3.0
 
+  format:
+    name: Check formatting
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Install just
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          version: "latest"
+      - name: Set up Python
+        run: uv python install 3.14
+      - name: Pin Python version
+        run: uv python pin 3.14
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Run formatter
+        run: just format
+      - name: Check for changes
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::Formatting changes detected. Run 'just format' locally and commit the changes."
+            exit 1
+          fi
+
   lint:
     runs-on: ubuntu-latest
     permissions:
@@ -153,7 +183,7 @@ jobs:
   auto-release:
     # Only run on main branch, after all CI checks pass
     if: github.ref == 'refs/heads/main'
-    needs: [action-lint, lint, test, coverage, slow-tests]
+    needs: [action-lint, format, lint, test, coverage, slow-tests]
     runs-on: ubuntu-22.04
     permissions:
       contents: write  # Needed to push commits and tags

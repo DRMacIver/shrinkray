@@ -166,9 +166,8 @@ async def test_apply_transformation_raises_clang_delta_error():
     error.stdout = b"Some error"
     error.stderr = b""
 
-    with patch("trio.run_process", side_effect=error):
-        with pytest.raises(ClangDeltaError):
-            await cd.apply_transformation("rename-var", 1, source)
+    with patch("trio.run_process", side_effect=error), pytest.raises(ClangDeltaError):
+        await cd.apply_transformation("rename-var", 1, source)
 
 
 async def test_pump_handles_assertion_failure():
@@ -238,14 +237,16 @@ def test_clang_delta_works_when_not_found():
 def test_clang_delta_works_when_execution_fails():
     """Test clang_delta_works returns False when clang_delta exists but fails to run."""
     clang_delta_works.cache_clear()
-    with patch(
-        "shrinkray.passes.clangdelta.find_clang_delta", return_value="/usr/bin/fake"
-    ):
-        with patch(
+    with (
+        patch(
+            "shrinkray.passes.clangdelta.find_clang_delta", return_value="/usr/bin/fake"
+        ),
+        patch(
             "shrinkray.passes.clangdelta.subprocess.run",
             side_effect=OSError("Library not found"),
-        ):
-            assert clang_delta_works() is False
+        ),
+    ):
+        assert clang_delta_works() is False
 
 
 def test_clang_delta_works_when_returns_nonzero():
@@ -254,13 +255,13 @@ def test_clang_delta_works_when_returns_nonzero():
     mock_result = MagicMock()
     mock_result.returncode = 1
 
-    with patch(
-        "shrinkray.passes.clangdelta.find_clang_delta", return_value="/usr/bin/fake"
+    with (
+        patch(
+            "shrinkray.passes.clangdelta.find_clang_delta", return_value="/usr/bin/fake"
+        ),
+        patch("shrinkray.passes.clangdelta.subprocess.run", return_value=mock_result),
     ):
-        with patch(
-            "shrinkray.passes.clangdelta.subprocess.run", return_value=mock_result
-        ):
-            assert clang_delta_works() is False
+        assert clang_delta_works() is False
 
 
 def test_find_clang_delta_when_found_in_path():
@@ -306,9 +307,8 @@ async def test_query_instances_raises_clang_delta_error():
     error.stdout = b"Some other error"
     error.stderr = b"More error info"
 
-    with patch("trio.run_process", side_effect=error):
-        with pytest.raises(ClangDeltaError):
-            await cd.query_instances("rename-var", b"int main() {}")
+    with patch("trio.run_process", side_effect=error), pytest.raises(ClangDeltaError):
+        await cd.query_instances("rename-var", b"int main() {}")
 
 
 async def test_query_instances_handles_assertion_failure():

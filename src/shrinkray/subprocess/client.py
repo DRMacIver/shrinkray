@@ -4,7 +4,7 @@ import asyncio
 import sys
 import traceback
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 from shrinkray.subprocess.protocol import (
@@ -200,7 +200,7 @@ class SubprocessClient:
             traceback.print_exc()
             return Response(id="", error="Failed to skip pass")
 
-    async def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]:
+    async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
         """Yield progress updates as they arrive."""
         while not self._completed:
             try:

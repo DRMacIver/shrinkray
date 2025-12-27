@@ -1,10 +1,14 @@
 import hashlib
+import io
 import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import time
+from unittest.mock import MagicMock, patch
 
 import black
 import pexpect
@@ -14,7 +18,7 @@ import trio
 from attrs import define
 from click.testing import CliRunner
 
-from shrinkray.__main__ import main
+from shrinkray.__main__ import main, worker_main
 from shrinkray.process import interrupt_wait_and_kill
 
 
@@ -342,7 +346,6 @@ def test_parallelism_defaults_to_one_for_basename_inplace(tmpdir, monkeypatch):
     This test mocks the state creation to verify the parallelism value
     without running a full reduction.
     """
-    from unittest.mock import patch
 
     monkeypatch.chdir(tmpdir)
 
@@ -382,7 +385,6 @@ def test_parallelism_defaults_to_one_for_basename_inplace(tmpdir, monkeypatch):
 
 def test_explicit_parallelism_skips_default_logic(tmpdir, monkeypatch):
     """Test that explicit non-zero parallelism skips the default logic (235->241 branch)."""
-    from unittest.mock import patch
 
     monkeypatch.chdir(tmpdir)
 
@@ -454,7 +456,6 @@ grep hello hello.txt
 
 def test_worker_main_can_be_imported():
     """Test that worker_main function can be called."""
-    from shrinkray.__main__ import worker_main
 
     # Can't actually run it without proper stdin/stdout setup,
     # but at least verify it's importable and callable
@@ -536,7 +537,6 @@ def test_clang_delta_explicit_path(tmp_path, monkeypatch):
 @pytest.mark.slow
 def test_default_backup_filename(basic_shrink_target):
     """Test that default backup filename is created correctly."""
-    import os
 
     # First, remove any existing backup
     backup_path = basic_shrink_target.test_case + os.extsep + "bak"
@@ -596,9 +596,6 @@ test -f "$1/a.txt" && grep hello "$1/a.txt"
 
 def test_worker_main_entry_point():
     """Test that worker_main can be invoked (will fail without proper stdin)."""
-    import io
-
-    from shrinkray.__main__ import worker_main
 
     # Capture what would happen if worker_main runs without proper input
     old_stdin = sys.stdin
@@ -639,7 +636,6 @@ def test_textual_ui_path(basic_shrink_target, monkeypatch):
 
     Exercises the textual UI code path in run_command.
     """
-    from unittest.mock import MagicMock
 
     # Mock run_textual_ui to avoid actually launching the TUI
     mock_run_textual_ui = MagicMock()
@@ -665,7 +661,6 @@ def test_keyboard_interrupt_handling(basic_shrink_target, tmp_path):
 
     Exercises the KeyboardInterrupt handling in run_command.
     """
-    from unittest.mock import patch
 
     # Create a custom trio.run that tracks calls
     call_count = [0]
@@ -706,7 +701,6 @@ def test_timeout_zero_converts_to_infinity(tmpdir, monkeypatch):
 
     Exercises the timeout=0 to infinity conversion in run_command.
     """
-    from unittest.mock import patch
 
     monkeypatch.chdir(tmpdir)
 
@@ -748,8 +742,6 @@ def test_default_backup_filename_calculation(tmpdir, monkeypatch):
 
     Exercises the default backup filename calculation in run_command.
     """
-    import os
-    from unittest.mock import patch
 
     monkeypatch.chdir(tmpdir)
 
@@ -797,8 +789,6 @@ def test_custom_backup_path_is_used(tmpdir, monkeypatch):
 
     This tests the case when --backup is explicitly provided.
     """
-    import os
-    from unittest.mock import patch
 
     monkeypatch.chdir(tmpdir)
 
@@ -848,8 +838,6 @@ def test_directory_mode_setup(tmp_path, monkeypatch):
 
     This tests the directory mode initialization without running a full reduction.
     """
-    import shutil
-    from unittest.mock import MagicMock, patch
 
     # Create a test directory with files
     target = tmp_path / "mydir"
@@ -885,25 +873,27 @@ def test_directory_mode_setup(tmp_path, monkeypatch):
         # Exit after check_formatter is called
         raise SystemExit(0)
 
-    with patch(
-        "shrinkray.__main__.ShrinkRayDirectoryState",
-        side_effect=mock_dir_state_init,
+    with (
+        patch(
+            "shrinkray.__main__.ShrinkRayDirectoryState",
+            side_effect=mock_dir_state_init,
+        ),
+        patch("shutil.copytree", tracking_copytree),
+        patch("shrinkray.__main__.trio.run", mock_trio_run),
     ):
-        with patch("shutil.copytree", tracking_copytree):
-            with patch("shrinkray.__main__.trio.run", mock_trio_run):
-                runner = CliRunner(catch_exceptions=False)
-                try:
-                    runner.invoke(
-                        main,
-                        [
-                            str(script),
-                            str(target),
-                            "--ui=basic",
-                            "--input-type=arg",
-                        ],
-                    )
-                except SystemExit:
-                    pass
+        runner = CliRunner(catch_exceptions=False)
+        try:
+            runner.invoke(
+                main,
+                [
+                    str(script),
+                    str(target),
+                    "--ui=basic",
+                    "--input-type=arg",
+                ],
+            )
+        except SystemExit:
+            pass
 
     # Verify copytree was called for backup
     assert len(copytree_calls) == 1
@@ -1364,7 +1354,6 @@ def test_trivial_is_not_error_tui(tmp_path, monkeypatch):
 
     Uses mocking to verify the TUI is invoked with correct parameters.
     """
-    from unittest.mock import MagicMock
 
     target = tmp_path / "test.txt"
     target.write_text("hello")
@@ -1487,7 +1476,6 @@ def test_tui_terminal_interaction_quit_during_reduction(tmp_path):
     The test typically completes in 2-3 seconds (most of which is subprocess and
     TUI startup overhead), with 5 second timeouts as safety margins for CI.
     """
-    import time
 
     # Create a smaller file (100 bytes) for faster testing
     # We need content whose hash is divisible by 10 so the initial test passes

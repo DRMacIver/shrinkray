@@ -44,10 +44,12 @@ def test_find_python_command_checks_python_bin_directory():
 
 
 def test_find_python_command_returns_none_when_not_in_bin_dir():
-    with patch("shrinkray.formatting.which", return_value=None):
-        with patch("os.path.exists", return_value=False):
-            result = find_python_command("nonexistent")
-            assert result is None
+    with (
+        patch("shrinkray.formatting.which", return_value=None),
+        patch("os.path.exists", return_value=False),
+    ):
+        result = find_python_command("nonexistent")
+        assert result is None
 
 
 # === try_decode tests ===

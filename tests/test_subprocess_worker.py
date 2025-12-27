@@ -1,12 +1,19 @@
 """Tests for ReducerWorker subprocess."""
 
 import io
+import json
+import os
+import runpy
 import sys
-from unittest.mock import MagicMock, patch
+import time
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 import trio
 
+import shrinkray.subprocess.worker
+from shrinkray.passes.clangdelta import find_clang_delta
+from shrinkray.problem import InvalidInitialExample
 from shrinkray.subprocess.protocol import (
     ProgressUpdate,
     Request,
@@ -14,7 +21,7 @@ from shrinkray.subprocess.protocol import (
     deserialize,
     serialize,
 )
-from shrinkray.subprocess.worker import ReducerWorker
+from shrinkray.subprocess.worker import ReducerWorker, StdoutStream, main
 
 
 # === ReducerWorker initialization tests ===
@@ -345,6 +352,9 @@ class MemoryInputStream:
         self.pos += chunk_size
         return chunk
 
+    async def aclose(self) -> None:
+        pass
+
 
 class MemoryOutputStream:
     """An in-memory output stream for testing."""
@@ -599,7 +609,6 @@ async def test_worker_handle_start_error(tmp_path):
 
 async def test_stdout_stream_send():
     """Test StdoutStream wrapper class sends data to stdout."""
-    from shrinkray.subprocess.worker import StdoutStream
 
     output = io.StringIO()
     stream = StdoutStream()
@@ -771,7 +780,6 @@ def test_worker_get_content_preview_decode_exception():
 
 async def test_worker_start_reduction_with_clang_delta(tmp_path):
     """Test _start_reduction with a C file and clang_delta enabled."""
-    from shrinkray.passes.clangdelta import find_clang_delta
 
     clang_delta_path = find_clang_delta()
     if not clang_delta_path:
@@ -860,7 +868,6 @@ async def test_worker_full_run_with_mock(tmp_path):
 
 def test_worker_main_function():
     """Test the main() function is callable."""
-    from shrinkray.subprocess.worker import main
 
     # We can't easily test the actual main() since it blocks on trio.run
     # But we can verify it exists and is callable
@@ -869,8 +876,6 @@ def test_worker_main_function():
 
 def test_worker_main_guard():
     """Test that the module has a main function."""
-    # This is just to verify the module can be imported
-    import shrinkray.subprocess.worker
 
     # The module exists and can be imported
     assert hasattr(shrinkray.subprocess.worker, "main")
@@ -920,6 +925,9 @@ async def test_worker_run_waits_for_start(tmp_path):
             await trio.sleep(0.05)
             self._sent = True
             return self._data
+
+        async def aclose(self) -> None:
+            pass
 
     input_stream = DelayedInputStream((serialize(start_request) + "\n").encode("utf-8"))
 
@@ -1039,7 +1047,6 @@ async def test_worker_start_reduction_clang_delta_path_provided(tmp_path):
 
 def test_worker_main_runs_trio():
     """Test main() function creates worker and runs trio."""
-    from shrinkray.subprocess.worker import main
 
     # Mock trio.run and ReducerWorker to verify the flow
     with patch("shrinkray.subprocess.worker.trio.run") as mock_trio_run:
@@ -1055,7 +1062,6 @@ def test_worker_main_runs_trio():
 
 async def test_worker_read_commands_uses_stdin_when_no_stream():
     """Test read_commands uses stdin when no stream is provided."""
-    import os
 
     output = MemoryOutputStream()
     worker = ReducerWorker(output_stream=output)
@@ -1084,7 +1090,6 @@ async def test_worker_read_commands_uses_stdin_when_no_stream():
 
 def test_worker_main_module_entry_point():
     """Test the __name__ == '__main__' guard."""
-    import runpy
 
     # Mock trio.run to prevent it from actually running
     with patch("shrinkray.subprocess.worker.trio.run") as mock_trio_run:
@@ -1172,9 +1177,6 @@ async def test_worker_start_validates_initial_example(tmp_path):
         "no_clang_delta": True,
     }
 
-    # _start_reduction should raise InvalidInitialExample
-    from shrinkray.problem import InvalidInitialExample
-
     with pytest.raises(InvalidInitialExample):
         await worker._start_reduction(params)
 
@@ -1220,9 +1222,6 @@ async def test_worker_full_run_with_failing_test(tmp_path):
     # Should have gotten an error response (not "started")
     assert b"error" in output.data
     assert b"Shrink ray cannot proceed" in output.data
-
-    # All output should be valid JSON
-    import json
 
     for line in output_str.strip().split("\n"):
         if line:
@@ -1416,7 +1415,6 @@ async def test_worker_trivial_result_no_error_when_disabled(tmp_path):
 @pytest.mark.trio
 async def test_worker_handle_start_invalid_initial_example_without_state():
     """Test error handling when InvalidInitialExample is raised before state is set."""
-    from shrinkray.problem import InvalidInitialExample
 
     output = MemoryOutputStream()
     worker = ReducerWorker(output_stream=output)
@@ -1452,7 +1450,6 @@ async def test_worker_run_reducer_exception_handling():
 @pytest.mark.trio
 async def test_worker_run_reducer_invalid_initial_example_without_state():
     """Test run_reducer handles InvalidInitialExample when state is None."""
-    from shrinkray.problem import InvalidInitialExample
 
     output = MemoryOutputStream()
     worker = ReducerWorker(output_stream=output)
@@ -1474,9 +1471,6 @@ async def test_worker_run_reducer_invalid_initial_example_without_state():
 @pytest.mark.trio
 async def test_worker_run_reducer_invalid_initial_example_with_state():
     """Test run_reducer builds error message when state is available."""
-    from unittest.mock import AsyncMock, MagicMock
-
-    from shrinkray.problem import InvalidInitialExample
 
     output = MemoryOutputStream()
     worker = ReducerWorker(output_stream=output)
@@ -1502,7 +1496,6 @@ async def test_worker_run_reducer_invalid_initial_example_with_state():
 @pytest.mark.trio
 async def test_worker_run_with_none_progress_update():
     """Test run() when _build_progress_update returns None (376->380 branch)."""
-    from unittest.mock import AsyncMock
 
     output = MemoryOutputStream()
 
@@ -1523,6 +1516,9 @@ async def test_worker_run_with_none_progress_update():
                 self.sent = True
                 return self.data
             raise StopAsyncIteration
+
+        async def aclose(self) -> None:
+            pass
 
     worker = ReducerWorker(input_stream=MockInputStream(), output_stream=output)
 
@@ -1575,7 +1571,6 @@ def test_worker_handle_disable_pass_no_reducer():
 
 def test_worker_handle_disable_pass_success():
     """Test disable_pass handler success case."""
-    from unittest.mock import Mock
 
     worker = ReducerWorker()
     worker.reducer = Mock()
@@ -1590,7 +1585,6 @@ def test_worker_handle_disable_pass_success():
 
 def test_worker_handle_disable_pass_unknown_pass():
     """Test disable_pass handler with unknown pass name."""
-    from unittest.mock import Mock
 
     worker = ReducerWorker()
     worker.reducer = Mock()
@@ -1632,7 +1626,6 @@ def test_worker_handle_enable_pass_no_reducer():
 
 def test_worker_handle_enable_pass_success():
     """Test enable_pass handler success case."""
-    from unittest.mock import Mock
 
     worker = ReducerWorker()
     worker.reducer = Mock()
@@ -1647,7 +1640,6 @@ def test_worker_handle_enable_pass_success():
 
 def test_worker_handle_enable_pass_unknown_pass():
     """Test enable_pass handler with unknown pass name."""
-    from unittest.mock import Mock
 
     worker = ReducerWorker()
     worker.reducer = Mock()
@@ -1673,7 +1665,6 @@ def test_worker_handle_skip_pass_no_reducer():
 
 def test_worker_handle_skip_pass_success():
     """Test skip_pass handler success case."""
-    from unittest.mock import Mock
 
     worker = ReducerWorker()
     worker.reducer = Mock()
@@ -1687,9 +1678,6 @@ def test_worker_handle_skip_pass_success():
 @pytest.mark.trio
 async def test_worker_handle_command_disable_pass():
     """Test handle_command dispatches to disable_pass handler."""
-    from unittest.mock import Mock
-
-    from shrinkray.subprocess.protocol import Request
 
     worker = ReducerWorker()
     worker.reducer = Mock()
@@ -1697,7 +1685,9 @@ async def test_worker_handle_command_disable_pass():
     # Mock pass_stats with the pass name in _stats
     worker.reducer.pass_stats._stats = {"hollow": Mock()}
 
-    request = Request(id="test-id", command="disable_pass", params={"pass_name": "hollow"})
+    request = Request(
+        id="test-id", command="disable_pass", params={"pass_name": "hollow"}
+    )
     response = await worker.handle_command(request)
 
     assert response.result == {"status": "disabled", "pass_name": "hollow"}
@@ -1706,9 +1696,6 @@ async def test_worker_handle_command_disable_pass():
 @pytest.mark.trio
 async def test_worker_handle_command_enable_pass():
     """Test handle_command dispatches to enable_pass handler."""
-    from unittest.mock import Mock
-
-    from shrinkray.subprocess.protocol import Request
 
     worker = ReducerWorker()
     worker.reducer = Mock()
@@ -1716,7 +1703,9 @@ async def test_worker_handle_command_enable_pass():
     # Mock pass_stats with the pass name in _stats
     worker.reducer.pass_stats._stats = {"hollow": Mock()}
 
-    request = Request(id="test-id", command="enable_pass", params={"pass_name": "hollow"})
+    request = Request(
+        id="test-id", command="enable_pass", params={"pass_name": "hollow"}
+    )
     response = await worker.handle_command(request)
 
     assert response.result == {"status": "enabled", "pass_name": "hollow"}
@@ -1725,9 +1714,6 @@ async def test_worker_handle_command_enable_pass():
 @pytest.mark.trio
 async def test_worker_handle_command_skip_pass():
     """Test handle_command dispatches to skip_pass handler."""
-    from unittest.mock import Mock
-
-    from shrinkray.subprocess.protocol import Request
 
     worker = ReducerWorker()
     worker.reducer = Mock()
@@ -1745,8 +1731,6 @@ async def test_worker_handle_command_skip_pass():
 @pytest.mark.trio
 async def test_build_progress_update_with_reducer_none():
     """Test _build_progress_update when reducer is None (346->375, 376->379)."""
-    import time
-    from unittest.mock import Mock
 
     worker = ReducerWorker()
     worker.reducer = None
@@ -1781,8 +1765,6 @@ async def test_build_progress_update_with_reducer_none():
 @pytest.mark.trio
 async def test_build_progress_update_with_reducer_pass_stats_none():
     """Test _build_progress_update when reducer.pass_stats is None (356->375)."""
-    import time
-    from unittest.mock import Mock
 
     worker = ReducerWorker()
 
@@ -1820,8 +1802,6 @@ async def test_build_progress_update_with_reducer_pass_stats_none():
 @pytest.mark.trio
 async def test_build_progress_update_with_reducer_no_disabled_passes_attr():
     """Test _build_progress_update when reducer lacks disabled_passes attribute."""
-    import time
-    from unittest.mock import Mock
 
     worker = ReducerWorker()
 

@@ -266,7 +266,6 @@ def test_normalize_identifiers_identifier_disappears():
 def test_regex_pass_with_compiled_pattern():
     """Test regex_pass with an already compiled pattern."""
 
-
     # Create a pass with a pre-compiled pattern
     pattern = re.compile(rb"[0-9]+")
 
@@ -344,7 +343,6 @@ async def test_normalize_identifiers_target_disappears():
     in the original source is no longer present when we try to process it.
     This can happen in concurrent scenarios or with modified problem classes.
     """
-
 
     # Create a mock problem that changes its current_test_case
     mock_problem = MagicMock()

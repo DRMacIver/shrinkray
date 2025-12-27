@@ -105,12 +105,12 @@ class ShrinkRayState[TestCase](ABC):
         else:
             command = self.test
 
-        kwargs: dict[str, Any] = dict(
-            universal_newlines=False,
-            preexec_fn=os.setsid,
-            cwd=cwd,
-            check=False,
-        )
+        kwargs: dict[str, Any] = {
+            "universal_newlines": False,
+            "preexec_fn": os.setsid,
+            "cwd": cwd,
+            "check": False,
+        }
         if self.input_type.enabled(self._InputType.stdin) and not os.path.isdir(
             working
         ):
@@ -562,10 +562,10 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
                 sorted((k, shortlex(v)) for k, v in test_case.items()),
             )
 
-        return dict(
-            sort_key=dict_sort_key,
-            size=dict_size,
-        )
+        return {
+            "sort_key": dict_sort_key,
+            "size": dict_size,
+        }
 
     def new_reducer(
         self, problem: ReductionProblem[dict[str, bytes]]

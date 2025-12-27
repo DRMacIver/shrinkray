@@ -1,7 +1,9 @@
 """Textual-based TUI for Shrink Ray."""
 
 import os
-from collections.abc import AsyncIterator
+import traceback
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from datetime import timedelta
 from typing import Literal, Protocol
 
@@ -114,7 +116,7 @@ class ReductionClientProtocol(Protocol):
 
     @property
     def error_message(self) -> str | None: ...
-    def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]: ...
+    def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]: ...
     @property
     def is_completed(self) -> bool: ...
 
@@ -485,7 +487,9 @@ class PassStatsScreen(ModalScreen[None]):
                     reductions = str(ps.successful_reductions)
                     success = f"{ps.success_rate:.1f}%"
 
-                table.add_row(checkbox, name, runs, bytes_del, tests, reductions, success)
+                table.add_row(
+                    checkbox, name, runs, bytes_del, tests, reductions, success
+                )
 
         # Restore cursor and scroll position after rebuilding
         # Only restore if the saved position is still valid
@@ -510,7 +514,9 @@ class PassStatsScreen(ModalScreen[None]):
             # Update footer with disabled count
             disabled_count = len(self.disabled_passes)
             if disabled_count > 0:
-                footer_text = f"Showing {len(self.pass_stats)} passes ({disabled_count} disabled)"
+                footer_text = (
+                    f"Showing {len(self.pass_stats)} passes ({disabled_count} disabled)"
+                )
             else:
                 footer_text = f"Showing {len(self.pass_stats)} passes in run order"
             footer = self.query_one("#stats-footer", Static)
@@ -713,18 +719,21 @@ class ShrinkRayApp(App[None]):
             stats_display = self.query_one("#stats-display", StatsDisplay)
             content_preview = self.query_one("#content-preview", ContentPreview)
 
-            async for update in self._client.get_progress_updates():
-                stats_display.update_stats(update)
-                content_preview.update_content(update.content_preview, update.hex_mode)
-                self._latest_pass_stats = update.pass_stats
-                self._current_pass_name = update.current_pass_name
-                self._disabled_passes = update.disabled_passes
+            async with aclosing(self._client.get_progress_updates()) as updates:
+                async for update in updates:
+                    stats_display.update_stats(update)
+                    content_preview.update_content(
+                        update.content_preview, update.hex_mode
+                    )
+                    self._latest_pass_stats = update.pass_stats
+                    self._current_pass_name = update.current_pass_name
+                    self._disabled_passes = update.disabled_passes
 
-                # Check if all passes are disabled
-                self._check_all_passes_disabled()
+                    # Check if all passes are disabled
+                    self._check_all_passes_disabled()
 
-                if self._client.is_completed:
-                    break
+                    if self._client.is_completed:
+                        break
 
             self._completed = True
 
@@ -739,6 +748,7 @@ class ShrinkRayApp(App[None]):
                 self.update_status("Reduction completed! Press 'q' to exit.")
 
         except Exception as e:
+            traceback.print_exc()
             self.exit(return_code=1, message=f"Error: {e}")
         finally:
             if self._owns_client and self._client:
@@ -750,7 +760,7 @@ class ShrinkRayApp(App[None]):
             all_pass_names = {ps.pass_name for ps in self._latest_pass_stats}
             if all_pass_names and all_pass_names <= set(self._disabled_passes):
                 self.update_status(
-                    "Reduction paused (all passes disabled) - " "[p] to re-enable passes"
+                    "Reduction paused (all passes disabled) - [p] to re-enable passes"
                 )
 
     def update_status(self, message: str) -> None:

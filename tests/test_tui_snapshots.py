@@ -45,12 +45,16 @@ class FakeReductionClientForSnapshots:
     async def disable_pass(self, pass_name: str):
         from shrinkray.subprocess.protocol import Response
 
-        return Response(id="disable", result={"status": "disabled", "pass_name": pass_name})
+        return Response(
+            id="disable", result={"status": "disabled", "pass_name": pass_name}
+        )
 
     async def enable_pass(self, pass_name: str):
         from shrinkray.subprocess.protocol import Response
 
-        return Response(id="enable", result={"status": "enabled", "pass_name": pass_name})
+        return Response(
+            id="enable", result={"status": "enabled", "pass_name": pass_name}
+        )
 
     async def skip_current_pass(self):
         from shrinkray.subprocess.protocol import Response

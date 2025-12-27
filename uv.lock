@@ -757,7 +757,7 @@ wheels = [
 
 [[package]]
 name = "shrinkray"
-version = "25.12.26"
+version = "25.12.26.2"
 source = { editable = "." }
 dependencies = [
     { name = "binaryornot" },

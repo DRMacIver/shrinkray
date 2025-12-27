@@ -13,7 +13,7 @@ Key concepts:
 
 import heapq
 from collections.abc import Awaitable, Callable, Sequence
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from enum import IntEnum
 from itertools import islice
 from random import Random
@@ -100,8 +100,9 @@ class WorkContext:
                         async with parallel_map(
                             values, f, parallelism=min(self.parallelism, n)
                         ) as result:
-                            async for v in result:
-                                await send.send(v)
+                            async with aclosing(result) as aiter:
+                                async for v in aiter:
+                                    await send.send(v)
 
                         n *= 2
                 else:
@@ -122,9 +123,10 @@ class WorkContext:
             @nursery.start_soon
             async def _():
                 async with self.map(ls, apply) as results:
-                    async for x, v in results:
-                        if v:
-                            await send.send(x)
+                    async with aclosing(results) as aiter:
+                        async for x, v in aiter:
+                            if v:
+                                await send.send(x)
                     send.close()
 
             yield receive
@@ -139,8 +141,9 @@ class WorkContext:
         Will run in parallel if parallelism is enabled.
         """
         async with self.filter(ls, f) as filtered:
-            async for x in filtered:
-                return x
+            async with aclosing(filtered) as aiter:
+                async for x in aiter:
+                    return x
         raise NotFound()
 
     async def find_large_integer(self, f: Callable[[int], Awaitable[bool]]) -> int:

@@ -1,13 +1,19 @@
 """Comprehensive tests for the textual TUI module."""
 
 import asyncio
+import inspect
 import os
 import tempfile
-from collections.abc import AsyncIterator
+import time
+from collections.abc import AsyncGenerator
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
+from textual.app import App
 from textual.widgets import DataTable, Label
 
+from shrinkray import tui
+from shrinkray.subprocess.client import SubprocessClient
 from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
 from shrinkray.tui import (
     ContentPreview,
@@ -15,6 +21,9 @@ from shrinkray.tui import (
     PassStatsScreen,
     ShrinkRayApp,
     StatsDisplay,
+    _validate_initial_example,
+    detect_terminal_theme,
+    run_textual_ui,
 )
 
 
@@ -66,10 +75,14 @@ class FakeReductionClient:
         return Response(id="cancel", result={"status": "cancelled"})
 
     async def disable_pass(self, pass_name: str) -> Response:
-        return Response(id="disable", result={"status": "disabled", "pass_name": pass_name})
+        return Response(
+            id="disable", result={"status": "disabled", "pass_name": pass_name}
+        )
 
     async def enable_pass(self, pass_name: str) -> Response:
-        return Response(id="enable", result={"status": "enabled", "pass_name": pass_name})
+        return Response(
+            id="enable", result={"status": "enabled", "pass_name": pass_name}
+        )
 
     async def skip_current_pass(self) -> Response:
         return Response(id="skip", result={"status": "skipped"})
@@ -77,7 +90,7 @@ class FakeReductionClient:
     async def close(self) -> None:
         self._closed = True
 
-    async def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]:
+    async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
         for update in self._updates:
             if self._cancelled:
                 break
@@ -217,7 +230,6 @@ def test_large_content_truncated():
 
 def test_content_diff_shown_for_large_files():
     """Test that diff is shown when content changes in large files."""
-    import time
 
     widget = ContentPreview()
 
@@ -648,7 +660,6 @@ def test_app_with_various_parameters():
 
 def test_app_creates_own_client():
     """Test that app creates its own client when none provided."""
-    from unittest.mock import AsyncMock, MagicMock, patch
 
     async def run_test():
         # Mock SubprocessClient to avoid actually spawning subprocess
@@ -680,7 +691,6 @@ def test_app_creates_own_client():
 
 def test_app_successful_start_covers_no_error_branch():
     """Test successful start covers the 'no error' branch (424->430)."""
-    from unittest.mock import AsyncMock, MagicMock, patch
 
     async def run_test():
         # Mock SubprocessClient with successful start
@@ -720,7 +730,6 @@ def test_app_successful_start_covers_no_error_branch():
 
 def test_app_handles_exception_in_run_reduction():
     """Test that app handles exceptions during reduction."""
-    from unittest.mock import AsyncMock, MagicMock, patch
 
     async def run_test():
         mock_client = MagicMock()
@@ -776,8 +785,6 @@ def test_real_subprocess_communication(temp_test_file, temp_test_script):
     """Test with a real subprocess client."""
 
     async def run_test():
-        from shrinkray.subprocess.client import SubprocessClient
-
         # Create a client we can control
         client = SubprocessClient()
         app = ShrinkRayApp(
@@ -809,7 +816,6 @@ def test_real_subprocess_communication(temp_test_file, temp_test_script):
 
 def test_detect_dark_from_colorfgbg_dark(monkeypatch):
     """Test that COLORFGBG with dark background returns True."""
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.setenv("COLORFGBG", "15;0")  # white on black
     assert detect_terminal_theme() is True
@@ -817,7 +823,6 @@ def test_detect_dark_from_colorfgbg_dark(monkeypatch):
 
 def test_detect_light_from_colorfgbg_light(monkeypatch):
     """Test that COLORFGBG with light background returns False."""
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.setenv("COLORFGBG", "0;15")  # black on white
     assert detect_terminal_theme() is False
@@ -825,7 +830,6 @@ def test_detect_light_from_colorfgbg_light(monkeypatch):
 
 def test_detect_light_from_colorfgbg_gray(monkeypatch):
     """Test that COLORFGBG with gray background (7+) returns False."""
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.setenv("COLORFGBG", "0;7")  # black on light gray
     assert detect_terminal_theme() is False
@@ -833,7 +837,6 @@ def test_detect_light_from_colorfgbg_gray(monkeypatch):
 
 def test_detect_dark_colorfgbg_boundary(monkeypatch):
     """Test that COLORFGBG with value 6 returns True (dark)."""
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.setenv("COLORFGBG", "15;6")
     assert detect_terminal_theme() is True
@@ -841,7 +844,6 @@ def test_detect_dark_colorfgbg_boundary(monkeypatch):
 
 def test_detect_invalid_colorfgbg_falls_through(monkeypatch):
     """Test that invalid COLORFGBG falls through to default."""
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.setenv("COLORFGBG", "invalid")
     monkeypatch.delenv("TERM_PROGRAM", raising=False)
@@ -851,7 +853,6 @@ def test_detect_invalid_colorfgbg_falls_through(monkeypatch):
 
 def test_detect_colorfgbg_non_numeric(monkeypatch):
     """Test that non-numeric COLORFGBG values are handled."""
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.setenv("COLORFGBG", "foo;bar")
     monkeypatch.delenv("TERM_PROGRAM", raising=False)
@@ -860,7 +861,6 @@ def test_detect_colorfgbg_non_numeric(monkeypatch):
 
 def test_detect_empty_colorfgbg(monkeypatch):
     """Test that empty COLORFGBG falls through."""
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.setenv("COLORFGBG", "")
     monkeypatch.delenv("TERM_PROGRAM", raising=False)
@@ -869,7 +869,6 @@ def test_detect_empty_colorfgbg(monkeypatch):
 
 def test_detect_no_env_vars_defaults_dark(monkeypatch):
     """Test that no environment variables defaults to dark."""
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.delenv("COLORFGBG", raising=False)
     monkeypatch.delenv("TERM_PROGRAM", raising=False)
@@ -878,9 +877,6 @@ def test_detect_no_env_vars_defaults_dark(monkeypatch):
 
 def test_detect_macos_terminal_dark(monkeypatch):
     """Test macOS Terminal.app dark mode detection."""
-    from unittest.mock import MagicMock, patch
-
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.delenv("COLORFGBG", raising=False)
     monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
@@ -896,9 +892,6 @@ def test_detect_macos_terminal_dark(monkeypatch):
 
 def test_detect_macos_terminal_light(monkeypatch):
     """Test macOS Terminal.app light mode detection."""
-    from unittest.mock import MagicMock, patch
-
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.delenv("COLORFGBG", raising=False)
     monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
@@ -914,9 +907,6 @@ def test_detect_macos_terminal_light(monkeypatch):
 
 def test_detect_macos_iterm_dark(monkeypatch):
     """Test iTerm.app dark mode detection."""
-    from unittest.mock import MagicMock, patch
-
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.delenv("COLORFGBG", raising=False)
     monkeypatch.setenv("TERM_PROGRAM", "iTerm.app")
@@ -932,9 +922,6 @@ def test_detect_macos_iterm_dark(monkeypatch):
 
 def test_detect_macos_subprocess_exception(monkeypatch):
     """Test macOS detection handles subprocess exceptions."""
-    from unittest.mock import patch
-
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.delenv("COLORFGBG", raising=False)
     monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
@@ -947,7 +934,6 @@ def test_detect_macos_subprocess_exception(monkeypatch):
 
 def test_detect_macos_with_cf_bundle_identifier(monkeypatch):
     """Test macOS detection skips subprocess when __CFBundleIdentifier is set."""
-    from shrinkray.tui import detect_terminal_theme
 
     monkeypatch.delenv("COLORFGBG", raising=False)
     monkeypatch.setenv("TERM_PROGRAM", "Apple_Terminal")
@@ -1022,7 +1008,6 @@ def test_app_with_auto_theme(monkeypatch):
 
 def test_tui_can_be_imported():
     """Test that the TUI module can be imported."""
-    from shrinkray import tui
 
     assert hasattr(tui, "ShrinkRayApp")
     assert hasattr(tui, "run_textual_ui")
@@ -1032,18 +1017,12 @@ def test_tui_can_be_imported():
 
 def test_shrinkray_app_is_textual_app():
     """Test that ShrinkRayApp is a proper textual App subclass."""
-    from textual.app import App
-
-    from shrinkray.tui import ShrinkRayApp
 
     assert issubclass(ShrinkRayApp, App)
 
 
 def test_run_textual_ui_signature():
     """Test that run_textual_ui has expected parameters."""
-    import inspect
-
-    from shrinkray.tui import run_textual_ui
 
     sig = inspect.signature(run_textual_ui)
     params = list(sig.parameters.keys())
@@ -1081,8 +1060,6 @@ def test_fake_client_implements_protocol():
 def test_get_available_lines_fallback_to_app_size():
     """Test _get_available_lines falls back to app.size when parent unavailable."""
     widget = ContentPreview()
-    # Mock the app with a valid size
-    from unittest.mock import MagicMock
 
     mock_app = MagicMock()
     mock_app.size.height = 50
@@ -1133,7 +1110,6 @@ def test_update_status_before_mount():
 
 def test_quit_handles_cancel_exception():
     """Test that action_quit handles exceptions from cancel."""
-    from unittest.mock import AsyncMock, MagicMock
 
     async def run_test():
         # Create a mock client that raises on cancel
@@ -1266,7 +1242,6 @@ def test_loop_with_empty_updates():
     This exercises the 433->440 branch where the iterator is immediately
     exhausted (no updates) and the loop exits without executing the body.
     """
-    from unittest.mock import AsyncMock, MagicMock
 
     async def run_test():
         # Create a mock client with an empty async generator
@@ -1329,7 +1304,7 @@ def test_loop_breaks_on_first_iteration():
         def __init__(self):
             super().__init__(updates=[])
 
-        async def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]:
+        async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
             # Mark as completed BEFORE yielding
             self._completed = True
             yield ProgressUpdate(
@@ -1374,7 +1349,6 @@ def test_loop_breaks_on_first_iteration():
 
 def test_content_preview_app_size_zero_height():
     """Test _get_available_lines when app.size.height is 0."""
-    from unittest.mock import MagicMock, PropertyMock, patch
 
     widget = ContentPreview()
 
@@ -1416,13 +1390,11 @@ def test_content_preview_diff_is_empty():
     widget.preview_content = large_content_new
     widget.hex_mode = False
 
-    # Mock unified_diff to return empty list
-    # Note: unified_diff is imported inside render(), so patch difflib directly
-    from unittest.mock import patch
-
-    with patch.object(widget, "_get_available_lines", return_value=10):
-        with patch("difflib.unified_diff", return_value=[]):
-            result = widget.render()
+    with (
+        patch.object(widget, "_get_available_lines", return_value=10),
+        patch("difflib.unified_diff", return_value=[]),
+    ):
+        result = widget.render()
 
     # Since diff is empty (mocked), should show truncated content
     assert "more lines" in result
@@ -1439,7 +1411,7 @@ def test_cancel_exception_is_caught():
         async def cancel(self) -> Response:
             raise ConnectionError("Process already dead")
 
-        async def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]:
+        async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
             # Yield many updates with delays
             for i in range(100):
                 if self._cancelled:
@@ -1482,9 +1454,6 @@ def test_cancel_exception_is_caught():
 
 def test_run_textual_ui_creates_and_runs_app():
     """Test run_textual_ui function creates app and calls run()."""
-    from unittest.mock import MagicMock, patch
-
-    from shrinkray.tui import run_textual_ui
 
     # Mock validation to pass without launching subprocess
     async def mock_validate(*args, **kwargs):
@@ -1546,7 +1515,7 @@ def test_completed_flag_during_iteration_breaks_loop():
             super().__init__(updates=[])
             self._yield_count = 0
 
-        async def get_progress_updates(self) -> AsyncIterator[ProgressUpdate]:
+        async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
             for i in range(10):
                 self._yield_count += 1
                 yield ProgressUpdate(
@@ -1590,9 +1559,6 @@ def test_completed_flag_during_iteration_breaks_loop():
 
 def test_validate_initial_example_success(tmp_path):
     """Test _validate_initial_example returns None on success."""
-    from unittest.mock import AsyncMock, MagicMock, patch
-
-    from shrinkray.tui import _validate_initial_example
 
     async def run_test():
         mock_client = MagicMock()
@@ -1632,9 +1598,6 @@ def test_validate_initial_example_success(tmp_path):
 
 def test_validate_initial_example_returns_error():
     """Test _validate_initial_example returns error message on failure."""
-    from unittest.mock import AsyncMock, MagicMock, patch
-
-    from shrinkray.tui import _validate_initial_example
 
     async def run_test():
         mock_client = MagicMock()
@@ -1668,9 +1631,6 @@ def test_validate_initial_example_returns_error():
 
 def test_run_textual_ui_prints_error_and_exits(capsys):
     """Test run_textual_ui prints error to stderr and exits with code 1."""
-    from unittest.mock import patch
-
-    from shrinkray.tui import run_textual_ui
 
     # Mock validation to return an error
     async def mock_validate(*args, **kwargs):
@@ -1691,9 +1651,6 @@ def test_run_textual_ui_prints_error_and_exits(capsys):
 
 def test_run_textual_ui_exits_with_app_return_code():
     """Test run_textual_ui exits with app.return_code when set."""
-    from unittest.mock import MagicMock, patch
-
-    from shrinkray.tui import run_textual_ui
 
     async def mock_validate(*args, **kwargs):
         return None
@@ -1701,22 +1658,21 @@ def test_run_textual_ui_exits_with_app_return_code():
     mock_app = MagicMock()
     mock_app.return_code = 42  # Non-zero return code
 
-    with patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate):
-        with patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app):
-            with pytest.raises(SystemExit) as exc_info:
-                run_textual_ui(
-                    file_path="/tmp/test.txt",
-                    test=["./test.sh"],
-                )
+    with (
+        patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate),
+        patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app),
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            run_textual_ui(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+            )
 
-            assert exc_info.value.code == 42
+        assert exc_info.value.code == 42
 
 
 def test_run_textual_ui_prints_validation_message(capsys):
     """Test run_textual_ui prints validation message before validating."""
-    from unittest.mock import MagicMock, patch
-
-    from shrinkray.tui import run_textual_ui
 
     async def mock_validate(*args, **kwargs):
         return None
@@ -1724,12 +1680,14 @@ def test_run_textual_ui_prints_validation_message(capsys):
     mock_app = MagicMock()
     mock_app.return_code = None
 
-    with patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate):
-        with patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app):
-            run_textual_ui(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-            )
+    with (
+        patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate),
+        patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app),
+    ):
+        run_textual_ui(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+        )
 
     captured = capsys.readouterr()
     assert "Validating initial example" in captured.out
@@ -1737,9 +1695,6 @@ def test_run_textual_ui_prints_validation_message(capsys):
 
 def test_run_textual_ui_handles_validation_exception(capsys):
     """Test run_textual_ui handles exceptions during validation (lines 877-882)."""
-    from unittest.mock import patch
-
-    from shrinkray.tui import run_textual_ui
 
     # Mock validation to raise an exception
     async def mock_validate(*args, **kwargs):
@@ -1767,7 +1722,6 @@ def test_run_textual_ui_handles_validation_exception(capsys):
 
 def test_pass_stats_screen_creation():
     """Test PassStatsScreen can be created with stats."""
-    from unittest.mock import Mock
 
     stats = [
         PassStatsData(
@@ -1791,7 +1745,6 @@ def test_pass_stats_screen_creation():
 
 def test_pass_stats_screen_empty():
     """Test PassStatsScreen with no stats."""
-    from unittest.mock import Mock
 
     mock_app = Mock()
     mock_app._latest_pass_stats = []
@@ -1911,8 +1864,7 @@ def test_action_show_pass_stats_opens_modal():
 
                 # Check that PassStatsScreen is on the screen stack
                 assert any(
-                    isinstance(screen, PassStatsScreen)
-                    for screen in app.screen_stack
+                    isinstance(screen, PassStatsScreen) for screen in app.screen_stack
                 )
 
                 # Press 'q' to close the modal
@@ -1976,8 +1928,7 @@ def test_pass_stats_modal_closes_with_p_key():
 
                 # Check that PassStatsScreen is on the screen stack
                 assert any(
-                    isinstance(screen, PassStatsScreen)
-                    for screen in app.screen_stack
+                    isinstance(screen, PassStatsScreen) for screen in app.screen_stack
                 )
 
                 # Press 'p' again to close the modal
@@ -1986,8 +1937,7 @@ def test_pass_stats_modal_closes_with_p_key():
 
                 # Modal should be closed
                 assert not any(
-                    isinstance(screen, PassStatsScreen)
-                    for screen in app.screen_stack
+                    isinstance(screen, PassStatsScreen) for screen in app.screen_stack
                 )
 
         finally:
@@ -2047,8 +1997,7 @@ def test_pass_stats_modal_shows_help_with_h_key():
 
                 # Check that PassStatsScreen is on the screen stack
                 assert any(
-                    isinstance(screen, PassStatsScreen)
-                    for screen in app.screen_stack
+                    isinstance(screen, PassStatsScreen) for screen in app.screen_stack
                 )
 
                 # Press 'h' to open help
@@ -2057,14 +2006,12 @@ def test_pass_stats_modal_shows_help_with_h_key():
 
                 # HelpScreen should now be on the stack
                 assert any(
-                    isinstance(screen, HelpScreen)
-                    for screen in app.screen_stack
+                    isinstance(screen, HelpScreen) for screen in app.screen_stack
                 )
 
                 # PassStatsScreen should still be there (underneath)
                 assert any(
-                    isinstance(screen, PassStatsScreen)
-                    for screen in app.screen_stack
+                    isinstance(screen, PassStatsScreen) for screen in app.screen_stack
                 )
 
                 # Close help screen
@@ -2084,7 +2031,6 @@ def test_pass_stats_modal_shows_help_with_h_key():
 
 def test_pass_stats_screen_with_empty_stats():
     """Test PassStatsScreen initialization with no stats returns empty list."""
-    from unittest.mock import Mock
 
     mock_app = Mock()
     mock_app._latest_pass_stats = []
@@ -2101,7 +2047,6 @@ def test_pass_stats_screen_with_empty_stats():
 
 def test_pass_stats_screen_disabled_passes_styling():
     """Test that disabled passes are styled correctly."""
-    from unittest.mock import Mock
 
     mock_app = Mock()
     mock_app._latest_pass_stats = [
@@ -2339,8 +2284,7 @@ def test_pass_stats_modal_with_empty_stats():
                 # The modal should show "No pass data yet" row
                 # Just verify modal opened successfully
                 assert any(
-                    isinstance(screen, PassStatsScreen)
-                    for screen in app.screen_stack
+                    isinstance(screen, PassStatsScreen) for screen in app.screen_stack
                 )
 
                 # Press 'escape' to close the modal
@@ -2415,8 +2359,7 @@ def test_pass_stats_modal_non_current_non_disabled_pass():
 
                 # The modal should be open with both passes
                 assert any(
-                    isinstance(screen, PassStatsScreen)
-                    for screen in app.screen_stack
+                    isinstance(screen, PassStatsScreen) for screen in app.screen_stack
                 )
 
                 # Press 'escape' to close the modal
@@ -2498,7 +2441,6 @@ def test_pass_stats_modal_toggle_enable():
 
 def test_pass_stats_screen_refresh_updates_data():
     """Test that the periodic refresh updates data when it changes."""
-    from unittest.mock import Mock
 
     # Create initial stats
     initial_stats = [
@@ -2550,7 +2492,6 @@ def test_pass_stats_screen_refresh_updates_data():
 
 def test_pass_stats_screen_toggle_disable_no_selection():
     """Test action_toggle_disable returns early when no pass is selected."""
-    from unittest.mock import Mock
 
     mock_app = Mock()
     mock_app._latest_pass_stats = []  # Empty stats
@@ -2604,8 +2545,7 @@ def test_help_screen_opens_and_closes():
 
                 # Check that HelpScreen is on the screen stack
                 assert any(
-                    isinstance(screen, HelpScreen)
-                    for screen in app.screen_stack
+                    isinstance(screen, HelpScreen) for screen in app.screen_stack
                 )
 
                 # Press 'h' again to close the modal
@@ -2715,7 +2655,8 @@ def test_pass_stats_modal_refresh_triggers_update():
                 original_size=200,
                 calls=10,
                 reductions=3,
-                pass_stats=stats + [
+                pass_stats=stats
+                + [
                     PassStatsData(
                         pass_name="delete_lines",
                         bytes_deleted=10,
@@ -2866,7 +2807,6 @@ def test_skip_current_pass_from_main_when_completed():
 
 def test_pass_stats_screen_direct_method_calls():
     """Test PassStatsScreen methods directly for coverage."""
-    from unittest.mock import AsyncMock, Mock
 
     # Create mock app with all required attributes
     mock_app = Mock()
@@ -3518,7 +3458,9 @@ def test_all_passes_disabled_shows_message():
 
                 # Check that the "paused" message was shown
                 paused_msgs = [m for m in status_messages if "paused" in m.lower()]
-                assert len(paused_msgs) > 0, f"Expected 'paused' in messages, got: {status_messages}"
+                assert len(paused_msgs) > 0, (
+                    f"Expected 'paused' in messages, got: {status_messages}"
+                )
 
                 await pilot.press("q")
 
@@ -3585,7 +3527,9 @@ def test_check_all_passes_disabled_partial():
 
                 # Check that NO "paused" message was shown
                 paused_msgs = [m for m in status_messages if "paused" in m.lower()]
-                assert len(paused_msgs) == 0, f"Expected no 'paused' messages, got: {paused_msgs}"
+                assert len(paused_msgs) == 0, (
+                    f"Expected no 'paused' messages, got: {paused_msgs}"
+                )
 
                 await pilot.press("q")
 
@@ -3698,7 +3642,6 @@ def test_pass_stats_screen_cursor_position_out_of_bounds():
 
 def test_pass_stats_screen_get_selected_empty_table():
     """Test _get_selected_pass_name when table has 0 rows."""
-    from unittest.mock import PropertyMock, patch
 
     async def run():
         fake_client = FakeReductionClient(updates=[])

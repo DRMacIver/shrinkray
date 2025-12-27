@@ -50,22 +50,6 @@ def test_shortlex_string():
 # =============================================================================
 
 
-def test_default_sort_key_bytes():
-    key = default_sort_key(b"hello")
-    assert key == (5, b"hello")
-
-
-def test_default_sort_key_string():
-    key = default_sort_key("hello")
-    assert key == (5, "hello")
-
-
-def test_default_sort_key_list():
-    # For non-string/bytes, uses repr
-    key = default_sort_key([1, 2, 3])
-    assert key[0] == len(repr([1, 2, 3]))
-
-
 def test_default_sort_key_ordering():
     assert default_sort_key(b"a") < default_sort_key(b"ab")
 

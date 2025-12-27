@@ -8,23 +8,78 @@ import subprocess
 import sys
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import timedelta
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, TypeVar
 
 import humanize
 import trio
 from attrs import define
 
+from shrinkray.formatting import try_decode
 from shrinkray.passes.clangdelta import ClangDelta
 from shrinkray.problem import (
     BasicReductionProblem,
     InvalidInitialExample,
+    LazyChainedSortKey,
     ReductionProblem,
+    natural_key,
     shortlex,
 )
 from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
+
+
+T = TypeVar("T")
+
+
+def sort_key_for_initial(initial: Any) -> Callable[[Any], Any]:
+    if isinstance(initial, bytes):
+        encoding, _ = try_decode(initial)
+        if encoding is None:
+            return shortlex
+        else:
+
+            def natural_for_encoding(b: T) -> Any:
+                try:
+                    s = b.decode(encoding)
+                    return (0, natural_key(s))
+                except UnicodeDecodeError:
+                    return (1, shortlex(b))
+
+            return natural_for_encoding
+    else:
+        assert isinstance(initial, dict)
+        keys = sorted(initial, key=lambda k: shortlex(initial[k]), reverse=True)
+        natural_keys = {k: sort_key_for_initial(v) for k, v in initial.items()}
+
+        def dict_total_size(s):
+            return sum(len(v) for v in s.values())
+
+        def key_sort_key(k):
+            def f(x):
+                try:
+                    v = x[k]
+                except KeyError:
+                    return (0,)
+                else:
+                    return (1, natural_keys[k](v))
+
+            return f
+
+        functions = [
+            dict_total_size,
+            len,
+        ] + [key_sort_key(k) for k in keys]
+
+        def dict_sort_key(v):
+            return LazyChainedSortKey(
+                functions=functions,
+                value=v,
+            )
+
+        return dict_sort_key
 
 
 class TimeoutExceededOnInitial(InvalidInitialExample):
@@ -310,6 +365,7 @@ class ShrinkRayState[TestCase](ABC):
             is_interesting=self.is_interesting,
             initial=self.initial,
             work=work,
+            sort_key=sort_key_for_initial(self.initial),
             **self.extra_problem_kwargs,
         )
 
@@ -591,23 +647,6 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
 
 class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     def setup_formatter(self): ...
-
-    @property
-    def extra_problem_kwargs(self):
-        def dict_size(test_case: dict[str, bytes]) -> int:
-            return sum(len(v) for v in test_case.values())
-
-        def dict_sort_key(test_case: dict[str, bytes]) -> Any:
-            return (
-                len(test_case),
-                dict_size(test_case),
-                sorted((k, shortlex(v)) for k, v in test_case.items()),
-            )
-
-        return {
-            "sort_key": dict_sort_key,
-            "size": dict_size,
-        }
 
     def new_reducer(
         self, problem: ReductionProblem[dict[str, bytes]]

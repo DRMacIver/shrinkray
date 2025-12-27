@@ -12,10 +12,12 @@ the details of caching, parallelism, and state management.
 """
 
 import hashlib
+import string
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sized
 from datetime import timedelta
+from functools import total_ordering
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -71,9 +73,68 @@ def shortlex[SizedT: Sized](value: SizedT) -> tuple[int, SizedT]:
     return (len(value), value)
 
 
-def default_sort_key(value: Any):
-    if isinstance(value, str | bytes):
+@total_ordering
+class LazyChainedSortKey:
+    def __init__(self, functions: list[Callable[[T], Any]], value: T):
+        self.functions = functions
+        self.value = value
+
+    def __eq__(self, other):
+        if not isinstance(other, LazyChainedSortKey):
+            return NotImplemented
+        assert len(self.functions) == len(other.functions)
+        return self.value == other.value
+
+    def __lt__(self, other):
+        if self == other:
+            return False
+        if not isinstance(other, LazyChainedSortKey):
+            return NotImplemented
+        for f in self.functions:
+            self_key = f(self.value)
+            other_key = f(other.value)
+            if self_key < other_key:
+                return True
+            elif self_key > other_key:
+                return False
+        return True
+
+
+NATURAL_CHARACTER_ORDER = (
+    string.whitespace + string.digits + string.ascii_lowercase + string.ascii_uppercase
+)
+NATURAL_CHARACTER_ORDER_INDEX = {s: i for i, s in enumerate(NATURAL_CHARACTER_ORDER)}
+
+
+def character_index(c):
+    return NATURAL_CHARACTER_ORDER.get(c, len(NATURAL_CHARACTER_ORDER) + ord(c))
+
+
+def natural_string_lex(s):
+    return list(map(character_index, s))
+
+
+NATURAL_ORDERING_FUNCTIONS: list[Callable[[str], Any]] = [
+    len,
+    lambda s: sum(len(line) ** 2 for line in s.split("\n")),
+    lambda s: len(s.splitlines()),
+    lambda s: list(map(len, s.splitlines())),
+    natural_string_lex,
+]
+
+
+def natural_key(s: str) -> LazyChainedSortKey:
+    return LazyChainedSortKey(functions=NATURAL_ORDERING_FUNCTIONS, value=s)
+
+
+# This really should return some sort of Comparable type, but Python
+# doesn't have a built in protocol for that, and it's a mess to
+# express properly.
+def default_sort_key(value: Any) -> Any:
+    if isinstance(value, bytes):
         return shortlex(value)
+    elif isinstance(value, str):
+        return natural_key(value)
     else:
         return shortlex(repr(value))
 

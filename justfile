@@ -21,9 +21,8 @@ lint:
     uv run python scripts/extra_lints.py
     uv run basedpyright src tests
 
-# Format code with shed and ruff
+# Format code with ruff
 format:
-    find src tests -name '*.py' | xargs uv run shed --refactor --py312-plus
     uv run ruff format src tests
     uv run ruff check --fix src tests
 

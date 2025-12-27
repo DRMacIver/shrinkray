@@ -46,7 +46,6 @@ dev = [
     "pygments>=2.17.0",
     "basedpyright>=1.1.0",
     "ruff>=0.1.0",
-    "shed>=2024.1.1",
     "pexpect>=4.9.0",
     "pyte>=0.8.2",
 ]

@@ -126,15 +126,6 @@ wheels = [
 ]
 
 [[package]]
-name = "com2ann"
-version = "0.3.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0d/13/9fda82ea58462b65a6afb84392e58d3f5c1adae5124b5cf86f31f8152ae9/com2ann-0.3.0.tar.gz", hash = "sha256:0da5e3900292057e5c4a5e33b21fe48817b4923437a095e6a677dff94b3d4e10", size = 14870, upload-time = "2021-08-21T09:01:28.272Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/35/ad/71dee203144d0fb0decb034adafb189285994adee55f144054e2c76cc6ce/com2ann-0.3.0-py3-none-any.whl", hash = "sha256:bb0994c7ea9e6f847c98b20d0cc056aa90c256937d3aede504026663d7f36bb6", size = 11501, upload-time = "2021-08-21T09:01:26.597Z" },
-]
-
-[[package]]
 name = "coverage"
 version = "7.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -656,18 +647,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyupgrade"
-version = "3.21.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "tokenize-rt" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/7f/a1/dc63caaeed232b1c58eae1b7a75f262d64ab8435882f696ffa9b58c0c415/pyupgrade-3.21.2.tar.gz", hash = "sha256:1a361bea39deda78d1460f65d9dd548d3a36ff8171d2482298539b9dc11c9c06", size = 45455, upload-time = "2025-11-19T00:39:48.012Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/16/8c/433dac11910989a90c40b10149d07ef7224232236971a562d3976790ec53/pyupgrade-3.21.2-py2.py3-none-any.whl", hash = "sha256:2ac7b95cbd176475041e4dfe8ef81298bd4654a244f957167bd68af37d52be9f", size = 62814, upload-time = "2025-11-19T00:39:46.958Z" },
-]
-
-[[package]]
 name = "pyyaml"
 version = "6.0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -777,22 +756,6 @@ wheels = [
 ]
 
 [[package]]
-name = "shed"
-version = "2025.6.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "black" },
-    { name = "com2ann" },
-    { name = "libcst" },
-    { name = "pyupgrade" },
-    { name = "ruff" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/74/c5/3c8d41c902a0b453b6423779d938f703948bd6f023a6eaecd1c7a86eefc6/shed-2025.6.1.tar.gz", hash = "sha256:43d056a2495172194ed23ee7738c49cde9cc3a54abbfa6178d5b70fd32b1a3b2", size = 39773, upload-time = "2025-06-05T18:58:00.028Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/eb/76f3dad9f509ef744c925ef374d5b814fafbdf7d4c8da19772717edb21ad/shed-2025.6.1-py3-none-any.whl", hash = "sha256:a238f34be0f040bdd705e4cbdaf3f98cdd30db832c34ca542037c8462556eb2a", size = 36535, upload-time = "2025-06-05T18:57:58.869Z" },
-]
-
-[[package]]
 name = "shrinkray"
 version = "25.12.26.2"
 source = { editable = "." }
@@ -822,7 +785,6 @@ dev = [
     { name = "pytest-textual-snapshot" },
     { name = "pytest-trio" },
     { name = "ruff" },
-    { name = "shed" },
 ]
 
 [package.metadata]
@@ -847,7 +809,6 @@ requires-dist = [
     { name = "pytest-textual-snapshot", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "pytest-trio", marker = "extra == 'dev'", specifier = ">=0.8.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
-    { name = "shed", marker = "extra == 'dev'", specifier = ">=2024.1.1" },
     { name = "textual", specifier = ">=0.47.0" },
     { name = "trio", specifier = ">=0.28.0" },
 ]
@@ -898,15 +859,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/55/06/906f86bbc59ec7cd3fb424250e19ce670406d1f28e49e86c2221e9fd7ed2/textual-6.11.0.tar.gz", hash = "sha256:08237ebda0cfbbfd1a4e2fd3039882b35894a73994f6f0fcc12c5b0d78acf3cc", size = 1584292, upload-time = "2025-12-18T10:48:38.033Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b5/fc/5e2988590ff2e0128eea6446806c904445a44e17256c67141573ea16b5a5/textual-6.11.0-py3-none-any.whl", hash = "sha256:9e663b73ed37123a9b13c16a0c85e09ef917a4cfded97814361ed5cccfa40f89", size = 714886, upload-time = "2025-12-18T10:48:36.269Z" },
-]
-
-[[package]]
-name = "tokenize-rt"
-version = "6.2.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/69/ed/8f07e893132d5051d86a553e749d5c89b2a4776eb3a579b72ed61f8559ca/tokenize_rt-6.2.0.tar.gz", hash = "sha256:8439c042b330c553fdbe1758e4a05c0ed460dbbbb24a606f11f0dee75da4cad6", size = 5476, upload-time = "2025-05-23T23:48:00.035Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/f0/3fe8c6e69135a845f4106f2ff8b6805638d4e85c264e70114e8126689587/tokenize_rt-6.2.0-py2.py3-none-any.whl", hash = "sha256:a152bf4f249c847a66497a4a95f63376ed68ac6abf092a2f7cfb29d044ecff44", size = 6004, upload-time = "2025-05-23T23:47:58.812Z" },
 ]
 
 [[package]]

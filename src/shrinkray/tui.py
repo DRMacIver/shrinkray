@@ -657,6 +657,7 @@ class ShrinkRayApp(App[None]):
             yield Label(
                 "Shrink Ray - [h] help, [p] passes, [c] skip pass, [q] quit",
                 id="status-label",
+                markup=False,
             )
             with Vertical(id="stats-container"):
                 yield StatsDisplay(id="stats-display")

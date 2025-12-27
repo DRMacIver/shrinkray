@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
-from shrinkray.tui import ShrinkRayApp
+from shrinkray.tui import ShrinkRayApp, StatsDisplay
 
 
 # Directory where snapshots are stored
@@ -200,11 +200,26 @@ def large_file_update() -> ProgressUpdate:
 
 
 async def wait_for_render(pilot):
-    """Wait for the app to fully render."""
-    # Give the app time to start and process updates
-    # The run_reduction worker needs time to process the first update
-    for _ in range(10):
+    """Wait for the app to fully render with actual content.
+
+    Checks that the StatsDisplay has received and rendered the update
+    by verifying original_size is non-zero (all test fixtures have non-zero size).
+    """
+    max_attempts = 50  # Generous limit to avoid flakiness
+    for _ in range(max_attempts):
         await pilot.pause()
+        stats = pilot.app.query_one("#stats-display", StatsDisplay)
+        if stats.original_size > 0:
+            # Content has been rendered, give one more pause for layout
+            await pilot.pause()
+            return
+
+    # Get final state for error message
+    final_stats = pilot.app.query_one("#stats-display", StatsDisplay)
+    raise AssertionError(
+        "App did not render within expected time. "
+        f"StatsDisplay.original_size is still {final_stats.original_size}"
+    )
 
 
 def test_initial_state(snap_compare, initial_state_update):

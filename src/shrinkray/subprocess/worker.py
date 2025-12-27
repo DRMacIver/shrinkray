@@ -178,6 +178,7 @@ class ReducerWorker:
         no_clang_delta = params.get("no_clang_delta", False)
         clang_delta_path = params.get("clang_delta", "")
         trivial_is_error = params.get("trivial_is_error", True)
+        skip_validation = params.get("skip_validation", False)
 
         clang_delta_executable = None
         if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:
@@ -217,8 +218,10 @@ class ReducerWorker:
         self.reducer = self.state.reducer
 
         # Validate initial example before starting - this will raise
-        # InvalidInitialExample if the initial test case fails
-        await self.problem.setup()
+        # InvalidInitialExample if the initial test case fails.
+        # Skip if validation was already done by the caller (e.g., main()).
+        if not skip_validation:
+            await self.problem.setup()
 
         self.running = True
 

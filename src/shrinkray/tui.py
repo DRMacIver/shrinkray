@@ -712,7 +712,7 @@ class ShrinkRayApp(App[None]):
 
                 await self._client.start()
 
-                # Start the reduction
+                # Start the reduction - validation was already done by main()
                 response = await self._client.start_reduction(
                     file_path=self._file_path,
                     test=self._test,
@@ -726,6 +726,7 @@ class ShrinkRayApp(App[None]):
                     no_clang_delta=self._no_clang_delta,
                     clang_delta=self._clang_delta,
                     trivial_is_error=self._trivial_is_error,
+                    skip_validation=True,
                 )
 
                 if response.error:

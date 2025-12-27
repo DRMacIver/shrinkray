@@ -517,6 +517,42 @@ async def test_worker_start_reduction_single_file(tmp_path):
     assert worker.problem.current_test_case == b"hello world"
 
 
+async def test_worker_start_reduction_skip_validation(tmp_path):
+    """Test _start_reduction with skip_validation=True skips setup()."""
+    # Create a test file
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a test script that would FAIL if run - this verifies setup() is skipped
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 1")  # Always fails
+    script.chmod(0o755)
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+        "skip_validation": True,  # Skip validation - setup() won't run the test
+    }
+
+    # This would raise InvalidInitialExample if setup() was called
+    await worker._start_reduction(params)
+
+    assert worker.running is True
+    assert worker.state is not None
+    assert worker.problem is not None
+
+
 async def test_worker_start_reduction_directory(tmp_path):
     """Test _start_reduction with a directory."""
     # Create a test directory with files

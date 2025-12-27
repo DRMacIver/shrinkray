@@ -416,7 +416,9 @@ def pytest_terminal_summary(
     """
     if os.environ.get("PYTEST_XDIST_WORKER") is None:
         cfg = cast(Any, config)
-        diffs = cfg._textual_snapshots if hasattr(config, "_textual_snapshots") else None
+        diffs = (
+            cfg._textual_snapshots if hasattr(config, "_textual_snapshots") else None
+        )
         console = Console(legacy_windows=False, force_terminal=True)
         if diffs:
             snapshot_report_location = cfg._textual_snapshot_html_report

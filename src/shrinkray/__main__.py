@@ -17,6 +17,7 @@ from shrinkray.cli import (
     validate_command,
     validate_ui,
 )
+from shrinkray.formatting import determine_formatter_command
 from shrinkray.passes.clangdelta import (
     C_FILE_EXTENSIONS,
     ClangDelta,
@@ -28,6 +29,7 @@ from shrinkray.state import (
     ShrinkRayStateSingleFile,
 )
 from shrinkray.ui import BasicUI, ShrinkRayUI
+from shrinkray.validation import run_validation
 from shrinkray.work import Volume
 
 
@@ -276,9 +278,6 @@ def main(
 
     # Run initial validation before any state setup
     # This validates the interestingness test and formatter with proper output streaming
-    from shrinkray.formatting import determine_formatter_command
-    from shrinkray.validation import run_validation
-
     formatter_command = None
     if not os.path.isdir(filename) and formatter.lower() != "none":
         formatter_command = determine_formatter_command(formatter, filename)

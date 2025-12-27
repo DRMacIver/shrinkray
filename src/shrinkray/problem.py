@@ -19,7 +19,6 @@ from collections.abc import Awaitable, Callable, Sized
 from datetime import timedelta
 from functools import total_ordering
 from typing import (
-    TYPE_CHECKING,
     Any,
     Protocol,
     TypeVar,
@@ -34,9 +33,6 @@ from humanize import naturalsize, precisedelta
 from shrinkray.formatting import try_decode
 from shrinkray.work import WorkContext
 
-
-if TYPE_CHECKING:
-    from shrinkray.passes.definitions import Format
 
 S = TypeVar("S")
 T = TypeVar("T")
@@ -275,6 +271,70 @@ def default_display(value: Any) -> str:
     return f"value of size {len(value)}"
 
 
+class ParseError(Exception):
+    """Raised when a Format cannot parse its input."""
+
+    pass
+
+
+class DumpError(Exception):
+    """Raised when a Format cannot serialize its output.
+
+    This occurs because not all internal representations map to valid
+    output in the target format. For example, a reduction might create
+    an invalid AST structure that cannot be converted back to source code.
+    """
+
+    pass
+
+
+class Format[S, T](ABC):
+    """A bidirectional transformation between two types.
+
+    Formats enable format-agnostic passes by abstracting the
+    parse/serialize cycle. For example:
+
+    - Split(b"\\n"): bytes <-> list[bytes] (lines)
+    - Tokenize(): bytes <-> list[bytes] (tokens)
+    - JSON: bytes <-> Any (Python objects)
+    - DimacsCNF: bytes <-> list[list[int]] (SAT clauses)
+
+    A Format must satisfy the round-trip property:
+        dumps(parse(x)) should be equivalent to x
+        (possibly with normalization)
+
+    Example usage:
+        # Delete duplicate lines
+        compose(Split(b"\\n"), delete_duplicates)
+
+        # Reduce integer literals in source code
+        compose(IntegerFormat(), reduce_integer)
+    """
+
+    @property
+    def name(self) -> str:
+        """Human-readable name for this format, used in pass names."""
+        return repr(self)
+
+    @abstractmethod
+    def parse(self, input: S) -> T:
+        """Parse input into the target type. Raises ParseError on failure."""
+        ...
+
+    def is_valid(self, input: S) -> bool:
+        """Check if input can be parsed by this format."""
+        try:
+            self.parse(input)
+            return True
+        except ParseError:
+            return False
+
+    @abstractmethod
+    def dumps(self, input: T) -> S:
+        """Serialize the target type back to the source type."""
+        ...
+
+
 def default_size(value: Any) -> int:
     try:
         return len(value)
@@ -373,7 +433,7 @@ class ReductionProblem[T](ABC):
         self.__view_cache: dict[Any, ReductionProblem[Any]] = {}
 
     def view(
-        self, format: "Format[T, S] | type[Format[T, S]]"
+        self, format: Format[T, S] | type[Format[T, S]]
     ) -> "ReductionProblem[S]":
         """Create a view of this problem through a Format.
 
@@ -671,8 +731,6 @@ class View[S, T](ReductionProblem[T]):
         return self.__current
 
     async def is_interesting(self, test_case: T) -> bool:
-        from shrinkray.passes.definitions import DumpError
-
         try:
             return await self.__problem.is_interesting(self.__dump(test_case))
         except DumpError:

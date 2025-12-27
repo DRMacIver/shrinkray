@@ -53,7 +53,6 @@ digraph imports {
     "passes.sequences" -> "passes.patching";
     "passes.sequences" -> "problem";
     "problem" -> "formatting";
-    "problem" -> "passes.definitions";
     "problem" -> "work";
     "reducer" -> "passes.bytes";
     "reducer" -> "passes.clangdelta";

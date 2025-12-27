@@ -1,3 +1,4 @@
+.cache/
 .mypy_cache/
 /.hypothesis/
 /.coverage

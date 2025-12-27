@@ -40,6 +40,19 @@ class TimeoutExceededOnInitial(InvalidInitialExample):
 DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT = 300.0  # 5 minutes for first call
 DYNAMIC_TIMEOUT_MULTIPLIER = 10
 DYNAMIC_TIMEOUT_MAX = 300.0  # 5 minutes maximum
+DYNAMIC_TIMEOUT_MIN = 1.0  # 1 second minimum to prevent edge cases
+
+
+def compute_dynamic_timeout(runtime: float) -> float:
+    """Compute dynamic timeout based on measured runtime.
+
+    The timeout is set to 10x the measured runtime, clamped between
+    DYNAMIC_TIMEOUT_MIN and DYNAMIC_TIMEOUT_MAX.
+    """
+    return max(
+        DYNAMIC_TIMEOUT_MIN,
+        min(runtime * DYNAMIC_TIMEOUT_MULTIPLIER, DYNAMIC_TIMEOUT_MAX),
+    )
 
 
 @define(slots=False)
@@ -146,10 +159,7 @@ class ShrinkRayState[TestCase](ABC):
                 self.initial_exit_code = completed.returncode
                 # Set dynamic timeout if not explicitly specified
                 if self.timeout is None:
-                    self.timeout = min(
-                        runtime * DYNAMIC_TIMEOUT_MULTIPLIER,
-                        DYNAMIC_TIMEOUT_MAX,
-                    )
+                    self.timeout = compute_dynamic_timeout(runtime)
             self.first_call = False
 
             # Store captured output
@@ -218,10 +228,7 @@ class ShrinkRayState[TestCase](ABC):
                     # Set dynamic timeout if not explicitly specified
                     if self.timeout is None:
                         runtime = time.time() - start_time
-                        self.timeout = min(
-                            runtime * DYNAMIC_TIMEOUT_MULTIPLIER,
-                            DYNAMIC_TIMEOUT_MAX,
-                        )
+                        self.timeout = compute_dynamic_timeout(runtime)
                 self.first_call = False
 
             result: int | None = sp.returncode

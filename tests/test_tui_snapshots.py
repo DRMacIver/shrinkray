@@ -1,10 +1,11 @@
 """Snapshot tests for the textual TUI."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
 
-from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate
+from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
 from shrinkray.tui import ShrinkRayApp
 
 
@@ -55,42 +56,30 @@ class FakeReductionClientForSnapshots:
         no_clang_delta: bool = False,
         clang_delta: str = "",
         trivial_is_error: bool = True,
-    ):
-        from shrinkray.subprocess.protocol import Response
-
+    ) -> Response:
         return Response(id="start", result={"status": "started"})
 
-    async def cancel(self):
-        from shrinkray.subprocess.protocol import Response
-
+    async def cancel(self) -> Response:
         self._cancelled = True
         return Response(id="cancel", result={"status": "cancelled"})
 
-    async def disable_pass(self, pass_name: str):
-        from shrinkray.subprocess.protocol import Response
-
+    async def disable_pass(self, pass_name: str) -> Response:
         return Response(
             id="disable", result={"status": "disabled", "pass_name": pass_name}
         )
 
-    async def enable_pass(self, pass_name: str):
-        from shrinkray.subprocess.protocol import Response
-
+    async def enable_pass(self, pass_name: str) -> Response:
         return Response(
             id="enable", result={"status": "enabled", "pass_name": pass_name}
         )
 
-    async def skip_current_pass(self):
-        from shrinkray.subprocess.protocol import Response
-
+    async def skip_current_pass(self) -> Response:
         return Response(id="skip", result={"status": "skipped"})
 
     async def close(self) -> None:
         pass
 
     async def get_progress_updates(self):
-        import asyncio
-
         for update in self._updates:
             if self._cancelled:
                 break

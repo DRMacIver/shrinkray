@@ -19,6 +19,7 @@ test-quick *args: install
 lint: install
     uv run ruff check src tests
     uv run python scripts/extra_lints.py
+    uv run python scripts/check_import_cycles.py
     uv run basedpyright src tests
 
 # Format code with ruff

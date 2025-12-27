@@ -49,7 +49,12 @@ from shrinkray.passes.patching import PatchApplier, Patches
 from shrinkray.passes.python import PYTHON_PASSES, is_python
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
-from shrinkray.problem import ReductionProblem, ReductionStats, shortlex
+from shrinkray.problem import (
+    ReductionProblem,
+    ReductionStats,
+    shortlex,
+    sort_key_for_initial,
+)
 
 
 @define
@@ -531,6 +536,8 @@ class KeyProblem(ReductionProblem[bytes]):
         self.base_problem = base_problem
         self.applier = applier
         self.key = key
+        # Use the appropriate sort key for this value (natural for text, shortlex for binary)
+        self._sort_key_fn = sort_key_for_initial(self.current_test_case)
 
     @property
     def current_test_case(self) -> bytes:
@@ -547,7 +554,7 @@ class KeyProblem(ReductionProblem[bytes]):
         return len(test_case)
 
     def sort_key(self, test_case: bytes) -> Any:
-        return shortlex(test_case)
+        return self._sort_key_fn(test_case)
 
     def display(self, value: bytes) -> str:
         return repr(value)

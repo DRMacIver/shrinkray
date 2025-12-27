@@ -10,7 +10,7 @@ import time
 from abc import ABC, abstractmethod
 from datetime import timedelta
 from tempfile import TemporaryDirectory
-from typing import Any
+from typing import Any, TypeVar
 
 import humanize
 import trio
@@ -21,10 +21,13 @@ from shrinkray.problem import (
     BasicReductionProblem,
     InvalidInitialExample,
     ReductionProblem,
-    shortlex,
+    sort_key_for_initial,
 )
 from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
+
+
+T = TypeVar("T")
 
 
 class TimeoutExceededOnInitial(InvalidInitialExample):
@@ -310,6 +313,7 @@ class ShrinkRayState[TestCase](ABC):
             is_interesting=self.is_interesting,
             initial=self.initial,
             work=work,
+            sort_key=sort_key_for_initial(self.initial),
             **self.extra_problem_kwargs,
         )
 
@@ -593,20 +597,9 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     def setup_formatter(self): ...
 
     @property
-    def extra_problem_kwargs(self):
-        def dict_size(test_case: dict[str, bytes]) -> int:
-            return sum(len(v) for v in test_case.values())
-
-        def dict_sort_key(test_case: dict[str, bytes]) -> Any:
-            return (
-                len(test_case),
-                dict_size(test_case),
-                sorted((k, shortlex(v)) for k, v in test_case.items()),
-            )
-
+    def extra_problem_kwargs(self) -> dict[str, Any]:
         return {
-            "sort_key": dict_sort_key,
-            "size": dict_size,
+            "size": lambda tc: sum(len(v) for v in tc.values()),
         }
 
     def new_reducer(

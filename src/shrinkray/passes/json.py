@@ -4,9 +4,9 @@ from typing import Any
 
 from attrs import define
 
-from shrinkray.passes.definitions import Format, ParseError, ReductionPass
+from shrinkray.passes.definitions import ReductionPass
 from shrinkray.passes.patching import Patches, apply_patches
-from shrinkray.problem import ReductionProblem
+from shrinkray.problem import Format, ParseError, ReductionProblem
 
 
 def is_json(s: bytes) -> bool:

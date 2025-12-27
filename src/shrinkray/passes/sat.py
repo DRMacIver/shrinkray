@@ -1,15 +1,10 @@
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Iterator
 
-from shrinkray.passes.definitions import (
-    DumpError,
-    Format,
-    ParseError,
-    ReductionPass,
-)
+from shrinkray.passes.definitions import ReductionPass
 from shrinkray.passes.patching import Conflict, SetPatches, apply_patches
 from shrinkray.passes.sequences import delete_elements
-from shrinkray.problem import ReductionProblem
+from shrinkray.problem import DumpError, Format, ParseError, ReductionProblem
 
 
 Clause = list[int]

@@ -42,7 +42,9 @@ def is_satisfiable(clauses):
         o.write(DimacsCNF.dumps(clauses))
     try:
         result = subprocess.run(
-            ["minisat", sat_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            ["minisat", sat_file],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         ).returncode
         assert result in (10, 20)
         return result == 10
@@ -95,7 +97,10 @@ def sat_clauses(draw, min_clause_size=1):
     )
 
     return draw(
-        st.lists(st.lists(literal, unique_by=abs, min_size=min_clause_size), min_size=1)
+        st.lists(
+            st.lists(literal, unique_by=abs, min_size=min_clause_size),
+            min_size=1,
+        )
     )
 
 
@@ -195,10 +200,8 @@ def test_reduces_unsatisfiable_to_trivial(unsat):
     shrunk = shrink_sat(unsat, test)
 
     assert shrunk == [
+        [1],
         [-1],
-        [
-            1,
-        ],
     ]
 
 

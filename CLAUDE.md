@@ -45,6 +45,10 @@ If you encounter a case where suppression seems genuinely necessary and principl
 - Just commit when ready - don't ask for permission
 - Use the `/checkpoint` skill to ensure consistent quality at each commit
 
+### No Backward Compatibility
+
+Shrink Ray is a standalone application, not a library. Do not add backward compatibility shims, re-exports, or compatibility layers when refactoring. When moving code between modules, update all imports directly rather than re-exporting from the old location.
+
 ### CLAUDE.md as Source of Truth
 
 This file is the source of truth for project conventions. However:
@@ -96,13 +100,13 @@ Shrink Ray is a multiformat test-case reducer built on Trio for async/parallelis
 **ReductionProblem[T]** (`problem.py`): The central interface representing a reduction task.
 - `current_test_case: T` - The current state being reduced
 - `is_interesting(test_case: T) -> bool` - Tests if a candidate triggers the bug
-- `sort_key(test_case: T)` - Shortlex ordering: (length, lexicographic) for reproducibility
+- `sort_key(test_case: T)` - Ordering for reproducibility (natural ordering for text, shortlex for binary)
 - Problems can be "viewed" through Formats to reduce structured data
 
-**Format[S, T]** (`passes/definitions.py`): Bridges bytes ↔ structured data.
+**Format[S, T]** (`problem.py`): Bridges bytes ↔ structured data.
 - `parse(input: S) -> T` and `dumps(output: T) -> S`
 - Enables format-agnostic passes to work on bytes, JSON, Python AST, etc.
-- `compose(format, pass)` wraps a pass to work through a format layer
+- `compose(format, pass)` in `passes/definitions.py` wraps a pass to work through a format layer
 
 **ReductionPass** (`passes/definitions.py`): A callable `(ReductionProblem[T]) -> Awaitable[None]` that makes reduction attempts until no progress.
 
@@ -168,7 +172,7 @@ Main Process (asyncio/textual)     Subprocess (trio)
 
 ### Key Design Decisions
 
-1. **Shortlex ordering**: Ensures reproducibility - same minimal result regardless of reduction path
+1. **Natural ordering**: Ensures reproducibility - same minimal result regardless of reduction path. Uses a multi-tier heuristic for text (length, average squared line length, line count, then character ordering) and shortlex for binary data.
 2. **Cache clearing on reduction**: When a smaller test case is found, old cached results are no longer useful (derived from old test case)
 3. **View caching**: `problem.view(format)` caches parsed views to avoid redundant parsing
 4. **Speculative parallelism**: Multiple candidates tested concurrently; first success wins, others are "wasted" but harmless

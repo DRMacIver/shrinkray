@@ -7,12 +7,15 @@ Rules:
 3. No use of async iterators without contextlib.aclosing
 4. No swallowing exception stack traces (str(e) without traceback logging)
 5. No mutable default arguments
+
+Uses a cache in .cache/extra_lints_cache.json to skip unchanged files.
 """
 
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import libcst as cst
 from libcst.metadata import (
@@ -21,6 +24,9 @@ from libcst.metadata import (
     ParentNodeProvider,
     PositionProvider,
 )
+
+
+CACHE_FILE = Path(".cache/extra_lints_cache.json")
 
 
 @dataclass
@@ -355,16 +361,63 @@ def lint_file(path: Path) -> list[LintError]:
         return [LintError(path, e.raw_line, e.raw_column, "parse-error", str(e))]
 
 
+def load_cache() -> dict[str, Any]:
+    """Load the lint cache from disk."""
+    if not CACHE_FILE.exists():
+        return {}
+    try:
+        return json.loads(CACHE_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_cache(cache: dict[str, Any]) -> None:
+    """Save the lint cache to disk."""
+    CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE_FILE.write_text(json.dumps(cache, indent=2, sort_keys=True))
+
+
+def get_file_key(path: Path) -> tuple[int, float]:
+    """Get the cache key for a file (size, mtime)."""
+    stat = path.stat()
+    return (stat.st_size, stat.st_mtime)
+
+
+def file_changed(path: Path, cache: dict[str, Any]) -> bool:
+    """Check if a file has changed since it was last cached."""
+    path_str = str(path)
+    if path_str not in cache:
+        return True
+    cached = cache[path_str]
+    size, mtime = get_file_key(path)
+    return cached.get("size") != size or cached.get("mtime") != mtime
+
+
 def main() -> int:
     """Run linting on all Python files in src and tests."""
+    cache = load_cache()
     errors: list[LintError] = []
+    files_checked = 0
+    files_skipped = 0
 
     for directory in ["src", "tests"]:
         dir_path = Path(directory)
         if not dir_path.exists():
             continue
         for py_file in dir_path.rglob("*.py"):
-            errors.extend(lint_file(py_file))
+            if not file_changed(py_file, cache):
+                files_skipped += 1
+                continue
+            files_checked += 1
+            file_errors = lint_file(py_file)
+            errors.extend(file_errors)
+            # Update cache for this file (even if it has errors, so we
+            # don't re-check until it changes)
+            size, mtime = get_file_key(py_file)
+            cache[str(py_file)] = {"size": size, "mtime": mtime}
+
+    # Save cache after checking all files
+    save_cache(cache)
 
     if errors:
         for error in sorted(errors, key=lambda e: (str(e.file), e.line, e.column)):
@@ -372,7 +425,12 @@ def main() -> int:
         print(f"\nFound {len(errors)} error(s)")
         return 1
 
-    print("All custom lint checks passed!")
+    if files_skipped > 0 and files_checked == 0:
+        print("All custom lint checks passed! (all files cached)")
+    elif files_skipped > 0:
+        print(f"All custom lint checks passed! ({files_checked} checked, {files_skipped} cached)")
+    else:
+        print("All custom lint checks passed!")
     return 0
 
 

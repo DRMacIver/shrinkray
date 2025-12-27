@@ -2,8 +2,8 @@
 
 from random import Random
 
-from shrinkray.passes.definitions import Format, ParseError, compose
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.passes.definitions import compose
+from shrinkray.problem import BasicReductionProblem, Format, ParseError
 from shrinkray.work import Volume, WorkContext
 
 

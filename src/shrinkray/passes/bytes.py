@@ -24,8 +24,8 @@ from collections.abc import Sequence
 
 from attrs import define
 
-from shrinkray.passes.definitions import Format, ReductionProblem
 from shrinkray.passes.patching import Cuts, Patches, apply_patches
+from shrinkray.problem import Format, ReductionProblem
 
 
 @define(frozen=True)
@@ -739,12 +739,13 @@ async def line_sorter(problem: ReductionProblem[bytes]):
     while i < len(lines):
         j = i
         while j > 0:
-            u = lines[j - 1]
-            v = lines[j]
-            if v + u < u + v:
-                attempt = list(lines)
-                attempt[j - 1], attempt[j] = attempt[j], attempt[j - 1]
-                if not await problem.is_interesting(b"\n".join(attempt)):
+            attempt = list(lines)
+            attempt[j - 1], attempt[j] = attempt[j], attempt[j - 1]
+            new_test_case = b"\n".join(attempt)
+            if problem.sort_key(new_test_case) < problem.sort_key(
+                problem.current_test_case
+            ):
+                if not await problem.is_interesting(new_test_case):
                     break
                 else:
                     j -= 1

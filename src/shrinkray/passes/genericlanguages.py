@@ -3,7 +3,7 @@ Module of reduction passes designed for "things that look like programming langu
 """
 
 import re
-from collections.abc import Callable, Sized
+from collections.abc import Callable
 from functools import wraps
 from string import ascii_lowercase, ascii_uppercase
 from typing import AnyStr
@@ -12,9 +12,15 @@ import trio
 from attr import define
 
 from shrinkray.passes.bytes import ByteReplacement, delete_intervals
-from shrinkray.passes.definitions import Format, ParseError, ReductionPass
+from shrinkray.passes.definitions import ReductionPass
 from shrinkray.passes.patching import PatchApplier, Patches, apply_patches
-from shrinkray.problem import BasicReductionProblem, ReductionProblem
+from shrinkray.problem import (
+    BasicReductionProblem,
+    Format,
+    ParseError,
+    ReductionProblem,
+    sort_key_for_initial,
+)
 from shrinkray.work import NotFound
 
 
@@ -240,10 +246,6 @@ async def simplify_brackets(problem: ReductionProblem[bytes]) -> None:
 IDENTIFIER = re.compile(rb"(\b[A-Za-z][A-Za-z0-9_]*\b)|([0-9]+)")
 
 
-def shortlex[T: Sized](s: T) -> tuple[int, T]:
-    return (len(s), s)
-
-
 async def normalize_identifiers(problem: ReductionProblem[bytes]) -> None:
     """Replace identifiers with shorter alternatives.
 
@@ -261,8 +263,10 @@ async def normalize_identifiers(problem: ReductionProblem[bytes]) -> None:
                 replacements.add(c)
                 break
 
-    replacements = sorted(replacements, key=shortlex)
-    targets = sorted(identifiers, key=shortlex, reverse=True)
+    sort_key = sort_key_for_initial(problem.current_test_case)
+
+    replacements = sorted(replacements, key=sort_key)
+    targets = sorted(identifiers, key=sort_key, reverse=True)
 
     # TODO: This could use better parallelisation.
     for t in targets:
@@ -272,7 +276,7 @@ async def normalize_identifiers(problem: ReductionProblem[bytes]) -> None:
             continue
 
         async def can_replace(r):
-            if shortlex(r) >= shortlex(t):
+            if sort_key(r) >= sort_key(t):
                 return False
             attempt = pattern.sub(r, source)
             assert attempt != source

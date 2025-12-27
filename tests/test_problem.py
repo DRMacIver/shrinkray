@@ -4,9 +4,10 @@ import time
 
 import pytest
 
-from shrinkray.passes.definitions import DumpError, Format
 from shrinkray.problem import (
     BasicReductionProblem,
+    DumpError,
+    Format,
     InvalidInitialExample,
     ReductionProblem,
     ReductionStats,
@@ -50,24 +51,16 @@ def test_shortlex_string():
 # =============================================================================
 
 
-def test_default_sort_key_bytes():
-    key = default_sort_key(b"hello")
-    assert key == (5, b"hello")
-
-
-def test_default_sort_key_string():
-    key = default_sort_key("hello")
-    assert key == (5, "hello")
-
-
-def test_default_sort_key_list():
-    # For non-string/bytes, uses repr
-    key = default_sort_key([1, 2, 3])
-    assert key[0] == len(repr([1, 2, 3]))
-
-
-def test_default_sort_key_ordering():
+def test_default_sort_key_bytes_ordering():
     assert default_sort_key(b"a") < default_sort_key(b"ab")
+
+
+def test_default_sort_key_string_ordering():
+    """default_sort_key uses natural_key for strings."""
+    # Shorter strings are preferred
+    assert default_sort_key("a") < default_sort_key("ab")
+    # Same length, character order matters
+    assert default_sort_key("a") < default_sort_key("b")
 
 
 # =============================================================================

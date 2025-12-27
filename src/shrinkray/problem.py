@@ -12,12 +12,13 @@ the details of caching, parallelism, and state management.
 """
 
 import hashlib
+import string
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sized
 from datetime import timedelta
+from functools import total_ordering
 from typing import (
-    TYPE_CHECKING,
     Any,
     Protocol,
     TypeVar,
@@ -29,11 +30,9 @@ import trio
 from attrs import define
 from humanize import naturalsize, precisedelta
 
+from shrinkray.formatting import try_decode
 from shrinkray.work import WorkContext
 
-
-if TYPE_CHECKING:
-    from shrinkray.passes.definitions import Format
 
 S = TypeVar("S")
 T = TypeVar("T")
@@ -71,9 +70,196 @@ def shortlex[SizedT: Sized](value: SizedT) -> tuple[int, SizedT]:
     return (len(value), value)
 
 
-def default_sort_key(value: Any):
-    if isinstance(value, str | bytes):
+@total_ordering
+class LazyChainedSortKey:
+    """A comparison key that lazily evaluates a chain of comparison functions.
+
+    This class provides an ordering that compares values by applying a sequence
+    of functions in order. The first function that produces different values
+    for two inputs determines the ordering. If all functions return equal
+    values, the inputs are considered equal.
+
+    This is used to implement the natural ordering for strings, which compares
+    by length, then average squared line length, then number of lines, etc.
+
+    The "lazy" aspect is that comparison functions are only evaluated until
+    one returns different values, avoiding unnecessary computation.
+    """
+
+    def __init__(self, functions: list[Callable[[T], Any]], value: T):
+        self.functions = functions
+        self.value = value
+
+    def __eq__(self, other):
+        if not isinstance(other, LazyChainedSortKey):
+            return NotImplemented
+        assert len(self.functions) == len(other.functions)
+        return self.value == other.value
+
+    def __lt__(self, other):
+        if self == other:
+            return False
+        if not isinstance(other, LazyChainedSortKey):
+            return NotImplemented
+        for f in self.functions:
+            self_key = f(self.value)
+            other_key = f(other.value)
+            if self_key < other_key:
+                return True
+            elif self_key > other_key:
+                return False
+        # All comparison functions returned equal values for different inputs.
+        # This shouldn't happen with the current functions (natural_string_lex
+        # compares character-by-character) but if it does, neither is less.
+        return False
+
+
+# Natural character ordering: whitespace < digits < lowercase < uppercase.
+# Characters not in this string are sorted by ord() after all known characters.
+NATURAL_CHARACTER_ORDER = (
+    string.whitespace + string.digits + string.ascii_lowercase + string.ascii_uppercase
+)
+NATURAL_CHARACTER_ORDER_INDEX = {s: i for i, s in enumerate(NATURAL_CHARACTER_ORDER)}
+
+
+def character_index(c: str) -> int:
+    """Return the sorting index for a character in natural ordering.
+
+    Characters in NATURAL_CHARACTER_ORDER get their position in that string.
+    Unknown characters (punctuation, unicode, etc.) sort after all known
+    characters, ordered by their Unicode code point.
+    """
+    return NATURAL_CHARACTER_ORDER_INDEX.get(c, len(NATURAL_CHARACTER_ORDER) + ord(c))
+
+
+def natural_string_lex(s: str) -> list[int]:
+    """Convert a string to a list of character indices for lexicographic comparison.
+
+    This transforms the string so that comparing the resulting lists gives
+    the natural character ordering (whitespace < digits < lowercase < uppercase).
+    """
+    return list(map(character_index, s))
+
+
+# The chain of comparison functions used for natural string ordering.
+# Each function is tried in sequence; the first that differs determines order.
+#
+# 1. Total length - shorter strings are always preferred
+# 2. Average squared line length - penalizes very long lines, preferring balanced code
+#    Formula: sum(len(line)²) / count(lines)²
+# 3. Number of lines - fewer lines is better (after accounting for balance)
+# 4. List of line lengths - lexicographically compare line length sequences
+# 5. Natural character order - whitespace < digits < lowercase < uppercase
+NATURAL_ORDERING_FUNCTIONS: list[Callable[[str], Any]] = [
+    len,
+    lambda s: sum(len(line) ** 2 for line in s.split("\n")) / len(s.split("\n")) ** 2,
+    lambda s: len(s.splitlines()),
+    lambda s: list(map(len, s.splitlines())),
+    natural_string_lex,
+]
+
+
+def natural_key(s: str) -> LazyChainedSortKey:
+    """Return a comparison key for natural string ordering.
+
+    Natural ordering uses a chain of heuristics to determine which string
+    is "smaller" (more reduced). This is designed to produce human-readable
+    minimal test cases with balanced line lengths and natural character choices.
+
+    See NATURAL_ORDERING_FUNCTIONS for the complete ordering criteria.
+    """
+    return LazyChainedSortKey(functions=NATURAL_ORDERING_FUNCTIONS, value=s)
+
+
+def sort_key_for_initial(initial: Any) -> Callable[[Any], Any]:
+    """Create a sort key function appropriate for the given initial value.
+
+    This examines the initial test case and returns a comparison function
+    that will be used to order all test cases during reduction.
+
+    For bytes:
+        - If decodable as text, uses natural ordering on the decoded string
+        - Falls back to shortlex for binary data that can't be decoded
+
+    For dicts:
+        - Orders by total size of values, then number of keys
+        - Then compares values for each key in order of largest-first
+
+    For other types:
+        - Falls back to natural ordering on repr()
+
+    The returned function can be used as a sort key or comparison key.
+    """
+    if isinstance(initial, bytes):
+        encoding, _ = try_decode(initial)
+        if encoding is None:
+            return shortlex
+        else:
+
+            def natural_for_encoding(b: bytes) -> Any:
+                try:
+                    s = b.decode(encoding)
+                    return (0, natural_key(s))
+                except UnicodeDecodeError:
+                    return (1, shortlex(b))
+
+            return natural_for_encoding
+    elif isinstance(initial, dict):
+        keys = sorted(initial, key=lambda k: shortlex(initial[k]), reverse=True)
+        natural_keys = {k: sort_key_for_initial(v) for k, v in initial.items()}
+
+        def dict_total_size(s):
+            return sum(len(v) for v in s.values())
+
+        def key_sort_key(k):
+            def f(x):
+                try:
+                    v = x[k]
+                except KeyError:
+                    return (0,)
+                else:
+                    return (1, natural_keys[k](v))
+
+            return f
+
+        functions = [
+            dict_total_size,
+            len,
+        ] + [key_sort_key(k) for k in keys]
+
+        def dict_sort_key(v):
+            return LazyChainedSortKey(
+                functions=functions,
+                value=v,
+            )
+
+        return dict_sort_key
+    else:
+        # We don't use this branch in the main app, but this
+        # function is also used in tests.
+        def fallback_sort_key(s):
+            return natural_key(repr(s))
+
+        return fallback_sort_key
+
+
+def default_sort_key(value: Any) -> Any:
+    """Return a comparison key for a value using type-appropriate ordering.
+
+    This is a simpler alternative to sort_key_for_initial that doesn't
+    examine the initial value to determine the best ordering.
+
+    - bytes: shortlex ordering (length, then lexicographic)
+    - str: natural ordering (length, line balance, character order)
+    - other: shortlex on repr()
+
+    Note: This really should return some sort of Comparable type, but Python
+    doesn't have a built-in protocol for that.
+    """
+    if isinstance(value, bytes):
         return shortlex(value)
+    elif isinstance(value, str):
+        return natural_key(value)
     else:
         return shortlex(repr(value))
 
@@ -83,6 +269,70 @@ def default_display(value: Any) -> str:
     if len(r) < 50:
         return f"{r} (size {len(value)})"
     return f"value of size {len(value)}"
+
+
+class ParseError(Exception):
+    """Raised when a Format cannot parse its input."""
+
+    pass
+
+
+class DumpError(Exception):
+    """Raised when a Format cannot serialize its output.
+
+    This occurs because not all internal representations map to valid
+    output in the target format. For example, a reduction might create
+    an invalid AST structure that cannot be converted back to source code.
+    """
+
+    pass
+
+
+class Format[S, T](ABC):
+    """A bidirectional transformation between two types.
+
+    Formats enable format-agnostic passes by abstracting the
+    parse/serialize cycle. For example:
+
+    - Split(b"\\n"): bytes <-> list[bytes] (lines)
+    - Tokenize(): bytes <-> list[bytes] (tokens)
+    - JSON: bytes <-> Any (Python objects)
+    - DimacsCNF: bytes <-> list[list[int]] (SAT clauses)
+
+    A Format must satisfy the round-trip property:
+        dumps(parse(x)) should be equivalent to x
+        (possibly with normalization)
+
+    Example usage:
+        # Delete duplicate lines
+        compose(Split(b"\\n"), delete_duplicates)
+
+        # Reduce integer literals in source code
+        compose(IntegerFormat(), reduce_integer)
+    """
+
+    @property
+    def name(self) -> str:
+        """Human-readable name for this format, used in pass names."""
+        return repr(self)
+
+    @abstractmethod
+    def parse(self, input: S) -> T:
+        """Parse input into the target type. Raises ParseError on failure."""
+        ...
+
+    def is_valid(self, input: S) -> bool:
+        """Check if input can be parsed by this format."""
+        try:
+            self.parse(input)
+            return True
+        except ParseError:
+            return False
+
+    @abstractmethod
+    def dumps(self, input: T) -> S:
+        """Serialize the target type back to the source type."""
+        ...
 
 
 def default_size(value: Any) -> int:
@@ -182,9 +432,7 @@ class ReductionProblem[T](ABC):
         # Cache of View objects for each Format, to avoid re-parsing
         self.__view_cache: dict[Any, ReductionProblem[Any]] = {}
 
-    def view(
-        self, format: "Format[T, S] | type[Format[T, S]]"
-    ) -> "ReductionProblem[S]":
+    def view(self, format: Format[T, S] | type[Format[T, S]]) -> "ReductionProblem[S]":
         """Create a view of this problem through a Format.
 
         A View wraps this problem, parsing the current test case through
@@ -481,8 +729,6 @@ class View[S, T](ReductionProblem[T]):
         return self.__current
 
     async def is_interesting(self, test_case: T) -> bool:
-        from shrinkray.passes.definitions import DumpError
-
         try:
             return await self.__problem.is_interesting(self.__dump(test_case))
         except DumpError:

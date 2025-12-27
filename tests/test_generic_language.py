@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
-from shrinkray.passes.definitions import ParseError
 from shrinkray.passes.genericlanguages import (
     IntegerFormat,
     RegionReplacingPatches,
@@ -18,9 +17,9 @@ from shrinkray.passes.genericlanguages import (
     reduce_integer_literals,
     regex_pass,
     replace_falsey_with_zero,
-    shortlex,
     simplify_brackets,
 )
+from shrinkray.problem import ParseError, shortlex
 from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
 
@@ -222,8 +221,8 @@ def test_simplify_brackets_square_to_parens():
 
 def test_normalize_identifiers_basic():
     result = reduce_with([normalize_identifiers], b"hello hello", lambda x: True)
-    # Tries uppercase first, then lowercase
-    assert result == b"A A"
+    # Tries lowercase first, then uppercase
+    assert result == b"a a"
 
 
 def test_normalize_identifiers_multiple():

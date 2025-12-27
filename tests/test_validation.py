@@ -1,10 +1,12 @@
 """Tests for the validation module."""
 
+import io
 import os
 import shutil
 import stat
+import sys
 import tempfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -12,7 +14,7 @@ from shrinkray.cli import InputType
 from shrinkray.validation import (
     ValidationResult,
     _build_command,
-    _format_command,
+    _format_command_for_display,
     run_validation,
     validate_initial_example,
 )
@@ -84,28 +86,56 @@ def test_build_command_with_existing_args():
 
 
 # =============================================================================
-# _format_command tests
+# _format_command_for_display tests
 # =============================================================================
 
 
 def test_format_command_simple():
-    """Test _format_command formats a simple command."""
-    result = _format_command(["./test.sh", "file.txt"], "/tmp/dir")
-    assert result == "cd /tmp/dir && ./test.sh file.txt"
+    """Test _format_command_for_display formats a simple command."""
+    result = _format_command_for_display(["./test.sh", "file.txt"], "/tmp/dir")
+    lines = result.split("\n")
+    assert lines[0] == "cd /tmp/dir"
+    assert lines[1] == "./test.sh file.txt"
 
 
 def test_format_command_with_spaces():
-    """Test _format_command quotes paths with spaces."""
-    result = _format_command(["./test.sh", "file with spaces.txt"], "/tmp/my dir")
-    assert "cd '/tmp/my dir'" in result
-    assert "'file with spaces.txt'" in result
+    """Test _format_command_for_display quotes paths with spaces."""
+    result = _format_command_for_display(
+        ["./test.sh", "file with spaces.txt"], "/tmp/my dir"
+    )
+    lines = result.split("\n")
+    assert lines[0] == "cd '/tmp/my dir'"
+    assert "'file with spaces.txt'" in lines[1]
 
 
 def test_format_command_with_special_chars():
-    """Test _format_command quotes special characters."""
-    result = _format_command(["./test.sh", "file$var.txt"], "/tmp")
+    """Test _format_command_for_display quotes special characters."""
+    result = _format_command_for_display(["./test.sh", "file$var.txt"], "/tmp")
     # Should quote the filename to prevent shell expansion
     assert "'file$var.txt'" in result
+
+
+def test_format_command_converts_paths_in_cwd_to_relative():
+    """Test _format_command_for_display converts paths within cwd to relative."""
+    result = _format_command_for_display(
+        ["./test.sh", "/tmp/workdir/subdir/file.txt"], "/tmp/workdir"
+    )
+    lines = result.split("\n")
+    assert lines[0] == "cd /tmp/workdir"
+    # The path /tmp/workdir/subdir/file.txt should become subdir/file.txt
+    assert "subdir/file.txt" in lines[1]
+    assert "/tmp/workdir/subdir/file.txt" not in lines[1]
+
+
+def test_format_command_keeps_paths_outside_cwd_absolute():
+    """Test _format_command_for_display keeps paths outside cwd absolute."""
+    result = _format_command_for_display(
+        ["/usr/bin/test.sh", "/other/path/file.txt"], "/tmp/workdir"
+    )
+    lines = result.split("\n")
+    # Paths outside cwd should remain absolute
+    assert "/usr/bin/test.sh" in lines[1]
+    assert "/other/path/file.txt" in lines[1]
 
 
 # =============================================================================
@@ -414,7 +444,7 @@ def test_run_validation_captures_output(capsys):
 
         captured = capsys.readouterr()
         assert "Validating" in captured.err
-        assert "Command:" in captured.err
+        assert "Running interestingness test:" in captured.err
 
 
 def test_run_validation_shows_temp_dir_on_failure(capsys):
@@ -518,6 +548,110 @@ async def test_cleanup_handles_exception():
                     os.unlink(path)
                 except Exception:
                     pass
+
+
+async def test_validation_with_captured_stderr():
+    """Test validation when stderr doesn't have a real file descriptor.
+
+    This exercises the fallback path where we capture and then print output.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Create test file
+        test_file = os.path.join(tmp_dir, "test.txt")
+        with open(test_file, "wb") as f:
+            f.write(b"test content")
+
+        # Create test script that prints output and exits 0
+        script = os.path.join(tmp_dir, "test.sh")
+        with open(script, "w") as f:
+            f.write("#!/bin/bash\necho 'test output'\nexit 0\n")
+        os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
+
+        # Mock sys.stderr.fileno to raise UnsupportedOperation
+        # This simulates running under pytest with output capture
+        original_stderr = sys.stderr
+        mock_stderr = MagicMock()
+        mock_stderr.fileno.side_effect = io.UnsupportedOperation("fileno")
+        mock_stderr.buffer = original_stderr.buffer
+        mock_stderr.flush = original_stderr.flush
+
+        with patch("shrinkray.validation.sys.stderr", mock_stderr):
+            result = await validate_initial_example(
+                file_path=test_file,
+                test=[script],
+                input_type=InputType.all,
+                in_place=False,
+            )
+
+        assert result.success
+
+
+async def test_validation_with_captured_output_failure():
+    """Test validation failure when output is captured.
+
+    This exercises the output capture path with a failing test.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Create test file
+        test_file = os.path.join(tmp_dir, "test.txt")
+        with open(test_file, "wb") as f:
+            f.write(b"test content")
+
+        # Create test script that prints output and exits 1
+        script = os.path.join(tmp_dir, "test.sh")
+        with open(script, "w") as f:
+            f.write("#!/bin/bash\necho 'error output' >&2\nexit 1\n")
+        os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
+
+        # Mock sys.stderr.fileno to raise UnsupportedOperation
+        original_stderr = sys.stderr
+        mock_stderr = MagicMock()
+        mock_stderr.fileno.side_effect = io.UnsupportedOperation("fileno")
+        mock_stderr.buffer = original_stderr.buffer
+        mock_stderr.flush = original_stderr.flush
+
+        with patch("shrinkray.validation.sys.stderr", mock_stderr):
+            result = await validate_initial_example(
+                file_path=test_file,
+                test=[script],
+                input_type=InputType.all,
+                in_place=False,
+            )
+
+        assert not result.success
+        # Clean up temp dirs
+        if result.temp_dirs:
+            for d in result.temp_dirs:
+                shutil.rmtree(d, ignore_errors=True)
+
+
+async def test_validation_handles_run_process_exception():
+    """Test validation handles exceptions during process execution.
+
+    This covers the exception handler in _run_validation_test.
+    """
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # Create test file
+        test_file = os.path.join(tmp_dir, "test.txt")
+        with open(test_file, "wb") as f:
+            f.write(b"test content")
+
+        # Use a non-existent command to trigger an exception
+        result = await validate_initial_example(
+            file_path=test_file,
+            test=["/nonexistent/command/that/does/not/exist"],
+            input_type=InputType.all,
+            in_place=False,
+        )
+
+        assert not result.success
+        assert result.error_message is not None
+        assert "Error running interestingness test" in result.error_message
+
+        # Clean up temp dirs
+        if result.temp_dirs:
+            for d in result.temp_dirs:
+                shutil.rmtree(d, ignore_errors=True)
 
 
 async def test_failure_with_no_temp_dirs():

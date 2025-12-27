@@ -6,6 +6,7 @@ to stderr so users can understand what's happening with slow tests, and
 preserves temporary directories on failure for debugging.
 """
 
+import io
 import os
 import shlex
 import shutil
@@ -41,11 +42,24 @@ def _build_command(
     return list(test)
 
 
-def _format_command(command: list[str], cwd: str) -> str:
-    """Format a command for display, showing cd and the command."""
-    # Quote command parts for display
-    quoted = " ".join(shlex.quote(part) for part in command)
-    return f"cd {shlex.quote(cwd)} && {quoted}"
+def _format_command_for_display(command: list[str], cwd: str) -> str:
+    """Format a command for display, with cd on its own line and relative paths.
+
+    Returns a multi-line string with:
+    - cd <directory>
+    - <command with relative paths for files in cwd>
+    """
+    # Convert absolute paths within cwd to relative paths for readability
+    display_parts = []
+    for part in command:
+        if part.startswith(cwd + os.sep):
+            # Convert to relative path
+            display_parts.append(os.path.relpath(part, cwd))
+        else:
+            display_parts.append(part)
+
+    quoted = " ".join(shlex.quote(part) for part in display_parts)
+    return f"cd {shlex.quote(cwd)}\n{quoted}"
 
 
 async def _run_validation_test(
@@ -94,25 +108,36 @@ async def _run_validation_test(
 
         # Print what we're doing to stderr
         print(
-            f"\nRunning interestingness test from: {cwd}",
+            "\nRunning interestingness test:",
             file=sys.stderr,
             flush=True,
         )
         print(
-            f"Command: {_format_command(command, cwd)}",
+            _format_command_for_display(command, cwd),
             file=sys.stderr,
             flush=True,
         )
         print(file=sys.stderr, flush=True)
 
-        # Build subprocess kwargs - stream output to stderr
+        # Build subprocess kwargs
         kwargs: dict = {
             "cwd": cwd,
             "check": False,
-            # Stream stdout/stderr to parent's stderr for visibility
-            "stdout": sys.stderr.fileno(),
-            "stderr": sys.stderr.fileno(),
         }
+
+        # Try to stream output directly to stderr if possible
+        # This allows real-time output visibility for slow tests
+        # Falls back to capturing if stderr doesn't have a real file descriptor
+        # (e.g., when running under pytest with output capture)
+        try:
+            stderr_fd = sys.stderr.fileno()
+            kwargs["stdout"] = stderr_fd
+            kwargs["stderr"] = stderr_fd
+            capture_output = False
+        except (io.UnsupportedOperation, OSError):
+            kwargs["capture_stdout"] = True
+            kwargs["capture_stderr"] = True
+            capture_output = True
 
         # Handle stdin if needed
         if input_type.enabled(InputType.stdin) and not os.path.isdir(working):
@@ -123,6 +148,15 @@ async def _run_validation_test(
 
         # Run the process
         result = await trio.run_process(command, **kwargs)
+
+        # If we captured output, print it now
+        if capture_output:
+            if result.stdout:
+                sys.stderr.buffer.write(result.stdout)
+                sys.stderr.flush()
+            if result.stderr:
+                sys.stderr.buffer.write(result.stderr)
+                sys.stderr.flush()
 
         print(file=sys.stderr, flush=True)
         print(
@@ -136,9 +170,8 @@ async def _run_validation_test(
                 success=False,
                 error_message=(
                     f"Interestingness test exited with code {result.returncode}, "
-                    f"but should return 0 for interesting test cases.\n"
-                    f"Test was run from: {cwd}\n"
-                    f"Command: {_format_command(command, cwd)}"
+                    f"but should return 0 for interesting test cases.\n\n"
+                    f"To reproduce:\n{_format_command_for_display(command, cwd)}"
                 ),
                 exit_code=result.returncode,
                 temp_dirs=temp_dirs,

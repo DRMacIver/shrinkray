@@ -22,7 +22,7 @@ class FakeReductionClientForSnapshots:
         file_path: str,
         test: list[str],
         parallelism: int | None = None,
-        timeout: float = 1.0,
+        timeout: float | None = None,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,

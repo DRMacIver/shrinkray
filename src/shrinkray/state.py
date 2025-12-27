@@ -36,13 +36,19 @@ class TimeoutExceededOnInitial(InvalidInitialExample):
         )
 
 
+# Constants for dynamic timeout
+DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT = 300.0  # 5 minutes for first call
+DYNAMIC_TIMEOUT_MULTIPLIER = 10
+DYNAMIC_TIMEOUT_MAX = 300.0  # 5 minutes maximum
+
+
 @define(slots=False)
 class ShrinkRayState[TestCase](ABC):
     input_type: Any  # InputType from __main__
     in_place: bool
     test: list[str]
     filename: str
-    timeout: float
+    timeout: float | None
     base: str
     parallelism: int
     initial: TestCase
@@ -127,7 +133,8 @@ class ShrinkRayState[TestCase](ABC):
             completed = await trio.run_process(command, **kwargs)
             runtime = time.time() - start_time
 
-            if runtime >= self.timeout and self.first_call:
+            # Check for timeout violation (only when timeout is explicitly set)
+            if self.timeout is not None and runtime >= self.timeout and self.first_call:
                 self.initial_exit_code = completed.returncode
                 self.first_call = False
                 raise TimeoutExceededOnInitial(
@@ -137,6 +144,12 @@ class ShrinkRayState[TestCase](ABC):
 
             if self.first_call:
                 self.initial_exit_code = completed.returncode
+                # Set dynamic timeout if not explicitly specified
+                if self.timeout is None:
+                    self.timeout = min(
+                        runtime * DYNAMIC_TIMEOUT_MULTIPLIER,
+                        DYNAMIC_TIMEOUT_MAX,
+                    )
             self.first_call = False
 
             # Store captured output
@@ -168,9 +181,19 @@ class ShrinkRayState[TestCase](ABC):
             sp = await nursery.start(call_with_kwargs)
 
             try:
-                with trio.move_on_after(
-                    self.timeout * 10 if self.first_call else self.timeout
-                ):
+                # Determine effective timeout for this call
+                if self.first_call:
+                    # For first call: use calibration timeout if dynamic, otherwise 10x explicit timeout
+                    if self.timeout is None:
+                        effective_timeout = DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT
+                    else:
+                        effective_timeout = self.timeout * 10
+                else:
+                    # For subsequent calls, timeout must be set (either explicit or computed)
+                    assert self.timeout is not None
+                    effective_timeout = self.timeout
+
+                with trio.move_on_after(effective_timeout):
                     await sp.wait()
 
                 runtime = time.time() - start_time
@@ -179,7 +202,12 @@ class ShrinkRayState[TestCase](ABC):
                     # Process didn't terminate before timeout - kill it
                     await self._interrupt_wait_and_kill(sp)
 
-                if runtime >= self.timeout and self.first_call:
+                # Check for timeout violation (only when timeout is explicitly set)
+                if (
+                    self.timeout is not None
+                    and runtime >= self.timeout
+                    and self.first_call
+                ):
                     raise TimeoutExceededOnInitial(
                         timeout=self.timeout,
                         runtime=runtime,
@@ -187,6 +215,13 @@ class ShrinkRayState[TestCase](ABC):
             finally:
                 if self.first_call:
                     self.initial_exit_code = sp.returncode
+                    # Set dynamic timeout if not explicitly specified
+                    if self.timeout is None:
+                        runtime = time.time() - start_time
+                        self.timeout = min(
+                            runtime * DYNAMIC_TIMEOUT_MULTIPLIER,
+                            DYNAMIC_TIMEOUT_MAX,
+                        )
                 self.first_call = False
 
             result: int | None = sp.returncode

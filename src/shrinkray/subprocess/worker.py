@@ -169,7 +169,7 @@ class ReducerWorker:
         filename = params["file_path"]
         test = params["test"]
         parallelism = params.get("parallelism", os.cpu_count() or 1)
-        timeout = params.get("timeout", 1.0)
+        timeout = params.get("timeout")  # None means dynamic timeout
         seed = params.get("seed", 0)
         input_type = InputType[params.get("input_type", "all")]
         in_place = params.get("in_place", False)

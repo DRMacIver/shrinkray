@@ -1640,6 +1640,45 @@ async def test_run_for_exit_code_debug_mode_timeout_on_first_call(tmp_path):
     assert state.first_call is False
 
 
+async def test_run_for_exit_code_debug_mode_dynamic_timeout(tmp_path):
+    """Test dynamic timeout computation in debug mode on first call.
+
+    Exercises the dynamic timeout computation path in debug mode.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=None,  # Dynamic timeout
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # First call in debug mode with None timeout should compute dynamic timeout
+    assert state.timeout is None
+    exit_code = await state.run_for_exit_code(b"hello", debug=True)
+    assert exit_code == 0
+    # After first call, timeout should be computed
+    assert state.timeout is not None
+    assert state.timeout > 0
+    # first_call should be False after this
+    assert state.first_call is False
+
+
 async def test_run_for_exit_code_debug_mode_captures_stdout(tmp_path):
     """Test that debug mode captures stdout output.
 

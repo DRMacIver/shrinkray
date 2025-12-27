@@ -127,7 +127,7 @@ class SubprocessClient:
         file_path: str,
         test: list[str],
         parallelism: int | None = None,
-        timeout: float = 1.0,
+        timeout: float | None = None,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,
@@ -138,10 +138,9 @@ class SubprocessClient:
         trivial_is_error: bool = True,
     ) -> Response:
         """Start the reduction process."""
-        params = {
+        params: dict[str, Any] = {
             "file_path": file_path,
             "test": test,
-            "timeout": timeout,
             "seed": seed,
             "input_type": input_type,
             "in_place": in_place,
@@ -153,6 +152,8 @@ class SubprocessClient:
         }
         if parallelism is not None:
             params["parallelism"] = parallelism
+        if timeout is not None:
+            params["timeout"] = timeout
         return await self.send_command("start", params)
 
     async def get_status(self) -> Response:

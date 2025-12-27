@@ -165,14 +165,14 @@ async def renumber_variables(problem: ReductionProblem[SAT]) -> None:
         result: SAT = []
         for clause in sat:
             new_clause: Clause = sorted(
-                set(
-                    [
+                {
+                    (
                         (renumbering[lit] if lit > 0 else -renumbering[-lit])
                         if abs(lit) in renumbering
                         else lit
-                        for lit in clause
-                    ]
-                )
+                    )
+                    for lit in clause
+                }
             )
             if len(set(map(abs, new_clause))) == len(new_clause):
                 result.append(new_clause)
@@ -290,7 +290,7 @@ class BooleanEquivalence(UnionFind[int]):
 
     def find(self, value: int) -> int:
         if not value:
-            raise ValueError("Invalid variable %r" % (value,))
+            raise ValueError(f"Invalid variable {value!r}")
         return super().find(value)
 
     def merge(self, left: int, right: int) -> None:

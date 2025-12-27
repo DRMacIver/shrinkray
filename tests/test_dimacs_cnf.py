@@ -213,10 +213,14 @@ def test_negating_map_repr():
     nm[3] = 4
     r = repr(nm)
     # Should contain both positive and negative mappings
-    assert "1" in r and "-1" in r
-    assert "2" in r and "-2" in r
-    assert "3" in r and "-3" in r
-    assert "4" in r and "-4" in r
+    assert "1" in r
+    assert "-1" in r
+    assert "2" in r
+    assert "-2" in r
+    assert "3" in r
+    assert "-3" in r
+    assert "4" in r
+    assert "-4" in r
 
 
 def test_unit_propagator_duplicate_unit():

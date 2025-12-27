@@ -1,10 +1,14 @@
 """Unit tests for problem module utilities and classes."""
 
+import time
+
 import pytest
 
+from shrinkray.passes.definitions import DumpError, Format
 from shrinkray.problem import (
     BasicReductionProblem,
     InvalidInitialExample,
+    ReductionProblem,
     ReductionStats,
     View,
     default_cache_key,
@@ -165,8 +169,6 @@ def test_reduction_stats_display_no_reductions():
 
 
 def test_reduction_stats_display_with_reductions():
-    import time
-
     stats = ReductionStats()
     stats.initial_test_case_size = 1000
     stats.current_test_case_size = 500
@@ -481,7 +483,6 @@ async def test_view_is_interesting_delegates():
 
 async def test_view_is_interesting_handles_dump_error():
     """Test View returns False when dump raises DumpError."""
-    from shrinkray.passes.definitions import DumpError
 
     async def is_interesting(x):
         return True
@@ -640,7 +641,7 @@ async def test_view_caches_parsed_value():
         problem=problem,
         parse=counting_parse,
         dump=lambda s: s.encode("utf-8"),
-        sort_key=lambda s: len(s),
+        sort_key=len,
     )
 
     # Initial parse
@@ -672,14 +673,14 @@ async def test_view_only_accepts_smaller_parse_results():
         initial=b"5chars",
         is_interesting=is_interesting,
         work=WorkContext(parallelism=1),
-        sort_key=lambda x: len(x),  # Size-based sorting
+        sort_key=len,  # Size-based sorting
     )
 
     view = View(
         problem=problem,
         parse=lambda b: b.decode("utf-8"),
         dump=lambda s: s.encode("utf-8"),
-        sort_key=lambda s: len(s),
+        sort_key=len,
     )
 
     assert view.current_test_case == "5chars"
@@ -703,14 +704,14 @@ async def test_view_keeps_cached_value_if_parse_is_larger():
         initial=b"hi",
         is_interesting=is_interesting,
         work=WorkContext(parallelism=1),
-        sort_key=lambda x: len(x),
+        sort_key=len,
     )
 
     view = View(
         problem=problem,
         parse=lambda b: b.decode("utf-8"),
         dump=lambda s: s.encode("utf-8"),
-        sort_key=lambda s: len(s),
+        sort_key=len,
     )
 
     assert view.current_test_case == "hi"
@@ -753,7 +754,6 @@ async def test_basic_problem_setup_called_twice():
 
 def test_reduction_problem_view_method():
     """Test that view() creates a View with correct format."""
-    from shrinkray.passes.definitions import Format
 
     async def is_interesting(x):
         return True
@@ -779,7 +779,6 @@ def test_reduction_problem_view_method():
 
 def test_reduction_problem_view_caches():
     """Test that view() returns cached View for same format."""
-    from shrinkray.passes.definitions import Format
 
     async def is_interesting(x):
         return True
@@ -806,7 +805,6 @@ def test_reduction_problem_view_caches():
 
 def test_reduction_problem_view_with_instance():
     """Test that view() works with format instance."""
-    from shrinkray.passes.definitions import Format
 
     async def is_interesting(x):
         return True
@@ -833,7 +831,6 @@ def test_reduction_problem_view_with_instance():
 
 async def test_reduction_problem_base_setup():
     """Test that base ReductionProblem.setup() does nothing."""
-    from shrinkray.problem import ReductionProblem
 
     # Create a minimal concrete implementation
     class MinimalProblem(ReductionProblem[bytes]):
@@ -872,7 +869,6 @@ async def test_abstract_method_default_implementations():
     The abstract methods is_interesting and size have default implementations
     that can be used by subclasses calling super().
     """
-    from shrinkray.problem import ReductionProblem
 
     # Create a subclass that explicitly calls super() for abstract methods
     class SubclassThatCallsSuper(ReductionProblem[bytes]):

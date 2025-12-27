@@ -1,11 +1,17 @@
 """Unit tests for reducer module."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 import trio
 
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
+from shrinkray.passes.definitions import Format, ParseError
+from shrinkray.passes.patching import PatchApplier
+from shrinkray.problem import BasicReductionProblem, shortlex
 from shrinkray.reducer import (
     BasicReducer,
+    DirectoryShrinkRay,
     KeyProblem,
     PassStats,
     PassStatsTracker,
@@ -345,7 +351,6 @@ def test_update_keys_size():
 
 async def test_key_problem_current_test_case():
     """Test KeyProblem.current_test_case returns value for key."""
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         return True
@@ -364,7 +369,6 @@ async def test_key_problem_current_test_case():
 
 def test_key_problem_size():
     """Test KeyProblem.size returns byte length."""
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         return True
@@ -384,8 +388,6 @@ def test_key_problem_size():
 
 def test_key_problem_sort_key():
     """Test KeyProblem.sort_key uses shortlex."""
-    from shrinkray.passes.patching import PatchApplier
-    from shrinkray.problem import shortlex
 
     async def is_interesting(x):
         return True
@@ -404,7 +406,6 @@ def test_key_problem_sort_key():
 
 def test_key_problem_display():
     """Test KeyProblem.display returns repr."""
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         return True
@@ -423,7 +424,6 @@ def test_key_problem_display():
 
 def test_key_problem_stats_delegates_to_base():
     """Test KeyProblem.stats returns base problem's stats."""
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         return True
@@ -443,7 +443,6 @@ def test_key_problem_stats_delegates_to_base():
 
 async def test_key_problem_is_interesting():
     """Test KeyProblem.is_interesting applies patch correctly."""
-    from shrinkray.passes.patching import PatchApplier
 
     async def is_interesting(x):
         # Only accept if file1 contains 'hi'
@@ -470,7 +469,6 @@ async def test_key_problem_is_interesting():
 
 def test_shrinkray_status_with_pump_no_pass():
     """Test ShrinkRay status when pump is set but pass is not."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         return True
@@ -498,7 +496,6 @@ def test_shrinkray_status_with_pump_no_pass():
 
 def test_shrinkray_status_with_pump_and_pass():
     """Test ShrinkRay status when both pump and pass are set."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         return True
@@ -533,7 +530,6 @@ def test_shrinkray_status_with_pump_and_pass():
 
 def test_shrinkray_status_no_pump_no_pass():
     """Test ShrinkRay status when neither pump nor pass is set."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         return True
@@ -554,7 +550,6 @@ def test_shrinkray_status_no_pump_no_pass():
 
 def test_shrinkray_pumps_without_clang_delta():
     """Test ShrinkRay.pumps returns empty when no clang_delta."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         return True
@@ -576,7 +571,6 @@ def test_shrinkray_pumps_without_clang_delta():
 
 async def test_directory_shrinkray_delete_keys():
     """Test DirectoryShrinkRay.delete_keys removes deletable keys."""
-    from shrinkray.reducer import DirectoryShrinkRay
 
     # Track which files are required
     required_files = {"a.txt", "c.txt"}
@@ -602,7 +596,6 @@ async def test_directory_shrinkray_delete_keys():
 
 async def test_directory_shrinkray_delete_keys_priority():
     """Test DirectoryShrinkRay.delete_keys deletes larger files first."""
-    from shrinkray.reducer import DirectoryShrinkRay
 
     deletion_order = []
 
@@ -635,7 +628,6 @@ async def test_directory_shrinkray_delete_keys_priority():
 
 async def test_directory_shrinkray_run_reduces_directory():
     """Test DirectoryShrinkRay.run reduces directory contents."""
-    from shrinkray.reducer import DirectoryShrinkRay
 
     async def is_interesting(x):
         # Interesting if a.txt exists and contains 'x'
@@ -665,8 +657,6 @@ async def test_directory_shrinkray_run_reduces_directory():
 
 def test_shrinkray_pumps_with_clang_delta():
     """Test ShrinkRay.pumps returns clang_delta_pumps when clang_delta is set."""
-    from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
-    from shrinkray.reducer import ShrinkRay
 
     clang_delta_exec = find_clang_delta()
     if not clang_delta_exec:
@@ -692,7 +682,6 @@ def test_shrinkray_pumps_with_clang_delta():
 
 def test_shrinkray_status_with_pass_no_pump():
     """Test ShrinkRay status when pass is set but pump is not."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         return True
@@ -720,8 +709,6 @@ def test_shrinkray_status_with_pass_no_pump():
 
 def test_shrinkray_register_format_specific_pass():
     """Test ShrinkRay.register_format_specific_pass adds passes for valid format."""
-    from shrinkray.passes.definitions import Format, ParseError
-    from shrinkray.reducer import ShrinkRay
 
     # Create a simple format that only validates if starts with "FORMAT:"
     class TestFormat(Format[bytes, bytes]):
@@ -760,8 +747,6 @@ def test_shrinkray_register_format_specific_pass():
 
 def test_shrinkray_register_format_specific_pass_invalid_format():
     """Test register_format_specific_pass doesn't add passes for invalid format."""
-    from shrinkray.passes.definitions import Format, ParseError
-    from shrinkray.reducer import ShrinkRay
 
     class TestFormat(Format[bytes, bytes]):
         @property
@@ -799,7 +784,6 @@ def test_shrinkray_register_format_specific_pass_invalid_format():
 
 async def test_shrinkray_pump_method():
     """Test ShrinkRay.pump method runs pump and reduction passes."""
-    from shrinkray.reducer import ShrinkRay
 
     pump_called = [False]
     pass_called = [False]
@@ -839,7 +823,6 @@ async def test_shrinkray_pump_method():
 
 async def test_shrinkray_run_empty_is_interesting():
     """Test ShrinkRay.run returns immediately if empty string is interesting."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         # Everything is interesting, including empty string
@@ -860,7 +843,6 @@ async def test_shrinkray_run_empty_is_interesting():
 
 async def test_shrinkray_run_single_byte_interesting():
     """Test ShrinkRay.run returns early if single byte is interesting."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         # Only empty is not interesting, but single byte newline is
@@ -883,7 +865,6 @@ async def test_shrinkray_run_single_byte_interesting():
 
 async def test_shrinkray_run_single_byte_finds_smaller():
     """Test ShrinkRay.run finds smaller single byte when possible."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         # Empty is not interesting
@@ -912,7 +893,6 @@ async def test_shrinkray_run_single_byte_no_smaller():
 
     The branch 474->477 happens when range(c) is empty, i.e., c=0.
     """
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         # Empty is not interesting
@@ -940,7 +920,6 @@ async def test_shrinkray_run_single_byte_no_smaller():
 
 async def test_shrinkray_pump_no_change():
     """Test ShrinkRay.pump returns early when pumped equals current."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         return True
@@ -1058,7 +1037,6 @@ async def test_basic_reducer_pump_returns_same():
 
 async def test_shrinkray_pump_early_break_on_improvement():
     """Test ShrinkRay.pump breaks early when finding smaller result."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         return True
@@ -1106,7 +1084,6 @@ async def test_shrinkray_pump_early_break_on_improvement():
 
 async def test_shrinkray_great_passes_no_reduction():
     """Test ShrinkRay.run_great_passes resets to all passes when none reduce."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         return True
@@ -1142,7 +1119,6 @@ async def test_shrinkray_great_passes_change_without_size_reduction():
     The condition is: test case changed, but no individual pass reduced size.
     This can happen if a pass changes content to lexicographically smaller but same size.
     """
-    from shrinkray.reducer import ShrinkRay
 
     call_count = [0]
 
@@ -1177,7 +1153,6 @@ async def test_shrinkray_great_passes_change_without_size_reduction():
 
 async def test_shrinkray_ok_passes_make_progress():
     """Test ShrinkRay.run_some_passes returns after ok_passes when they make progress."""
-    from shrinkray.reducer import ShrinkRay
 
     async def is_interesting(x):
         return True
@@ -1218,7 +1193,6 @@ async def test_shrinkray_ok_passes_make_progress():
 
 async def test_shrinkray_main_loop_with_pumps():
     """Test ShrinkRay.run main loop calls pumps and continues on progress."""
-    from shrinkray.reducer import ShrinkRay
 
     call_log = []
     loop_iterations = [0]
@@ -1281,9 +1255,6 @@ async def test_directory_shrinkray_shrink_values_uses_clang_delta():
     This is a fast unit test that verifies the clang_delta assignment logic
     without running a full reduction.
     """
-    from unittest.mock import AsyncMock, MagicMock, patch
-
-    from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
 
     # Create a mock clang_delta
     mock_cd = MagicMock()
@@ -1326,8 +1297,6 @@ async def test_directory_shrinkray_shrink_values_uses_clang_delta():
 @pytest.mark.slow
 async def test_directory_shrinkray_with_c_files():
     """Test DirectoryShrinkRay uses clang_delta for C files."""
-    from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
-    from shrinkray.reducer import DirectoryShrinkRay
 
     clang_delta_exec = find_clang_delta()
     if not clang_delta_exec:
@@ -1657,6 +1626,7 @@ def test_enable_pass_not_disabled():
 
 async def test_disabled_pass_is_skipped():
     """Test that a disabled pass is skipped during reduction."""
+
     async def is_interesting(x):
         return b"t" in x
 
@@ -1689,6 +1659,7 @@ async def test_disabled_pass_is_skipped():
 
 async def test_skip_current_pass_without_active_scope():
     """Test that skip_current_pass is safe when no pass is running."""
+
     async def is_interesting(x):
         return b"t" in x
 
@@ -1703,6 +1674,7 @@ async def test_skip_current_pass_without_active_scope():
 
 async def test_disable_pass_while_running_skips_it():
     """Test that disabling a pass while it's running skips it."""
+
     async def is_interesting(x):
         return b"t" in x
 
@@ -1747,6 +1719,7 @@ async def test_disable_pass_while_running_skips_it():
 
 async def test_reducer_continues_when_passes_skipped():
     """Test that reducer continues when passes were skipped and no progress made."""
+
     async def is_interesting(x):
         return b"t" in x
 

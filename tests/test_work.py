@@ -1,3 +1,6 @@
+from contextlib import aclosing
+from random import Random
+
 import pytest
 
 from shrinkray.work import NotFound, Volume, WorkContext, parallel_map
@@ -11,8 +14,9 @@ async def identity(x: int) -> int:
 async def test_parallel_map(p: int) -> None:
     input = [1, 2, 3]
     async with parallel_map(input, identity, parallelism=p) as mapped:
-        values = [x async for x in mapped]
-        print(values)
+        async with aclosing(mapped) as aiter:
+            values = [x async for x in aiter]
+            print(values)
     assert values == input
 
 
@@ -24,9 +28,10 @@ async def test_worker_map(p: int) -> None:
 
     i = 0
     async with work.map(input, identity) as mapped:
-        async for x in mapped:
-            assert input[i] == x
-            i += 1
+        async with aclosing(mapped) as aiter:
+            async for x in aiter:
+                assert input[i] == x
+                i += 1
 
 
 @pytest.mark.parametrize("p", [1, 2])
@@ -36,8 +41,9 @@ async def test_worker_map_empty(p: int) -> None:
 
     results = []
     async with work.map([], identity) as mapped:
-        async for x in mapped:
-            results.append(x)
+        async with aclosing(mapped) as aiter:
+            async for x in aiter:
+                results.append(x)
 
     assert results == []
 
@@ -126,7 +132,8 @@ async def test_filter_basic(p: int) -> None:
         return n % 2 == 0
 
     async with work.filter([1, 2, 3, 4, 5], is_even) as filtered:
-        results = [x async for x in filtered]
+        async with aclosing(filtered) as aiter:
+            results = [x async for x in aiter]
 
     assert results == [2, 4]
 
@@ -140,7 +147,8 @@ async def test_filter_none_match(p: int) -> None:
         return False
 
     async with work.filter([1, 2, 3], always_false) as filtered:
-        results = [x async for x in filtered]
+        async with aclosing(filtered) as aiter:
+            results = [x async for x in aiter]
 
     assert results == []
 
@@ -199,7 +207,6 @@ def test_workcontext_defaults():
 
 def test_workcontext_custom_random():
     """Test WorkContext with custom random."""
-    from random import Random
 
     rnd = Random(42)
     work = WorkContext(random=rnd)

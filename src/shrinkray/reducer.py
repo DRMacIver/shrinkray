@@ -59,7 +59,9 @@ class Reducer[T](ABC):
     # Optional pass statistics tracking (implemented by ShrinkRay)
     pass_stats: "PassStatsTracker | None" = attrs.field(default=None, init=False)
     # Optional current pass tracking (implemented by ShrinkRay)
-    current_reduction_pass: "ReductionPass[T] | None" = attrs.field(default=None, init=False)
+    current_reduction_pass: "ReductionPass[T] | None" = attrs.field(
+        default=None, init=False
+    )
 
     @contextmanager
     def backtrack(self, restart: T) -> Generator[None, None, None]:
@@ -192,7 +194,9 @@ class ShrinkRay(Reducer[bytes]):
     # Pass control: disabled passes and skip functionality
     disabled_passes: set[str] = attrs.Factory(set)
     _skip_requested: bool = attrs.field(default=False, init=False)
-    _current_pass_scope: "trio.CancelScope | None" = attrs.field(default=None, init=False)
+    _current_pass_scope: "trio.CancelScope | None" = attrs.field(
+        default=None, init=False
+    )
     _passes_were_skipped: bool = attrs.field(default=False, init=False)
 
     def disable_pass(self, pass_name: str) -> None:

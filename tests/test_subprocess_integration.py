@@ -1,9 +1,12 @@
 """Integration tests for subprocess communication."""
 
+import select
 import subprocess
 import sys
 
 import pytest
+
+from shrinkray.subprocess import SubprocessClient, client, worker
 
 
 # === Worker module tests ===
@@ -11,7 +14,6 @@ import pytest
 
 def test_worker_can_be_imported():
     """Test that the worker module can be imported."""
-    from shrinkray.subprocess import worker
 
     assert hasattr(worker, "ReducerWorker")
     assert hasattr(worker, "main")
@@ -34,9 +36,6 @@ def test_worker_module_runs_as_main():
     proc.stdin.write(command)
     proc.stdin.flush()
 
-    # Read response with timeout
-    import select
-
     ready, _, _ = select.select([proc.stdout], [], [], 5.0)
     if ready:
         response = proc.stdout.readline()
@@ -56,14 +55,12 @@ def test_worker_module_runs_as_main():
 
 def test_client_can_be_imported():
     """Test that the client module can be imported."""
-    from shrinkray.subprocess import client
 
     assert hasattr(client, "SubprocessClient")
 
 
 def test_subprocess_client_has_expected_methods():
     """Test that SubprocessClient has the expected interface."""
-    from shrinkray.subprocess import SubprocessClient
 
     client = SubprocessClient()
     assert hasattr(client, "start")
@@ -93,9 +90,6 @@ def test_worker_handles_unknown_command():
     assert proc.stdout is not None
     proc.stdin.write(command)
     proc.stdin.flush()
-
-    # Read response with timeout
-    import select
 
     ready, _, _ = select.select([proc.stdout], [], [], 5.0)
     if ready:
@@ -130,9 +124,6 @@ def test_worker_handles_malformed_json():
     valid_command = b'{"id":"test-3","command":"status","params":{}}\n'
     proc.stdin.write(valid_command)
     proc.stdin.flush()
-
-    # Read responses with timeout
-    import select
 
     responses = []
     for _ in range(2):  # Try to read up to 2 responses

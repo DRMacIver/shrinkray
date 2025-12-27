@@ -46,6 +46,7 @@ dev = [
     "pygments>=2.17.0",
     "basedpyright>=1.1.0",
     "ruff>=0.1.0",
+    "shed>=2024.1.1",
     "pexpect>=4.9.0",
     "pyte>=0.8.2",
 ]
@@ -77,10 +78,8 @@ ignore = [
     "B007",  # unused loop variable
     "B023",  # function definition in loop
     "B904",  # raise without from - intentional in some exception handling
-    "C408",  # unnecessary dict() call - sometimes more readable
     "UP031", # use format specifiers - % format is fine
     "B018",  # useless expression - sometimes intentional for side effects
-    "C403",  # unnecessary list comprehension - sometimes more readable
     "UP022", # prefer capture_output - explicit is fine
 ]
 

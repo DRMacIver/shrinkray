@@ -4,6 +4,9 @@ Each test asserts that a specific input can reduce to a specific output
 via a specific pass, running under both parallelism=1 and parallelism=2.
 """
 
+from unittest.mock import patch
+
+import libcst
 import pytest
 
 from shrinkray.passes.bytes import (
@@ -41,6 +44,7 @@ from shrinkray.passes.genericlanguages import (
     replace_falsey_with_zero,
     simplify_brackets,
 )
+from shrinkray.passes.python import replace_bodies_with_ellipsis, strip_annotations
 from shrinkray.passes.sequences import (
     block_deletion,
     delete_duplicates,
@@ -48,6 +52,8 @@ from shrinkray.passes.sequences import (
     merged_intervals,
     with_deletions,
 )
+from shrinkray.problem import BasicReductionProblem
+from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
 
 
@@ -189,7 +195,8 @@ def test_delete_byte_spans(parallelism):
         lambda x: b"aaa" in x and b"ccc" in x,
         parallelism=parallelism,
     )
-    assert b"aaa" in result and b"ccc" in result
+    assert b"aaa" in result
+    assert b"ccc" in result
     assert len(result) <= len(b"aaabbbccc")
 
 
@@ -455,7 +462,8 @@ def test_tokenize_with_consecutive_spaces(parallelism):
         lambda x: b"a" in x and b"b" in x,
         parallelism=parallelism,
     )
-    assert b"a" in result and b"b" in result
+    assert b"a" in result
+    assert b"b" in result
 
 
 def test_tokenize_with_numbers(parallelism):
@@ -1008,9 +1016,6 @@ def test_format_is_valid_false():
 
 async def test_compose_with_changing_format():
     """Test compose handles cases where format becomes invalid during reduction."""
-    from shrinkray.passes.sequences import delete_elements
-    from shrinkray.problem import BasicReductionProblem
-    from shrinkray.work import WorkContext
 
     # Start with valid format
     fmt = Substring(b"<", b">")
@@ -1045,9 +1050,6 @@ async def test_compose_with_changing_format():
 
 async def test_strip_annotations_with_value():
     """Test stripping type annotations from assignments with values."""
-    from shrinkray.passes.python import strip_annotations
-    from shrinkray.problem import BasicReductionProblem
-    from shrinkray.work import WorkContext
 
     # Python code with type annotation that has a value
     code = b"x: int = 5\n"
@@ -1069,9 +1071,6 @@ async def test_strip_annotations_with_value():
 
 async def test_strip_annotations_without_value():
     """Test stripping type annotations from declarations without values."""
-    from shrinkray.passes.python import strip_annotations
-    from shrinkray.problem import BasicReductionProblem
-    from shrinkray.work import WorkContext
 
     # Python code with type annotation declaration only (no value)
     code = b"x: int\ny = 1\n"
@@ -1093,9 +1092,6 @@ async def test_strip_annotations_without_value():
 
 async def test_libcst_transform_invalid_python():
     """Test that libcst_transform handles invalid Python gracefully."""
-    from shrinkray.passes.python import replace_bodies_with_ellipsis
-    from shrinkray.problem import BasicReductionProblem
-    from shrinkray.work import WorkContext
 
     # Invalid Python code
     code = b"def foo(:\n  pass\n"
@@ -1116,13 +1112,6 @@ async def test_libcst_transform_invalid_python():
 
 async def test_libcst_transform_reparsing_fails():
     """Test handling when code becomes unparseable during reduction."""
-    from unittest.mock import patch
-
-    import libcst
-
-    from shrinkray.passes.python import replace_bodies_with_ellipsis
-    from shrinkray.problem import BasicReductionProblem
-    from shrinkray.work import WorkContext
 
     # Valid Python code with a function
     code = b"def foo():\n    return 1\n"

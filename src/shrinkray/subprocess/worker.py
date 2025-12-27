@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import traceback
+from contextlib import aclosing
 from typing import Any, Protocol
 
 import trio
@@ -25,6 +26,7 @@ class InputStream(Protocol):
 
     def __aiter__(self) -> "InputStream": ...
     async def __anext__(self) -> bytes | bytearray: ...
+    async def aclose(self) -> None: ...
 
 
 class OutputStream(Protocol):
@@ -88,12 +90,13 @@ class ReducerWorker:
             stream = trio.lowlevel.FdStream(os.dup(sys.stdin.fileno()))
 
         buffer = b""
-        async for chunk in stream:
-            buffer += chunk
-            while b"\n" in buffer:
-                line, buffer = buffer.split(b"\n", 1)
-                if line:
-                    await self.handle_line(line.decode("utf-8"))
+        async with aclosing(stream) as aiter:
+            async for chunk in aiter:
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    if line:
+                        await self.handle_line(line.decode("utf-8"))
 
     async def handle_line(self, line: str) -> None:
         """Handle a single command line."""
@@ -124,7 +127,9 @@ class ReducerWorker:
             case "skip_pass":
                 return self._handle_skip_pass(request.id)
             case _:
-                return Response(id=request.id, error=f"Unknown command: {request.command}")
+                return Response(
+                    id=request.id, error=f"Unknown command: {request.command}"
+                )
 
     async def _handle_start(self, request_id: str, params: dict) -> Response:
         """Start the reduction process."""
@@ -181,20 +186,20 @@ class ReducerWorker:
             if clang_delta_path:
                 clang_delta_executable = ClangDelta(clang_delta_path)
 
-        state_kwargs: dict[str, Any] = dict(
-            input_type=input_type,
-            in_place=in_place,
-            test=test,
-            timeout=timeout,
-            base=os.path.basename(filename),
-            parallelism=parallelism,
-            filename=filename,
-            formatter=formatter,
-            trivial_is_error=trivial_is_error,
-            seed=seed,
-            volume=volume,
-            clang_delta_executable=clang_delta_executable,
-        )
+        state_kwargs: dict[str, Any] = {
+            "input_type": input_type,
+            "in_place": in_place,
+            "test": test,
+            "timeout": timeout,
+            "base": os.path.basename(filename),
+            "parallelism": parallelism,
+            "filename": filename,
+            "formatter": formatter,
+            "trivial_is_error": trivial_is_error,
+            "seed": seed,
+            "volume": volume,
+            "clang_delta_executable": clang_delta_executable,
+        }
 
         if os.path.isdir(filename):
             files = [os.path.join(d, f) for d, _, fs in os.walk(filename) for f in fs]
@@ -263,7 +268,9 @@ class ReducerWorker:
 
         if self.reducer is not None and hasattr(self.reducer, "disable_pass"):
             self.reducer.disable_pass(pass_name)
-            return Response(id=request_id, result={"status": "disabled", "pass_name": pass_name})
+            return Response(
+                id=request_id, result={"status": "disabled", "pass_name": pass_name}
+            )
         return Response(id=request_id, error="Reducer does not support pass control")
 
     def _handle_enable_pass(self, request_id: str, params: dict) -> Response:
@@ -281,7 +288,9 @@ class ReducerWorker:
 
         if self.reducer is not None and hasattr(self.reducer, "enable_pass"):
             self.reducer.enable_pass(pass_name)
-            return Response(id=request_id, result={"status": "enabled", "pass_name": pass_name})
+            return Response(
+                id=request_id, result={"status": "enabled", "pass_name": pass_name}
+            )
         return Response(id=request_id, error="Reducer does not support pass control")
 
     def _handle_skip_pass(self, request_id: str) -> Response:

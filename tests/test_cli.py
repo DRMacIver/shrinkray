@@ -103,28 +103,36 @@ def test_validate_ui_returns_value_when_provided():
 
 
 def test_validate_ui_returns_textual_for_tty():
-    with patch.object(sys.stdin, "isatty", return_value=True):
-        with patch.object(sys.stdout, "isatty", return_value=True):
-            result = validate_ui(None, None, None)
-            assert result == UIType.textual
+    with (
+        patch.object(sys.stdin, "isatty", return_value=True),
+        patch.object(sys.stdout, "isatty", return_value=True),
+    ):
+        result = validate_ui(None, None, None)
+        assert result == UIType.textual
 
 
 def test_validate_ui_returns_basic_for_non_tty_stdin():
-    with patch.object(sys.stdin, "isatty", return_value=False):
-        with patch.object(sys.stdout, "isatty", return_value=True):
-            result = validate_ui(None, None, None)
-            assert result == UIType.basic
+    with (
+        patch.object(sys.stdin, "isatty", return_value=False),
+        patch.object(sys.stdout, "isatty", return_value=True),
+    ):
+        result = validate_ui(None, None, None)
+        assert result == UIType.basic
 
 
 def test_validate_ui_returns_basic_for_non_tty_stdout():
-    with patch.object(sys.stdin, "isatty", return_value=True):
-        with patch.object(sys.stdout, "isatty", return_value=False):
-            result = validate_ui(None, None, None)
-            assert result == UIType.basic
+    with (
+        patch.object(sys.stdin, "isatty", return_value=True),
+        patch.object(sys.stdout, "isatty", return_value=False),
+    ):
+        result = validate_ui(None, None, None)
+        assert result == UIType.basic
 
 
 def test_validate_ui_returns_basic_for_non_tty_both():
-    with patch.object(sys.stdin, "isatty", return_value=False):
-        with patch.object(sys.stdout, "isatty", return_value=False):
-            result = validate_ui(None, None, None)
-            assert result == UIType.basic
+    with (
+        patch.object(sys.stdin, "isatty", return_value=False),
+        patch.object(sys.stdout, "isatty", return_value=False),
+    ):
+        result = validate_ui(None, None, None)
+        assert result == UIType.basic

@@ -18,10 +18,12 @@ test-quick *args:
 # Lint and type-check
 lint:
     uv run ruff check src tests
+    uv run python scripts/extra_lints.py
     uv run basedpyright src tests
 
-# Format code with ruff
+# Format code with shed and ruff
 format:
+    find src tests -name '*.py' | xargs uv run shed --refactor --py312-plus
     uv run ruff format src tests
     uv run ruff check --fix src tests
 

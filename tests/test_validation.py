@@ -500,7 +500,7 @@ async def test_cleanup_handles_already_deleted_file():
         script = os.path.join(tmp_dir, "test.sh")
         # The script will receive the temp file path as an argument and delete it
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nrm -f \"$1\" 2>/dev/null; exit 0\n")
+            f.write('#!/bin/bash\nrm -f "$1" 2>/dev/null; exit 0\n')
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Run with in_place=True + arg so it creates a temp file that gets passed to script
@@ -534,7 +534,10 @@ async def test_cleanup_handles_exception():
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Mock os.unlink to raise an exception
-        with patch("shrinkray.validation.os.unlink", side_effect=PermissionError("Cannot delete")):
+        with patch(
+            "shrinkray.validation.os.unlink",
+            side_effect=PermissionError("Cannot delete"),
+        ):
             result = await validate_initial_example(
                 file_path=test_file,
                 test=[script],
@@ -708,12 +711,7 @@ def test_validation_output_streams_immediately():
         # Create test script that prints immediately, then sleeps
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write(
-                "#!/bin/bash\n"
-                "echo 'MARKER_OUTPUT_APPEARED' >&2\n"
-                "sleep 2\n"
-                "exit 0\n"
-            )
+            f.write("#!/bin/bash\necho 'MARKER_OUTPUT_APPEARED' >&2\nsleep 2\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Run the actual shrinkray command
@@ -861,7 +859,7 @@ async def test_validate_with_formatter_makes_content_uninteresting():
         # Create test script that only accepts "hello", not "goodbye"
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\ngrep -q hello \"$1\"\n")
+            f.write('#!/bin/bash\ngrep -q hello "$1"\n')
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Create formatter that changes content to "goodbye"
@@ -880,7 +878,9 @@ async def test_validate_with_formatter_makes_content_uninteresting():
 
         assert not result.success
         assert result.error_message is not None
-        assert "Formatting initial test case made it uninteresting" in result.error_message
+        assert (
+            "Formatting initial test case made it uninteresting" in result.error_message
+        )
 
 
 async def test_validate_with_formatter_preserves_interesting_content():

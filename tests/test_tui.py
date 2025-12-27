@@ -396,7 +396,9 @@ def test_output_preview_get_available_lines_with_parent():
     parent_mock = MagicMock()
     parent_mock.size.height = 50
 
-    with patch.object(OutputPreview, "parent", new_callable=PropertyMock) as mock_parent:
+    with patch.object(
+        OutputPreview, "parent", new_callable=PropertyMock
+    ) as mock_parent:
         mock_parent.return_value = parent_mock
         lines = widget._get_available_lines()
         assert lines == 47  # 50 - 3
@@ -413,11 +415,10 @@ def test_output_preview_get_available_lines_with_app():
     app_mock = MagicMock()
     app_mock.size.height = 40
 
-    with patch.object(
-        OutputPreview, "parent", new_callable=PropertyMock
-    ) as mock_parent, patch.object(
-        OutputPreview, "app", new_callable=PropertyMock
-    ) as mock_app:
+    with (
+        patch.object(OutputPreview, "parent", new_callable=PropertyMock) as mock_parent,
+        patch.object(OutputPreview, "app", new_callable=PropertyMock) as mock_app,
+    ):
         mock_parent.return_value = parent_mock
         mock_app.return_value = app_mock
         lines = widget._get_available_lines()
@@ -436,11 +437,10 @@ def test_output_preview_get_available_lines_parent_zero_height():
     app_mock = MagicMock()
     app_mock.size.height = 30
 
-    with patch.object(
-        OutputPreview, "parent", new_callable=PropertyMock
-    ) as mock_parent, patch.object(
-        OutputPreview, "app", new_callable=PropertyMock
-    ) as mock_app:
+    with (
+        patch.object(OutputPreview, "parent", new_callable=PropertyMock) as mock_parent,
+        patch.object(OutputPreview, "app", new_callable=PropertyMock) as mock_app,
+    ):
         mock_parent.return_value = parent_mock
         mock_app.return_value = app_mock
         lines = widget._get_available_lines()
@@ -460,11 +460,10 @@ def test_output_preview_get_available_lines_app_zero_height():
     app_mock = MagicMock()
     app_mock.size.height = 0
 
-    with patch.object(
-        OutputPreview, "parent", new_callable=PropertyMock
-    ) as mock_parent, patch.object(
-        OutputPreview, "app", new_callable=PropertyMock
-    ) as mock_app:
+    with (
+        patch.object(OutputPreview, "parent", new_callable=PropertyMock) as mock_parent,
+        patch.object(OutputPreview, "app", new_callable=PropertyMock) as mock_app,
+    ):
         mock_parent.return_value = parent_mock
         mock_app.return_value = app_mock
         lines = widget._get_available_lines()

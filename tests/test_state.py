@@ -2116,9 +2116,7 @@ def test_output_manager_safe_delete_nonexistent(tmp_path):
 
 def test_output_manager_active_test_takes_priority(tmp_path):
     """Test that active tests always take priority over completed tests."""
-    manager = TestOutputManager(
-        output_dir=str(tmp_path), min_display_seconds=0.5
-    )
+    manager = TestOutputManager(output_dir=str(tmp_path), min_display_seconds=0.5)
 
     # Allocate and complete a test
     test_id1, path1 = manager.allocate_output_file()

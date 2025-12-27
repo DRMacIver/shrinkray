@@ -184,15 +184,11 @@ class StatsDisplay(Static):
         # Runtime
         if self.runtime > 0:
             runtime_delta = timedelta(seconds=self.runtime)
-            lines.append(
-                f"Total runtime: {humanize.precisedelta(runtime_delta)}"
-            )
+            lines.append(f"Total runtime: {humanize.precisedelta(runtime_delta)}")
 
         # Call statistics
         if self.call_count > 0:
-            calls_per_sec = (
-                self.call_count / self.runtime if self.runtime > 0 else 0
-            )
+            calls_per_sec = self.call_count / self.runtime if self.runtime > 0 else 0
             interesting_pct = (self.interesting_calls / self.call_count) * 100
             wasted_pct = (self.wasted_calls / self.call_count) * 100
             lines.append(
@@ -419,9 +415,7 @@ class HelpScreen(ModalScreen[None]):
             yield Static("  [green]c[/green]     Skip current pass")
             yield Static("  [green]q[/green]     Quit application")
             yield Static("")
-            yield Static(
-                "[bold]Pass Statistics Screen[/bold]", classes="help-section"
-            )
+            yield Static("[bold]Pass Statistics Screen[/bold]", classes="help-section")
             yield Static("  [green]↑/↓[/green]   Navigate passes")
             yield Static("  [green]space[/green] Toggle pass enabled/disabled")
             yield Static("  [green]c[/green]     Skip current pass")
@@ -547,9 +541,7 @@ class PassStatsScreen(ModalScreen[None]):
                     runs = Text(str(ps.run_count), style=style)
                     bytes_del = Text(bytes_str, style=style)
                     tests = Text(f"{ps.test_evaluations:,}", style=style)
-                    reductions = Text(
-                        str(ps.successful_reductions), style=style
-                    )
+                    reductions = Text(str(ps.successful_reductions), style=style)
                     success = Text(f"{ps.success_rate:.1f}%", style=style)
                 else:
                     name = ps.pass_name
@@ -579,21 +571,18 @@ class PassStatsScreen(ModalScreen[None]):
         """
         new_stats = self._app._latest_pass_stats.copy()
         new_current = self._app._current_pass_name
-        if (
-            new_stats != self.pass_stats
-            or new_current != self.current_pass_name
-        ):
+        if new_stats != self.pass_stats or new_current != self.current_pass_name:
             self.pass_stats = new_stats
             self.current_pass_name = new_current
             self._update_table_data()
             # Update footer with disabled count
             disabled_count = len(self.disabled_passes)
             if disabled_count > 0:
-                footer_text = f"Showing {len(self.pass_stats)} passes ({disabled_count} disabled)"
-            else:
                 footer_text = (
-                    f"Showing {len(self.pass_stats)} passes in run order"
+                    f"Showing {len(self.pass_stats)} passes ({disabled_count} disabled)"
                 )
+            else:
+                footer_text = f"Showing {len(self.pass_stats)} passes in run order"
             footer = self.query_one("#stats-footer", Static)
             footer.update(footer_text)
 
@@ -778,9 +767,7 @@ class ShrinkRayApp(App[None]):
             self.theme = "shrinkray-light"
         else:  # auto
             self.theme = (
-                "shrinkray-dark"
-                if detect_terminal_theme()
-                else "shrinkray-light"
+                "shrinkray-dark" if detect_terminal_theme() else "shrinkray-light"
             )
 
         self.title = "Shrink Ray"

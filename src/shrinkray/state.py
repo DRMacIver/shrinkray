@@ -71,7 +71,9 @@ class TestOutputManager:
     max_files: int = 50
     max_age_seconds: float = 60.0
     min_display_seconds: float = 1.0  # Minimum time to show completed output
-    grace_period_seconds: float = 0.5  # Extra time to wait for new test after min_display
+    grace_period_seconds: float = (
+        0.5  # Extra time to wait for new test after min_display
+    )
 
     _sequence: int = 0
     _active_outputs: dict[int, str] = {}

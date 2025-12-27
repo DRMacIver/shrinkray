@@ -71,6 +71,7 @@ class TestOutputManager:
     max_files: int = 50
     max_age_seconds: float = 60.0
     min_display_seconds: float = 1.0  # Minimum time to show completed output
+    grace_period_seconds: float = 0.5  # Extra time to wait for new test after min_display
 
     _sequence: int = 0
     _active_outputs: dict[int, str] = {}
@@ -111,29 +112,39 @@ class TestOutputManager:
             _, file_path, _ = self._completed_outputs.popleft()
             self._safe_delete(file_path)
 
-    def _get_recent_completed(self) -> tuple[int, str] | None:
-        """Get most recently completed test if within display window."""
+    def _should_show_completed(self) -> tuple[int, str] | None:
+        """Check if we should show a completed test's output.
+
+        Note: This method is only called when there are no active tests.
+        It returns the completed test info if within the display window
+        (min_display_seconds + grace_period).
+        """
         if not self._completed_outputs:
             return None
         test_id, file_path, completion_time = self._completed_outputs[-1]
-        if time.time() - completion_time < self.min_display_seconds:
+        elapsed = time.time() - completion_time
+
+        # Show completed test during the full display window
+        if elapsed < self.min_display_seconds + self.grace_period_seconds:
             return test_id, file_path
+
         return None
 
     def get_current_output_path(self) -> str | None:
         """Get the most relevant output file path.
 
-        Prioritizes recently completed tests (within min_display_seconds)
-        to ensure output stays visible briefly after completion.
+        Active tests always take priority. If no active test, shows
+        recently completed test output for min_display_seconds, plus
+        an additional grace_period if no new test has started.
         """
-        # First check for recently completed test that should stay visible
-        recent = self._get_recent_completed()
-        if recent is not None:
-            return recent[1]
-        # Then check for active tests
+        # Active tests always take priority
         if self._active_outputs:
             max_id = max(self._active_outputs.keys())
             return self._active_outputs[max_id]
+        # Then check for recently completed test that should stay visible
+        recent = self._should_show_completed()
+        if recent is not None:
+            return recent[1]
         # Fall back to most recent completed (even if past display window)
         if self._completed_outputs:
             return self._completed_outputs[-1][1]
@@ -142,13 +153,8 @@ class TestOutputManager:
     def get_active_test_id(self) -> int | None:
         """Get the currently running test ID, if any.
 
-        Returns None if a recently completed test is still in its
-        display window (to show "completed" status instead of "running").
+        Returns the active test ID if one is running, None otherwise.
         """
-        # If a recently completed test is being displayed, return None
-        # to indicate we're showing completed output, not an active test
-        if self._get_recent_completed() is not None:
-            return None
         if self._active_outputs:
             return max(self._active_outputs.keys())
         return None

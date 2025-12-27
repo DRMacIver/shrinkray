@@ -2114,8 +2114,8 @@ def test_output_manager_safe_delete_nonexistent(tmp_path):
     TestOutputManager._safe_delete(str(tmp_path / "nonexistent.log"))
 
 
-def test_output_manager_display_window(tmp_path):
-    """Test that completed output stays visible for min_display_seconds."""
+def test_output_manager_active_test_takes_priority(tmp_path):
+    """Test that active tests always take priority over completed tests."""
     manager = TestOutputManager(
         output_dir=str(tmp_path), min_display_seconds=0.5
     )
@@ -2131,23 +2131,22 @@ def test_output_manager_display_window(tmp_path):
     with open(path2, "w") as f:
         f.write("output2")
 
-    # Should still show the completed test's output (within display window)
-    assert manager.get_current_output_path() == path1
-    # active_test_id should be None (showing completed, not running)
-    assert manager.get_active_test_id() is None
-
-    # Wait for display window to expire
-    time.sleep(0.6)
-
-    # Now should show the new active test
+    # Active test should take priority over recently completed
     assert manager.get_current_output_path() == path2
     assert manager.get_active_test_id() == test_id2
+
+    # Complete the second test
+    manager.mark_completed(test_id2)
+
+    # Now should show the most recently completed test
+    assert manager.get_current_output_path() == path2
+    assert manager.get_active_test_id() is None
 
 
 def test_output_manager_display_window_no_new_test(tmp_path):
     """Test display window behavior when no new test starts."""
     manager = TestOutputManager(
-        output_dir=str(tmp_path), min_display_seconds=0.2
+        output_dir=str(tmp_path), min_display_seconds=0.2, grace_period_seconds=0.2
     )
 
     # Allocate and complete a test
@@ -2160,9 +2159,45 @@ def test_output_manager_display_window_no_new_test(tmp_path):
     assert manager.get_current_output_path() == path1
     assert manager.get_active_test_id() is None
 
-    # Wait for display window to expire
+    # Wait for min_display_seconds but within grace period
     time.sleep(0.25)
 
-    # After display window: still shows path1 (fallback), still no active test
+    # Still within grace period (0.2 + 0.2 = 0.4s total), should still show completed
     assert manager.get_current_output_path() == path1
     assert manager.get_active_test_id() is None
+
+    # Wait for grace period to expire
+    time.sleep(0.2)
+
+    # After full window: still shows path1 (fallback), still no active test
+    assert manager.get_current_output_path() == path1
+    assert manager.get_active_test_id() is None
+
+
+def test_output_manager_grace_period_with_new_test(tmp_path):
+    """Test that new test starting during grace period is shown immediately."""
+    manager = TestOutputManager(
+        output_dir=str(tmp_path), min_display_seconds=0.15, grace_period_seconds=0.3
+    )
+
+    # Allocate and complete a test
+    test_id1, path1 = manager.allocate_output_file()
+    with open(path1, "w") as f:
+        f.write("output1")
+    manager.mark_completed(test_id1)
+
+    # Wait until we're past min_display but within grace period
+    time.sleep(0.2)
+
+    # Should still show completed (in grace period, no active test)
+    assert manager.get_current_output_path() == path1
+    assert manager.get_active_test_id() is None
+
+    # Start a new test during grace period
+    test_id2, path2 = manager.allocate_output_file()
+    with open(path2, "w") as f:
+        f.write("output2")
+
+    # New active test should take priority immediately
+    assert manager.get_current_output_path() == path2
+    assert manager.get_active_test_id() == test_id2

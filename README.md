@@ -119,30 +119,3 @@ not to handle well, but it's easy to extend with additional transformations.
 It is also fairly easy to add support for new formats as needed.
 
 If you run into a test case and interestingness test that you care about that shrink ray handles badly please let me know and I'll likely see about improving its handling of that format.
-
-## Parallelism
-
-You can control the number of parallel tasks shrinkray will run with the `--parallelism` flag. By default this will be the number of CPU cores you have available
-
-Shrink Ray is designed to be able to run heavily in parallel, with a basic heuristic of aiming to be embarrassingly parallel when making no progress, mostly sequential when making progress, and smoothly scaling in between the two. It mostly succeeds at this.
-
-Currently the bottleneck on scaling to a very large number of cores is how fast the controlling Python program can generate variant test cases to try and pass them to the interestingness test. This isn't well optimised at present and I don't currently have good benchmarks for it, but I'd expect you to be able to get linear speedups on most workflows while running 10-20 test cases in parallel, and to start to struggle past that.
-
-This also depends on the performance of the interestingness test - the slower your test is to run, the more you'll be able to scale linearly with the number of cores available.
-
-I'm quite interested in getting this part to scale well, so please let me know if you find examples where it doesn't seem to work.
-
-## Bug Reports
-
-Shrink Ray is still pretty new and under-tested software, so it definitely has bugs. If you run into any, [please file an issue](https://github.com/DRMacIver/shrinkray/issues).
-
-As well as obvious bugs (crashes, etc) I'm also very interested in hearing about usability issues and cases where the reduced test case isn't very good.
-
-Requests for new features, new supported formats, etc. also welcome although I'm less likely to jump right on them.
-
-## Sponsorship
-
-Shrink Ray is something of a labour of love - I wanted to have a tool that actually put into practice many of my ideas about test-case reduction, as I think the previous state of the art was well behind where I'd like it to be.
-
-That being said, it is first and foremost designed to be a useful tool for practical engineering problems.
-If you find it useful as such, please [consider sponsoring my development of it](https://github.com/sponsors/DRMacIver).

@@ -1,6 +1,7 @@
 """Textual-based TUI for Shrink Ray."""
 
 import os
+import time
 import traceback
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
@@ -237,8 +238,6 @@ class ContentPreview(Static):
     _pending_hex_mode: bool = False
 
     def update_content(self, content: str, hex_mode: bool) -> None:
-        import time
-
         # Store the pending content
         self._pending_content = content
         self._pending_hex_mode = hex_mode
@@ -322,8 +321,6 @@ class OutputPreview(Static):
     _last_seen_test_id: int | None = None  # Track last test ID for "completed" message
 
     def update_output(self, content: str, test_id: int | None) -> None:
-        import time
-
         # Throttle updates to every 200ms
         now = time.time()
         if now - self._last_update_time < 0.2:

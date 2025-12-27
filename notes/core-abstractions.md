@@ -33,18 +33,20 @@ For text-based test cases (bytes that decode as valid Unicode in any encoding), 
 
 This ordering is implemented via `LazyChainedSortKey`, which evaluates comparison functions lazily until one returns different values for the two inputs.
 
-#### Shortlex Ordering (for binary data)
+#### Shortlex Ordering (fallback for non-text)
 
-For binary data (bytes that can't be decoded as text), Shrink Ray uses **shortlex ordering**: `(length, lexicographic_value)`. This means:
+If bytes cannot be decoded as valid Unicode, Shrink Ray falls back to **shortlex ordering**: `(length, lexicographic_value)`. This means:
 1. Shorter test cases are always preferred
 2. Among equal-length test cases, lexicographically smaller is preferred
+
+Note: Bytes that decode as valid text are always preferred over bytes that don't, regardless of other ordering criteria.
 
 #### Dict Ordering (for directories)
 
 For dict-based test cases (used in directory reduction), ordering compares:
 1. Total size of all values
 2. Number of keys
-3. Values for each key (largest keys first), using the appropriate ordering for each value
+3. Values for each key (in reverse order of their initial file sizes), using the appropriate ordering for each value
 
 ### Normalisation
 

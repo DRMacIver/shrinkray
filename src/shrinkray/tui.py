@@ -98,7 +98,7 @@ class ReductionClientProtocol(Protocol):
         file_path: str,
         test: list[str],
         parallelism: int | None = None,
-        timeout: float = 1.0,
+        timeout: float | None = None,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,
@@ -616,7 +616,7 @@ class ShrinkRayApp(App[None]):
         file_path: str,
         test: list[str],
         parallelism: int | None = None,
-        timeout: float = 1.0,
+        timeout: float | None = None,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,
@@ -657,6 +657,7 @@ class ShrinkRayApp(App[None]):
             yield Label(
                 "Shrink Ray - [h] help, [p] passes, [c] skip pass, [q] quit",
                 id="status-label",
+                markup=False,
             )
             with Vertical(id="stats-container"):
                 yield StatsDisplay(id="stats-display")
@@ -807,7 +808,7 @@ async def _validate_initial_example(
     file_path: str,
     test: list[str],
     parallelism: int | None,
-    timeout: float,
+    timeout: float | None,
     seed: int,
     input_type: str,
     in_place: bool,
@@ -855,7 +856,7 @@ def run_textual_ui(
     file_path: str,
     test: list[str],
     parallelism: int | None = None,
-    timeout: float = 1.0,
+    timeout: float | None = None,
     seed: int = 0,
     input_type: str = "all",
     in_place: bool = False,

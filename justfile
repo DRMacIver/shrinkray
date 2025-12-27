@@ -7,22 +7,22 @@ install:
     uv sync --extra dev
 
 # Run tests with coverage enforcement (skips slow tests when no args given)
-test *args:
+test *args: install
     uv run coverage run -m pytest tests/ {{ if args == "" { "-m 'not slow' --durations=10" } else { args } }}
     {{ if args == "" { "uv run coverage report" } else { "" } }}
 
 # Run tests without coverage (faster for development)
-test-quick *args:
+test-quick *args: install
     uv run python -m pytest tests/ {{ args }}
 
 # Lint and type-check
-lint:
+lint: install
     uv run ruff check src tests
     uv run python scripts/extra_lints.py
     uv run basedpyright src tests
 
 # Format code with ruff
-format:
+format: install
     uv run ruff format src tests
     uv run ruff check --fix src tests
 

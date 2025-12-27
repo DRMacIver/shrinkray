@@ -75,12 +75,14 @@ async def run_shrink_ray(
 )
 @click.option(
     "--timeout",
-    default=1,
+    default=None,
     type=click.FLOAT,
     help=(
-        "Time out subprocesses after this many seconds. If set to <= 0 then "
-        "no timeout will be used. Any commands that time out will be treated "
-        "as failing the test"
+        "Time out subprocesses after this many seconds. If not specified, "
+        "runs the interestingness test once and sets timeout to 10x the "
+        "measured time (capped at 5 minutes). If set to <= 0 then no timeout "
+        "will be used. Any commands that time out will be treated as failing "
+        "the test"
     ),
 )
 @click.option(
@@ -212,7 +214,7 @@ def main(
     backup: str,
     filename: str,
     test: list[str],
-    timeout: float,
+    timeout: float | None,
     in_place: bool,
     parallelism: int,
     seed: int,
@@ -225,7 +227,7 @@ def main(
     ui_type: UIType,
     theme: str,
 ) -> None:
-    if timeout <= 0:
+    if timeout is not None and timeout <= 0:
         timeout = float("inf")
 
     if not os.access(test[0], os.X_OK):

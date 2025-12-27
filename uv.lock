@@ -608,22 +608,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pytest-textual-snapshot"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "jinja2" },
-    { name = "pytest" },
-    { name = "rich" },
-    { name = "syrupy" },
-    { name = "textual" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8b/75/2ef17ae52fa5bc848ff2d1d7bc317a702cbd6d7ad733ca991b9f899dbbae/pytest_textual_snapshot-1.0.0.tar.gz", hash = "sha256:065217055ed833b8a16f2320a0613f39a0154e8d9fee63535f29f32c6414b9d7", size = 11071, upload-time = "2024-07-22T15:17:44.629Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/70/2e/4bf16ed78b382b3d7c1e545475ec8cf04346870be662815540faf8f16e8c/pytest_textual_snapshot-1.0.0-py3-none-any.whl", hash = "sha256:dd3a421491a6b1987ee7b4336d7f65299524924d2b0a297e69733b73b01570e1", size = 11171, upload-time = "2024-07-22T15:17:43.167Z" },
-]
-
-[[package]]
 name = "pytest-trio"
 version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -757,7 +741,7 @@ wheels = [
 
 [[package]]
 name = "shrinkray"
-version = "25.12.26.2"
+version = "25.12.27.0"
 source = { editable = "." }
 dependencies = [
     { name = "binaryornot" },
@@ -777,14 +761,15 @@ dev = [
     { name = "coverage" },
     { name = "hypothesis" },
     { name = "hypothesmith" },
+    { name = "jinja2" },
     { name = "pexpect" },
     { name = "pygments" },
     { name = "pyte" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
-    { name = "pytest-textual-snapshot" },
     { name = "pytest-trio" },
     { name = "ruff" },
+    { name = "syrupy" },
 ]
 
 [package.metadata]
@@ -800,15 +785,16 @@ requires-dist = [
     { name = "humanize", specifier = ">=4.9.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.92.1" },
     { name = "hypothesmith", marker = "extra == 'dev'", specifier = ">=0.3.1" },
+    { name = "jinja2", marker = "extra == 'dev'", specifier = ">=3.0.0" },
     { name = "libcst", specifier = ">=1.1.0" },
     { name = "pexpect", marker = "extra == 'dev'", specifier = ">=4.9.0" },
     { name = "pygments", marker = "extra == 'dev'", specifier = ">=2.17.0" },
     { name = "pyte", marker = "extra == 'dev'", specifier = ">=0.8.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
-    { name = "pytest-textual-snapshot", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "pytest-trio", marker = "extra == 'dev'", specifier = ">=0.8.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
+    { name = "syrupy", marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "textual", specifier = ">=0.47.0" },
     { name = "trio", specifier = ">=0.28.0" },
 ]

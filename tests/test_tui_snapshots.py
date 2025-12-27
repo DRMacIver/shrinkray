@@ -1,9 +1,33 @@
 """Snapshot tests for the textual TUI."""
 
+import asyncio
+from pathlib import Path
+
 import pytest
 
-from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate
-from shrinkray.tui import ShrinkRayApp
+from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
+from shrinkray.tui import ShrinkRayApp, StatsDisplay
+
+
+# Directory where snapshots are stored
+SNAPSHOTS_DIR = Path(__file__).parent / "__snapshots__" / "test_tui_snapshots"
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Verify all snapshots contain expected content after tests complete."""
+    if not SNAPSHOTS_DIR.exists():
+        return
+
+    # Using vendored pytest_textual_snapshot with syrupy 5.0 compatibility
+    for snapshot_file in SNAPSHOTS_DIR.glob("*.svg"):
+        content = snapshot_file.read_text()
+        # Each snapshot should contain "Reducer" which appears in StatsDisplay
+        # Note: SVG uses &#160; for non-breaking spaces, so we just check for "Reducer"
+        if "Reducer" not in content:
+            raise AssertionError(
+                f"Snapshot {snapshot_file.name} does not contain expected text 'Reducer'. "
+                "The snapshot may have been captured before the app fully rendered."
+            )
 
 
 class FakeReductionClientForSnapshots:
@@ -12,7 +36,8 @@ class FakeReductionClientForSnapshots:
     def __init__(self, updates: list[ProgressUpdate]):
         self._updates = updates
         self._update_index = 0
-        self._completed = False
+        self._cancelled = False
+        self._updates_consumed = False
 
     async def start(self) -> None:
         pass
@@ -22,7 +47,7 @@ class FakeReductionClientForSnapshots:
         file_path: str,
         test: list[str],
         parallelism: int | None = None,
-        timeout: float = 1.0,
+        timeout: float | None = None,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,
@@ -31,34 +56,24 @@ class FakeReductionClientForSnapshots:
         no_clang_delta: bool = False,
         clang_delta: str = "",
         trivial_is_error: bool = True,
-    ):
-        from shrinkray.subprocess.protocol import Response
-
+    ) -> Response:
         return Response(id="start", result={"status": "started"})
 
-    async def cancel(self):
-        from shrinkray.subprocess.protocol import Response
-
-        self._completed = True
+    async def cancel(self) -> Response:
+        self._cancelled = True
         return Response(id="cancel", result={"status": "cancelled"})
 
-    async def disable_pass(self, pass_name: str):
-        from shrinkray.subprocess.protocol import Response
-
+    async def disable_pass(self, pass_name: str) -> Response:
         return Response(
             id="disable", result={"status": "disabled", "pass_name": pass_name}
         )
 
-    async def enable_pass(self, pass_name: str):
-        from shrinkray.subprocess.protocol import Response
-
+    async def enable_pass(self, pass_name: str) -> Response:
         return Response(
             id="enable", result={"status": "enabled", "pass_name": pass_name}
         )
 
-    async def skip_current_pass(self):
-        from shrinkray.subprocess.protocol import Response
-
+    async def skip_current_pass(self) -> Response:
         return Response(id="skip", result={"status": "skipped"})
 
     async def close(self) -> None:
@@ -66,14 +81,18 @@ class FakeReductionClientForSnapshots:
 
     async def get_progress_updates(self):
         for update in self._updates:
-            if self._completed:
+            if self._cancelled:
                 break
             yield update
-        self._completed = True
+        self._updates_consumed = True
+        # Keep the app running by waiting indefinitely (until cancelled)
+        while not self._cancelled:
+            await asyncio.sleep(1)
 
     @property
     def is_completed(self) -> bool:
-        return self._completed
+        # Only complete when cancelled, not when updates are consumed
+        return self._cancelled
 
     @property
     def error_message(self) -> str | None:
@@ -180,40 +199,63 @@ def large_file_update() -> ProgressUpdate:
 # === TUI snapshot tests ===
 
 
+async def wait_for_render(pilot):
+    """Wait for the app to fully render with actual content.
+
+    Checks that the StatsDisplay has received and rendered the update
+    by verifying original_size is non-zero (all test fixtures have non-zero size).
+    """
+    max_attempts = 50  # Generous limit to avoid flakiness
+    for _ in range(max_attempts):
+        await pilot.pause()
+        stats = pilot.app.query_one("#stats-display", StatsDisplay)
+        if stats.original_size > 0:
+            # Content has been rendered, give one more pause for layout
+            await pilot.pause()
+            return
+
+    # Get final state for error message
+    final_stats = pilot.app.query_one("#stats-display", StatsDisplay)
+    raise AssertionError(
+        "App did not render within expected time. "
+        f"StatsDisplay.original_size is still {final_stats.original_size}"
+    )
+
+
 def test_initial_state(snap_compare, initial_state_update):
     """Snapshot test for initial app state."""
     app = make_app_with_updates([initial_state_update])
-    assert snap_compare(app, terminal_size=(120, 40))
+    assert snap_compare(app, terminal_size=(120, 40), run_before=wait_for_render)
 
 
 def test_mid_reduction(snap_compare, mid_reduction_update):
     """Snapshot test for mid-reduction state."""
     app = make_app_with_updates([mid_reduction_update])
-    assert snap_compare(app, terminal_size=(120, 40))
+    assert snap_compare(app, terminal_size=(120, 40), run_before=wait_for_render)
 
 
 def test_hex_mode(snap_compare, hex_mode_update):
     """Snapshot test for hex mode display."""
     app = make_app_with_updates([hex_mode_update])
-    assert snap_compare(app, terminal_size=(120, 40))
+    assert snap_compare(app, terminal_size=(120, 40), run_before=wait_for_render)
 
 
 def test_large_file(snap_compare, large_file_update):
     """Snapshot test for large file with potential diff."""
     app = make_app_with_updates([large_file_update])
-    assert snap_compare(app, terminal_size=(120, 40))
+    assert snap_compare(app, terminal_size=(120, 40), run_before=wait_for_render)
 
 
 def test_small_terminal(snap_compare, mid_reduction_update):
     """Snapshot test with smaller terminal size."""
     app = make_app_with_updates([mid_reduction_update])
-    assert snap_compare(app, terminal_size=(80, 24))
+    assert snap_compare(app, terminal_size=(80, 24), run_before=wait_for_render)
 
 
 def test_wide_terminal(snap_compare, mid_reduction_update):
     """Snapshot test with wider terminal."""
     app = make_app_with_updates([mid_reduction_update])
-    assert snap_compare(app, terminal_size=(160, 50))
+    assert snap_compare(app, terminal_size=(160, 50), run_before=wait_for_render)
 
 
 @pytest.fixture

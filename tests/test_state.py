@@ -9,6 +9,7 @@ import trio
 from shrinkray.cli import InputType
 from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import (
+    DYNAMIC_TIMEOUT_MIN,
     ShrinkRayDirectoryState,
     ShrinkRayStateSingleFile,
     TimeoutExceededOnInitial,
@@ -1636,6 +1637,87 @@ async def test_run_for_exit_code_debug_mode_timeout_on_first_call(tmp_path):
 
     assert exc_info.value.timeout == 0.1
     assert exc_info.value.runtime >= 0.1
+    # first_call should be False after this
+    assert state.first_call is False
+
+
+async def test_run_for_exit_code_debug_mode_dynamic_timeout(tmp_path):
+    """Test dynamic timeout computation in debug mode on first call.
+
+    Exercises the dynamic timeout computation path in debug mode.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=None,  # Dynamic timeout
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # First call in debug mode with None timeout should compute dynamic timeout
+    assert state.timeout is None
+    exit_code = await state.run_for_exit_code(b"hello", debug=True)
+    assert exit_code == 0
+    # After first call, timeout should be computed
+    assert state.timeout is not None
+    assert state.timeout > 0
+    # first_call should be False after this
+    assert state.first_call is False
+
+
+async def test_run_for_exit_code_dynamic_timeout_non_debug(tmp_path):
+    """Test dynamic timeout computation in non-debug mode on first call.
+
+    Exercises the dynamic timeout computation path in non-debug mode,
+    which uses run_script_on_file instead of the debug path.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=None,  # Dynamic timeout
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # First call in non-debug mode with None timeout should compute dynamic timeout
+    assert state.timeout is None
+    exit_code = await state.run_for_exit_code(b"hello", debug=False)
+    assert exit_code == 0
+    # After first call, timeout should be computed
+    assert state.timeout is not None
+    assert state.timeout > 0
+    # Verify minimum timeout is respected
+    assert state.timeout >= DYNAMIC_TIMEOUT_MIN
     # first_call should be False after this
     assert state.first_call is False
 

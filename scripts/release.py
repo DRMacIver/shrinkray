@@ -156,8 +156,11 @@ def update_version_in_pyproject(new_version: str) -> str:
 
 def create_release_commit_and_tag(version: str) -> None:
     """Commit version change and create git tag."""
-    # Commit the version change
-    run_command(["git", "add", "pyproject.toml"])
+    # Update uv.lock to reflect the new version
+    run_command(["uv", "lock"])
+
+    # Commit the version change and lock file
+    run_command(["git", "add", "pyproject.toml", "uv.lock"])
     run_command(["git", "commit", "-m", f"Release {version}"])
     print(f"Created commit for release {version}")
 
@@ -198,7 +201,8 @@ def main() -> None:
         old_version_match = re.search(pattern, content, flags=re.MULTILINE)
         old_version = old_version_match.group(0).split('"')[1] if old_version_match else "unknown"
         print(f"Would update version: {old_version} → {new_version}")
-        print(f"Would create commit and tag: v{new_version}")
+        print("Would run uv lock to update uv.lock")
+        print(f"Would create commit (pyproject.toml + uv.lock) and tag: v{new_version}")
         print("Would push to GitHub")
     else:
         # Check git status first

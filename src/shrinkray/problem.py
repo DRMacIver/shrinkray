@@ -120,7 +120,7 @@ def natural_string_lex(s):
 
 NATURAL_ORDERING_FUNCTIONS: list[Callable[[str], Any]] = [
     len,
-    lambda s: sum(len(line) ** 2 for line in s.split("\n")),
+    lambda s: sum(len(line) ** 2 for line in s.split("\n")) / len(s.split("\n")) ** 2,
     lambda s: len(s.splitlines()),
     lambda s: list(map(len, s.splitlines())),
     natural_string_lex,

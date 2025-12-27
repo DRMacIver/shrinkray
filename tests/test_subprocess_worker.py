@@ -462,6 +462,7 @@ async def test_worker_emit_progress_updates_loop():
 
     mock_state = MagicMock()
     mock_state.parallel_tasks_running = 2
+    mock_state.output_manager = None  # No test output capture in this mock
     worker.state = mock_state
 
     # Run for a short time then stop
@@ -515,6 +516,42 @@ async def test_worker_start_reduction_single_file(tmp_path):
     assert worker.problem is not None
     assert worker.reducer is not None
     assert worker.problem.current_test_case == b"hello world"
+
+
+async def test_worker_start_reduction_skip_validation(tmp_path):
+    """Test _start_reduction with skip_validation=True skips setup()."""
+    # Create a test file
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a test script that would FAIL if run - this verifies setup() is skipped
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 1")  # Always fails
+    script.chmod(0o755)
+
+    output = MemoryOutputStream()
+    worker = ReducerWorker(output_stream=output)
+
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+        "skip_validation": True,  # Skip validation - setup() won't run the test
+    }
+
+    # This would raise InvalidInitialExample if setup() was called
+    await worker._start_reduction(params)
+
+    assert worker.running is True
+    assert worker.state is not None
+    assert worker.problem is not None
 
 
 async def test_worker_start_reduction_directory(tmp_path):
@@ -685,7 +722,8 @@ async def test_worker_emit_progress_updates_no_parallel_attr():
     worker.reducer = mock_reducer
 
     # State without parallel_tasks_running attribute
-    mock_state = MagicMock(spec=[])  # Empty spec means no attributes
+    mock_state = MagicMock(spec=["output_manager"])  # Only output_manager attr
+    mock_state.output_manager = None  # No test output capture
     worker.state = mock_state
 
     # Run for a short time then stop
@@ -1751,6 +1789,7 @@ async def test_build_progress_update_with_reducer_none():
     # Set up state for parallel workers calculation
     worker.state = Mock()
     worker.state.parallel_tasks_running = 2
+    worker.state.output_manager = None  # No test output capture
 
     # Build progress update with reducer=None
     update = await worker._build_progress_update()
@@ -1791,6 +1830,7 @@ async def test_build_progress_update_with_reducer_pass_stats_none():
     # Set up state
     worker.state = Mock()
     worker.state.parallel_tasks_running = 2
+    worker.state.output_manager = None  # No test output capture
 
     # Build progress update
     update = await worker._build_progress_update()
@@ -1828,9 +1868,66 @@ async def test_build_progress_update_with_reducer_no_disabled_passes_attr():
     # Set up state
     worker.state = Mock()
     worker.state.parallel_tasks_running = 2
+    worker.state.output_manager = None  # No test output capture
 
     # Build progress update - should not crash even without disabled_passes
     update = await worker._build_progress_update()
 
     assert update is not None
     assert update.disabled_passes == []
+
+
+# === _get_test_output_preview tests ===
+
+
+def test_get_test_output_preview_no_output_path():
+    """Test _get_test_output_preview when output_path is None."""
+    worker = ReducerWorker()
+    worker.state = MagicMock()
+
+    # Output manager with no output path
+    manager = MagicMock()
+    manager.get_active_test_id.return_value = 5
+    manager.get_current_output_path.return_value = None
+    worker.state.output_manager = manager
+
+    preview, test_id = worker._get_test_output_preview()
+    assert preview == ""
+    assert test_id == 5
+
+
+def test_get_test_output_preview_large_file(tmp_path):
+    """Test _get_test_output_preview with file larger than 4KB."""
+    worker = ReducerWorker()
+    worker.state = MagicMock()
+
+    # Create a file larger than 4KB
+    output_file = tmp_path / "test_output.log"
+    content = "x" * 5000 + "LAST PART"
+    output_file.write_text(content)
+
+    manager = MagicMock()
+    manager.get_active_test_id.return_value = 10
+    manager.get_current_output_path.return_value = str(output_file)
+    worker.state.output_manager = manager
+
+    preview, test_id = worker._get_test_output_preview()
+    assert test_id == 10
+    # Should get last 4KB
+    assert len(preview.encode()) <= 4096
+    assert "LAST PART" in preview
+
+
+def test_get_test_output_preview_file_read_error():
+    """Test _get_test_output_preview handles OSError gracefully."""
+    worker = ReducerWorker()
+    worker.state = MagicMock()
+
+    manager = MagicMock()
+    manager.get_active_test_id.return_value = 3
+    manager.get_current_output_path.return_value = "/nonexistent/path/file.log"
+    worker.state.output_manager = manager
+
+    preview, test_id = worker._get_test_output_preview()
+    assert preview == ""
+    assert test_id == 3

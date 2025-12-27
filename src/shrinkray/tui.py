@@ -1,6 +1,7 @@
 """Textual-based TUI for Shrink Ray."""
 
 import os
+import time
 import traceback
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
@@ -11,14 +12,18 @@ import humanize
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.widgets import DataTable, Footer, Header, Label, Static
 
 from shrinkray.subprocess.client import SubprocessClient
-from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
+from shrinkray.subprocess.protocol import (
+    PassStatsData,
+    ProgressUpdate,
+    Response,
+)
 
 
 ThemeMode = Literal["auto", "dark", "light"]
@@ -229,8 +234,6 @@ class ContentPreview(Static):
     _pending_hex_mode: bool = False
 
     def update_content(self, content: str, hex_mode: bool) -> None:
-        import time
-
         # Store the pending content
         self._pending_content = content
         self._pending_hex_mode = hex_mode
@@ -303,6 +306,67 @@ class ContentPreview(Static):
             "\n".join(lines[:available_lines])
             + f"\n\n... ({len(lines) - available_lines} more lines)"
         )
+
+
+class OutputPreview(Static):
+    """Widget to display test output preview."""
+
+    output_content = reactive("")
+    active_test_id: reactive[int | None] = reactive(None)
+    _last_update_time: float = 0.0
+    _last_seen_test_id: int | None = None  # Track last test ID for "completed" message
+
+    def update_output(self, content: str, test_id: int | None) -> None:
+        # Throttle updates to every 200ms
+        now = time.time()
+        if now - self._last_update_time < 0.2:
+            return
+
+        self._last_update_time = now
+        self.output_content = content
+        # Track the last test ID we've seen (for showing in "completed" message)
+        if test_id is not None:
+            self._last_seen_test_id = test_id
+        self.active_test_id = test_id
+        self.refresh(layout=True)
+
+    def _get_available_lines(self) -> int:
+        """Get the number of lines available for display based on container size."""
+        try:
+            parent = self.parent
+            if parent and hasattr(parent, "size"):
+                parent_size = parent.size  # type: ignore[union-attr]
+                if parent_size.height > 0:
+                    return max(10, parent_size.height - 3)
+            if self.app and self.app.size.height > 0:
+                return max(10, self.app.size.height - 15)
+        except Exception:
+            pass
+        return 30
+
+    def render(self) -> str:
+        # Header line
+        if self.active_test_id is not None:
+            header = f"[green]Test #{self.active_test_id} running...[/green]"
+        elif self.output_content and self._last_seen_test_id is not None:
+            header = f"[dim]Test #{self._last_seen_test_id} completed[/dim]"
+        else:
+            header = "[dim]No test output yet...[/dim]"
+
+        if not self.output_content:
+            return header
+
+        available_lines = self._get_available_lines()
+        lines = self.output_content.split("\n")
+
+        # Show tail of output (most recent lines)
+        if len(lines) <= available_lines:
+            return f"{header}\n{self.output_content}"
+
+        # Truncate from the beginning
+        truncated_lines = lines[-(available_lines):]
+        skipped = len(lines) - available_lines
+        return f"{header}\n... ({skipped} earlier lines)\n" + "\n".join(truncated_lines)
 
 
 class HelpScreen(ModalScreen[None]):
@@ -595,10 +659,32 @@ class ShrinkRayApp(App[None]):
         margin: 0 1;
     }
 
+    #content-area {
+        height: 1fr;
+    }
+
     #content-container {
         border: solid blue;
         margin: 1;
-        height: 1fr;
+        padding: 1;
+        width: 1fr;
+        height: 100%;
+    }
+
+    #content-container:dark {
+        border: solid lightskyblue;
+    }
+
+    #output-container {
+        border: solid blue;
+        margin: 1;
+        padding: 1;
+        width: 1fr;
+        height: 100%;
+    }
+
+    #output-container:dark {
+        border: solid lightskyblue;
     }
     """
 
@@ -661,8 +747,13 @@ class ShrinkRayApp(App[None]):
             )
             with Vertical(id="stats-container"):
                 yield StatsDisplay(id="stats-display")
-            with VerticalScroll(id="content-container"):
-                yield ContentPreview(id="content-preview")
+            with Horizontal(id="content-area"):
+                with VerticalScroll(id="content-container") as content_scroll:
+                    content_scroll.border_title = "Recent Reductions"
+                    yield ContentPreview(id="content-preview")
+                with VerticalScroll(id="output-container") as output_scroll:
+                    output_scroll.border_title = "Test Output"
+                    yield OutputPreview(id="output-preview")
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -695,7 +786,7 @@ class ShrinkRayApp(App[None]):
 
                 await self._client.start()
 
-                # Start the reduction
+                # Start the reduction - validation was already done by main()
                 response = await self._client.start_reduction(
                     file_path=self._file_path,
                     test=self._test,
@@ -709,6 +800,7 @@ class ShrinkRayApp(App[None]):
                     no_clang_delta=self._no_clang_delta,
                     clang_delta=self._clang_delta,
                     trivial_is_error=self._trivial_is_error,
+                    skip_validation=True,
                 )
 
                 if response.error:
@@ -719,12 +811,16 @@ class ShrinkRayApp(App[None]):
             # Monitor progress (client is already started and reduction is running)
             stats_display = self.query_one("#stats-display", StatsDisplay)
             content_preview = self.query_one("#content-preview", ContentPreview)
+            output_preview = self.query_one("#output-preview", OutputPreview)
 
             async with aclosing(self._client.get_progress_updates()) as updates:
                 async for update in updates:
                     stats_display.update_stats(update)
                     content_preview.update_content(
                         update.content_preview, update.hex_mode
+                    )
+                    output_preview.update_output(
+                        update.test_output_preview, update.active_test_id
                     )
                     self._latest_pass_stats = update.pass_stats
                     self._current_pass_name = update.current_pass_name
@@ -741,7 +837,10 @@ class ShrinkRayApp(App[None]):
             # Check if there was an error from the worker
             if self._client.error_message:
                 # Exit immediately on error, printing the error message
-                self.exit(return_code=1, message=f"Error: {self._client.error_message}")
+                self.exit(
+                    return_code=1,
+                    message=f"Error: {self._client.error_message}",
+                )
                 return
             elif self._exit_on_completion:
                 self.exit()
@@ -804,54 +903,6 @@ class ShrinkRayApp(App[None]):
         return self._completed
 
 
-async def _validate_initial_example(
-    file_path: str,
-    test: list[str],
-    parallelism: int | None,
-    timeout: float | None,
-    seed: int,
-    input_type: str,
-    in_place: bool,
-    formatter: str,
-    volume: str,
-    no_clang_delta: bool,
-    clang_delta: str,
-    trivial_is_error: bool,
-) -> str | None:
-    """Validate initial example before showing TUI.
-
-    Returns error_message if validation failed, None if it passed.
-    """
-    debug_mode = volume == "debug"
-    client = SubprocessClient(debug_mode=debug_mode)
-    try:
-        await client.start()
-
-        response = await client.start_reduction(
-            file_path=file_path,
-            test=test,
-            parallelism=parallelism,
-            timeout=timeout,
-            seed=seed,
-            input_type=input_type,
-            in_place=in_place,
-            formatter=formatter,
-            volume=volume,
-            no_clang_delta=no_clang_delta,
-            clang_delta=clang_delta,
-            trivial_is_error=trivial_is_error,
-        )
-
-        if response.error:
-            return response.error
-
-        # Validation passed - cancel this reduction since TUI will start fresh
-        await client.cancel()
-        return None
-    finally:
-        await client.close()
-
-
 def run_textual_ui(
     file_path: str,
     test: list[str],
@@ -868,43 +919,14 @@ def run_textual_ui(
     exit_on_completion: bool = True,
     theme: ThemeMode = "auto",
 ) -> None:
-    """Run the textual TUI."""
-    import asyncio
+    """Run the textual TUI.
+
+    Note: Validation must be done before calling this function.
+    The caller (main()) is responsible for running run_validation() first.
+    """
     import sys
 
-    print("Validating initial example...", flush=True)
-
-    # Validate initial example before showing TUI
-    async def validate():
-        return await _validate_initial_example(
-            file_path=file_path,
-            test=test,
-            parallelism=parallelism,
-            timeout=timeout,
-            seed=seed,
-            input_type=input_type,
-            in_place=in_place,
-            formatter=formatter,
-            volume=volume,
-            no_clang_delta=no_clang_delta,
-            clang_delta=clang_delta,
-            trivial_is_error=trivial_is_error,
-        )
-
-    try:
-        error = asyncio.run(validate())
-    except Exception as e:
-        import traceback
-
-        traceback.print_exc()
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    if error:
-        print(f"Error: {error}", file=sys.stderr)
-        sys.exit(1)
-
-    # Validation passed - now show the TUI which will start a fresh client
+    # Start the TUI app - validation has already been done by main()
     app = ShrinkRayApp(
         file_path=file_path,
         test=test,

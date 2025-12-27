@@ -17,18 +17,19 @@ from shrinkray.cli import (
     validate_command,
     validate_ui,
 )
+from shrinkray.formatting import determine_formatter_command
 from shrinkray.passes.clangdelta import (
     C_FILE_EXTENSIONS,
     ClangDelta,
     find_clang_delta,
 )
-from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import (
     ShrinkRayDirectoryState,
     ShrinkRayState,
     ShrinkRayStateSingleFile,
 )
 from shrinkray.ui import BasicUI, ShrinkRayUI
+from shrinkray.validation import run_validation
 from shrinkray.work import Volume
 
 
@@ -39,12 +40,9 @@ async def run_shrink_ray(
     """Run the shrink ray reduction process."""
     async with trio.open_nursery() as nursery:
         problem = state.problem
-        try:
-            await problem.setup()
-        except* InvalidInitialExample as excs:
-            assert len(excs.exceptions) == 1
-            (e,) = excs.exceptions
-            await state.report_error(e)
+        # Validation runs before run_shrink_ray is called, so setup() should
+        # always succeed. If it doesn't, there's a bug and we want it to propagate.
+        await problem.setup()
 
         reducer = state.reducer
 
@@ -273,6 +271,26 @@ def main(
     if not backup:
         backup = filename + os.extsep + "bak"
 
+    # Run initial validation before any state setup
+    # This validates the interestingness test and formatter with proper output streaming
+    formatter_command = None
+    if not os.path.isdir(filename) and formatter.lower() != "none":
+        formatter_command = determine_formatter_command(formatter, filename)
+
+    validation_result = run_validation(
+        file_path=filename,
+        test=test,
+        input_type=input_type,
+        in_place=in_place,
+        formatter_command=formatter_command,
+    )
+
+    if not validation_result.success:
+        print(f"\nError: {validation_result.error_message}", file=sys.stderr)
+        sys.exit(1)
+
+    print("\nStarting reduction...", file=sys.stderr, flush=True)
+
     state_kwargs: dict[str, Any] = {
         "input_type": input_type,
         "in_place": in_place,
@@ -307,8 +325,6 @@ def main(
 
         state = ShrinkRayDirectoryState(initial=initial, **state_kwargs)
 
-        trio.run(state.check_formatter)
-
     else:
         try:
             os.remove(backup)
@@ -322,8 +338,6 @@ def main(
             writer.write(initial)
 
         state = ShrinkRayStateSingleFile(initial=initial, **state_kwargs)
-
-        trio.run(state.check_formatter)
 
     if ui_type == UIType.textual:
         from shrinkray.tui import run_textual_ui

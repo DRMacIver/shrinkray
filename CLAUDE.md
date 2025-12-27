@@ -44,6 +44,7 @@ If you encounter a case where suppression seems genuinely necessary and principl
 - Commits are a good checkpoint for self-review
 - Just commit when ready - don't ask for permission
 - Use the `/checkpoint` skill to ensure consistent quality at each commit
+- **Always use `git add` with specific file paths** - Never use `git add -A`, `git add .`, or `git add <directory>`. Always list the specific files you intend to stage. This prevents accidentally committing unrelated files (test scripts, debug files, etc.).
 
 ### No Backward Compatibility
 
@@ -178,6 +179,25 @@ Main Process (asyncio/textual)     Subprocess (trio)
 4. **Speculative parallelism**: Multiple candidates tested concurrently; first success wins, others are "wasted" but harmless
 
 ## Testing Best Practices
+
+### Test-First Development
+
+When implementing features, **start with tests, not code**:
+
+1. **UI changes need integration tests first** - Before modifying the TUI, write a fast integration test that validates the expected behavior. This ensures the feature works end-to-end.
+
+2. **Develop "outside in"** - For features that span TUI and worker subprocess:
+   - First: Write a TUI unit test with a mocked/fake client
+   - Then: Write tests for the worker/protocol layer
+   - Finally: Implement the actual feature
+
+3. **Why?** This approach:
+   - Clarifies the interface/contract before implementation
+   - Catches integration issues early
+   - Results in better test coverage
+   - Forces thinking about testability upfront
+
+4. **Coverage goal** - The tests you write before implementing should aim to achieve 100% coverage of the new code automatically. If you find yourself needing to add tests after implementation, that's a sign the test-first approach wasn't thorough enough. This won't be perfect, but it's the goal.
 
 ### Async Tests
 - **Use pytest-trio for most async tests** - This project uses pytest-trio, so async test functions work directly. Simply define `async def test_something():` and pytest-trio will run it.

@@ -7,6 +7,7 @@ Rules:
 3. No use of async iterators without contextlib.aclosing
 4. No swallowing exception stack traces (str(e) without traceback logging)
 5. No mutable default arguments
+6. No bool | None function arguments (use enum or separate parameters)
 
 Uses a cache in .cache/extra_lints_cache.json to skip unchanged files.
 """
@@ -171,6 +172,9 @@ class LintVisitor(cst.CSTVisitor):
         # Rule 5: No mutable default arguments
         self._check_mutable_defaults(node.params)
 
+        # Rule 6: No bool | None function arguments
+        self._check_optional_bool_args(node.params)
+
         return True
 
     def _check_mutable_defaults(self, params: cst.Parameters) -> None:
@@ -207,6 +211,49 @@ class LintVisitor(cst.CSTVisitor):
             func = node.func
             if isinstance(func, cst.Name) and func.value in ("list", "dict", "set"):
                 return True
+        return False
+
+    def _check_optional_bool_args(self, params: cst.Parameters) -> None:
+        """Check for bool | None function argument types."""
+        all_params: list[cst.Param] = [
+            *params.params,
+            *params.posonly_params,
+            *params.kwonly_params,
+        ]
+
+        for param in all_params:
+            if param.annotation is not None:
+                if self._is_optional_bool_type(param.annotation.annotation):
+                    self._add_error(
+                        param.annotation,
+                        "optional-bool-argument",
+                        f"Parameter '{param.name.value}' has type 'bool | None'. "
+                        "Avoid optional booleans - use an enum or separate parameters.",
+                    )
+
+    def _is_optional_bool_type(self, node: cst.BaseExpression) -> bool:
+        """Check if annotation is bool | None or Optional[bool]."""
+        # Check for bool | None using BinaryOperation with BitOr
+        if isinstance(node, cst.BinaryOperation):
+            if isinstance(node.operator, cst.BitOr):
+                # Check if one side is bool and other is None
+                left_is_bool = isinstance(node.left, cst.Name) and node.left.value == "bool"
+                right_is_bool = isinstance(node.right, cst.Name) and node.right.value == "bool"
+                left_is_none = isinstance(node.left, cst.Name) and node.left.value == "None"
+                right_is_none = isinstance(node.right, cst.Name) and node.right.value == "None"
+                if (left_is_bool and right_is_none) or (left_is_none and right_is_bool):
+                    return True
+        # Check for Optional[bool]
+        if isinstance(node, cst.Subscript):
+            if isinstance(node.value, cst.Name) and node.value.value == "Optional":
+                # Check if the subscript is [bool]
+                if len(node.slice) == 1:
+                    slice_item = node.slice[0]
+                    if isinstance(slice_item, cst.SubscriptElement):
+                        if isinstance(slice_item.slice, cst.Index):
+                            inner = slice_item.slice.value
+                            if isinstance(inner, cst.Name) and inner.value == "bool":
+                                return True
         return False
 
     def leave_FunctionDef(self, node: cst.FunctionDef) -> None:

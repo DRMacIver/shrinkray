@@ -368,13 +368,9 @@ def save_svg_diffs(
         diff_sort_key = attrgetter("test_name")
         diffs = sorted(diffs, key=diff_sort_key)
 
-        # Use the upstream package's template (we depend on it for this resource)
-        import pytest_textual_snapshot as upstream
-
+        # Use the vendored template
         snapshot_template_path = (
-            Path(upstream.__file__).parent
-            / "resources"
-            / "snapshot_report_template.jinja2"
+            Path(__file__).parent / "resources" / "snapshot_report_template.jinja2"
         )
 
         snapshot_report_path = session.config.getoption("--snapshot-report")

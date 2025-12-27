@@ -18,10 +18,10 @@ from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Respons
 from shrinkray.tui import (
     ContentPreview,
     HelpScreen,
+    OutputPreview,
     PassStatsScreen,
     ShrinkRayApp,
     StatsDisplay,
-    _validate_initial_example,
     detect_terminal_theme,
     run_textual_ui,
 )
@@ -317,6 +317,158 @@ def test_render_diff_no_changes_shows_truncated():
         assert "more lines" in rendered
     finally:
         widget._get_available_lines = original_method
+
+
+# === OutputPreview tests ===
+
+
+def test_output_preview_render_no_content():
+    """Test OutputPreview render with no content."""
+    widget = OutputPreview()
+    rendered = widget.render()
+    assert "No test output yet" in rendered
+
+
+def test_output_preview_render_with_active_test():
+    """Test OutputPreview render with an active test."""
+    widget = OutputPreview()
+    widget.output_content = "Some test output\nMore output"
+    widget.active_test_id = 5
+    rendered = widget.render()
+    assert "Test #5 running" in rendered
+    assert "Some test output" in rendered
+
+
+def test_output_preview_render_completed_test():
+    """Test OutputPreview render with completed test (no active test ID)."""
+    widget = OutputPreview()
+    widget.output_content = "Final output"
+    widget.active_test_id = None
+    widget._last_seen_test_id = 42  # Last test that was running
+    rendered = widget.render()
+    assert "Test #42 completed" in rendered
+    assert "Final output" in rendered
+
+
+def test_output_preview_render_truncates_long_output():
+    """Test OutputPreview truncates long output from beginning."""
+    widget = OutputPreview()
+    # Create content longer than available lines
+    lines = [f"Line {i}" for i in range(100)]
+    widget.output_content = "\n".join(lines)
+    widget.active_test_id = 1
+
+    # Mock _get_available_lines to return a small number
+    widget._get_available_lines = lambda: 10  # type: ignore
+
+    rendered = widget.render()
+    assert "earlier lines" in rendered
+    # Should show the last lines
+    assert "Line 99" in rendered
+
+
+def test_output_preview_update_output_throttling():
+    """Test that update_output throttles updates."""
+    widget = OutputPreview()
+
+    # First update should work
+    widget.update_output("first", 1)
+    assert widget.output_content == "first"
+
+    # Immediate second update should be throttled
+    widget.update_output("second", 2)
+    assert widget.output_content == "first"  # Still first due to throttling
+
+
+def test_output_preview_get_available_lines_fallback():
+    """Test _get_available_lines fallback when no parent."""
+    widget = OutputPreview()
+    # Widget has no parent or app, should return fallback
+    lines = widget._get_available_lines()
+    assert lines == 30  # Default fallback
+
+
+def test_output_preview_get_available_lines_with_parent():
+    """Test _get_available_lines with parent that has size."""
+    widget = OutputPreview()
+
+    # Mock parent with size via property patching
+    parent_mock = MagicMock()
+    parent_mock.size.height = 50
+
+    with patch.object(
+        OutputPreview, "parent", new_callable=PropertyMock
+    ) as mock_parent:
+        mock_parent.return_value = parent_mock
+        lines = widget._get_available_lines()
+        assert lines == 47  # 50 - 3
+
+
+def test_output_preview_get_available_lines_with_app():
+    """Test _get_available_lines when parent has no size but app does."""
+    widget = OutputPreview()
+
+    # Mock parent without size attribute
+    parent_mock = MagicMock(spec=[])  # No size attr
+
+    # Mock app with size
+    app_mock = MagicMock()
+    app_mock.size.height = 40
+
+    with (
+        patch.object(OutputPreview, "parent", new_callable=PropertyMock) as mock_parent,
+        patch.object(OutputPreview, "app", new_callable=PropertyMock) as mock_app,
+    ):
+        mock_parent.return_value = parent_mock
+        mock_app.return_value = app_mock
+        lines = widget._get_available_lines()
+        assert lines == 25  # 40 - 15
+
+
+def test_output_preview_get_available_lines_parent_zero_height():
+    """Test _get_available_lines falls through when parent has zero height."""
+    widget = OutputPreview()
+
+    # Mock parent with size but height=0
+    parent_mock = MagicMock()
+    parent_mock.size.height = 0
+
+    # Mock app with valid size
+    app_mock = MagicMock()
+    app_mock.size.height = 30
+
+    with (
+        patch.object(OutputPreview, "parent", new_callable=PropertyMock) as mock_parent,
+        patch.object(OutputPreview, "app", new_callable=PropertyMock) as mock_app,
+    ):
+        mock_parent.return_value = parent_mock
+        mock_app.return_value = app_mock
+        lines = widget._get_available_lines()
+        # Should fall through to app check: 30 - 15 = 15
+        assert lines == 15
+
+
+def test_output_preview_get_available_lines_app_zero_height():
+    """Test _get_available_lines falls to default when app has zero height."""
+    widget = OutputPreview()
+
+    # Mock parent with size but height=0
+    parent_mock = MagicMock()
+    parent_mock.size.height = 0
+
+    # Mock app with zero height
+    app_mock = MagicMock()
+    app_mock.size.height = 0
+
+    with (
+        patch.object(OutputPreview, "parent", new_callable=PropertyMock) as mock_parent,
+        patch.object(OutputPreview, "app", new_callable=PropertyMock) as mock_app,
+    ):
+        mock_parent.return_value = parent_mock
+        mock_app.return_value = app_mock
+        lines = widget._get_available_lines()
+        # Should fall through to default
+        assert lines == 30
 
 
 # === ShrinkRayApp with fake client tests ===
@@ -1455,15 +1607,8 @@ def test_cancel_exception_is_caught():
 def test_run_textual_ui_creates_and_runs_app():
     """Test run_textual_ui function creates app and calls run()."""
 
-    # Mock validation to pass without launching subprocess
-    async def mock_validate(*args, **kwargs):
-        return None
-
-    # Patch ShrinkRayApp and validation
-    with (
-        patch("shrinkray.tui.ShrinkRayApp") as mock_app_class,
-        patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate),
-    ):
+    # Patch ShrinkRayApp - validation is now done before run_textual_ui is called
+    with patch("shrinkray.tui.ShrinkRayApp") as mock_app_class:
         mock_app = MagicMock()
         mock_app.return_code = None  # Ensure no exit
         mock_app_class.return_value = mock_app
@@ -1474,7 +1619,7 @@ def test_run_textual_ui_creates_and_runs_app():
             parallelism=4,
             timeout=2.0,
             seed=42,
-            input_type="bytes",
+            input_type="arg",
             in_place=True,
             formatter="clang-format",
             volume="quiet",
@@ -1492,7 +1637,7 @@ def test_run_textual_ui_creates_and_runs_app():
             parallelism=4,
             timeout=2.0,
             seed=42,
-            input_type="bytes",
+            input_type="arg",
             in_place=True,
             formatter="clang-format",
             volume="quiet",
@@ -1557,111 +1702,13 @@ def test_completed_flag_during_iteration_breaks_loop():
     run_async(run_test())
 
 
-def test_validate_initial_example_success(tmp_path):
-    """Test _validate_initial_example returns None on success."""
-
-    async def run_test():
-        mock_client = MagicMock()
-        mock_client.start = AsyncMock()
-        mock_client.start_reduction = AsyncMock(
-            return_value=Response(id="start", result={"status": "started"})
-        )
-        mock_client.cancel = AsyncMock(
-            return_value=Response(id="cancel", result={"status": "cancelled"})
-        )
-        mock_client.close = AsyncMock()
-
-        with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
-            result = await _validate_initial_example(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-                parallelism=1,
-                timeout=1.0,
-                seed=0,
-                input_type="all",
-                in_place=False,
-                formatter="none",
-                volume="quiet",
-                no_clang_delta=True,
-                clang_delta="",
-                trivial_is_error=True,
-            )
-
-        assert result is None
-        mock_client.start.assert_called_once()
-        mock_client.start_reduction.assert_called_once()
-        mock_client.cancel.assert_called_once()
-        mock_client.close.assert_called_once()
-
-    run_async(run_test())
-
-
-def test_validate_initial_example_returns_error():
-    """Test _validate_initial_example returns error message on failure."""
-
-    async def run_test():
-        mock_client = MagicMock()
-        mock_client.start = AsyncMock()
-        mock_client.start_reduction = AsyncMock(
-            return_value=Response(id="start", error="Interestingness test failed")
-        )
-        mock_client.close = AsyncMock()
-
-        with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
-            result = await _validate_initial_example(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-                parallelism=1,
-                timeout=1.0,
-                seed=0,
-                input_type="all",
-                in_place=False,
-                formatter="none",
-                volume="quiet",
-                no_clang_delta=True,
-                clang_delta="",
-                trivial_is_error=True,
-            )
-
-        assert result == "Interestingness test failed"
-        mock_client.close.assert_called_once()
-
-    run_async(run_test())
-
-
-def test_run_textual_ui_prints_error_and_exits(capsys):
-    """Test run_textual_ui prints error to stderr and exits with code 1."""
-
-    # Mock validation to return an error
-    async def mock_validate(*args, **kwargs):
-        return "Test validation error"
-
-    with patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate):
-        with pytest.raises(SystemExit) as exc_info:
-            run_textual_ui(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-            )
-
-        assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-    assert "Error: Test validation error" in captured.err
-
-
 def test_run_textual_ui_exits_with_app_return_code():
     """Test run_textual_ui exits with app.return_code when set."""
-
-    async def mock_validate(*args, **kwargs):
-        return None
 
     mock_app = MagicMock()
     mock_app.return_code = 42  # Non-zero return code
 
-    with (
-        patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate),
-        patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app),
-    ):
+    with patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app):
         with pytest.raises(SystemExit) as exc_info:
             run_textual_ui(
                 file_path="/tmp/test.txt",
@@ -1669,50 +1716,6 @@ def test_run_textual_ui_exits_with_app_return_code():
             )
 
         assert exc_info.value.code == 42
-
-
-def test_run_textual_ui_prints_validation_message(capsys):
-    """Test run_textual_ui prints validation message before validating."""
-
-    async def mock_validate(*args, **kwargs):
-        return None
-
-    mock_app = MagicMock()
-    mock_app.return_code = None
-
-    with (
-        patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate),
-        patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app),
-    ):
-        run_textual_ui(
-            file_path="/tmp/test.txt",
-            test=["./test.sh"],
-        )
-
-    captured = capsys.readouterr()
-    assert "Validating initial example" in captured.out
-
-
-def test_run_textual_ui_handles_validation_exception(capsys):
-    """Test run_textual_ui handles exceptions during validation (lines 877-882)."""
-
-    # Mock validation to raise an exception
-    async def mock_validate(*args, **kwargs):
-        raise RuntimeError("Validation failed unexpectedly")
-
-    with patch("shrinkray.tui._validate_initial_example", side_effect=mock_validate):
-        with pytest.raises(SystemExit) as exc_info:
-            run_textual_ui(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-            )
-
-        assert exc_info.value.code == 1
-
-    captured = capsys.readouterr()
-    assert "Error: Validation failed unexpectedly" in captured.err
-    # Check that traceback was printed (should contain "RuntimeError")
-    assert "RuntimeError" in captured.err
 
 
 # =============================================================================

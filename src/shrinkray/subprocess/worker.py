@@ -1,7 +1,9 @@
 """Worker subprocess that runs the reducer with trio and communicates via JSON protocol."""
 
 import os
+import shutil
 import sys
+import tempfile
 import time
 import traceback
 from contextlib import aclosing
@@ -62,6 +64,8 @@ class ReducerWorker:
         # I/O streams - None means use stdin/stdout
         self._input_stream = input_stream
         self._output_stream = output_stream
+        # Output directory for test output capture (cleaned up on shutdown)
+        self._output_dir: str | None = None
 
     async def emit(self, msg: Response | ProgressUpdate) -> None:
         """Write a message to the output stream."""
@@ -163,6 +167,7 @@ class ReducerWorker:
         from shrinkray.state import (
             ShrinkRayDirectoryState,
             ShrinkRayStateSingleFile,
+            TestOutputManager,
         )
         from shrinkray.work import Volume
 
@@ -178,6 +183,7 @@ class ReducerWorker:
         no_clang_delta = params.get("no_clang_delta", False)
         clang_delta_path = params.get("clang_delta", "")
         trivial_is_error = params.get("trivial_is_error", True)
+        skip_validation = params.get("skip_validation", False)
 
         clang_delta_executable = None
         if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:
@@ -213,12 +219,18 @@ class ReducerWorker:
                 initial = reader.read()
             self.state = ShrinkRayStateSingleFile(initial=initial, **state_kwargs)
 
+        # Create output manager for test output capture (always enabled for TUI)
+        self._output_dir = tempfile.mkdtemp(prefix="shrinkray-output-")
+        self.state.output_manager = TestOutputManager(output_dir=self._output_dir)
+
         self.problem = self.state.problem
         self.reducer = self.state.reducer
 
         # Validate initial example before starting - this will raise
-        # InvalidInitialExample if the initial test case fails
-        await self.problem.setup()
+        # InvalidInitialExample if the initial test case fails.
+        # Skip if validation was already done by the caller (e.g., main()).
+        if not skip_validation:
+            await self.problem.setup()
 
         self.running = True
 
@@ -299,6 +311,32 @@ class ReducerWorker:
             self.reducer.skip_current_pass()
             return Response(id=request_id, result={"status": "skipped"})
         return Response(id=request_id, error="Reducer does not support pass control")
+
+    def _get_test_output_preview(self) -> tuple[str, int | None]:
+        """Get preview of current test output and active test ID."""
+        if self.state is None or self.state.output_manager is None:
+            return "", None
+
+        manager = self.state.output_manager
+        active_test_id = manager.get_active_test_id()
+        output_path = manager.get_current_output_path()
+
+        if output_path is None:
+            return "", active_test_id
+
+        # Read last 4KB of file
+        try:
+            with open(output_path, "rb") as f:
+                f.seek(0, 2)  # Seek to end
+                size = f.tell()
+                if size > 4096:
+                    f.seek(-4096, 2)
+                else:
+                    f.seek(0)
+                data = f.read()
+            return data.decode("utf-8", errors="replace"), active_test_id
+        except OSError:
+            return "", active_test_id
 
     def _get_content_preview(self) -> tuple[str, bool]:
         """Get a preview of the current test case content."""
@@ -402,6 +440,9 @@ class ReducerWorker:
         else:
             disabled_passes = []
 
+        # Get test output preview
+        test_output_preview, active_test_id = self._get_test_output_preview()
+
         return ProgressUpdate(
             status=self.reducer.status if self.reducer else "",
             size=stats.current_test_case_size,
@@ -420,6 +461,8 @@ class ReducerWorker:
             pass_stats=pass_stats_list,
             current_pass_name=current_pass_name,
             disabled_passes=disabled_passes,
+            test_output_preview=test_output_preview,
+            active_test_id=active_test_id,
         )
 
     async def emit_progress_updates(self) -> None:
@@ -469,25 +512,32 @@ class ReducerWorker:
 
     async def run(self) -> None:
         """Main entry point for the worker."""
-        async with trio.open_nursery() as nursery:
-            await nursery.start(self.read_commands)
+        try:
+            async with trio.open_nursery() as nursery:
+                await nursery.start(self.read_commands)
 
-            # Wait for start command
-            while not self.running:
-                await trio.sleep(0.01)
+                # Wait for start command
+                while not self.running:
+                    await trio.sleep(0.01)
 
-            # Start progress updates and reducer
-            nursery.start_soon(self.emit_progress_updates)
-            await self.run_reducer()
+                # Start progress updates and reducer
+                nursery.start_soon(self.emit_progress_updates)
+                await self.run_reducer()
 
-            # Emit final progress update before completion
-            final_update = await self._build_progress_update()
-            if final_update is not None:
-                await self.emit(final_update)
+                # Emit final progress update before completion
+                final_update = await self._build_progress_update()
+                if final_update is not None:
+                    await self.emit(final_update)
 
-            # Signal completion
-            await self.emit(Response(id="", result={"status": "completed"}))
-            nursery.cancel_scope.cancel()
+                # Signal completion
+                await self.emit(Response(id="", result={"status": "completed"}))
+                nursery.cancel_scope.cancel()
+        finally:
+            # Clean up test output files and temp directory
+            if self.state is not None and self.state.output_manager is not None:
+                self.state.output_manager.cleanup_all()
+            if self._output_dir is not None and os.path.isdir(self._output_dir):
+                shutil.rmtree(self._output_dir, ignore_errors=True)
 
 
 def main() -> None:

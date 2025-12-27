@@ -320,3 +320,111 @@ async def test_pass_stats_modal(snap_compare, update_with_pass_stats):
 
     app = make_app_with_updates([update_with_pass_stats])
     assert snap_compare(app, terminal_size=(120, 40), run_before=interact)
+
+
+# === Test output display snapshots ===
+
+
+@pytest.fixture
+def update_with_active_test() -> ProgressUpdate:
+    """A progress update with an active test showing output."""
+    return ProgressUpdate(
+        status="Running DeleteChunks",
+        size=5000,
+        original_size=10000,
+        calls=150,
+        reductions=25,
+        interesting_calls=50,
+        wasted_calls=10,
+        runtime=30.5,
+        parallel_workers=4,
+        average_parallelism=3.8,
+        effective_parallelism=3.5,
+        time_since_last_reduction=2.5,
+        content_preview="Line 1\nLine 3\nLine 5",
+        hex_mode=False,
+        test_output_preview=(
+            "Running test case validation...\n"
+            "Checking syntax: OK\n"
+            "Checking semantics: OK\n"
+            "Executing test script...\n"
+            "  + ./test.sh test_case.txt\n"
+            "  Assertion failed at line 42\n"
+            "  Expected: 0\n"
+            "  Got: 1\n"
+        ),
+        active_test_id=42,
+    )
+
+
+@pytest.fixture
+def update_with_completed_test() -> ProgressUpdate:
+    """A progress update with a completed test (no active test)."""
+    return ProgressUpdate(
+        status="Running DeleteChunks",
+        size=5000,
+        original_size=10000,
+        calls=151,
+        reductions=26,
+        interesting_calls=51,
+        wasted_calls=10,
+        runtime=31.0,
+        parallel_workers=4,
+        average_parallelism=3.8,
+        effective_parallelism=3.5,
+        time_since_last_reduction=0.5,
+        content_preview="Line 1\nLine 3\nLine 5",
+        hex_mode=False,
+        test_output_preview=(
+            "Running test case validation...\n"
+            "Checking syntax: OK\n"
+            "Checking semantics: OK\n"
+            "Executing test script...\n"
+            "  + ./test.sh test_case.txt\n"
+            "Test passed (exit code 0)\n"
+        ),
+        active_test_id=None,  # Test completed
+    )
+
+
+@pytest.fixture
+def update_with_long_output() -> ProgressUpdate:
+    """A progress update with long test output that needs truncation."""
+    # Generate output longer than the display area
+    output_lines = [f"[{i:04d}] Processing item {i}..." for i in range(50)]
+    return ProgressUpdate(
+        status="Running ByteReduction",
+        size=2000,
+        original_size=10000,
+        calls=500,
+        reductions=80,
+        interesting_calls=150,
+        wasted_calls=30,
+        runtime=60.0,
+        parallel_workers=4,
+        average_parallelism=3.5,
+        effective_parallelism=3.2,
+        time_since_last_reduction=1.0,
+        content_preview="Reduced content here",
+        hex_mode=False,
+        test_output_preview="\n".join(output_lines),
+        active_test_id=123,
+    )
+
+
+def test_active_test_output(snap_compare, update_with_active_test):
+    """Snapshot test showing active test with output."""
+    app = make_app_with_updates([update_with_active_test])
+    assert snap_compare(app, terminal_size=(120, 40), run_before=wait_for_render)
+
+
+def test_completed_test_output(snap_compare, update_with_completed_test):
+    """Snapshot test showing completed test output."""
+    app = make_app_with_updates([update_with_completed_test])
+    assert snap_compare(app, terminal_size=(120, 40), run_before=wait_for_render)
+
+
+def test_long_test_output(snap_compare, update_with_long_output):
+    """Snapshot test showing truncated long output."""
+    app = make_app_with_updates([update_with_long_output])
+    assert snap_compare(app, terminal_size=(120, 40), run_before=wait_for_render)

@@ -56,6 +56,10 @@ class ProgressUpdate:
     current_pass_name: str = ""
     # List of disabled pass names
     disabled_passes: list[str] = field(default_factory=list)
+    # Test output preview (last 4KB of current/recent test output)
+    test_output_preview: str = ""
+    # Currently running test ID (None if no test running)
+    active_test_id: int | None = None
 
 
 @dataclass
@@ -115,6 +119,8 @@ def serialize(msg: Request | Response | ProgressUpdate) -> str:
                 ],
                 "current_pass_name": msg.current_pass_name,
                 "disabled_passes": msg.disabled_passes,
+                "test_output_preview": msg.test_output_preview,
+                "active_test_id": msg.active_test_id,
             },
         }
     else:
@@ -162,6 +168,8 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
             pass_stats=pass_stats_data,
             current_pass_name=d.get("current_pass_name", ""),
             disabled_passes=d.get("disabled_passes", []),
+            test_output_preview=d.get("test_output_preview", ""),
+            active_test_id=d.get("active_test_id"),
         )
 
     # Check for response (has "result" or "error" field)

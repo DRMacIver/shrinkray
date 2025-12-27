@@ -217,7 +217,9 @@ Main Process (asyncio/textual)     Subprocess (trio)
 - **Use `--durations=10` to monitor test performance** - The justfile includes this by default to show slowest tests
 
 ### TUI Testing
-- **Snapshot tests** (`tests/test_tui_snapshots.py`) use `pytest-textual-snapshot` for visual regression testing
+- **Snapshot tests** (`tests/test_tui_snapshots.py`) use a vendored copy of `pytest-textual-snapshot` in `tests/pytest_textual_snapshot.py`
+  - The vendored copy fixes syrupy 5.0 compatibility (upstream uses `_file_extension` but syrupy 5.0 changed to `file_extension`)
+  - Snapshots are saved as `.svg` files for easy viewing
 - Run `just test tests/test_tui_snapshots.py --snapshot-update` to update snapshots after intentional UI changes
 - View snapshot gallery: `uv run pytest tests/test_tui_snapshots.py --snapshot-report` then open `snapshot_report.html`
 - **Unit tests** (`tests/test_tui.py`) use `FakeSubprocessClient` to test TUI logic without spawning subprocesses

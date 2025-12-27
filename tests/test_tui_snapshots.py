@@ -17,8 +17,8 @@ def pytest_sessionfinish(session, exitstatus):
     if not SNAPSHOTS_DIR.exists():
         return
 
-    # Note: syrupy 5.0 uses .raw extension instead of .svg
-    for snapshot_file in SNAPSHOTS_DIR.glob("*.raw"):
+    # Using vendored pytest_textual_snapshot with syrupy 5.0 compatibility
+    for snapshot_file in SNAPSHOTS_DIR.glob("*.svg"):
         content = snapshot_file.read_text()
         # Each snapshot should contain "Reducer" which appears in StatsDisplay
         # Note: SVG uses &#160; for non-breaking spaces, so we just check for "Reducer"

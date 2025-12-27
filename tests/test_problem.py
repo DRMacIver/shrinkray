@@ -4,9 +4,10 @@ import time
 
 import pytest
 
-from shrinkray.passes.definitions import DumpError, Format
 from shrinkray.problem import (
     BasicReductionProblem,
+    DumpError,
+    Format,
     InvalidInitialExample,
     ReductionProblem,
     ReductionStats,

@@ -6,9 +6,8 @@ import pytest
 import trio
 
 from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
-from shrinkray.passes.definitions import Format, ParseError
 from shrinkray.passes.patching import PatchApplier
-from shrinkray.problem import BasicReductionProblem, shortlex
+from shrinkray.problem import BasicReductionProblem, Format, ParseError, shortlex
 from shrinkray.reducer import (
     BasicReducer,
     DirectoryShrinkRay,

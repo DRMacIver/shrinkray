@@ -16,6 +16,8 @@ Perform a thorough self-review of the code changes on this branch compared to ma
    - Imports inside functions (should be at module level)
    - Mutable default arguments
    - Shortcuts or workarounds instead of proper fixes
+   - Backward compatibility shims or re-exports (shrinkray is an app, not a library)
+   - Dead code (unused functions, imports, variables)
 
 3. **Evaluate test quality**:
    - Are the tests actually testing what they claim?

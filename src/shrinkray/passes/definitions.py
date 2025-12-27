@@ -4,38 +4,20 @@ This module defines the core type aliases and abstractions for reduction:
 
 - ReductionPass[T]: A function that attempts to reduce a test case
 - ReductionPump[T]: A function that may temporarily increase test case size
-- Format[S, T]: A bidirectional transformation between types
 - compose(): Combines a Format with a pass to work on a different type
 
 These abstractions enable format-agnostic reduction: the same pass
 (e.g., "delete duplicate elements") can work on bytes, lines, tokens,
 JSON arrays, or any other sequence-like type.
 
-Note: Format, ParseError, and DumpError are defined in shrinkray.problem
-and re-exported here for backward compatibility.
+Note: Format, ParseError, and DumpError are defined in shrinkray.problem.
 """
 
 from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import TypeVar
 
-from shrinkray.problem import (
-    DumpError,
-    Format,
-    ParseError,
-    ReductionProblem,
-)
-
-
-# Re-export for backward compatibility
-__all__ = [
-    "DumpError",
-    "Format",
-    "ParseError",
-    "ReductionPass",
-    "ReductionPump",
-    "compose",
-]
+from shrinkray.problem import Format, ParseError, ReductionProblem
 
 
 S = TypeVar("S")

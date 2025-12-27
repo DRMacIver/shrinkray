@@ -31,7 +31,7 @@ from shrinkray.passes.bytes import (
     sort_whitespace,
     standard_substitutions,
 )
-from shrinkray.passes.definitions import ParseError, compose
+from shrinkray.passes.definitions import compose
 from shrinkray.passes.genericlanguages import (
     IntegerFormat,
     RegionReplacingPatches,
@@ -55,7 +55,7 @@ from shrinkray.passes.sequences import (
     merged_intervals,
     with_deletions,
 )
-from shrinkray.problem import BasicReductionProblem, shortlex
+from shrinkray.problem import BasicReductionProblem, ParseError, shortlex
 from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
 

@@ -5,7 +5,6 @@ These tests do NOT require minisat and can run anywhere.
 
 import pytest
 
-from shrinkray.passes.definitions import DumpError, ParseError
 from shrinkray.passes.sat import (
     BooleanEquivalence,
     DimacsCNF,
@@ -16,6 +15,7 @@ from shrinkray.passes.sat import (
     combine_clauses,
     merge_literals,
 )
+from shrinkray.problem import DumpError, ParseError
 from tests.helpers import reduce_with
 
 

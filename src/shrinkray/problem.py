@@ -432,9 +432,7 @@ class ReductionProblem[T](ABC):
         # Cache of View objects for each Format, to avoid re-parsing
         self.__view_cache: dict[Any, ReductionProblem[Any]] = {}
 
-    def view(
-        self, format: Format[T, S] | type[Format[T, S]]
-    ) -> "ReductionProblem[S]":
+    def view(self, format: Format[T, S] | type[Format[T, S]]) -> "ReductionProblem[S]":
         """Create a view of this problem through a Format.
 
         A View wraps this problem, parsing the current test case through

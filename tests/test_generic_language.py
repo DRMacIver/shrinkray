@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
-from shrinkray.passes.definitions import ParseError
 from shrinkray.passes.genericlanguages import (
     IntegerFormat,
     RegionReplacingPatches,
@@ -20,7 +19,7 @@ from shrinkray.passes.genericlanguages import (
     replace_falsey_with_zero,
     simplify_brackets,
 )
-from shrinkray.problem import shortlex
+from shrinkray.problem import ParseError, shortlex
 from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
 

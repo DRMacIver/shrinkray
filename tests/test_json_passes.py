@@ -4,7 +4,6 @@ import json
 
 import pytest
 
-from shrinkray.passes.definitions import ParseError
 from shrinkray.passes.json import (
     JSON,
     DeleteIdentifiers,
@@ -12,7 +11,7 @@ from shrinkray.passes.json import (
     gather_identifiers,
     is_json,
 )
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.problem import BasicReductionProblem, ParseError
 from shrinkray.work import WorkContext
 
 

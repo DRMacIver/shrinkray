@@ -28,32 +28,6 @@ def get_short_name(module: str) -> str:
     return module
 
 
-def extract_imports(path: Path, package_prefix: str) -> set[str]:
-    """Extract internal imports from a Python file."""
-    try:
-        tree = ast.parse(path.read_text())
-    except SyntaxError:
-        return set()
-
-    imports: set[str] = set()
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name.startswith(package_prefix):
-                    imports.add(alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if node.module and node.module.startswith(package_prefix):
-                imports.add(node.module)
-            elif node.level > 0:
-                # Relative import - need to resolve it
-                # For now, we'll handle this by looking at what's imported
-                # The module field may be None for "from . import x"
-                pass
-
-    return imports
-
-
 def resolve_relative_imports(
     path: Path, src_dir: Path, package_prefix: str
 ) -> set[str]:

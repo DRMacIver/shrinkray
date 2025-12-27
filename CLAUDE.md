@@ -45,6 +45,10 @@ If you encounter a case where suppression seems genuinely necessary and principl
 - Just commit when ready - don't ask for permission
 - Use the `/checkpoint` skill to ensure consistent quality at each commit
 
+### No Backward Compatibility
+
+Shrink Ray is a standalone application, not a library. Do not add backward compatibility shims, re-exports, or compatibility layers when refactoring. When moving code between modules, update all imports directly rather than re-exporting from the old location.
+
 ### CLAUDE.md as Source of Truth
 
 This file is the source of truth for project conventions. However:
@@ -99,10 +103,10 @@ Shrink Ray is a multiformat test-case reducer built on Trio for async/parallelis
 - `sort_key(test_case: T)` - Shortlex ordering: (length, lexicographic) for reproducibility
 - Problems can be "viewed" through Formats to reduce structured data
 
-**Format[S, T]** (`passes/definitions.py`): Bridges bytes ↔ structured data.
+**Format[S, T]** (`problem.py`): Bridges bytes ↔ structured data.
 - `parse(input: S) -> T` and `dumps(output: T) -> S`
 - Enables format-agnostic passes to work on bytes, JSON, Python AST, etc.
-- `compose(format, pass)` wraps a pass to work through a format layer
+- `compose(format, pass)` in `passes/definitions.py` wraps a pass to work through a format layer
 
 **ReductionPass** (`passes/definitions.py`): A callable `(ReductionProblem[T]) -> Awaitable[None]` that makes reduction attempts until no progress.
 

@@ -12,10 +12,12 @@ import trio
 from attr import define
 
 from shrinkray.passes.bytes import ByteReplacement, delete_intervals
-from shrinkray.passes.definitions import Format, ParseError, ReductionPass
+from shrinkray.passes.definitions import ReductionPass
 from shrinkray.passes.patching import PatchApplier, Patches, apply_patches
 from shrinkray.problem import (
     BasicReductionProblem,
+    Format,
+    ParseError,
     ReductionProblem,
     sort_key_for_initial,
 )

@@ -1,6 +1,7 @@
 """Textual-based TUI for Shrink Ray."""
 
 import os
+import traceback
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from datetime import timedelta
@@ -747,6 +748,7 @@ class ShrinkRayApp(App[None]):
                 self.update_status("Reduction completed! Press 'q' to exit.")
 
         except Exception as e:
+            traceback.print_exc()
             self.exit(return_code=1, message=f"Error: {e}")
         finally:
             if self._owns_client and self._client:

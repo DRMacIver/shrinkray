@@ -16,6 +16,7 @@ publishing them to the gh-pages branch for GitHub Pages hosting.
 import argparse
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -391,6 +392,38 @@ def convert_gif_to_mp4(gif_path: Path, mp4_path: Path) -> bool:
     return result.returncode == 0
 
 
+def update_readme_video_urls(published_urls: dict[str, str]) -> bool:
+    """Update README.md with new video URLs.
+
+    Replaces URLs of the form:
+    https://drmaciver.github.io/shrinkray/assets/{base_name}-*.mp4
+
+    with the new hashed URLs.
+
+    Returns True if README was modified.
+    """
+    readme_path = Path("README.md")
+    if not readme_path.exists():
+        return False
+
+    content = readme_path.read_text()
+    modified = False
+
+    for item_name, new_url in published_urls.items():
+        base_name = ITEMS_NEEDING_MP4[item_name]
+        # Match URLs like https://drmaciver.github.io/shrinkray/assets/hello-*.mp4
+        pattern = rf"{re.escape(GITHUB_PAGES_BASE)}/{base_name}-[a-f0-9]+\.mp4"
+        if re.search(pattern, content):
+            content = re.sub(pattern, new_url, content)
+            modified = True
+
+    if modified:
+        readme_path.write_text(content)
+        print("Updated README.md with new video URLs")
+
+    return modified
+
+
 def generate_and_publish_mp4s(updated_tapes: list[Path]) -> dict[str, str]:
     """Generate MP4 versions and publish them to gh-pages.
 
@@ -507,6 +540,8 @@ def main() -> int:
             print("\nPublished video URLs:")
             for item_name, url in published_urls.items():
                 print(f"  {item_name}: {url}")
+            # Update README with new URLs
+            update_readme_video_urls(published_urls)
     except RuntimeError as e:
         print(f"\nFailed to generate/publish MP4: {e}")
         # Restore all files before returning

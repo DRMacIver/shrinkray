@@ -332,7 +332,11 @@ class ReducerWorker:
                 else:
                     f.seek(0)
                 data = f.read()
-            return data.decode("utf-8", errors="replace"), active_test_id, last_return_code
+            return (
+                data.decode("utf-8", errors="replace"),
+                active_test_id,
+                last_return_code,
+            )
         except OSError:
             return "", active_test_id, last_return_code
 

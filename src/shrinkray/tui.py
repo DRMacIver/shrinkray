@@ -768,14 +768,20 @@ class ExpandedBoxModal(ModalScreen[None]):
             try:
                 output_preview = app.query_one("#output-preview", OutputPreview)
                 # Use pending values (most recent) rather than throttled values
-                raw_content = output_preview._pending_content or output_preview.output_content
+                raw_content = (
+                    output_preview._pending_content or output_preview.output_content
+                )
                 test_id = output_preview._last_seen_test_id
                 if output_preview._pending_test_id is not None:
                     test_id = output_preview._pending_test_id
                 return_code = output_preview._pending_return_code
                 if return_code is None:
                     return_code = output_preview.last_return_code
-                active_test_id = output_preview._pending_test_id if output_preview._pending_test_id is not None else output_preview.active_test_id
+                active_test_id = (
+                    output_preview._pending_test_id
+                    if output_preview._pending_test_id is not None
+                    else output_preview.active_test_id
+                )
                 has_seen_output = output_preview._has_seen_output
 
                 # Build header
@@ -1151,7 +1157,12 @@ class ShrinkRayApp(App[None]):
         self._disabled_passes: list[str] = []
 
     # Box IDs in navigation order: [top-left, top-right, bottom-left, bottom-right]
-    _BOX_IDS = ["stats-container", "graph-container", "content-container", "output-container"]
+    _BOX_IDS = [
+        "stats-container",
+        "graph-container",
+        "content-container",
+        "output-container",
+    ]
 
     def compose(self) -> ComposeResult:
         yield Header()

@@ -1106,7 +1106,12 @@ def test_box_containers_are_focusable():
             await pilot.pause()
 
             # Check all containers are focusable
-            for box_id in ["stats-container", "graph-container", "content-container", "output-container"]:
+            for box_id in [
+                "stats-container",
+                "graph-container",
+                "content-container",
+                "output-container",
+            ]:
                 container = app.query_one(f"#{box_id}")
                 assert container.can_focus, f"{box_id} should be focusable"
 

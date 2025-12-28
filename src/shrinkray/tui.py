@@ -535,11 +535,14 @@ class OutputPreview(Static):
         # Header line
         if self.active_test_id is not None:
             header = f"[green]Test #{self.active_test_id} running...[/green]"
-        elif self.output_content and self._last_seen_test_id is not None:
+        elif self._last_seen_test_id is not None:
             if self.last_return_code is not None:
                 header = f"[dim]Test #{self._last_seen_test_id} exited with code {self.last_return_code}[/dim]"
             else:
                 header = f"[dim]Test #{self._last_seen_test_id} completed[/dim]"
+        elif self.output_content:
+            # Have output but no test ID - just show output without header
+            header = ""
         else:
             header = "[dim]No test output yet...[/dim]"
 
@@ -549,14 +552,17 @@ class OutputPreview(Static):
         available_lines = self._get_available_lines()
         lines = self.output_content.split("\n")
 
+        # Build prefix (header + newline, or empty if no header)
+        prefix = f"{header}\n" if header else ""
+
         # Show tail of output (most recent lines)
         if len(lines) <= available_lines:
-            return f"{header}\n{self.output_content}"
+            return f"{prefix}{self.output_content}"
 
         # Truncate from the beginning
         truncated_lines = lines[-(available_lines):]
         skipped = len(lines) - available_lines
-        return f"{header}\n... ({skipped} earlier lines)\n" + "\n".join(truncated_lines)
+        return f"{prefix}... ({skipped} earlier lines)\n" + "\n".join(truncated_lines)
 
 
 class HelpScreen(ModalScreen[None]):
@@ -627,13 +633,15 @@ class ExpandedBoxModal(ModalScreen[None]):
         height: 90%;
         background: $panel;
         border: thick $primary;
-        padding: 1;
+        padding: 0 1 1 1;
     }
 
     ExpandedBoxModal #expanded-title {
         text-align: center;
         text-style: bold;
         height: auto;
+        border-bottom: solid $primary;
+        padding: 1 0;
     }
 
     ExpandedBoxModal VerticalScroll {
@@ -1000,27 +1008,27 @@ class ShrinkRayApp(App[None]):
     }
 
     #stats-container {
-        border: solid green;
-        margin: 1 1 0 1;
+        border: solid $primary;
+        margin: 0;
         padding: 1;
         width: 1fr;
         height: 100%;
     }
 
     #stats-container:focus {
-        border: thick green;
+        border: thick $primary;
     }
 
     #graph-container {
-        border: solid green;
-        margin: 1 1 0 1;
-        padding: 0;
+        border: solid $primary;
+        margin: 0;
+        padding: 1;
         width: 1fr;
         height: 100%;
     }
 
     #graph-container:focus {
-        border: thick green;
+        border: thick $primary;
     }
 
     #size-graph {
@@ -1033,43 +1041,27 @@ class ShrinkRayApp(App[None]):
     }
 
     #content-container {
-        border: solid blue;
-        margin: 0 1 1 1;
+        border: solid $primary;
+        margin: 0;
         padding: 1;
         width: 1fr;
         height: 100%;
     }
 
     #content-container:focus {
-        border: thick blue;
-    }
-
-    #content-container:dark {
-        border: solid lightskyblue;
-    }
-
-    #content-container:dark:focus {
-        border: thick lightskyblue;
+        border: thick $primary;
     }
 
     #output-container {
-        border: solid blue;
-        margin: 0 1 1 1;
+        border: solid $primary;
+        margin: 0;
         padding: 1;
         width: 1fr;
         height: 100%;
     }
 
     #output-container:focus {
-        border: thick blue;
-    }
-
-    #output-container:dark {
-        border: solid lightskyblue;
-    }
-
-    #output-container:dark:focus {
-        border: thick lightskyblue;
+        border: thick $primary;
     }
     """
 
@@ -1307,12 +1299,13 @@ class ShrinkRayApp(App[None]):
                         update.original_size,
                         update.runtime,
                     )
-                    # Also update expanded graph if it exists
+                    # Also update expanded modals if they exist
                     self._update_expanded_graph(
                         update.new_size_history,
                         update.original_size,
                         update.runtime,
                     )
+                    self._update_expanded_stats()
                     self._latest_pass_stats = update.pass_stats
                     self._current_pass_name = update.current_pass_name
                     self._disabled_passes = update.disabled_passes
@@ -1377,6 +1370,19 @@ class ShrinkRayApp(App[None]):
                         expanded_graph.update_graph(
                             new_entries, original_size, current_runtime
                         )
+                    except Exception:
+                        pass
+                    break
+
+    def _update_expanded_stats(self) -> None:
+        """Update the expanded stats if it exists in a modal screen."""
+        for screen in self.screen_stack:
+            if isinstance(screen, ExpandedBoxModal):
+                if screen._content_widget_id == "stats-container":
+                    try:
+                        stats_display = self.query_one("#stats-display", StatsDisplay)
+                        expanded_content = screen.query_one("#expanded-content", Static)
+                        expanded_content.update(stats_display.render())
                     except Exception:
                         pass
                     break

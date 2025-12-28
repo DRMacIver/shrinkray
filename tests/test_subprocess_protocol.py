@@ -7,9 +7,7 @@ from shrinkray.subprocess.protocol import (
     ProgressUpdate,
     Request,
     Response,
-    decode_bytes,
     deserialize,
-    encode_bytes,
     serialize,
 )
 
@@ -223,36 +221,6 @@ def test_progress_update_with_multiple_pass_stats():
     assert deserialized.pass_stats[0].bytes_deleted == 500
     assert deserialized.pass_stats[1].pass_name == "delete_duplicates"
     assert deserialized.pass_stats[1].bytes_deleted == 200
-
-
-# === Bytes encoding tests ===
-
-
-def test_encode_bytes():
-    data = b"Hello, World!"
-    encoded = encode_bytes(data)
-    assert isinstance(encoded, str)
-    assert encoded == "SGVsbG8sIFdvcmxkIQ=="
-
-
-def test_decode_bytes():
-    encoded = "SGVsbG8sIFdvcmxkIQ=="
-    decoded = decode_bytes(encoded)
-    assert decoded == b"Hello, World!"
-
-
-def test_bytes_roundtrip():
-    original = b"\x00\x01\x02\xff\xfe\xfd"
-    encoded = encode_bytes(original)
-    decoded = decode_bytes(encoded)
-    assert decoded == original
-
-
-def test_empty_bytes():
-    original = b""
-    encoded = encode_bytes(original)
-    decoded = decode_bytes(encoded)
-    assert decoded == original
 
 
 # === Serialize error tests ===

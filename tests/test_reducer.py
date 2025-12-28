@@ -9,17 +9,16 @@ from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
 from shrinkray.passes.patching import PatchApplier
 from shrinkray.problem import BasicReductionProblem, Format, ParseError, shortlex
 from shrinkray.reducer import (
-    BasicReducer,
     DirectoryShrinkRay,
     KeyProblem,
     PassStats,
     PassStatsTracker,
     Reducer,
-    RestartPass,
     ShrinkRay,
     UpdateKeys,
 )
 from shrinkray.work import WorkContext
+from tests.helpers import BasicReducer
 
 
 # =============================================================================
@@ -281,17 +280,6 @@ async def test_basic_reducer_pump_backtrack():
     # Original problem should still be at original value (no reduction made)
     # since pump's backtrack ensures we only update if reduction is better
     assert len(problem.current_test_case) <= len(b"hello")
-
-
-# =============================================================================
-# RestartPass exception tests
-# =============================================================================
-
-
-def test_restart_pass_is_exception():
-    """Test RestartPass can be raised and caught."""
-    with pytest.raises(RestartPass):
-        raise RestartPass()
 
 
 # =============================================================================

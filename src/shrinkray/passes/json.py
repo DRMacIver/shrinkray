@@ -9,14 +9,6 @@ from shrinkray.passes.patching import Patches, apply_patches
 from shrinkray.problem import Format, ParseError, ReductionProblem
 
 
-def is_json(s: bytes) -> bool:
-    try:
-        json.loads(s)
-        return True
-    except ValueError:
-        return False
-
-
 @define(frozen=True)
 class _JSON(Format[bytes, Any]):
     def __repr__(self) -> str:

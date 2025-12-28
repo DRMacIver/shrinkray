@@ -29,26 +29,6 @@ from shrinkray.problem import Format, ReductionProblem
 
 
 @define(frozen=True)
-class Encoding(Format[bytes, str]):
-    """Format that decodes/encodes bytes using a character encoding."""
-
-    encoding: str
-
-    def __repr__(self) -> str:
-        return f"Encoding({repr(self.encoding)})"
-
-    @property
-    def name(self) -> str:
-        return self.encoding
-
-    def parse(self, input: bytes) -> str:
-        return input.decode(self.encoding)
-
-    def dumps(self, input: str) -> bytes:
-        return input.encode(self.encoding)
-
-
-@define(frozen=True)
 class Split(Format[bytes, list[bytes]]):
     """Format that splits bytes by a delimiter.
 
@@ -163,9 +143,6 @@ def tokenize(text: bytes) -> list[bytes]:
         i = j
     assert b"".join(result) == text
     return result
-
-
-MAX_DELETE_INTERVAL = 8
 
 
 async def lexeme_based_deletions(
@@ -599,108 +576,6 @@ async def lower_individual_bytes(problem: ReductionProblem[bytes]) -> None:
         if i > 0 and initial[i - 1] > 0 and c == 0
     ]
     await apply_patches(problem, IndividualByteReplacement(), patches)
-
-
-RegionReplacementPatch = list[tuple[int, int, int]]
-
-
-class RegionReplacement(Patches[RegionReplacementPatch, bytes]):
-    @property
-    def empty(self) -> RegionReplacementPatch:
-        return []
-
-    def combine(self, *patches: RegionReplacementPatch) -> RegionReplacementPatch:
-        result: RegionReplacementPatch = []
-        for p in patches:
-            result.extend(p)
-        return result
-
-    def apply(self, patch: RegionReplacementPatch, target: bytes) -> bytes:
-        result = bytearray(target)
-        for i, j, d in patch:
-            if d < result[i]:
-                for k in range(i, j):
-                    result[k] = d
-        return bytes(result)
-
-    def size(self, patch: RegionReplacementPatch) -> int:
-        return 0
-
-
-async def short_replacements(problem: ReductionProblem[bytes]) -> None:
-    """Replace short regions with uniform byte values.
-
-    Tries replacing 1-4 byte regions with uniform values like 0, 1,
-    space, newline, or period. Useful for simplifying small sequences.
-    """
-    target = problem.current_test_case
-    patches = [
-        [(i, j, c)]
-        for c in [0, 1] + list(b"01 \t\n\r.")
-        for i in range(len(target))
-        if target[i] > c
-        for j in range(i + 1, min(i + 5, len(target) + 1))
-    ]
-
-    await apply_patches(problem, RegionReplacement(), patches)
-
-
-WHITESPACE = b" \t\r\n"
-
-
-async def sort_whitespace(problem: ReductionProblem[bytes]) -> None:
-    """NB: This is a stupid pass that we only really need for artificial
-    test cases, but it's helpful for allowing those artificial test cases
-    to expose other issues."""
-
-    whitespace_up_to = 0
-    while (
-        whitespace_up_to < len(problem.current_test_case)
-        and problem.current_test_case[whitespace_up_to] not in WHITESPACE
-    ):
-        whitespace_up_to += 1
-    while (
-        whitespace_up_to < len(problem.current_test_case)
-        and problem.current_test_case[whitespace_up_to] in WHITESPACE
-    ):
-        whitespace_up_to += 1
-
-    # If the initial whitespace ends with a newline we want to keep it doing
-    # that. This is mostly for Python purposes.
-    if (
-        whitespace_up_to > 0
-        and problem.current_test_case[whitespace_up_to - 1] == b"\n"[0]
-    ):
-        whitespace_up_to -= 1
-
-    i = whitespace_up_to + 1
-
-    while i < len(problem.current_test_case):
-        if problem.current_test_case[i] not in WHITESPACE:
-            i += 1
-            continue
-
-        async def can_move_to_whitespace(k: int) -> bool:
-            if i + k > len(problem.current_test_case):
-                return False
-
-            base = problem.current_test_case
-            target = base[i : i + k]
-
-            if any(c not in WHITESPACE for c in target):
-                return False
-
-            prefix = base[:whitespace_up_to]
-            attempt = prefix + target + base[whitespace_up_to:i] + base[i + k :]
-            return await problem.is_interesting(attempt)
-
-        k = await problem.work.find_large_integer(can_move_to_whitespace)
-        whitespace_up_to += k
-        i += k + 1
-    test_case = problem.current_test_case
-    await problem.is_interesting(
-        bytes(sorted(test_case[:whitespace_up_to])) + test_case[whitespace_up_to:]
-    )
 
 
 # These are some cheat substitutions that are sometimes helpful, but mostly

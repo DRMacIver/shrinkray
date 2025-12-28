@@ -28,11 +28,13 @@ jobs:
     name: Check formatting
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          persist-credentials: false
+          # For PRs, checkout the actual branch so we can push back to it
+          ref: ${{ github.head_ref || github.ref }}
+          persist-credentials: true
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
       - name: Install uv
@@ -47,12 +49,31 @@ jobs:
         run: uv sync --extra dev
       - name: Run formatter
         run: just format
-      - name: Check for changes
+      - name: Check for changes and auto-commit on PRs
+        env:
+          GH_REF: ${{ github.ref }}
         run: |
-          if ! git diff --exit-code; then
+          if git diff --exit-code; then
+            echo "No formatting changes needed"
+            exit 0
+          fi
+
+          # On main branch, just fail with an error
+          if [ "$GH_REF" = "refs/heads/main" ]; then
             echo "::error::Formatting changes detected. Run 'just format' locally and commit the changes."
             exit 1
           fi
+
+          # On PR branches, commit and push the changes
+          echo "Formatting changes detected, committing..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "style: auto-format code
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+          git push
+          echo "::notice::Formatting changes have been committed and pushed."
 
   lint:
     runs-on: ubuntu-latest

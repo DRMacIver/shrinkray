@@ -9,52 +9,9 @@ from shrinkray.passes.json import (
     DeleteIdentifiers,
     delete_identifiers,
     gather_identifiers,
-    is_json,
 )
 from shrinkray.problem import BasicReductionProblem, ParseError
 from shrinkray.work import WorkContext
-
-
-# =============================================================================
-# is_json function tests
-# =============================================================================
-
-
-def test_is_json_valid_object():
-    assert is_json(b'{"key": "value"}')
-
-
-def test_is_json_valid_array():
-    assert is_json(b"[1, 2, 3]")
-
-
-def test_is_json_valid_string():
-    assert is_json(b'"hello"')
-
-
-def test_is_json_valid_number():
-    assert is_json(b"42")
-
-
-def test_is_json_valid_boolean():
-    assert is_json(b"true")
-    assert is_json(b"false")
-
-
-def test_is_json_valid_null():
-    assert is_json(b"null")
-
-
-def test_is_json_invalid():
-    assert not is_json(b"not json")
-
-
-def test_is_json_invalid_incomplete():
-    assert not is_json(b'{"key":')
-
-
-def test_is_json_empty():
-    assert not is_json(b"")
 
 
 # =============================================================================

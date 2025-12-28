@@ -7,7 +7,6 @@ import pytest
 from shrinkray.passes.genericlanguages import (
     IntegerFormat,
     RegionReplacingPatches,
-    Substring,
     combine_expressions,
     cut_comment_like_things,
     cut_comments,
@@ -66,36 +65,6 @@ def test_comment_removal():
     x = reduce_with([cut_comment_like_things], LOTS_OF_COMMENTS, lambda x: True)
     lines = [line.strip() for line in x.splitlines() if line.strip()]
     assert lines == [b"hello", b"world"]
-
-
-# === Substring tests ===
-
-
-def test_substring_parse_valid():
-    sub = Substring(prefix=b"<", suffix=b">")
-    assert sub.parse(b"<hello>") == b"hello"
-
-
-def test_substring_parse_invalid_prefix():
-    sub = Substring(prefix=b"<", suffix=b">")
-    with pytest.raises(ParseError):
-        sub.parse(b"hello>")
-
-
-def test_substring_parse_invalid_suffix():
-    sub = Substring(prefix=b"<", suffix=b">")
-    with pytest.raises(ParseError):
-        sub.parse(b"<hello")
-
-
-def test_substring_dumps():
-    sub = Substring(prefix=b"<", suffix=b">")
-    assert sub.dumps(b"hello") == b"<hello>"
-
-
-def test_substring_name():
-    sub = Substring(prefix=b"<", suffix=b">")
-    assert sub.name == "Substring(1, 1)"
 
 
 # === RegionReplacingPatches tests ===

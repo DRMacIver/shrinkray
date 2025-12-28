@@ -1,6 +1,6 @@
 import os
 import subprocess
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -10,10 +10,10 @@ from shrinkray.passes.clangdelta import (
     ClangDeltaError,
     clang_delta_pump,
     clang_delta_pumps,
-    clang_delta_works,
     find_clang_delta,
 )
 from shrinkray.problem import BasicReductionProblem, WorkContext
+from tests.helpers import clang_delta_works
 
 
 pytestmark = pytest.mark.skipif(
@@ -217,51 +217,6 @@ async def test_pump_handles_apply_error():
 # =============================================================================
 # Additional edge case tests for complete coverage
 # =============================================================================
-
-
-def test_clang_delta_works_when_available():
-    """Test clang_delta_works returns True when clang_delta is installed and works."""
-    # We're running this test, so clang_delta must be working
-    # Clear cache to get fresh result
-    clang_delta_works.cache_clear()
-    assert clang_delta_works() is True
-
-
-def test_clang_delta_works_when_not_found():
-    """Test clang_delta_works returns False when clang_delta is not installed."""
-    clang_delta_works.cache_clear()
-    with patch("shrinkray.passes.clangdelta.find_clang_delta", return_value=""):
-        assert clang_delta_works() is False
-
-
-def test_clang_delta_works_when_execution_fails():
-    """Test clang_delta_works returns False when clang_delta exists but fails to run."""
-    clang_delta_works.cache_clear()
-    with (
-        patch(
-            "shrinkray.passes.clangdelta.find_clang_delta", return_value="/usr/bin/fake"
-        ),
-        patch(
-            "shrinkray.passes.clangdelta.subprocess.run",
-            side_effect=OSError("Library not found"),
-        ),
-    ):
-        assert clang_delta_works() is False
-
-
-def test_clang_delta_works_when_returns_nonzero():
-    """Test clang_delta_works returns False when clang_delta returns non-zero."""
-    clang_delta_works.cache_clear()
-    mock_result = MagicMock()
-    mock_result.returncode = 1
-
-    with (
-        patch(
-            "shrinkray.passes.clangdelta.find_clang_delta", return_value="/usr/bin/fake"
-        ),
-        patch("shrinkray.passes.clangdelta.subprocess.run", return_value=mock_result),
-    ):
-        assert clang_delta_works() is False
 
 
 def test_find_clang_delta_when_found_in_path():

@@ -18,31 +18,6 @@ async def delete_elements[Seq: Sequence[Any]](problem: ReductionProblem[Seq]) ->
     )
 
 
-def merged_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    normalized: list[list[int]] = []
-    for start, end in sorted(map(tuple, intervals)):
-        if normalized and normalized[-1][-1] >= start:
-            normalized[-1][-1] = max(normalized[-1][-1], end)
-        else:
-            normalized.append([start, end])
-    return list(map(tuple, normalized))  # type: ignore
-
-
-def with_deletions[Seq: Sequence[Any]](
-    target: Seq, deletions: list[tuple[int, int]]
-) -> Seq:
-    result: list[Any] = []
-    prev = 0
-    total_deleted = 0
-    for start, end in deletions:
-        total_deleted += end - start
-        result.extend(target[prev:start])
-        prev = end
-    result.extend(target[prev:])
-    assert len(result) + total_deleted == len(target)
-    return type(target)(result)  # type: ignore
-
-
 def block_deletion[Seq: Sequence[Any]](
     min_block: int, max_block: int
 ) -> ReductionPass[Seq]:

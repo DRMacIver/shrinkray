@@ -14,21 +14,6 @@ from shrinkray.work import Volume, WorkContext
 from tests.helpers import assert_no_blockers, assert_reduces_to, direct_reductions
 
 
-def tidy_python_example(s):
-    results = []
-    for line in s.splitlines():
-        line, *_ = line.split("#")
-        line = line.strip()
-        if line:
-            results.append(line)
-    output = "\n".join(results)
-    if output.startswith('"""'):
-        output = output[3:]
-        i = output.index('"""')
-        output = output[i + 3 :]
-    return output.strip() + "\n"
-
-
 POTENTIAL_BLOCKERS = [
     b"\n",
     b"s",

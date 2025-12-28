@@ -37,14 +37,6 @@ class OutputStream(Protocol):
     async def send(self, data: bytes) -> None: ...
 
 
-class StdoutStream:
-    """Wrapper around sys.stdout for the OutputStream protocol."""
-
-    async def send(self, data: bytes) -> None:
-        sys.stdout.write(data.decode("utf-8"))
-        sys.stdout.flush()
-
-
 class ReducerWorker:
     """Runs the reducer in a subprocess with JSON protocol communication."""
 

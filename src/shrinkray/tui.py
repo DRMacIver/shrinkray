@@ -386,7 +386,7 @@ class SizeGraph(PlotextPlot):
         # Use log scale for y-axis (percentages)
         log_percentages = [math.log10(max(0.01, p)) for p in percentages]
 
-        plt.plot(times, log_percentages)
+        plt.plot(times, log_percentages, marker="hd")
 
         # Get stable x-axis bounds
         max_time, x_ticks, x_labels = _get_time_axis_bounds(self._current_runtime)

@@ -38,7 +38,9 @@ shrinkray (or any other test-case reducer) then systematically tries smaller and
 
 While it runs, you will see the following user interface:
 
-![Demo of shrink ray running](demo.png)
+![Demo of shrink ray running](gallery/enterprise-hello/hello.png)
+
+(This is a toy example based on reducing a ridiculously bad version of hello world. You can see [a full run of it in the gallery directory](gallery/enterprise-hello/hello.gif))
 
 When it finishes you will be left with the reduced test case in `mytestcase.py`.
 

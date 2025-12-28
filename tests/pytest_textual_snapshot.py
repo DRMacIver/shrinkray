@@ -123,16 +123,6 @@ def pytest_addoption(parser):
     )
 
 
-_app_stash_key: pytest.StashKey[App] | None = None
-
-
-def app_stash_key() -> pytest.StashKey[App]:
-    global _app_stash_key
-    if _app_stash_key is None:
-        _app_stash_key = pytest.StashKey[App]()
-    return _app_stash_key
-
-
 def node_to_report_path(node: Item) -> Path:
     """Generate a report file name for a test node."""
     tempdir = get_tempdir()

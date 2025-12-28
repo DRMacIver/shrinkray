@@ -236,10 +236,6 @@ def direct_reductions(
     return children
 
 
-class Completed(Exception):
-    pass
-
-
 def assert_reduces_to(
     *,
     origin: bytes,

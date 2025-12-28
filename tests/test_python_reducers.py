@@ -1,6 +1,3 @@
-import os
-from glob import glob
-
 import libcst
 import libcst.matchers as m
 import pytest
@@ -103,14 +100,6 @@ def test_body_replacement_of_if():
         reduce_with([replace_bodies_with_ellipsis], IF_BLOCK, lambda x: True).strip()
         == b"if True:\n    ..."
     )
-
-
-ROOT = os.path.dirname(os.path.dirname(__file__))
-
-
-PYTHON_FILES = glob(os.path.join(ROOT, "src", "**", "*.py"), recursive=True) + glob(
-    os.path.join(ROOT, "tests", "**", "*.py"), recursive=True
-)
 
 
 ISSUE_12_INPUT = b"""

@@ -8,10 +8,10 @@ from tests import pytest_textual_snapshot as _textual_snapshot
 
 
 # Re-export the hooks and fixture for pytest to pick up
-pytest_addoption = _textual_snapshot.pytest_addoption
-pytest_sessionstart = _textual_snapshot.pytest_sessionstart
-pytest_terminal_summary = _textual_snapshot.pytest_terminal_summary
-snap_compare = _textual_snapshot.snap_compare
+pytest_addoption = _textual_snapshot.pytest_addoption  # used
+pytest_sessionstart = _textual_snapshot.pytest_sessionstart  # used
+pytest_terminal_summary = _textual_snapshot.pytest_terminal_summary  # used
+snap_compare = _textual_snapshot.snap_compare  # used
 
 settings.register_profile("default", settings(deadline=None))
 warnings.filterwarnings("ignore", category=DeprecationWarning)

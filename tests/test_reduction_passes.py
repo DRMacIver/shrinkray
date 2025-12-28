@@ -10,9 +10,7 @@ import libcst
 import pytest
 
 from shrinkray.passes.bytes import (
-    Encoding,
     NewlineReplacer,
-    RegionReplacement,
     Split,
     Tokenize,
     debracket,
@@ -27,15 +25,12 @@ from shrinkray.passes.bytes import (
     remove_whitespace,
     replace_space_with_newlines,
     short_deletions,
-    short_replacements,
-    sort_whitespace,
     standard_substitutions,
 )
 from shrinkray.passes.definitions import compose
 from shrinkray.passes.genericlanguages import (
     IntegerFormat,
     RegionReplacingPatches,
-    Substring,
     combine_expressions,
     cut_comment_like_things,
     merge_adjacent_strings,
@@ -44,6 +39,7 @@ from shrinkray.passes.genericlanguages import (
     replace_falsey_with_zero,
     simplify_brackets,
 )
+from shrinkray.passes.json import JSON
 from shrinkray.passes.python import (
     replace_bodies_with_ellipsis,
     strip_annotations,
@@ -52,8 +48,6 @@ from shrinkray.passes.sequences import (
     block_deletion,
     delete_duplicates,
     delete_elements,
-    merged_intervals,
-    with_deletions,
 )
 from shrinkray.problem import BasicReductionProblem, ParseError, shortlex
 from shrinkray.work import WorkContext
@@ -369,58 +363,6 @@ def test_line_sorter_swap_not_interesting(parallelism):
     assert result.split(b"\n")[0] == b"c"
 
 
-def test_short_replacements(parallelism):
-    result = reduce_with(
-        [short_replacements],
-        b"\x05\x05\x05",
-        lambda x: len(x) == 3,
-        parallelism=parallelism,
-    )
-    assert all(b <= 5 for b in result)
-
-
-def test_sort_whitespace_to_front(parallelism):
-    result = reduce_with(
-        [sort_whitespace],
-        b"a b c",
-        lambda x: set(x) >= set(b"abc "),
-        parallelism=parallelism,
-    )
-    assert len(result) == 5
-
-
-def test_sort_whitespace_simple(parallelism):
-    result = reduce_with(
-        [sort_whitespace],
-        b"hello world test",
-        lambda x: True,
-        parallelism=parallelism,
-    )
-    assert len(result) <= len(b"hello world test")
-
-
-def test_sort_whitespace_with_initial_newline(parallelism):
-    """Test whitespace sorting when initial whitespace ends with newline."""
-    result = reduce_with(
-        [sort_whitespace],
-        b"x\n y z",
-        lambda x: True,
-        parallelism=parallelism,
-    )
-    assert len(result) <= len(b"x\n y z")
-
-
-def test_sort_whitespace_large_k(parallelism):
-    """Test whitespace sorting when sort size exceeds remaining input."""
-    result = reduce_with(
-        [sort_whitespace],
-        b"abc   ",
-        lambda x: True,
-        parallelism=parallelism,
-    )
-    assert len(result) <= len(b"abc   ")
-
-
 # =============================================================================
 # Format Tests
 # =============================================================================
@@ -504,28 +446,6 @@ def test_tokenize_with_underscores(parallelism):
     assert b"=" in result
 
 
-def test_encoding_parse():
-    enc = Encoding("utf-8")
-    assert enc.parse(b"hello") == "hello"
-
-
-def test_encoding_dumps():
-    enc = Encoding("utf-8")
-    assert enc.dumps("caf\u00e9") == b"caf\xc3\xa9"
-
-
-def test_encoding_name():
-    enc = Encoding("utf-8")
-    assert enc.name == "utf-8"
-
-
-def test_encoding_repr():
-    enc = Encoding("utf-8")
-    assert repr(enc) == "Encoding('utf-8')"
-
-
-# Note: Substring tests are in test_generic_language.py
-
 # =============================================================================
 # Sequence Passes - sequences.py
 # =============================================================================
@@ -601,41 +521,6 @@ def test_delete_duplicates_keeps_when_required(parallelism):
         parallelism=parallelism,
     )
     assert result.count(1) == 3
-
-
-def test_merged_intervals_simple():
-    result = merged_intervals([(0, 2), (1, 3)])
-    assert result == [(0, 3)]
-
-
-def test_merged_intervals_no_overlap():
-    result = merged_intervals([(0, 1), (2, 3)])
-    assert result == [(0, 1), (2, 3)]
-
-
-def test_merged_intervals_adjacent():
-    result = merged_intervals([(0, 2), (2, 4)])
-    assert result == [(0, 4)]
-
-
-def test_merged_intervals_unsorted():
-    result = merged_intervals([(3, 5), (0, 2)])
-    assert result == [(0, 2), (3, 5)]
-
-
-def test_with_deletions_list():
-    result = with_deletions([1, 2, 3, 4, 5], [(1, 2), (3, 4)])
-    assert result == [1, 3, 5]
-
-
-def test_with_deletions_tuple():
-    result = with_deletions((1, 2, 3, 4, 5), [(0, 2)])
-    assert result == (3, 4, 5)
-
-
-def test_with_deletions_empty():
-    result = with_deletions([1, 2, 3], [])
-    assert result == [1, 2, 3]
 
 
 # =============================================================================
@@ -929,16 +814,6 @@ def test_newline_replacer_size():
     assert nr.size(patch) == 3
 
 
-def test_region_replacement_empty():
-    rr = RegionReplacement()
-    assert rr.empty == []
-
-
-def test_region_replacement_size():
-    rr = RegionReplacement()
-    assert rr.size([(0, 1, 0)]) == 0
-
-
 # =============================================================================
 # Edge Cases for Full Coverage
 # =============================================================================
@@ -953,39 +828,6 @@ def test_lexeme_based_deletions_all_same_bytes(parallelism):
         parallelism=parallelism,
     )
     assert result == b"aaaa" or len(result) <= 4
-
-
-def test_sort_whitespace_newline_at_end_of_initial_ws(parallelism):
-    """Test whitespace sorting when whitespace block ends with newline.
-
-    Input has whitespace ' \\n' which ends with newline - the algorithm needs
-    to adjust the whitespace boundary to avoid including the trailing newline.
-    """
-    result = reduce_with(
-        [sort_whitespace],
-        b"a \nb",  # 'a', then ' \n' (ws ending in newline), then 'b'
-        lambda x: True,
-        parallelism=parallelism,
-    )
-    # Verify it runs without error and doesn't grow
-    assert isinstance(result, bytes)
-    assert len(result) <= 4
-
-
-def test_sort_whitespace_k_exceeds_length(parallelism):
-    """Test whitespace sorting when probing past end of input.
-
-    The algorithm uses find_large_integer to probe how much whitespace to sort,
-    which may probe past the end of the input.
-    """
-    result = reduce_with(
-        [sort_whitespace],
-        b"a b ",  # 'a', ' ', 'b', ' ' - second space triggers the search
-        lambda x: True,
-        parallelism=parallelism,
-    )
-    assert isinstance(result, bytes)
-    assert len(result) <= 4
 
 
 def test_reduce_integer_literals_hi_minus_one_interesting(parallelism):
@@ -1022,27 +864,24 @@ def test_normalize_identifiers_pattern_not_found(parallelism):
 
 def test_format_is_valid_true():
     """Test Format.is_valid returns True for valid input."""
-    fmt = Substring(b"<", b">")
-    assert fmt.is_valid(b"<hello>") is True
+    fmt = IntegerFormat()
+    assert fmt.is_valid(b"123") is True
 
 
 def test_format_is_valid_false():
     """Test Format.is_valid returns False for invalid input."""
-    fmt = Substring(b"<", b">")
+    fmt = IntegerFormat()
     assert fmt.is_valid(b"hello") is False
 
 
 async def test_compose_with_changing_format():
     """Test compose handles cases where format becomes invalid during reduction."""
 
-    # Start with valid format
-    fmt = Substring(b"<", b">")
-
-    async def pass_that_changes_format(problem):
+    async def pass_that_deletes(problem):
         # Try to delete elements, which will access current_test_case
         await delete_elements(problem)
 
-    composed = compose(fmt, pass_that_changes_format)
+    composed = compose(JSON, pass_that_deletes)
 
     call_count = [0]
 
@@ -1052,12 +891,12 @@ async def test_compose_with_changing_format():
         return True
 
     problem = BasicReductionProblem(
-        initial=b"<abc>",
+        initial=b"[1, 2, 3]",
         is_interesting=is_interesting,
         work=WorkContext(parallelism=1),
     )
 
-    # This should work since initial input is parseable
+    # This should work since initial input is parseable as JSON
     await composed(problem)
 
 

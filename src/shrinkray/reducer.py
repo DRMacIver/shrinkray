@@ -100,50 +100,6 @@ class Reducer[T](ABC):
 
 
 @define
-class BasicReducer[T](Reducer[T]):
-    reduction_passes: Iterable[ReductionPass[T]]
-    pumps: Iterable[ReductionPump[T]] = ()
-    _status: str = "Starting up"
-
-    def __attrs_post_init__(self) -> None:
-        self.reduction_passes = list(self.reduction_passes)
-
-    @property
-    def status(self) -> str:
-        return self._status
-
-    @status.setter
-    def status(self, value: str) -> None:
-        self._status = value
-
-    async def run_pass(self, rp: ReductionPass[T]) -> None:
-        await rp(self.target)
-
-    async def run(self) -> None:
-        await self.target.setup()
-
-        while True:
-            prev = self.target.current_test_case
-            for rp in self.reduction_passes:
-                self.status = f"Running reduction pass {rp.__name__}"
-                await self.run_pass(rp)
-            for pump in self.pumps:
-                self.status = f"Pumping with {pump.__name__}"
-                pumped = await pump(self.target)
-                if pumped != self.target.current_test_case:
-                    with self.backtrack(pumped):
-                        for rp in self.reduction_passes:
-                            self.status = f"Running reduction pass {rp.__name__} under pump {pump.__name__}"
-                            await self.run_pass(rp)
-            if prev == self.target.current_test_case:
-                return
-
-
-class RestartPass(Exception):
-    pass
-
-
-@define
 class PassStats:
     """Statistics for a single reduction pass."""
 
@@ -179,12 +135,6 @@ class PassStatsTracker:
     def get_stats_in_order(self) -> list[PassStats]:
         """Get stats in the order passes were first run."""
         return list(self._stats.values())
-
-
-class SkipPass(Exception):
-    """Raised to skip the current pass."""
-
-    pass
 
 
 @define

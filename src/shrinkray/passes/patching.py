@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
-from enum import Enum
-from random import Random
 from typing import Any, TypeVar, cast
 
 import trio
@@ -49,27 +47,6 @@ class SetPatches[T, TargetType](Patches[frozenset[T], TargetType]):
         return self.__apply(patch, target)
 
     def size(self, patch: frozenset[T]) -> int:
-        return len(patch)
-
-
-class ListPatches[T, TargetType](Patches[list[T], TargetType]):
-    def __init__(self, apply: Callable[[list[T], TargetType], TargetType]):
-        self.__apply = apply
-
-    @property
-    def empty(self):
-        return []
-
-    def combine(self, *patches: list[T]) -> list[T]:
-        result = []
-        for p in patches:
-            result.extend(p)
-        return result
-
-    def apply(self, patch: list[T], target: TargetType) -> TargetType:
-        return self.__apply(patch, target)
-
-    def size(self, patch: list[T]) -> int:
         return len(patch)
 
 
@@ -174,15 +151,6 @@ class PatchApplier[PatchType, TargetType]:
             return await receive_merge_result.receive()
 
 
-class Direction(Enum):
-    LEFT = 0
-    RIGHT = 1
-
-
-class Completed(Exception):
-    pass
-
-
 async def apply_patches[PatchType, TargetType](
     problem: ReductionProblem[TargetType],
     patch_info: Patches[PatchType, TargetType],
@@ -218,37 +186,6 @@ async def apply_patches[PatchType, TargetType](
                     except trio.EndOfChannel:
                         break
                     await applier.try_apply_patch(patch)
-
-
-class LazyMutableRange:
-    def __init__(self, n: int):
-        self.__size = n
-        self.__mask: dict[int, int] = {}
-
-    def __getitem__(self, i: int) -> int:
-        return self.__mask.get(i, i)
-
-    def __setitem__(self, i: int, v: int) -> None:
-        self.__mask[i] = v
-
-    def __len__(self) -> int:
-        return self.__size
-
-    def pop(self) -> int:
-        i = len(self) - 1
-        result = self[i]
-        self.__size = i
-        self.__mask.pop(i, None)
-        return result
-
-
-def lazy_shuffle[T](seq: Sequence[T], rnd: Random) -> Iterable[T]:
-    indices = LazyMutableRange(len(seq))
-    while indices:
-        j = len(indices) - 1
-        i = rnd.randrange(0, len(indices))
-        indices[i], indices[j] = indices[j], indices[i]
-        yield seq[indices.pop()]
 
 
 CutPatch = list[tuple[int, int]]

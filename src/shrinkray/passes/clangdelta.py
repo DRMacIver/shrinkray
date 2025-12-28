@@ -1,6 +1,5 @@
 import os
 import subprocess
-from functools import lru_cache
 from glob import glob
 from shutil import which
 from tempfile import NamedTemporaryFile
@@ -24,29 +23,6 @@ def find_clang_delta():
         if possible_locations:
             clang_delta = max(possible_locations)
     return clang_delta
-
-
-@lru_cache(maxsize=1)
-def clang_delta_works() -> bool:
-    """Check if clang_delta can actually execute.
-
-    This verifies not just that the binary exists, but that it can run.
-    On some systems (e.g., Ubuntu 24.04), creduce is installed but
-    clang_delta fails at runtime due to shared library issues.
-    """
-    clang_delta = find_clang_delta()
-    if not clang_delta:
-        return False
-    try:
-        # Run a simple test to verify clang_delta works
-        result = subprocess.run(
-            [clang_delta, "--help"],
-            capture_output=True,
-            timeout=5,
-        )
-        return result.returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
 
 
 TRANSFORMATIONS: list[str] = [

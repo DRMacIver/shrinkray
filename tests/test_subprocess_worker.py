@@ -21,7 +21,7 @@ from shrinkray.subprocess.protocol import (
     deserialize,
     serialize,
 )
-from shrinkray.subprocess.worker import ReducerWorker, StdoutStream, main
+from shrinkray.subprocess.worker import ReducerWorker, main
 
 
 # === ReducerWorker initialization tests ===
@@ -642,18 +642,6 @@ async def test_worker_handle_start_error(tmp_path):
 
 
 # === Additional coverage tests ===
-
-
-async def test_stdout_stream_send():
-    """Test StdoutStream wrapper class sends data to stdout."""
-
-    output = io.StringIO()
-    stream = StdoutStream()
-
-    with patch.object(sys, "stdout", output):
-        await stream.send(b"hello world\n")
-
-    assert output.getvalue() == "hello world\n"
 
 
 async def test_worker_read_commands_empty_lines():

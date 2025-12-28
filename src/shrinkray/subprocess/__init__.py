@@ -5,9 +5,7 @@ from shrinkray.subprocess.protocol import (
     ProgressUpdate,
     Request,
     Response,
-    decode_bytes,
     deserialize,
-    encode_bytes,
     serialize,
 )
 
@@ -18,7 +16,5 @@ __all__ = [
     "ProgressUpdate",
     "serialize",
     "deserialize",
-    "encode_bytes",
-    "decode_bytes",
     "SubprocessClient",
 ]

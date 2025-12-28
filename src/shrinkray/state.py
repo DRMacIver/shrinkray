@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from datetime import timedelta
 from tempfile import TemporaryDirectory
-from typing import Any, TypeVar
+from typing import Any
 
 import humanize
 import trio
@@ -26,9 +26,6 @@ from shrinkray.problem import (
 )
 from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
-
-
-T = TypeVar("T")
 
 
 class TimeoutExceededOnInitial(InvalidInitialExample):

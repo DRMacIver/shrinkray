@@ -1,6 +1,5 @@
 """Line-oriented JSON protocol for subprocess communication."""
 
-import base64
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -188,11 +187,3 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
     )
 
 
-def encode_bytes(data: bytes) -> str:
-    """Encode bytes to base64 string for JSON transport."""
-    return base64.b64encode(data).decode("ascii")
-
-
-def decode_bytes(data: str) -> bytes:
-    """Decode base64 string back to bytes."""
-    return base64.b64decode(data.encode("ascii"))

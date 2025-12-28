@@ -9,7 +9,6 @@ from string import ascii_lowercase, ascii_uppercase
 from typing import AnyStr
 
 import trio
-from attr import define
 
 from shrinkray.passes.bytes import ByteReplacement, delete_intervals
 from shrinkray.passes.definitions import ReductionPass
@@ -22,25 +21,6 @@ from shrinkray.problem import (
     sort_key_for_initial,
 )
 from shrinkray.work import NotFound
-
-
-@define(frozen=True)
-class Substring(Format[AnyStr, AnyStr]):
-    prefix: AnyStr
-    suffix: AnyStr
-
-    @property
-    def name(self) -> str:
-        return f"Substring({len(self.prefix)}, {len(self.suffix)})"
-
-    def parse(self, input: AnyStr) -> AnyStr:
-        if input.startswith(self.prefix) and input.endswith(self.suffix):
-            return input[len(self.prefix) : len(input) - len(self.suffix)]
-        else:
-            raise ParseError()
-
-    def dumps(self, input: AnyStr) -> AnyStr:
-        return self.prefix + input + self.suffix
 
 
 class RegionReplacingPatches(Patches[dict[int, AnyStr], AnyStr]):

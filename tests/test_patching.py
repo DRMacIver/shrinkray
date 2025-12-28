@@ -1,20 +1,15 @@
 """Unit tests for patching module."""
 
-from random import Random
-
 import pytest
 import trio
 
 from shrinkray.passes.patching import (
     Conflict,
     Cuts,
-    LazyMutableRange,
-    ListPatches,
     PatchApplier,
     Patches,
     SetPatches,
     apply_patches,
-    lazy_shuffle,
 )
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.work import WorkContext
@@ -150,141 +145,6 @@ def test_set_patches_size():
     sp = SetPatches(apply_fn)
     assert sp.size(frozenset({1, 2, 3})) == 3
     assert sp.size(frozenset()) == 0
-
-
-# =============================================================================
-# ListPatches class tests
-# =============================================================================
-
-
-def test_list_patches_empty():
-    def apply_fn(patch, target):
-        return [x for x in target if x not in patch]
-
-    lp = ListPatches(apply_fn)
-    assert lp.empty == []
-
-
-def test_list_patches_combine():
-    def apply_fn(patch, target):
-        return [x for x in target if x not in patch]
-
-    lp = ListPatches(apply_fn)
-    result = lp.combine([1, 2], [3, 4])
-    assert result == [1, 2, 3, 4]
-
-
-def test_list_patches_apply():
-    def apply_fn(patch, target):
-        return [x for x in target if x not in patch]
-
-    lp = ListPatches(apply_fn)
-    result = lp.apply([2, 4], [1, 2, 3, 4, 5])
-    assert result == [1, 3, 5]
-
-
-def test_list_patches_size():
-    def apply_fn(patch, target):
-        return target
-
-    lp = ListPatches(apply_fn)
-    assert lp.size([1, 2, 3]) == 3
-    assert lp.size([]) == 0
-
-
-# =============================================================================
-# LazyMutableRange class tests
-# =============================================================================
-
-
-def test_lazy_mutable_range_len():
-    r = LazyMutableRange(5)
-    assert len(r) == 5
-
-
-def test_lazy_mutable_range_getitem_unmodified():
-    r = LazyMutableRange(5)
-    assert r[0] == 0
-    assert r[2] == 2
-    assert r[4] == 4
-
-
-def test_lazy_mutable_range_setitem():
-    r = LazyMutableRange(5)
-    r[2] = 10
-    assert r[2] == 10
-    assert r[0] == 0  # Others unchanged
-
-
-def test_lazy_mutable_range_pop():
-    r = LazyMutableRange(5)
-    assert r.pop() == 4
-    assert len(r) == 4
-    assert r.pop() == 3
-    assert len(r) == 3
-
-
-def test_lazy_mutable_range_pop_after_swap():
-    r = LazyMutableRange(5)
-    r[4] = 0
-    r[0] = 4
-    assert r.pop() == 0  # Was swapped to position 4
-    assert len(r) == 4
-
-
-def test_lazy_mutable_range_pop_all():
-    r = LazyMutableRange(3)
-    assert r.pop() == 2
-    assert r.pop() == 1
-    assert r.pop() == 0
-    assert len(r) == 0
-
-
-# =============================================================================
-# lazy_shuffle function tests
-# =============================================================================
-
-
-def test_lazy_shuffle_produces_all_elements():
-    rnd = Random(42)
-    seq = [1, 2, 3, 4, 5]
-    result = list(lazy_shuffle(seq, rnd))
-    assert sorted(result) == [1, 2, 3, 4, 5]
-
-
-def test_lazy_shuffle_empty_sequence():
-    rnd = Random(42)
-    result = list(lazy_shuffle([], rnd))
-    assert result == []
-
-
-def test_lazy_shuffle_single_element():
-    rnd = Random(42)
-    result = list(lazy_shuffle([1], rnd))
-    assert result == [1]
-
-
-def test_lazy_shuffle_different_seeds_different_order():
-    seq = list(range(10))
-    result1 = list(lazy_shuffle(seq, Random(1)))
-    result2 = list(lazy_shuffle(seq, Random(2)))
-    # Very likely to be different with different seeds
-    assert result1 != result2 or len(seq) == 1
-
-
-def test_lazy_shuffle_same_seed_same_order():
-    seq = list(range(10))
-    result1 = list(lazy_shuffle(seq, Random(42)))
-    result2 = list(lazy_shuffle(seq, Random(42)))
-    assert result1 == result2
-
-
-def test_lazy_shuffle_preserves_original():
-    rnd = Random(42)
-    seq = [1, 2, 3, 4, 5]
-    original = seq.copy()
-    _ = list(lazy_shuffle(seq, rnd))
-    assert seq == original
 
 
 # =============================================================================

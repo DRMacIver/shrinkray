@@ -26,6 +26,67 @@ ITEMS_NEEDING_MP4 = {
 }
 
 
+def git_checkout(paths: list[str]) -> None:
+    """Checkout files from git, restoring them to their committed state.
+
+    Silently ignores paths that aren't tracked or don't exist in git.
+    """
+    if not paths:
+        return
+
+    # Filter to only paths that exist in git
+    result = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "--"] + paths,
+        capture_output=True,
+    )
+    # Even if some files aren't tracked, try to checkout the ones that are
+    subprocess.run(
+        ["git", "checkout", "--"] + paths,
+        capture_output=True,
+    )
+
+
+def get_resettable_gallery_paths(tapes: list[Path], include_outputs: bool) -> list[str]:
+    """Get paths to gallery files that should be reset to git version.
+
+    Args:
+        tapes: List of tape file paths
+        include_outputs: If True, include generated outputs (gif, png, mp4).
+                        If False, only include source files that may be modified
+                        during demos (like hello.py being reduced by shrinkray).
+
+    Returns all non-executable files except .tape files.
+    """
+    paths = []
+    assets_dir = Path("assets")
+    output_extensions = {".gif", ".png"}
+
+    for tape in tapes:
+        gallery_dir = tape.parent
+        for f in gallery_dir.iterdir():
+            if not f.is_file():
+                continue
+            # Skip tape files (the source of truth for regeneration)
+            if f.suffix.lower() == ".tape":
+                continue
+            # Skip executable files (test scripts)
+            if os.access(f, os.X_OK):
+                continue
+            # Skip outputs if not including them
+            if not include_outputs and f.suffix.lower() in output_extensions:
+                continue
+            paths.append(str(f))
+
+        # Include mp4 in assets if this item needs one (only if including outputs)
+        if include_outputs:
+            item_name = gallery_dir.name
+            if item_name in ITEMS_NEEDING_MP4:
+                mp4_path = assets_dir / ITEMS_NEEDING_MP4[item_name]
+                paths.append(str(mp4_path))
+
+    return paths
+
+
 def get_git_commit_time(path: str) -> int | None:
     """Get the Unix timestamp of the last commit that touched a path.
 
@@ -265,6 +326,13 @@ def main() -> int:
         print("No tape files found in gallery/")
         return 0
 
+    # Checkout gallery files from git before checking timestamps
+    # This ensures we compare against committed versions, not local modifications
+    all_resettable = get_resettable_gallery_paths(tapes, include_outputs=True)
+
+    print("Restoring gallery files from git...")
+    git_checkout(all_resettable)
+
     src_time, used_git = get_latest_src_time()
     if used_git:
         print("Using git commit times for change detection")
@@ -304,6 +372,9 @@ def main() -> int:
         print(f"\nFailed to generate {len(failed)} GIF(s):")
         for tape in failed:
             print(f"  - {tape}")
+        # Restore all files before returning (including outputs, since generation failed)
+        print("Restoring gallery files from git...")
+        git_checkout(all_resettable)
         return 1
 
     # Generate MP4 versions for items that need them
@@ -312,7 +383,16 @@ def main() -> int:
         print(f"\nFailed to generate {len(mp4_failed)} MP4(s):")
         for mp4 in mp4_failed:
             print(f"  - {mp4}")
+        # Restore all files before returning
+        print("Restoring gallery files from git...")
+        git_checkout(all_resettable)
         return 1
+
+    # Restore source files that may have been modified during demos
+    # (e.g., shrinkray reducing hello.py), but NOT outputs which we just generated
+    source_paths = get_resettable_gallery_paths(tapes, include_outputs=False)
+    print("Restoring gallery source files from git...")
+    git_checkout(source_paths)
 
     print(f"\nSuccessfully updated {len(updates_needed)} GIF(s)")
     return 0

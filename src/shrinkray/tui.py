@@ -499,22 +499,39 @@ class OutputPreview(Static):
     last_return_code: reactive[int | None] = reactive(None)
     _last_update_time: float = 0.0
     _last_seen_test_id: int | None = None  # Track last test ID for "completed" message
+    # Pending updates that haven't been applied yet (due to throttling)
+    _pending_content: str = ""
+    _pending_test_id: int | None = None
+    _pending_return_code: int | None = None
+    # Track if we've ever seen any output (once true, never show "No test output yet...")
+    _has_seen_output: bool = False
 
     def update_output(
         self, content: str, test_id: int | None, return_code: int | None = None
     ) -> None:
-        # Throttle updates to every 200ms
+        # Only update pending content if there's actual content to show
+        # This prevents switching to empty output when we have previous output
+        if content:
+            self._pending_content = content
+            self._has_seen_output = True
+        self._pending_test_id = test_id
+        if return_code is not None:
+            self._pending_return_code = return_code
+
+        # Throttle display updates to every 200ms
         now = time.time()
         if now - self._last_update_time < 0.2:
             return
 
         self._last_update_time = now
-        self.output_content = content
+        # Only update output_content if we have new content
+        if self._pending_content:
+            self.output_content = self._pending_content
         # Track the last test ID we've seen (for showing in "completed" message)
-        if test_id is not None:
-            self._last_seen_test_id = test_id
-        self.active_test_id = test_id
-        self.last_return_code = return_code
+        if self._pending_test_id is not None:
+            self._last_seen_test_id = self._pending_test_id
+        self.active_test_id = self._pending_test_id
+        self.last_return_code = self._pending_return_code
         self.refresh(layout=True)
 
     def _get_available_lines(self) -> int:
@@ -540,8 +557,8 @@ class OutputPreview(Static):
                 header = f"[dim]Test #{self._last_seen_test_id} exited with code {self.last_return_code}[/dim]"
             else:
                 header = f"[dim]Test #{self._last_seen_test_id} completed[/dim]"
-        elif self.output_content:
-            # Have output but no test ID - just show output without header
+        elif self._has_seen_output or self.output_content:
+            # Have seen output before - show without header
             header = ""
         else:
             header = "[dim]No test output yet...[/dim]"
@@ -640,8 +657,10 @@ class ExpandedBoxModal(ModalScreen[None]):
         text-align: center;
         text-style: bold;
         height: auto;
+        width: 100%;
         border-bottom: solid $primary;
-        padding: 1 0;
+        padding: 0;
+        margin-bottom: 1;
     }
 
     ExpandedBoxModal VerticalScroll {
@@ -748,21 +767,33 @@ class ExpandedBoxModal(ModalScreen[None]):
         elif self._content_widget_id == "output-container":
             try:
                 output_preview = app.query_one("#output-preview", OutputPreview)
-                raw_content = output_preview.output_content
-                if raw_content:
-                    # Show a header similar to the main view
-                    test_id = output_preview._last_seen_test_id
+                # Use pending values (most recent) rather than throttled values
+                raw_content = output_preview._pending_content or output_preview.output_content
+                test_id = output_preview._last_seen_test_id
+                if output_preview._pending_test_id is not None:
+                    test_id = output_preview._pending_test_id
+                return_code = output_preview._pending_return_code
+                if return_code is None:
                     return_code = output_preview.last_return_code
-                    if output_preview.active_test_id is not None:
-                        header = f"[green]Test #{output_preview.active_test_id} running...[/green]\n\n"
-                    elif test_id is not None:
-                        if return_code is not None:
-                            header = f"[dim]Test #{test_id} exited with code {return_code}[/dim]\n\n"
-                        else:
-                            header = f"[dim]Test #{test_id} completed[/dim]\n\n"
+                active_test_id = output_preview._pending_test_id if output_preview._pending_test_id is not None else output_preview.active_test_id
+                has_seen_output = output_preview._has_seen_output
+
+                # Build header
+                if active_test_id is not None:
+                    header = f"[green]Test #{active_test_id} running...[/green]\n\n"
+                elif test_id is not None:
+                    if return_code is not None:
+                        header = f"[dim]Test #{test_id} exited with code {return_code}[/dim]\n\n"
                     else:
-                        header = ""
+                        header = f"[dim]Test #{test_id} completed[/dim]\n\n"
+                else:
+                    header = ""
+
+                if raw_content:
                     content = header + raw_content
+                elif has_seen_output or test_id is not None:
+                    # We've seen output before - show header only (no "No test output" message)
+                    content = header.rstrip("\n") if header else ""
                 else:
                     content = "[dim]No test output yet...[/dim]"
             except Exception:

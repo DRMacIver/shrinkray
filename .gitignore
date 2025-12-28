@@ -15,8 +15,7 @@ __pycache__/
 scratch
 .venv*
 # Claude Code - ignore settings but keep commands
-.claude/*
-!.claude/commands/
+.claude/settings.local.json
 snapshot_report.html
 .DS_Store
 *.bak

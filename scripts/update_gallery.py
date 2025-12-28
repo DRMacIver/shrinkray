@@ -40,6 +40,18 @@ def get_content_hash(path: Path) -> str:
     return content_hash
 
 
+def get_remote_url() -> str:
+    """Get the remote URL for origin."""
+    result = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Failed to get origin URL")
+    return result.stdout.strip()
+
+
 def get_gh_pages_checkout() -> Path:
     """Get or create a gh-pages checkout in .cache directory.
 
@@ -49,7 +61,15 @@ def get_gh_pages_checkout() -> Path:
     cache_dir.mkdir(exist_ok=True)
     gh_pages_dir = cache_dir / "gh-pages"
 
+    remote_url = get_remote_url()
+
     if gh_pages_dir.exists():
+        # Ensure remote URL is correct (may have been cloned locally)
+        subprocess.run(
+            ["git", "remote", "set-url", "origin", remote_url],
+            cwd=gh_pages_dir,
+            capture_output=True,
+        )
         # Update existing checkout
         subprocess.run(
             ["git", "fetch", "origin", "gh-pages"],
@@ -62,7 +82,7 @@ def get_gh_pages_checkout() -> Path:
             capture_output=True,
         )
     else:
-        # Clone gh-pages branch into cache
+        # Clone locally (fast) then update remote to point to GitHub
         result = subprocess.run(
             [
                 "git",
@@ -70,8 +90,6 @@ def get_gh_pages_checkout() -> Path:
                 "--branch",
                 "gh-pages",
                 "--single-branch",
-                "--depth",
-                "1",
                 ".",
                 str(gh_pages_dir),
             ],
@@ -80,6 +98,13 @@ def get_gh_pages_checkout() -> Path:
         if result.returncode != 0:
             print(f"Failed to clone gh-pages: {result.stderr.decode()}")
             raise RuntimeError("Failed to clone gh-pages branch")
+
+        # Update origin to point to the actual remote
+        subprocess.run(
+            ["git", "remote", "set-url", "origin", remote_url],
+            cwd=gh_pages_dir,
+            capture_output=True,
+        )
 
     return gh_pages_dir
 

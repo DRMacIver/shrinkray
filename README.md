@@ -38,10 +38,7 @@ shrinkray (or any other test-case reducer) then systematically tries smaller and
 
 While it runs, you will see the following user interface:
 
-<video autoplay loop muted playsinline poster="gallery/enterprise-hello/hello.png">
-  <source src="assets/hello.mp4" type="video/mp4">
-  <img src="gallery/enterprise-hello/hello.png" alt="Demo of shrink ray running">
-</video>
+![Demo of shrink ray running](gallery/enterprise-hello/hello.gif)
 
 (This is a toy example based on reducing a ridiculously bad version of hello world)
 

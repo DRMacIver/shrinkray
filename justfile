@@ -8,12 +8,11 @@ install:
 
 # Run tests with coverage enforcement (skips slow tests when no args given)
 test *args: install
-    uv run coverage run -m pytest {{ if args == "" { "tests  -m 'not slow' --durations=10" } else { args } }}
-    {{ if args == "" { "uv run coverage report" } else { "" } }}
+    {{ if args == "" { "uv run pytest tests -n auto -m 'not slow and not serial' --durations=10 --cov --cov-report= && uv run pytest tests -n 0 -m 'serial and not slow' --cov --cov-append --cov-report=term-missing --cov-fail-under=100" } else { "uv run pytest " + args } }}
 
 # Run tests without coverage (faster for development)
 test-quick *args: install
-    uv run python -m pytest tests/ {{ args }}
+    uv run pytest tests/ -n auto {{ args }}
 
 # Lint and type-check
 lint: install

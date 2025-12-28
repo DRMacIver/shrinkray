@@ -480,8 +480,11 @@ async def test_worker_emit_progress_updates_loop():
 
 
 # === Integration tests with real files ===
+# These tests run actual bash scripts with tight timeouts, so they need to run
+# sequentially to avoid timeout failures under parallel load.
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_single_file(tmp_path):
     """Test _start_reduction with a real single file."""
     # Create a test file
@@ -554,6 +557,7 @@ async def test_worker_start_reduction_skip_validation(tmp_path):
     assert worker.problem is not None
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_directory(tmp_path):
     """Test _start_reduction with a directory."""
     # Create a test directory with files
@@ -804,6 +808,7 @@ def test_worker_get_content_preview_decode_exception():
     assert hex_mode is True
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_with_clang_delta(tmp_path):
     """Test _start_reduction with a C file and clang_delta enabled."""
 
@@ -843,6 +848,7 @@ async def test_worker_start_reduction_with_clang_delta(tmp_path):
     assert worker.running is True
 
 
+@pytest.mark.serial
 async def test_worker_full_run_with_mock(tmp_path):
     """Test the full run() method with mocked reducer."""
     # Create a test file
@@ -907,6 +913,7 @@ def test_worker_main_guard():
     assert hasattr(shrinkray.subprocess.worker, "main")
 
 
+@pytest.mark.serial
 async def test_worker_run_waits_for_start(tmp_path):
     """Test that run() waits for start command before proceeding."""
     # Create a test file
@@ -973,6 +980,7 @@ async def test_worker_run_waits_for_start(tmp_path):
     assert b"started" in output.data
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_clang_delta_not_found(tmp_path):
     """Test _start_reduction when find_clang_delta returns empty string."""
     # Create a C file
@@ -1005,6 +1013,7 @@ async def test_worker_start_reduction_clang_delta_not_found(tmp_path):
     # The test passes because we successfully started reduction
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_clang_delta_found(tmp_path):
     """Test _start_reduction when find_clang_delta returns a path."""
     # Create a C file
@@ -1039,6 +1048,7 @@ async def test_worker_start_reduction_clang_delta_found(tmp_path):
     mock_clang_delta.assert_called_once_with("/fake/clang_delta")
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_clang_delta_path_provided(tmp_path):
     """Test _start_reduction when clang_delta path is provided directly."""
     # Create a C file

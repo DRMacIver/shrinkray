@@ -57,9 +57,9 @@ class ProgressUpdate:
     disabled_passes: list[str] = field(default_factory=list)
     # Test output preview (last 4KB of current/recent test output)
     test_output_preview: str = ""
-    # Currently running test ID (None if no test running)
+    # Test ID of the output being displayed (None if no output yet)
     active_test_id: int | None = None
-    # Return code of most recently completed test (None if no completed test yet)
+    # Return code of the displayed test (None if test is still running)
     last_test_return_code: int | None = None
     # New size history entries since last update: list of (runtime_seconds, size)
     # Client should accumulate these over time

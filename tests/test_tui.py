@@ -512,6 +512,15 @@ def test_get_percentage_axis_bounds_very_low():
     assert lower < 0.1
 
 
+def test_get_percentage_axis_bounds_extremely_low():
+    """Test percentage bounds when below 0.01% (extreme reductions)."""
+    lower, _, labels = _get_percentage_axis_bounds(0.005, 100)
+    # Should extend below 0.01%
+    assert lower < 0.005
+    # Should have labels for very small percentages
+    assert any("%" in label for label in labels)
+
+
 # === OutputPreview tests ===
 
 
@@ -533,13 +542,13 @@ def test_output_preview_render_with_active_test():
 
 
 def test_output_preview_render_completed_test():
-    """Test OutputPreview render with completed test (no active test ID)."""
+    """Test OutputPreview render with completed test (has return code)."""
     widget = OutputPreview()
     widget.output_content = "Final output"
-    widget.active_test_id = None
-    widget._last_seen_test_id = 42  # Last test that was running
+    widget.active_test_id = 42
+    widget.last_return_code = 0  # Completed with success
     rendered = widget.render()
-    assert "Test #42 completed" in rendered
+    assert "Test #42 exited with code 0" in rendered
     assert "Final output" in rendered
 
 
@@ -547,20 +556,18 @@ def test_output_preview_render_completed_test_with_return_code():
     """Test OutputPreview render shows return code when available."""
     widget = OutputPreview()
     widget.output_content = "Final output"
-    widget.active_test_id = None
-    widget._last_seen_test_id = 42
-    widget.last_return_code = 1
+    widget.active_test_id = 42
+    widget.last_return_code = 1  # Completed with error
     rendered = widget.render()
     assert "Test #42 exited with code 1" in rendered
     assert "Final output" in rendered
 
 
 def test_output_preview_render_has_seen_output_no_header():
-    """Test OutputPreview render shows no header when has seen output before but no active/last test."""
+    """Test OutputPreview render shows no header when has seen output before but no test ID."""
     widget = OutputPreview()
     widget.output_content = "Some output"
     widget.active_test_id = None
-    widget._last_seen_test_id = None
     widget._has_seen_output = True  # We've seen output before
     rendered = widget.render()
     # Should have content but no header
@@ -1282,33 +1289,33 @@ def test_expanded_modal_stores_file_path():
     assert modal._file_path == "/path/to/file"
 
 
-def test_expanded_modal_read_file_with_retry_success(tmp_path):
-    """Test _read_file_with_retry reads file successfully."""
+def test_expanded_modal_read_file_success(tmp_path):
+    """Test _read_file reads file successfully."""
     test_file = tmp_path / "test.txt"
     test_file.write_text("Hello World")
 
     modal = ExpandedBoxModal("Test", "content-container")
-    content = modal._read_file_with_retry(str(test_file))
+    content = modal._read_file(str(test_file))
     assert content == "Hello World"
 
 
-def test_expanded_modal_read_file_with_retry_binary(tmp_path):
-    """Test _read_file_with_retry falls back to hex for binary content."""
+def test_expanded_modal_read_file_binary(tmp_path):
+    """Test _read_file falls back to hex for binary content."""
     test_file = tmp_path / "test.bin"
     # Use bytes that are invalid UTF-8 to trigger the hex fallback
     test_file.write_bytes(b"\x80\x81\x82\x83")
 
     modal = ExpandedBoxModal("Test", "content-container")
-    content = modal._read_file_with_retry(str(test_file))
+    content = modal._read_file(str(test_file))
     assert "Binary content" in content
     assert "80818283" in content
 
 
-def test_expanded_modal_read_file_with_retry_missing(tmp_path):
-    """Test _read_file_with_retry raises OSError for missing file."""
+def test_expanded_modal_read_file_missing(tmp_path):
+    """Test _read_file raises OSError for missing file."""
     modal = ExpandedBoxModal("Test", "content-container")
     with pytest.raises(OSError):
-        modal._read_file_with_retry(str(tmp_path / "nonexistent.txt"))
+        modal._read_file(str(tmp_path / "nonexistent.txt"))
 
 
 # === ExpandedBoxModal integration tests ===
@@ -5200,9 +5207,9 @@ def test_expanded_modal_output_with_return_code():
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Set output preview state directly
+                # Set output preview state directly - completed with error
                 output_preview = app.query_one("#output-preview", OutputPreview)
-                output_preview._last_seen_test_id = 42
+                output_preview.active_test_id = 42
                 output_preview.last_return_code = 1
                 output_preview.output_content = "some output"
 
@@ -5226,8 +5233,8 @@ def test_expanded_modal_output_with_return_code():
     asyncio.run(run())
 
 
-def test_expanded_modal_output_without_return_code():
-    """Test output modal displays 'completed' when test_id is set but no return_code."""
+def test_expanded_modal_output_running():
+    """Test output modal displays 'running' when test is still in progress."""
 
     async def run():
         fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
@@ -5247,10 +5254,11 @@ def test_expanded_modal_output_without_return_code():
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Set output preview state with test_id but no return_code
+                # Set output preview state - running (no return code)
                 output_preview = app.query_one("#output-preview", OutputPreview)
-                output_preview._last_seen_test_id = 42
+                output_preview.active_test_id = 42
                 output_preview.last_return_code = None
+                output_preview.output_content = "some output"
                 output_preview._has_seen_output = True
 
                 # Create modal for output-container
@@ -5258,11 +5266,11 @@ def test_expanded_modal_output_without_return_code():
                 await app.push_screen(modal)
                 await pilot.pause()
 
-                # Check that completed message is shown
+                # Check that running message is shown
                 content = modal.query_one("#expanded-content", Static)
                 content_str = get_static_content(content)
                 assert "Test #42" in content_str
-                assert "completed" in content_str
+                assert "running" in content_str
 
                 await pilot.press("escape")
                 await pilot.press("q")
@@ -5294,9 +5302,9 @@ def test_expanded_modal_output_with_empty_content_and_header():
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Set output preview state with test_id and return_code but no content
+                # Set output preview state - completed with return code but no content
                 output_preview = app.query_one("#output-preview", OutputPreview)
-                output_preview._last_seen_test_id = 42
+                output_preview.active_test_id = 42
                 output_preview.last_return_code = 0
                 output_preview._has_seen_output = True
                 output_preview.output_content = ""

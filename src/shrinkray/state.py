@@ -122,26 +122,13 @@ class OutputCaptureManager:
         except OSError:
             return False
 
-    def _should_show_completed(self) -> tuple[int, str] | None:
-        """Check if we should show a completed test's output.
+    def get_current_output(self) -> tuple[str | None, int | None, int | None]:
+        """Get the current output to display.
 
-        Note: This method is only called when there are no active tests.
-        It returns the completed test info if within the display window
-        (min_display_seconds + grace_period).
-        """
-        if not self._completed_outputs:
-            return None
-        test_id, file_path, completion_time, _ = self._completed_outputs[-1]
-        elapsed = time.time() - completion_time
-
-        # Show completed test during the full display window
-        if elapsed < self.min_display_seconds + self.grace_period_seconds:
-            return test_id, file_path
-
-        return None
-
-    def get_current_output_path(self) -> str | None:
-        """Get the most relevant output file path.
+        Returns (file_path, test_id, return_code) where:
+        - file_path: path to the output file to display
+        - test_id: the test ID (for display in header)
+        - return_code: the return code (None if test is still running)
 
         Active tests take priority only if they have produced output.
         Otherwise, shows recently completed test output for min_display_seconds,
@@ -152,35 +139,17 @@ class OutputCaptureManager:
             max_id = max(self._active_outputs.keys())
             active_path = self._active_outputs[max_id]
             if self._file_has_content(active_path):
-                return active_path
+                # Active test with output - no return code yet
+                return active_path, max_id, None
             # Active test has no output yet - fall through to show previous output
-        # Then check for recently completed test that should stay visible
-        recent = self._should_show_completed()
-        if recent is not None:
-            return recent[1]
-        # Fall back to most recent completed (even if past display window)
+
+        # Check for recently completed test that should stay visible,
+        # or fall back to most recent completed (even if past display window)
         if self._completed_outputs:
-            return self._completed_outputs[-1][1]
-        return None
+            test_id, file_path, _, return_code = self._completed_outputs[-1]
+            return file_path, test_id, return_code
 
-    def get_active_test_id(self) -> int | None:
-        """Get the currently running test ID, if any.
-
-        Returns the active test ID if one is running AND has produced output.
-        This ensures the UI doesn't flash briefly to an empty test.
-        """
-        if self._active_outputs:
-            max_id = max(self._active_outputs.keys())
-            active_path = self._active_outputs[max_id]
-            if self._file_has_content(active_path):
-                return max_id
-        return None
-
-    def get_last_return_code(self) -> int | None:
-        """Get the return code of the most recently completed test."""
-        if self._completed_outputs:
-            return self._completed_outputs[-1][3]
-        return None
+        return None, None, None
 
     def cleanup_all(self) -> None:
         """Clean up all output files (called on shutdown)."""

@@ -310,17 +310,20 @@ class ReducerWorker:
         return Response(id=request_id, error="Reducer does not support pass control")
 
     def _get_test_output_preview(self) -> tuple[str, int | None, int | None]:
-        """Get preview of current test output, active test ID, and last return code."""
+        """Get preview of current test output, test ID, and return code.
+
+        Returns (content, test_id, return_code) where:
+        - content: the last 4KB of the output file
+        - test_id: the test ID being displayed
+        - return_code: None if test is still running, otherwise the exit code
+        """
         if self.state is None or self.state.output_manager is None:
             return "", None, None
 
-        manager = self.state.output_manager
-        active_test_id = manager.get_active_test_id()
-        output_path = manager.get_current_output_path()
-        last_return_code = manager.get_last_return_code()
+        output_path, test_id, return_code = self.state.output_manager.get_current_output()
 
         if output_path is None:
-            return "", active_test_id, last_return_code
+            return "", None, None
 
         # Read last 4KB of file
         try:
@@ -334,11 +337,11 @@ class ReducerWorker:
                 data = f.read()
             return (
                 data.decode("utf-8", errors="replace"),
-                active_test_id,
-                last_return_code,
+                test_id,
+                return_code,
             )
         except OSError:
-            return "", active_test_id, last_return_code
+            return "", test_id, return_code
 
     def _get_content_preview(self) -> tuple[str, bool]:
         """Get a preview of the current test case content."""

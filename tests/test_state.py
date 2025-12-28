@@ -2011,23 +2011,29 @@ def test_output_manager_allocate_and_mark_completed(tmp_path):
     assert test_id2 == 1
     assert path1 != path2
 
-    # Write content to files (get_active_test_id only returns ID for files with content)
+    # Write content to files (get_current_output only returns info for files with content)
     Path(path1).write_text("test1 output")
     Path(path2).write_text("test2 output")
 
-    # Both should be active
-    assert manager.get_active_test_id() == 1  # Most recent
-    assert manager.get_current_output_path() == path2  # Most recent active
+    # Both should be active - get_current_output returns (path, test_id, return_code)
+    output_path, test_id, return_code = manager.get_current_output()
+    assert test_id == 1  # Most recent
+    assert output_path == path2  # Most recent active
+    assert return_code is None  # Still running
 
     # Mark the first one completed
     manager.mark_completed(test_id1)
-    assert manager.get_active_test_id() == 1  # Still have one active
-    assert manager.get_current_output_path() == path2
+    output_path, test_id, return_code = manager.get_current_output()
+    assert test_id == 1  # Still have one active
+    assert output_path == path2
+    assert return_code is None  # Still running
 
     # Mark the second one completed
     manager.mark_completed(test_id2)
-    assert manager.get_active_test_id() is None  # No more active
-    assert manager.get_current_output_path() == path2  # Most recent completed
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path2  # Most recent completed
+    assert test_id == 1
+    assert return_code == 0  # Completed
 
 
 def test_output_manager_mark_completed_unknown_id(tmp_path):
@@ -2035,13 +2041,18 @@ def test_output_manager_mark_completed_unknown_id(tmp_path):
     manager = OutputCaptureManager(output_dir=str(tmp_path))
     # Should not raise - just no-op
     manager.mark_completed(999)
-    assert manager.get_active_test_id() is None
+    output_path, test_id, _ = manager.get_current_output()
+    assert output_path is None
+    assert test_id is None
 
 
-def test_output_manager_get_current_output_path_none(tmp_path):
-    """Test get_current_output_path when nothing allocated."""
+def test_output_manager_get_current_output_none(tmp_path):
+    """Test get_current_output when nothing allocated."""
     manager = OutputCaptureManager(output_dir=str(tmp_path))
-    assert manager.get_current_output_path() is None
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path is None
+    assert test_id is None
+    assert return_code is None
 
 
 def test_output_manager_cleanup_old_files(tmp_path):
@@ -2135,15 +2146,19 @@ def test_output_manager_active_test_takes_priority(tmp_path):
         f.write("output2")
 
     # Active test should take priority over recently completed
-    assert manager.get_current_output_path() == path2
-    assert manager.get_active_test_id() == test_id2
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path2
+    assert test_id == test_id2
+    assert return_code is None  # Still running
 
     # Complete the second test
     manager.mark_completed(test_id2)
 
     # Now should show the most recently completed test
-    assert manager.get_current_output_path() == path2
-    assert manager.get_active_test_id() is None
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path2
+    assert test_id == test_id2
+    assert return_code == 0  # Completed
 
 
 def test_output_manager_display_window_no_new_test(tmp_path):
@@ -2158,23 +2173,27 @@ def test_output_manager_display_window_no_new_test(tmp_path):
         f.write("output1")
     manager.mark_completed(test_id1)
 
-    # Within display window: still shows path1, no active test
-    assert manager.get_current_output_path() == path1
-    assert manager.get_active_test_id() is None
+    # Within display window: still shows path1, completed test
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path1
+    assert test_id == test_id1
+    assert return_code == 0  # Completed
 
     # Wait for min_display_seconds but within grace period
     time.sleep(0.25)
 
     # Still within grace period (0.2 + 0.2 = 0.4s total), should still show completed
-    assert manager.get_current_output_path() == path1
-    assert manager.get_active_test_id() is None
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path1
+    assert return_code == 0  # Still completed
 
     # Wait for grace period to expire
     time.sleep(0.2)
 
-    # After full window: still shows path1 (fallback), still no active test
-    assert manager.get_current_output_path() == path1
-    assert manager.get_active_test_id() is None
+    # After full window: still shows path1 (fallback), still completed
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path1
+    assert return_code == 0
 
 
 def test_output_manager_grace_period_with_new_test(tmp_path):
@@ -2193,8 +2212,9 @@ def test_output_manager_grace_period_with_new_test(tmp_path):
     time.sleep(0.2)
 
     # Should still show completed (in grace period, no active test)
-    assert manager.get_current_output_path() == path1
-    assert manager.get_active_test_id() is None
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path1
+    assert return_code == 0  # Completed
 
     # Start a new test during grace period
     test_id2, path2 = manager.allocate_output_file()
@@ -2202,8 +2222,10 @@ def test_output_manager_grace_period_with_new_test(tmp_path):
         f.write("output2")
 
     # New active test should take priority immediately
-    assert manager.get_current_output_path() == path2
-    assert manager.get_active_test_id() == test_id2
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path2
+    assert test_id == test_id2
+    assert return_code is None  # Still running
 
 
 def test_output_manager_empty_active_file_shows_completed(tmp_path):
@@ -2221,24 +2243,29 @@ def test_output_manager_empty_active_file_shows_completed(tmp_path):
     # File exists but is empty (or doesn't exist yet)
 
     # Should still show completed test because active has no content
-    assert manager.get_current_output_path() == path1
-    assert manager.get_active_test_id() is None  # No active with content
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path1
+    assert test_id == test_id1
+    assert return_code == 0  # Showing completed test
 
     # Now write content to the active test
     with open(path2, "w") as f:
         f.write("output2")
 
     # Active test with content should take priority
-    assert manager.get_current_output_path() == path2
-    assert manager.get_active_test_id() == test_id2
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path2
+    assert test_id == test_id2
+    assert return_code is None  # Still running
 
 
 def test_output_manager_return_code(tmp_path):
-    """Test that return codes are tracked correctly."""
+    """Test that return codes are tracked correctly with the displayed output."""
     manager = OutputCaptureManager(output_dir=str(tmp_path))
 
     # No completed tests yet
-    assert manager.get_last_return_code() is None
+    output_path, test_id, return_code = manager.get_current_output()
+    assert return_code is None
 
     # Complete a test with return code
     test_id1, path1 = manager.allocate_output_file()
@@ -2246,7 +2273,10 @@ def test_output_manager_return_code(tmp_path):
         f.write("output1")
     manager.mark_completed(test_id1, return_code=42)
 
-    assert manager.get_last_return_code() == 42
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path1
+    assert test_id == test_id1
+    assert return_code == 42
 
     # Complete another test with different return code
     test_id2, path2 = manager.allocate_output_file()
@@ -2254,4 +2284,8 @@ def test_output_manager_return_code(tmp_path):
         f.write("output2")
     manager.mark_completed(test_id2, return_code=0)
 
-    assert manager.get_last_return_code() == 0
+    # Now shows the most recent completed test with its return code
+    output_path, test_id, return_code = manager.get_current_output()
+    assert output_path == path2
+    assert test_id == test_id2
+    assert return_code == 0

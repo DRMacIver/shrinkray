@@ -20,6 +20,7 @@ from textual.theme import Theme
 from textual.widgets import DataTable, Footer, Header, Label, Static
 from textual_plotext import PlotextPlot
 
+from shrinkray.formatting import try_decode
 from shrinkray.subprocess.client import SubprocessClient
 from shrinkray.subprocess.protocol import (
     PassStatsData,
@@ -238,10 +239,12 @@ def _format_time_label(seconds: float) -> str:
 
 
 def _get_time_axis_bounds(current_time: float) -> tuple[float, list[float], list[str]]:
-    """Get stable x-axis bounds and tick values.
+    """Get stable x-axis bounds and labeled positions.
 
-    Returns (max_time, ticks, labels) where max_time is the stable right boundary,
-    ticks are the tick positions, and labels are the formatted labels.
+    Returns (max_time, positions, labels) where:
+    - max_time: the stable right boundary of the axis
+    - positions: numeric positions where axis labels should appear (e.g., [0, 60, 120])
+    - labels: formatted strings for each position (e.g., ["0s", "1m", "2m"])
 
     The axis only rescales when current_time exceeds the current boundary.
     """
@@ -297,17 +300,24 @@ def _get_percentage_axis_bounds(
 ) -> tuple[float, list[float], list[str]]:
     """Get stable y-axis bounds for percentage values on log scale.
 
-    Returns (min_pct_bound, ticks, labels) where min_pct_bound is the stable lower
-    boundary, ticks are the log10 tick positions, and labels are percentage strings.
+    Returns (min_pct_bound, positions, labels) where:
+    - min_pct_bound: the stable lower boundary of the axis
+    - positions: log10 positions where axis labels should appear
+    - labels: formatted percentage strings for each position
 
     The axis only rescales when min_pct gets close to the current lower boundary.
     """
     # Standard percentage boundaries (log scale friendly)
-    boundaries = [100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01]
+    # Extended to handle very small reductions (below 0.01%)
+    boundaries = [
+        100, 50, 20, 10, 5, 2, 1,
+        0.5, 0.2, 0.1, 0.05, 0.02, 0.01,
+        0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001,
+    ]
 
     # Find the appropriate lower bound - use the first boundary below min_pct * 0.5
     # This gives us some room before we need to rescale
-    lower_bound = 0.01
+    lower_bound = boundaries[-1]  # Default to smallest boundary
     for b in boundaries:
         if b < min_pct * 0.5:
             lower_bound = b
@@ -318,8 +328,15 @@ def _get_percentage_axis_bounds(
     tick_pcts = [p for p in boundaries if p >= lower_bound and p <= 100]
 
     # Convert to log scale
-    ticks = [math.log10(max(0.01, p)) for p in tick_pcts]
-    labels = [f"{p}%" if p >= 1 else f"{p:.1f}%" for p in tick_pcts]
+    ticks = [math.log10(max(0.0001, p)) for p in tick_pcts]
+
+    # Format labels
+    labels = []
+    for p in tick_pcts:
+        if p >= 1:
+            labels.append(f"{p:.0f}%")
+        else:
+            labels.append(f"{p}%")
 
     return (lower_bound, ticks, labels)
 
@@ -498,7 +515,6 @@ class OutputPreview(Static):
     active_test_id: reactive[int | None] = reactive(None)
     last_return_code: reactive[int | None] = reactive(None)
     _last_update_time: float = 0.0
-    _last_seen_test_id: int | None = None  # Track last test ID for "completed" message
     # Pending updates that haven't been applied yet (due to throttling)
     _pending_content: str = ""
     _pending_test_id: int | None = None
@@ -515,8 +531,7 @@ class OutputPreview(Static):
             self._pending_content = content
             self._has_seen_output = True
         self._pending_test_id = test_id
-        if return_code is not None:
-            self._pending_return_code = return_code
+        self._pending_return_code = return_code
 
         # Throttle display updates to every 200ms
         now = time.time()
@@ -527,9 +542,6 @@ class OutputPreview(Static):
         # Only update output_content if we have new content
         if self._pending_content:
             self.output_content = self._pending_content
-        # Track the last test ID we've seen (for showing in "completed" message)
-        if self._pending_test_id is not None:
-            self._last_seen_test_id = self._pending_test_id
         self.active_test_id = self._pending_test_id
         self.last_return_code = self._pending_return_code
         self.refresh(layout=True)
@@ -549,14 +561,12 @@ class OutputPreview(Static):
         return 30
 
     def render(self) -> str:
-        # Header line
-        if self.active_test_id is not None:
+        # Header line - use return_code to determine if test is running
+        # (return_code is None means still running, has value means completed)
+        if self.active_test_id is not None and self.last_return_code is None:
             header = f"[green]Test #{self.active_test_id} running...[/green]"
-        elif self._last_seen_test_id is not None:
-            if self.last_return_code is not None:
-                header = f"[dim]Test #{self._last_seen_test_id} exited with code {self.last_return_code}[/dim]"
-            else:
-                header = f"[dim]Test #{self._last_seen_test_id} completed[/dim]"
+        elif self.active_test_id is not None:
+            header = f"[dim]Test #{self.active_test_id} exited with code {self.last_return_code}[/dim]"
         elif self._has_seen_output or self.output_content:
             # Have seen output before - show without header
             header = ""
@@ -690,31 +700,15 @@ class ExpandedBoxModal(ModalScreen[None]):
         self._content_widget_id = content_widget_id
         self._file_path = file_path
 
-    def _read_file_with_retry(self, file_path: str, max_retries: int = 3) -> str:
-        """Read file content with retry for transient errors during reduction.
-
-        The file may be briefly unavailable while the reducer is writing a new
-        version. Retry a few times with a short delay to handle this.
-        """
-        last_error: OSError | None = None
-        for attempt in range(max_retries):
-            try:
-                with open(file_path, "rb") as f:
-                    raw_content = f.read()
-                # Try to decode as text, fall back to hex if binary
-                try:
-                    return raw_content.decode("utf-8")
-                except UnicodeDecodeError:
-                    return "[Binary content - hex display]\n\n" + raw_content.hex()
-            except OSError as e:
-                last_error = e
-                if attempt < max_retries - 1:
-                    time.sleep(0.05)  # 50ms delay between retries
-
-        # All retries failed - raise the last error to be caught by caller
-        # last_error is always set here since the loop runs at least once (max_retries >= 1)
-        assert last_error is not None
-        raise last_error
+    def _read_file(self, file_path: str) -> str:
+        """Read file content, decoding as text if possible."""
+        with open(file_path, "rb") as f:
+            raw_content = f.read()
+        # Try to decode as text, fall back to hex display if binary
+        encoding, text = try_decode(raw_content)
+        if encoding is not None:
+            return text
+        return "[Binary content - hex display]\n\n" + raw_content.hex()
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -750,7 +744,7 @@ class ExpandedBoxModal(ModalScreen[None]):
     def _get_file_content(self, app: "ShrinkRayApp") -> str:
         """Get content from file or preview widget."""
         if self._file_path:
-            return self._read_file_with_retry(self._file_path)
+            return self._read_file(self._file_path)
         content_previews = list(app.query("#content-preview").results(ContentPreview))
         if not content_previews:
             return "Content preview not available"
@@ -765,29 +759,23 @@ class ExpandedBoxModal(ModalScreen[None]):
 
         # Use pending values (most recent) rather than throttled values
         raw_content = output_preview._pending_content or output_preview.output_content
-        test_id = output_preview._last_seen_test_id
-        if output_preview._pending_test_id is not None:
-            test_id = output_preview._pending_test_id
-        return_code = output_preview._pending_return_code
-        if return_code is None:
-            return_code = output_preview.last_return_code
-        active_test_id = (
+        test_id = (
             output_preview._pending_test_id
             if output_preview._pending_test_id is not None
             else output_preview.active_test_id
         )
+        return_code = (
+            output_preview._pending_return_code
+            if output_preview._pending_return_code is not None
+            else output_preview.last_return_code
+        )
         has_seen_output = output_preview._has_seen_output
 
-        # Build header
-        if active_test_id is not None:
-            header = f"[green]Test #{active_test_id} running...[/green]\n\n"
+        # Build header - return_code is None means test is still running
+        if test_id is not None and return_code is None:
+            header = f"[green]Test #{test_id} running...[/green]\n\n"
         elif test_id is not None:
-            if return_code is not None:
-                header = (
-                    f"[dim]Test #{test_id} exited with code {return_code}[/dim]\n\n"
-                )
-            else:
-                header = f"[dim]Test #{test_id} completed[/dim]\n\n"
+            header = f"[dim]Test #{test_id} exited with code {return_code}[/dim]\n\n"
         else:
             header = ""
 

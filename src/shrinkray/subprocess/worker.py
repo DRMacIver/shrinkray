@@ -162,9 +162,9 @@ class ReducerWorker:
             find_clang_delta,
         )
         from shrinkray.state import (
+            OutputCaptureManager,
             ShrinkRayDirectoryState,
             ShrinkRayStateSingleFile,
-            TestOutputManager,
         )
         from shrinkray.work import Volume
 
@@ -218,7 +218,7 @@ class ReducerWorker:
 
         # Create output manager for test output capture (always enabled for TUI)
         self._output_dir = tempfile.mkdtemp(prefix="shrinkray-output-")
-        self.state.output_manager = TestOutputManager(output_dir=self._output_dir)
+        self.state.output_manager = OutputCaptureManager(output_dir=self._output_dir)
 
         self.problem = self.state.problem
         self.reducer = self.state.reducer

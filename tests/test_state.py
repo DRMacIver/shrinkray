@@ -12,9 +12,9 @@ from shrinkray.cli import InputType
 from shrinkray.problem import InvalidInitialExample, shortlex
 from shrinkray.state import (
     DYNAMIC_TIMEOUT_MIN,
+    OutputCaptureManager,
     ShrinkRayDirectoryState,
     ShrinkRayStateSingleFile,
-    TestOutputManager,
     TimeoutExceededOnInitial,
     sort_key_for_initial,
 )
@@ -1995,13 +1995,13 @@ async def test_volume_debug_inherits_stderr(tmp_path):
     assert exit_code == 0
 
 
-# === TestOutputManager tests ===
+# === OutputCaptureManager tests ===
 
 
 def test_output_manager_allocate_and_mark_completed(tmp_path):
     """Test allocating output files and marking them completed."""
     # Use min_display_seconds=0 to test basic behavior without display window
-    manager = TestOutputManager(output_dir=str(tmp_path), min_display_seconds=0)
+    manager = OutputCaptureManager(output_dir=str(tmp_path), min_display_seconds=0)
 
     # Allocate some files
     test_id1, path1 = manager.allocate_output_file()
@@ -2032,7 +2032,7 @@ def test_output_manager_allocate_and_mark_completed(tmp_path):
 
 def test_output_manager_mark_completed_unknown_id(tmp_path):
     """Test marking an unknown test_id as completed (no-op)."""
-    manager = TestOutputManager(output_dir=str(tmp_path))
+    manager = OutputCaptureManager(output_dir=str(tmp_path))
     # Should not raise - just no-op
     manager.mark_completed(999)
     assert manager.get_active_test_id() is None
@@ -2040,13 +2040,13 @@ def test_output_manager_mark_completed_unknown_id(tmp_path):
 
 def test_output_manager_get_current_output_path_none(tmp_path):
     """Test get_current_output_path when nothing allocated."""
-    manager = TestOutputManager(output_dir=str(tmp_path))
+    manager = OutputCaptureManager(output_dir=str(tmp_path))
     assert manager.get_current_output_path() is None
 
 
 def test_output_manager_cleanup_old_files(tmp_path):
     """Test cleanup of files older than max_age."""
-    manager = TestOutputManager(
+    manager = OutputCaptureManager(
         output_dir=str(tmp_path), max_files=100, max_age_seconds=0.1
     )
 
@@ -2073,7 +2073,7 @@ def test_output_manager_cleanup_old_files(tmp_path):
 
 def test_output_manager_cleanup_excess_files(tmp_path):
     """Test cleanup of excess files beyond max_files."""
-    manager = TestOutputManager(
+    manager = OutputCaptureManager(
         output_dir=str(tmp_path), max_files=3, max_age_seconds=3600
     )
 
@@ -2090,7 +2090,7 @@ def test_output_manager_cleanup_excess_files(tmp_path):
 
 def test_output_manager_cleanup_all(tmp_path):
     """Test cleanup_all removes all files."""
-    manager = TestOutputManager(output_dir=str(tmp_path))
+    manager = OutputCaptureManager(output_dir=str(tmp_path))
 
     # Allocate some files (some active, some completed)
     test_id1, path1 = manager.allocate_output_file()
@@ -2116,12 +2116,12 @@ def test_output_manager_cleanup_all(tmp_path):
 def test_output_manager_safe_delete_nonexistent(tmp_path):
     """Test _safe_delete doesn't crash on nonexistent files."""
     # Should not raise
-    TestOutputManager._safe_delete(str(tmp_path / "nonexistent.log"))
+    OutputCaptureManager._safe_delete(str(tmp_path / "nonexistent.log"))
 
 
 def test_output_manager_active_test_takes_priority(tmp_path):
     """Test that active tests always take priority over completed tests."""
-    manager = TestOutputManager(output_dir=str(tmp_path), min_display_seconds=0.5)
+    manager = OutputCaptureManager(output_dir=str(tmp_path), min_display_seconds=0.5)
 
     # Allocate and complete a test
     test_id1, path1 = manager.allocate_output_file()
@@ -2148,7 +2148,7 @@ def test_output_manager_active_test_takes_priority(tmp_path):
 
 def test_output_manager_display_window_no_new_test(tmp_path):
     """Test display window behavior when no new test starts."""
-    manager = TestOutputManager(
+    manager = OutputCaptureManager(
         output_dir=str(tmp_path), min_display_seconds=0.2, grace_period_seconds=0.2
     )
 
@@ -2179,7 +2179,7 @@ def test_output_manager_display_window_no_new_test(tmp_path):
 
 def test_output_manager_grace_period_with_new_test(tmp_path):
     """Test that new test starting during grace period is shown immediately."""
-    manager = TestOutputManager(
+    manager = OutputCaptureManager(
         output_dir=str(tmp_path), min_display_seconds=0.15, grace_period_seconds=0.3
     )
 
@@ -2208,7 +2208,7 @@ def test_output_manager_grace_period_with_new_test(tmp_path):
 
 def test_output_manager_empty_active_file_shows_completed(tmp_path):
     """Test that active tests without content don't take priority over completed tests."""
-    manager = TestOutputManager(output_dir=str(tmp_path), min_display_seconds=0.5)
+    manager = OutputCaptureManager(output_dir=str(tmp_path), min_display_seconds=0.5)
 
     # Allocate and complete a test with output
     test_id1, path1 = manager.allocate_output_file()
@@ -2235,7 +2235,7 @@ def test_output_manager_empty_active_file_shows_completed(tmp_path):
 
 def test_output_manager_return_code(tmp_path):
     """Test that return codes are tracked correctly."""
-    manager = TestOutputManager(output_dir=str(tmp_path))
+    manager = OutputCaptureManager(output_dir=str(tmp_path))
 
     # No completed tests yet
     assert manager.get_last_return_code() is None

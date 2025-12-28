@@ -57,7 +57,7 @@ def compute_dynamic_timeout(runtime: float) -> float:
 
 
 @define
-class TestOutputManager:
+class OutputCaptureManager:
     """Manages temporary files for test output capture.
 
     Allocates unique files for each test's stdout/stderr output,
@@ -233,7 +233,7 @@ class ShrinkRayState[TestCase](ABC):
     _last_debug_output: str = ""
 
     # Optional output manager for capturing test output (TUI mode)
-    output_manager: TestOutputManager | None = None
+    output_manager: OutputCaptureManager | None = None
 
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))

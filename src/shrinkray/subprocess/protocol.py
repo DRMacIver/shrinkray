@@ -185,5 +185,3 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
         command=data["command"],
         params=data.get("params", {}),
     )
-
-

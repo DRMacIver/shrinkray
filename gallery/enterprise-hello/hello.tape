@@ -19,21 +19,34 @@ Sleep 15s
 Right
 Sleep 500ms
 Enter
-Sleep 15s
+Sleep 2s
 Type "q"
+Sleep 5s
 Sleep 200ms
 Down
 Sleep 200ms
 Left
-Sleep 200ms
+Sleep 500ms
 Enter
 Sleep 1s
 Down
 Down
 Down
 Down
+Sleep 200ms
 Down
+Down
+Down
+Down
+Down
+Down
+Sleep 200ms
 Sleep 1s
+Up
+Up
+Up
+Sleep 500ms
+Up
 Up
 Up
 Sleep 1s

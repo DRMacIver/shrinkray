@@ -309,17 +309,18 @@ class ReducerWorker:
             return Response(id=request_id, result={"status": "skipped"})
         return Response(id=request_id, error="Reducer does not support pass control")
 
-    def _get_test_output_preview(self) -> tuple[str, int | None]:
-        """Get preview of current test output and active test ID."""
+    def _get_test_output_preview(self) -> tuple[str, int | None, int | None]:
+        """Get preview of current test output, active test ID, and last return code."""
         if self.state is None or self.state.output_manager is None:
-            return "", None
+            return "", None, None
 
         manager = self.state.output_manager
         active_test_id = manager.get_active_test_id()
         output_path = manager.get_current_output_path()
+        last_return_code = manager.get_last_return_code()
 
         if output_path is None:
-            return "", active_test_id
+            return "", active_test_id, last_return_code
 
         # Read last 4KB of file
         try:
@@ -331,9 +332,9 @@ class ReducerWorker:
                 else:
                     f.seek(0)
                 data = f.read()
-            return data.decode("utf-8", errors="replace"), active_test_id
+            return data.decode("utf-8", errors="replace"), active_test_id, last_return_code
         except OSError:
-            return "", active_test_id
+            return "", active_test_id, last_return_code
 
     def _get_content_preview(self) -> tuple[str, bool]:
         """Get a preview of the current test case content."""
@@ -461,7 +462,9 @@ class ReducerWorker:
             disabled_passes = []
 
         # Get test output preview
-        test_output_preview, active_test_id = self._get_test_output_preview()
+        test_output_preview, active_test_id, last_return_code = (
+            self._get_test_output_preview()
+        )
 
         # Get new size history entries since last update
         new_entries = self._size_history[self._last_sent_history_index :]
@@ -487,6 +490,7 @@ class ReducerWorker:
             disabled_passes=disabled_passes,
             test_output_preview=test_output_preview,
             active_test_id=active_test_id,
+            last_test_return_code=last_return_code,
             new_size_history=new_entries,
         )
 

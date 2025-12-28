@@ -59,6 +59,8 @@ class ProgressUpdate:
     test_output_preview: str = ""
     # Currently running test ID (None if no test running)
     active_test_id: int | None = None
+    # Return code of most recently completed test (None if no completed test yet)
+    last_test_return_code: int | None = None
     # New size history entries since last update: list of (runtime_seconds, size)
     # Client should accumulate these over time
     new_size_history: list[tuple[float, int]] = field(default_factory=list)
@@ -123,6 +125,7 @@ def serialize(msg: Request | Response | ProgressUpdate) -> str:
                 "disabled_passes": msg.disabled_passes,
                 "test_output_preview": msg.test_output_preview,
                 "active_test_id": msg.active_test_id,
+                "last_test_return_code": msg.last_test_return_code,
                 "new_size_history": msg.new_size_history,
             },
         }
@@ -173,6 +176,7 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
             disabled_passes=d.get("disabled_passes", []),
             test_output_preview=d.get("test_output_preview", ""),
             active_test_id=d.get("active_test_id"),
+            last_test_return_code=d.get("last_test_return_code"),
             new_size_history=[tuple(x) for x in d.get("new_size_history", [])],
         )
 

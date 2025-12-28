@@ -2,6 +2,7 @@
 
 import os
 import time
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -2010,6 +2011,10 @@ def test_output_manager_allocate_and_mark_completed(tmp_path):
     assert test_id2 == 1
     assert path1 != path2
 
+    # Write content to files (get_active_test_id only returns ID for files with content)
+    Path(path1).write_text("test1 output")
+    Path(path2).write_text("test2 output")
+
     # Both should be active
     assert manager.get_active_test_id() == 1  # Most recent
     assert manager.get_current_output_path() == path2  # Most recent active
@@ -2199,3 +2204,54 @@ def test_output_manager_grace_period_with_new_test(tmp_path):
     # New active test should take priority immediately
     assert manager.get_current_output_path() == path2
     assert manager.get_active_test_id() == test_id2
+
+
+def test_output_manager_empty_active_file_shows_completed(tmp_path):
+    """Test that active tests without content don't take priority over completed tests."""
+    manager = TestOutputManager(output_dir=str(tmp_path), min_display_seconds=0.5)
+
+    # Allocate and complete a test with output
+    test_id1, path1 = manager.allocate_output_file()
+    with open(path1, "w") as f:
+        f.write("output1")
+    manager.mark_completed(test_id1)
+
+    # Start a new test but don't write any content
+    test_id2, path2 = manager.allocate_output_file()
+    # File exists but is empty (or doesn't exist yet)
+
+    # Should still show completed test because active has no content
+    assert manager.get_current_output_path() == path1
+    assert manager.get_active_test_id() is None  # No active with content
+
+    # Now write content to the active test
+    with open(path2, "w") as f:
+        f.write("output2")
+
+    # Active test with content should take priority
+    assert manager.get_current_output_path() == path2
+    assert manager.get_active_test_id() == test_id2
+
+
+def test_output_manager_return_code(tmp_path):
+    """Test that return codes are tracked correctly."""
+    manager = TestOutputManager(output_dir=str(tmp_path))
+
+    # No completed tests yet
+    assert manager.get_last_return_code() is None
+
+    # Complete a test with return code
+    test_id1, path1 = manager.allocate_output_file()
+    with open(path1, "w") as f:
+        f.write("output1")
+    manager.mark_completed(test_id1, return_code=42)
+
+    assert manager.get_last_return_code() == 42
+
+    # Complete another test with different return code
+    test_id2, path2 = manager.allocate_output_file()
+    with open(path2, "w") as f:
+        f.write("output2")
+    manager.mark_completed(test_id2, return_code=0)
+
+    assert manager.get_last_return_code() == 0

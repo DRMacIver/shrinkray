@@ -1877,11 +1877,13 @@ def test_get_test_output_preview_no_output_path():
     manager = MagicMock()
     manager.get_active_test_id.return_value = 5
     manager.get_current_output_path.return_value = None
+    manager.get_last_return_code.return_value = None
     worker.state.output_manager = manager
 
-    preview, test_id = worker._get_test_output_preview()
+    preview, test_id, return_code = worker._get_test_output_preview()
     assert preview == ""
     assert test_id == 5
+    assert return_code is None
 
 
 def test_get_test_output_preview_large_file(tmp_path):
@@ -1897,10 +1899,12 @@ def test_get_test_output_preview_large_file(tmp_path):
     manager = MagicMock()
     manager.get_active_test_id.return_value = 10
     manager.get_current_output_path.return_value = str(output_file)
+    manager.get_last_return_code.return_value = 42
     worker.state.output_manager = manager
 
-    preview, test_id = worker._get_test_output_preview()
+    preview, test_id, return_code = worker._get_test_output_preview()
     assert test_id == 10
+    assert return_code == 42
     # Should get last 4KB
     assert len(preview.encode()) <= 4096
     assert "LAST PART" in preview
@@ -1914,8 +1918,10 @@ def test_get_test_output_preview_file_read_error():
     manager = MagicMock()
     manager.get_active_test_id.return_value = 3
     manager.get_current_output_path.return_value = "/nonexistent/path/file.log"
+    manager.get_last_return_code.return_value = 1
     worker.state.output_manager = manager
 
-    preview, test_id = worker._get_test_output_preview()
+    preview, test_id, return_code = worker._get_test_output_preview()
     assert preview == ""
     assert test_id == 3
+    assert return_code == 1

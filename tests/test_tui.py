@@ -17,6 +17,7 @@ from shrinkray.subprocess.client import SubprocessClient
 from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
 from shrinkray.tui import (
     ContentPreview,
+    ExpandedBoxModal,
     HelpScreen,
     OutputPreview,
     PassStatsScreen,
@@ -1081,6 +1082,141 @@ def test_app_handles_exception_in_run_reduction():
                 mock_client.start.assert_called_once()
 
     run_async(run_test())
+
+
+# === Box navigation tests ===
+
+
+def test_box_containers_are_focusable():
+    """Test that all box containers can be focused."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[])
+        fake_client._completed = True
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            # Check all containers are focusable
+            for box_id in ["stats-container", "graph-container", "content-container", "output-container"]:
+                container = app.query_one(f"#{box_id}")
+                assert container.can_focus, f"{box_id} should be focusable"
+
+    run_async(run_test())
+
+
+def test_focus_navigation_actions_exist():
+    """Test that focus navigation action methods exist and are callable."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[])
+        fake_client._completed = True
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Verify the action methods exist
+            assert hasattr(app, "action_focus_up")
+            assert hasattr(app, "action_focus_down")
+            assert hasattr(app, "action_focus_left")
+            assert hasattr(app, "action_focus_right")
+            assert hasattr(app, "action_expand_box")
+
+            # Call them to ensure they don't error
+            app.action_focus_up()
+            app.action_focus_down()
+            app.action_focus_left()
+            app.action_focus_right()
+
+    run_async(run_test())
+
+
+def test_get_focused_box_index():
+    """Test that _get_focused_box_index returns correct indices."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[])
+        fake_client._completed = True
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            # Initial focus should be on stats-container (index 0)
+            assert app._get_focused_box_index() == 0
+
+    run_async(run_test())
+
+
+def test_enter_expands_box_to_modal():
+    """Test that Enter opens an expanded modal for the focused box."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[])
+        fake_client._completed = True
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            # Call action directly to open modal
+            app.action_expand_box()
+            await pilot.pause()
+
+            # Should have an expanded modal in the screen stack
+            assert any(
+                isinstance(screen, ExpandedBoxModal) for screen in app.screen_stack
+            )
+
+    run_async(run_test())
+
+
+def test_modal_dismiss_bindings():
+    """Test that the ExpandedBoxModal has the correct dismiss bindings."""
+    # Just verify the bindings are configured correctly
+    bindings = ExpandedBoxModal.BINDINGS
+    binding_keys = []
+    for binding in bindings:
+        if isinstance(binding, tuple):
+            binding_keys.append(binding[0])
+    assert any("escape" in str(key) for key in binding_keys)
+    assert any("enter" in str(key) for key in binding_keys)
+    assert any("q" in str(key) for key in binding_keys)
+
+
+def test_expanded_modal_stores_content_widget_id():
+    """Test that ExpandedBoxModal stores the content widget ID."""
+    modal = ExpandedBoxModal("Size Over Time", "graph-container")
+    assert modal._content_widget_id == "graph-container"
+    assert modal._title == "Size Over Time"
 
 
 # === End-to-end tests ===

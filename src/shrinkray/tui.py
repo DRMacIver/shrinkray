@@ -496,10 +496,13 @@ class OutputPreview(Static):
 
     output_content = reactive("")
     active_test_id: reactive[int | None] = reactive(None)
+    last_return_code: reactive[int | None] = reactive(None)
     _last_update_time: float = 0.0
     _last_seen_test_id: int | None = None  # Track last test ID for "completed" message
 
-    def update_output(self, content: str, test_id: int | None) -> None:
+    def update_output(
+        self, content: str, test_id: int | None, return_code: int | None = None
+    ) -> None:
         # Throttle updates to every 200ms
         now = time.time()
         if now - self._last_update_time < 0.2:
@@ -511,6 +514,7 @@ class OutputPreview(Static):
         if test_id is not None:
             self._last_seen_test_id = test_id
         self.active_test_id = test_id
+        self.last_return_code = return_code
         self.refresh(layout=True)
 
     def _get_available_lines(self) -> int:
@@ -532,7 +536,10 @@ class OutputPreview(Static):
         if self.active_test_id is not None:
             header = f"[green]Test #{self.active_test_id} running...[/green]"
         elif self.output_content and self._last_seen_test_id is not None:
-            header = f"[dim]Test #{self._last_seen_test_id} completed[/dim]"
+            if self.last_return_code is not None:
+                header = f"[dim]Test #{self._last_seen_test_id} exited with code {self.last_return_code}[/dim]"
+            else:
+                header = f"[dim]Test #{self._last_seen_test_id} completed[/dim]"
         else:
             header = "[dim]No test output yet...[/dim]"
 
@@ -605,6 +612,159 @@ class HelpScreen(ModalScreen[None]):
             yield Static("  [green]q[/green]     Close modal")
             yield Static("")
             yield Static("[dim]Press any key to close[/dim]")
+
+
+class ExpandedBoxModal(ModalScreen[None]):
+    """Modal screen showing an expanded view of a content box."""
+
+    CSS = """
+    ExpandedBoxModal {
+        align: center middle;
+    }
+
+    ExpandedBoxModal > Vertical {
+        width: 95%;
+        height: 90%;
+        background: $panel;
+        border: thick $primary;
+        padding: 1;
+    }
+
+    ExpandedBoxModal #expanded-title {
+        text-align: center;
+        text-style: bold;
+        height: auto;
+    }
+
+    ExpandedBoxModal VerticalScroll {
+        width: 100%;
+        height: 1fr;
+    }
+
+    ExpandedBoxModal #expanded-content {
+        width: 100%;
+    }
+
+    ExpandedBoxModal #expanded-graph {
+        width: 100%;
+        height: 1fr;
+    }
+    """
+
+    BINDINGS = [
+        ("escape,enter,q", "dismiss", "Close"),
+    ]
+
+    def __init__(
+        self, title: str, content_widget_id: str, file_path: str | None = None
+    ) -> None:
+        super().__init__()
+        self._title = title
+        self._content_widget_id = content_widget_id
+        self._file_path = file_path
+
+    def _read_file_with_retry(self, file_path: str, max_retries: int = 3) -> str:
+        """Read file content with retry for transient errors during reduction.
+
+        The file may be briefly unavailable while the reducer is writing a new
+        version. Retry a few times with a short delay to handle this.
+        """
+        last_error: OSError | None = None
+        for attempt in range(max_retries):
+            try:
+                with open(file_path, "rb") as f:
+                    raw_content = f.read()
+                # Try to decode as text, fall back to hex if binary
+                try:
+                    return raw_content.decode("utf-8")
+                except UnicodeDecodeError:
+                    return "[Binary content - hex display]\n\n" + raw_content.hex()
+            except OSError as e:
+                last_error = e
+                if attempt < max_retries - 1:
+                    time.sleep(0.05)  # 50ms delay between retries
+
+        # All retries failed - raise the last error to be caught by caller
+        if last_error is not None:
+            raise last_error
+        return "Could not read file"
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(self._title, id="expanded-title")
+            if self._content_widget_id == "graph-container":
+                # For graph, create a new SizeGraph widget
+                yield SizeGraph(id="expanded-graph")
+            else:
+                # For other content, use a scrollable static
+                with VerticalScroll():
+                    yield Static("", id="expanded-content")
+
+    def on_mount(self) -> None:
+        """Populate content from the source widget."""
+        app = self.app
+
+        if self._content_widget_id == "graph-container":
+            # Copy data from the main graph to the expanded graph
+            try:
+                main_graph = app.query_one("#size-graph", SizeGraph)
+                expanded_graph = self.query_one("#expanded-graph", SizeGraph)
+                # Copy the history data
+                expanded_graph._size_history = main_graph._size_history.copy()
+                expanded_graph._original_size = main_graph._original_size
+                expanded_graph._current_runtime = main_graph._current_runtime
+                expanded_graph._setup_plot()
+            except Exception:
+                pass
+            return
+
+        # For non-graph content, populate the static
+        content = ""
+
+        if self._content_widget_id == "stats-container":
+            try:
+                stats_display = app.query_one("#stats-display", StatsDisplay)
+                content = stats_display.render()
+            except Exception:
+                content = "Statistics not available"
+        elif self._content_widget_id == "content-container":
+            # Read the full current test case file content
+            try:
+                if self._file_path:
+                    content = self._read_file_with_retry(self._file_path)
+                else:
+                    content_preview = app.query_one("#content-preview", ContentPreview)
+                    content = content_preview.preview_content
+            except Exception:
+                content = "Content preview not available"
+        elif self._content_widget_id == "output-container":
+            try:
+                output_preview = app.query_one("#output-preview", OutputPreview)
+                raw_content = output_preview.output_content
+                if raw_content:
+                    # Show a header similar to the main view
+                    test_id = output_preview._last_seen_test_id
+                    return_code = output_preview.last_return_code
+                    if output_preview.active_test_id is not None:
+                        header = f"[green]Test #{output_preview.active_test_id} running...[/green]\n\n"
+                    elif test_id is not None:
+                        if return_code is not None:
+                            header = f"[dim]Test #{test_id} exited with code {return_code}[/dim]\n\n"
+                        else:
+                            header = f"[dim]Test #{test_id} completed[/dim]\n\n"
+                    else:
+                        header = ""
+                    content = header + raw_content
+                else:
+                    content = "[dim]No test output yet...[/dim]"
+            except Exception:
+                content = "Output not available"
+
+        try:
+            expanded_content = self.query_one("#expanded-content", Static)
+            expanded_content.update(content)
+        except Exception:
+            pass
 
 
 class PassStatsScreen(ModalScreen[None]):
@@ -847,12 +1007,20 @@ class ShrinkRayApp(App[None]):
         height: 100%;
     }
 
+    #stats-container:focus {
+        border: thick green;
+    }
+
     #graph-container {
         border: solid green;
         margin: 1 1 0 1;
         padding: 0;
         width: 1fr;
         height: 100%;
+    }
+
+    #graph-container:focus {
+        border: thick green;
     }
 
     #size-graph {
@@ -872,8 +1040,16 @@ class ShrinkRayApp(App[None]):
         height: 100%;
     }
 
+    #content-container:focus {
+        border: thick blue;
+    }
+
     #content-container:dark {
         border: solid lightskyblue;
+    }
+
+    #content-container:dark:focus {
+        border: thick lightskyblue;
     }
 
     #output-container {
@@ -884,8 +1060,16 @@ class ShrinkRayApp(App[None]):
         height: 100%;
     }
 
+    #output-container:focus {
+        border: thick blue;
+    }
+
     #output-container:dark {
         border: solid lightskyblue;
+    }
+
+    #output-container:dark:focus {
+        border: thick lightskyblue;
     }
     """
 
@@ -894,6 +1078,11 @@ class ShrinkRayApp(App[None]):
         ("p", "show_pass_stats", "Pass Stats"),
         ("c", "skip_current_pass", "Skip Pass"),
         ("h", "show_help", "Help"),
+        ("up", "focus_up", "Focus Up"),
+        ("down", "focus_down", "Focus Down"),
+        ("left", "focus_left", "Focus Left"),
+        ("right", "focus_right", "Focus Right"),
+        ("enter", "expand_box", "Expand"),
     ]
 
     ENABLE_COMMAND_PALETTE = False
@@ -938,6 +1127,9 @@ class ShrinkRayApp(App[None]):
         self._current_pass_name: str = ""
         self._disabled_passes: list[str] = []
 
+    # Box IDs in navigation order: [top-left, top-right, bottom-left, bottom-right]
+    _BOX_IDS = ["stats-container", "graph-container", "content-container", "output-container"]
+
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical(id="main-container"):
@@ -949,16 +1141,20 @@ class ShrinkRayApp(App[None]):
             with Horizontal(id="stats-area"):
                 with VerticalScroll(id="stats-container") as stats_scroll:
                     stats_scroll.border_title = "Statistics"
+                    stats_scroll.can_focus = True
                     yield StatsDisplay(id="stats-display")
                 with Vertical(id="graph-container") as graph_container:
                     graph_container.border_title = "Size Over Time"
+                    graph_container.can_focus = True
                     yield SizeGraph(id="size-graph")
             with Horizontal(id="content-area"):
                 with VerticalScroll(id="content-container") as content_scroll:
                     content_scroll.border_title = "Recent Reductions"
+                    content_scroll.can_focus = True
                     yield ContentPreview(id="content-preview")
                 with VerticalScroll(id="output-container") as output_scroll:
                     output_scroll.border_title = "Test Output"
+                    output_scroll.can_focus = True
                     yield OutputPreview(id="output-preview")
         yield Footer()
 
@@ -978,7 +1174,82 @@ class ShrinkRayApp(App[None]):
 
         self.title = "Shrink Ray"
         self.sub_title = self._file_path
+
+        # Set initial focus to first box
+        self.query_one("#stats-container").focus()
+
         self.run_reduction()
+
+    def _get_focused_box_index(self) -> int:
+        """Get the index of the currently focused box, or 0 if none."""
+        for i, box_id in enumerate(self._BOX_IDS):
+            try:
+                if self.query_one(f"#{box_id}").has_focus:
+                    return i
+            except Exception:
+                pass
+        return 0
+
+    def _focus_box(self, index: int) -> None:
+        """Focus the box at the given index (with wrapping)."""
+        index = index % len(self._BOX_IDS)
+        box_id = self._BOX_IDS[index]
+        self.query_one(f"#{box_id}").focus()
+
+    def action_focus_up(self) -> None:
+        """Move focus to the box above."""
+        current = self._get_focused_box_index()
+        # Grid is 2x2: top row is 0,1; bottom row is 2,3
+        # Moving up: 2->0, 3->1, 0->2, 1->3 (wraps)
+        if current >= 2:
+            self._focus_box(current - 2)
+        else:
+            self._focus_box(current + 2)
+
+    def action_focus_down(self) -> None:
+        """Move focus to the box below."""
+        current = self._get_focused_box_index()
+        # Moving down: 0->2, 1->3, 2->0, 3->1 (wraps)
+        if current < 2:
+            self._focus_box(current + 2)
+        else:
+            self._focus_box(current - 2)
+
+    def action_focus_left(self) -> None:
+        """Move focus to the box on the left."""
+        current = self._get_focused_box_index()
+        # Moving left within row: 0->1, 1->0, 2->3, 3->2 (wraps within row)
+        if current % 2 == 0:
+            self._focus_box(current + 1)
+        else:
+            self._focus_box(current - 1)
+
+    def action_focus_right(self) -> None:
+        """Move focus to the box on the right."""
+        current = self._get_focused_box_index()
+        # Moving right within row: 0->1, 1->0, 2->3, 3->2 (wraps within row)
+        if current % 2 == 0:
+            self._focus_box(current + 1)
+        else:
+            self._focus_box(current - 1)
+
+    def action_expand_box(self) -> None:
+        """Expand the currently focused box to a modal."""
+        current = self._get_focused_box_index()
+        box_id = self._BOX_IDS[current]
+
+        # Get the title from the container's border_title
+        titles = {
+            "stats-container": "Statistics",
+            "graph-container": "Size Over Time",
+            "content-container": "Current Test Case",
+            "output-container": "Test Output",
+        }
+        title = titles.get(box_id, "Details")
+
+        # Pass file_path for content-container to enable full file reading
+        file_path = self._file_path if box_id == "content-container" else None
+        self.push_screen(ExpandedBoxModal(title, box_id, file_path=file_path))
 
     @work(exclusive=True)
     async def run_reduction(self) -> None:
@@ -1027,9 +1298,17 @@ class ShrinkRayApp(App[None]):
                         update.content_preview, update.hex_mode
                     )
                     output_preview.update_output(
-                        update.test_output_preview, update.active_test_id
+                        update.test_output_preview,
+                        update.active_test_id,
+                        update.last_test_return_code,
                     )
                     size_graph.update_graph(
+                        update.new_size_history,
+                        update.original_size,
+                        update.runtime,
+                    )
+                    # Also update expanded graph if it exists
+                    self._update_expanded_graph(
                         update.new_size_history,
                         update.original_size,
                         update.runtime,
@@ -1081,6 +1360,26 @@ class ShrinkRayApp(App[None]):
             self.query_one("#status-label", Label).update(message)
         except Exception:
             pass  # Widget not yet mounted
+
+    def _update_expanded_graph(
+        self,
+        new_entries: list[tuple[float, int]],
+        original_size: int,
+        current_runtime: float,
+    ) -> None:
+        """Update the expanded graph if it exists in a modal screen."""
+        # Check if there's an ExpandedBoxModal for the graph on the screen stack
+        for screen in self.screen_stack:
+            if isinstance(screen, ExpandedBoxModal):
+                if screen._content_widget_id == "graph-container":
+                    try:
+                        expanded_graph = screen.query_one("#expanded-graph", SizeGraph)
+                        expanded_graph.update_graph(
+                            new_entries, original_size, current_runtime
+                        )
+                    except Exception:
+                        pass
+                    break
 
     async def action_quit(self) -> None:
         """Quit the application with graceful cancellation."""

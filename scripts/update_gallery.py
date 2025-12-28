@@ -8,13 +8,22 @@ This script regenerates gallery GIFs when:
 
 It uses git to efficiently check for changes, falling back to file
 modification times if there are uncommitted changes.
+
+Additionally, it generates MP4 versions for GIFs that need them (for README embeds).
 """
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Gallery items that need MP4 versions generated for video embeds
+# Maps gallery item name to output filename in assets/
+ITEMS_NEEDING_MP4 = {
+    "enterprise-hello": "hello.mp4",
+}
 
 
 def get_git_commit_time(path: str) -> int | None:
@@ -183,6 +192,58 @@ def run_vhs(tape_path: Path) -> bool:
     return result.returncode == 0
 
 
+def convert_gif_to_mp4(gif_path: Path, mp4_path: Path) -> bool:
+    """Convert a GIF to MP4 using ffmpeg. Returns True on success."""
+    if not shutil.which("ffmpeg"):
+        print("Warning: ffmpeg not found, skipping MP4 generation")
+        return False
+
+    print(f"Converting to MP4: {gif_path} -> {mp4_path}")
+
+    # Ensure output directory exists
+    mp4_path.parent.mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-y",  # Overwrite output
+            "-i",
+            str(gif_path),
+            "-movflags",
+            "faststart",  # Enable streaming
+            "-pix_fmt",
+            "yuv420p",  # Compatible pixel format
+            "-vf",
+            "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # Ensure even dimensions
+            str(mp4_path),
+        ],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def generate_mp4s_for_updated_items(updated_tapes: list[Path]) -> list[Path]:
+    """Generate MP4 versions for items that need them.
+
+    Returns list of failed conversions.
+    """
+    failed = []
+    assets_dir = Path("assets")
+
+    for tape in updated_tapes:
+        item_name = tape.parent.name
+        if item_name in ITEMS_NEEDING_MP4:
+            gif_path = tape.with_suffix(".gif")
+            mp4_filename = ITEMS_NEEDING_MP4[item_name]
+            mp4_path = assets_dir / mp4_filename
+
+            if gif_path.exists():
+                if not convert_gif_to_mp4(gif_path, mp4_path):
+                    failed.append(mp4_path)
+
+    return failed
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Update gallery GIFs from VHS tape files"
@@ -232,14 +293,25 @@ def main() -> int:
     # Run VHS on each tape
     print()
     failed = []
+    successful = []
     for tape in updates_needed:
         if not run_vhs(tape):
             failed.append(tape)
+        else:
+            successful.append(tape)
 
     if failed:
         print(f"\nFailed to generate {len(failed)} GIF(s):")
         for tape in failed:
             print(f"  - {tape}")
+        return 1
+
+    # Generate MP4 versions for items that need them
+    mp4_failed = generate_mp4s_for_updated_items(successful)
+    if mp4_failed:
+        print(f"\nFailed to generate {len(mp4_failed)} MP4(s):")
+        for mp4 in mp4_failed:
+            print(f"  - {mp4}")
         return 1
 
     print(f"\nSuccessfully updated {len(updates_needed)} GIF(s)")

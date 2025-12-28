@@ -67,3 +67,15 @@ release-publish:
 # Full release: update version, build, and publish
 release: release-version release-build release-publish
     @echo "Release complete!"
+
+# Update gallery GIFs from VHS tape files (only if needed)
+gallery:
+    uv run python scripts/update_gallery.py
+
+# Check if gallery GIFs need updating (returns non-zero if updates needed)
+gallery-check:
+    uv run python scripts/update_gallery.py --check
+
+# Force regeneration of all gallery GIFs
+gallery-force:
+    uv run python scripts/update_gallery.py --force

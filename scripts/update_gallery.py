@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""Update gallery GIFs from VHS tape files.
+
+This script regenerates gallery GIFs when:
+- The tape file has changed since the GIF was last generated
+- Any file in src/ has changed since the GIF was last generated
+
+It uses git to efficiently check for changes, falling back to file
+modification times if there are uncommitted changes in src/.
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def get_git_commit_time(path: str) -> int | None:
+    """Get the Unix timestamp of the last commit that touched a path.
+
+    Returns None if the path has uncommitted changes or isn't tracked.
+    """
+    # Check if the path has uncommitted changes
+    result = subprocess.run(
+        ["git", "diff", "--quiet", "--", path],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None  # Has uncommitted changes
+
+    # Check if the path has staged changes
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--quiet", "--", path],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        return None  # Has staged changes
+
+    # Get the commit time
+    result = subprocess.run(
+        ["git", "log", "-1", "--format=%ct", "--", path],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+
+    return int(result.stdout.strip())
+
+
+def get_file_mtime(path: str) -> int:
+    """Get the modification time of a file."""
+    return int(os.path.getmtime(path))
+
+
+def get_latest_src_time() -> tuple[int, bool]:
+    """Get the latest modification time of any file in src/.
+
+    Returns (timestamp, used_git) where used_git indicates whether
+    git commit times were used (True) or file mtimes (False).
+    """
+    # Check if src/ has any uncommitted changes
+    result = subprocess.run(
+        ["git", "diff", "--quiet", "--", "src/"],
+        capture_output=True,
+    )
+    has_uncommitted = result.returncode != 0
+
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--quiet", "--", "src/"],
+        capture_output=True,
+    )
+    has_staged = result.returncode != 0
+
+    if has_uncommitted or has_staged:
+        # Fall back to file modification times
+        latest = 0
+        for root, _, files in os.walk("src"):
+            for f in files:
+                if f.endswith(".py"):
+                    path = os.path.join(root, f)
+                    mtime = get_file_mtime(path)
+                    latest = max(latest, mtime)
+        return latest, False
+
+    # Use git commit time for src/
+    result = subprocess.run(
+        ["git", "log", "-1", "--format=%ct", "--", "src/"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        # No commits touching src/ yet, use file times
+        latest = 0
+        for root, _, files in os.walk("src"):
+            for f in files:
+                if f.endswith(".py"):
+                    path = os.path.join(root, f)
+                    mtime = get_file_mtime(path)
+                    latest = max(latest, mtime)
+        return latest, False
+
+    return int(result.stdout.strip()), True
+
+
+def needs_update(tape_path: Path, gif_path: Path, src_time: int, use_git: bool) -> bool:
+    """Check if a GIF needs to be regenerated."""
+    if not gif_path.exists():
+        return True
+
+    # Get gif modification time
+    if use_git:
+        gif_time = get_git_commit_time(str(gif_path))
+        if gif_time is None:
+            # GIF has uncommitted changes or isn't tracked, use mtime
+            gif_time = get_file_mtime(str(gif_path))
+    else:
+        gif_time = get_file_mtime(str(gif_path))
+
+    # Get tape modification time
+    if use_git:
+        tape_time = get_git_commit_time(str(tape_path))
+        if tape_time is None:
+            tape_time = get_file_mtime(str(tape_path))
+    else:
+        tape_time = get_file_mtime(str(tape_path))
+
+    # Check if tape or src is newer than gif
+    return tape_time > gif_time or src_time > gif_time
+
+
+def find_tapes() -> list[Path]:
+    """Find all tape files in the gallery directory."""
+    gallery = Path("gallery")
+    if not gallery.exists():
+        return []
+    return sorted(gallery.rglob("*.tape"))
+
+
+def run_vhs(tape_path: Path) -> bool:
+    """Run VHS on a tape file. Returns True on success."""
+    print(f"Generating: {tape_path}")
+
+    # VHS generates output files relative to the tape's directory
+    tape_dir = tape_path.parent
+
+    result = subprocess.run(
+        ["vhs", tape_path.name],
+        cwd=tape_dir,
+    )
+    return result.returncode == 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Update gallery GIFs from VHS tape files"
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Check if updates are needed without running VHS",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force regeneration of all GIFs",
+    )
+    args = parser.parse_args()
+
+    tapes = find_tapes()
+    if not tapes:
+        print("No tape files found in gallery/")
+        return 0
+
+    src_time, used_git = get_latest_src_time()
+    if used_git:
+        print("Using git commit times for change detection")
+    else:
+        print("Using file modification times (src/ has uncommitted changes)")
+
+    updates_needed = []
+    for tape in tapes:
+        # Derive gif path from tape path
+        gif_path = tape.with_suffix(".gif")
+
+        if args.force or needs_update(tape, gif_path, src_time, used_git):
+            updates_needed.append(tape)
+
+    if not updates_needed:
+        print("All gallery GIFs are up to date")
+        return 0
+
+    print(f"\nGIFs needing update: {len(updates_needed)}")
+    for tape in updates_needed:
+        print(f"  - {tape}")
+
+    if args.check:
+        return 1  # Indicate updates are needed
+
+    # Run VHS on each tape
+    print()
+    failed = []
+    for tape in updates_needed:
+        if not run_vhs(tape):
+            failed.append(tape)
+
+    if failed:
+        print(f"\nFailed to generate {len(failed)} GIF(s):")
+        for tape in failed:
+            print(f"  - {tape}")
+        return 1
+
+    print(f"\nSuccessfully updated {len(updates_needed)} GIF(s)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

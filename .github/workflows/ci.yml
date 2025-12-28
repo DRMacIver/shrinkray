@@ -75,6 +75,70 @@ jobs:
           git push
           echo "::notice::Formatting changes have been committed and pushed."
 
+  gallery:
+    name: Update gallery GIFs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # For PRs, checkout the actual branch so we can push back to it
+          ref: ${{ github.head_ref || github.ref }}
+          persist-credentials: true
+          lfs: true
+      - name: Install just
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          version: "latest"
+      - name: Set up Python
+        run: uv python install 3.14
+      - name: Pin Python version
+        run: uv python pin 3.14
+      - name: Install dependencies
+        run: uv sync --extra dev
+      - name: Setup Go
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5
+        with:
+          go-version: '1.22'
+      - name: Install VHS and dependencies
+        run: |
+          # Install ttyd (required for VHS headless operation)
+          sudo apt-get update
+          sudo apt-get install -y ttyd ffmpeg
+          # Install VHS
+          go install github.com/charmbracelet/vhs@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+      - name: Update gallery
+        run: just gallery
+      - name: Check for changes and auto-commit on PRs
+        env:
+          GH_REF: ${{ github.ref }}
+        run: |
+          if git diff --exit-code gallery/; then
+            echo "No gallery changes needed"
+            exit 0
+          fi
+
+          # On main branch, just fail with an error
+          if [ "$GH_REF" = "refs/heads/main" ]; then
+            echo "::error::Gallery GIFs are out of date. Run 'just gallery' locally and commit the changes."
+            exit 1
+          fi
+
+          # On PR branches, commit and push the changes
+          echo "Gallery changes detected, committing..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gallery/
+          git commit -m "chore: regenerate gallery GIFs
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+          git push
+          echo "::notice::Gallery GIFs have been regenerated and pushed."
+
   lint:
     runs-on: ubuntu-latest
     permissions:
@@ -204,7 +268,7 @@ jobs:
   auto-release:
     # Only run on main branch, after all CI checks pass
     if: github.ref == 'refs/heads/main'
-    needs: [action-lint, format, lint, test, coverage, slow-tests]
+    needs: [action-lint, format, gallery, lint, test, coverage, slow-tests]
     runs-on: ubuntu-22.04
     permissions:
       contents: write  # Needed to push commits and tags

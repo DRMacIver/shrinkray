@@ -528,6 +528,28 @@ def test_output_preview_render_completed_test():
     assert "Final output" in rendered
 
 
+def test_output_preview_render_completed_test_with_return_code():
+    """Test OutputPreview render shows return code when available."""
+    widget = OutputPreview()
+    widget.output_content = "Final output"
+    widget.active_test_id = None
+    widget._last_seen_test_id = 42
+    widget.last_return_code = 1
+    rendered = widget.render()
+    assert "Test #42 exited with code 1" in rendered
+    assert "Final output" in rendered
+
+
+def test_output_preview_update_output_with_return_code():
+    """Test that update_output stores return code."""
+    widget = OutputPreview()
+    widget._last_update_time = 0  # Ensure throttle doesn't block
+
+    widget.update_output("output", 1, return_code=42)
+    assert widget._pending_return_code == 42
+    assert widget.last_return_code == 42
+
+
 def test_output_preview_render_truncates_long_output():
     """Test OutputPreview truncates long output from beginning."""
     widget = OutputPreview()
@@ -1222,6 +1244,41 @@ def test_expanded_modal_stores_content_widget_id():
     modal = ExpandedBoxModal("Size Over Time", "graph-container")
     assert modal._content_widget_id == "graph-container"
     assert modal._title == "Size Over Time"
+
+
+def test_expanded_modal_stores_file_path():
+    """Test that ExpandedBoxModal stores the file path."""
+    modal = ExpandedBoxModal("Current Test Case", "content-container", "/path/to/file")
+    assert modal._file_path == "/path/to/file"
+
+
+def test_expanded_modal_read_file_with_retry_success(tmp_path):
+    """Test _read_file_with_retry reads file successfully."""
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("Hello World")
+
+    modal = ExpandedBoxModal("Test", "content-container")
+    content = modal._read_file_with_retry(str(test_file))
+    assert content == "Hello World"
+
+
+def test_expanded_modal_read_file_with_retry_binary(tmp_path):
+    """Test _read_file_with_retry falls back to hex for binary content."""
+    test_file = tmp_path / "test.bin"
+    # Use bytes that are invalid UTF-8 to trigger the hex fallback
+    test_file.write_bytes(b"\x80\x81\x82\x83")
+
+    modal = ExpandedBoxModal("Test", "content-container")
+    content = modal._read_file_with_retry(str(test_file))
+    assert "Binary content" in content
+    assert "80818283" in content
+
+
+def test_expanded_modal_read_file_with_retry_missing(tmp_path):
+    """Test _read_file_with_retry raises OSError for missing file."""
+    modal = ExpandedBoxModal("Test", "content-container")
+    with pytest.raises(OSError):
+        modal._read_file_with_retry(str(tmp_path / "nonexistent.txt"))
 
 
 # === End-to-end tests ===

@@ -4,9 +4,10 @@
 This script regenerates gallery GIFs when:
 - The tape file has changed since the GIF was last generated
 - Any file in src/ has changed since the GIF was last generated
+- Any source file in the gallery subdirectory (excluding .gif/.png) has changed
 
 It uses git to efficiently check for changes, falling back to file
-modification times if there are uncommitted changes in src/.
+modification times if there are uncommitted changes.
 """
 
 import argparse
@@ -104,6 +105,33 @@ def get_latest_src_time() -> tuple[int, bool]:
     return int(result.stdout.strip()), True
 
 
+def get_gallery_dir_time(gallery_dir: Path, use_git: bool) -> int:
+    """Get the latest modification time of source files in a gallery subdirectory.
+
+    Source files are any files that are not .gif or .png (the generated outputs).
+    """
+    source_files = [
+        f
+        for f in gallery_dir.iterdir()
+        if f.is_file() and f.suffix.lower() not in (".gif", ".png")
+    ]
+
+    if not source_files:
+        return 0
+
+    latest = 0
+    for f in source_files:
+        if use_git:
+            t = get_git_commit_time(str(f))
+            if t is None:
+                t = get_file_mtime(str(f))
+        else:
+            t = get_file_mtime(str(f))
+        latest = max(latest, t)
+
+    return latest
+
+
 def needs_update(tape_path: Path, gif_path: Path, src_time: int, use_git: bool) -> bool:
     """Check if a GIF needs to be regenerated."""
     if not gif_path.exists():
@@ -126,8 +154,11 @@ def needs_update(tape_path: Path, gif_path: Path, src_time: int, use_git: bool) 
     else:
         tape_time = get_file_mtime(str(tape_path))
 
-    # Check if tape or src is newer than gif
-    return tape_time > gif_time or src_time > gif_time
+    # Get gallery directory source files time
+    gallery_dir_time = get_gallery_dir_time(tape_path.parent, use_git)
+
+    # Check if tape, src, or gallery source files are newer than gif
+    return tape_time > gif_time or src_time > gif_time or gallery_dir_time > gif_time
 
 
 def find_tapes() -> list[Path]:

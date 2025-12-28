@@ -1,5 +1,6 @@
 """Textual-based TUI for Shrink Ray."""
 
+import math
 import os
 import time
 import traceback
@@ -17,6 +18,7 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.widgets import DataTable, Footer, Header, Label, Static
+from textual_plotext import PlotextPlot
 
 from shrinkray.subprocess.client import SubprocessClient
 from shrinkray.subprocess.protocol import (
@@ -221,6 +223,187 @@ class StatsDisplay(Static):
         )
 
         return "\n".join(lines)
+
+
+def _format_time_label(seconds: float) -> str:
+    """Format a time value for axis labels."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    elif seconds < 3600:
+        minutes = int(seconds / 60)
+        return f"{minutes}m"
+    else:
+        hours = int(seconds / 3600)
+        return f"{hours}h"
+
+
+def _get_time_axis_bounds(current_time: float) -> tuple[float, list[float], list[str]]:
+    """Get stable x-axis bounds and tick values.
+
+    Returns (max_time, ticks, labels) where max_time is the stable right boundary,
+    ticks are the tick positions, and labels are the formatted labels.
+
+    The axis only rescales when current_time exceeds the current boundary.
+    """
+    if current_time <= 0:
+        ticks = [0.0, 10.0, 20.0, 30.0]
+        labels = [_format_time_label(t) for t in ticks]
+        return (30.0, ticks, labels)
+
+    # For the first 10 minutes, expand one minute at a time with 1-minute ticks
+    if current_time < 600:
+        # Round up to next minute
+        minutes = int(current_time / 60) + 1
+        max_time = float(minutes * 60)
+        interval = 60.0
+    else:
+        # After 10 minutes, use larger boundaries
+        # (boundary, tick_interval) - axis extends to boundary, ticks at interval
+        boundaries = [
+            (1800, 300),  # 30m with 5m ticks
+            (3600, 600),  # 1h with 10m ticks
+            (7200, 1200),  # 2h with 20m ticks
+            (14400, 1800),  # 4h with 30m ticks
+            (28800, 3600),  # 8h with 1h ticks
+        ]
+
+        # Find the first boundary that exceeds current_time
+        max_time = 1800.0
+        interval = 300.0
+        for boundary, tick_interval in boundaries:
+            if current_time < boundary:
+                max_time = float(boundary)
+                interval = float(tick_interval)
+                break
+        else:
+            # Beyond 8h: extend in 4h increments with 1h ticks
+            hours = int(current_time / 14400) + 1
+            max_time = float(hours * 14400)
+            interval = 3600.0
+
+    # Generate ticks from 0 to max_time
+    ticks = []
+    t = 0.0
+    while t <= max_time:
+        ticks.append(t)
+        t += interval
+
+    labels = [_format_time_label(t) for t in ticks]
+    return (max_time, ticks, labels)
+
+
+def _get_percentage_axis_bounds(
+    min_pct: float, max_pct: float
+) -> tuple[float, list[float], list[str]]:
+    """Get stable y-axis bounds for percentage values on log scale.
+
+    Returns (min_pct_bound, ticks, labels) where min_pct_bound is the stable lower
+    boundary, ticks are the log10 tick positions, and labels are percentage strings.
+
+    The axis only rescales when min_pct gets close to the current lower boundary.
+    """
+    # Standard percentage boundaries (log scale friendly)
+    boundaries = [100, 50, 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01]
+
+    # Find the appropriate lower bound - use the first boundary below min_pct * 0.5
+    # This gives us some room before we need to rescale
+    lower_bound = 0.01
+    for b in boundaries:
+        if b < min_pct * 0.5:
+            lower_bound = b
+            break
+
+    # Find which percentage values to show as ticks (between lower_bound and 100%)
+    # Since boundaries always includes 100 and lower_bound <= 100, this is never empty
+    tick_pcts = [p for p in boundaries if p >= lower_bound and p <= 100]
+
+    # Convert to log scale
+    ticks = [math.log10(max(0.01, p)) for p in tick_pcts]
+    labels = [f"{p}%" if p >= 1 else f"{p:.1f}%" for p in tick_pcts]
+
+    return (lower_bound, ticks, labels)
+
+
+class SizeGraph(PlotextPlot):
+    """Widget to display test case size over time on a log scale."""
+
+    _size_history: list[tuple[float, int]]
+    _original_size: int
+    _current_runtime: float
+
+    def __init__(
+        self,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
+        disabled: bool = False,
+    ) -> None:
+        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
+        self._size_history = []
+        self._original_size = 0
+        self._current_runtime = 0.0
+
+    def update_graph(
+        self,
+        new_entries: list[tuple[float, int]],
+        original_size: int,
+        current_runtime: float,
+    ) -> None:
+        """Update the graph with new data."""
+        if new_entries:
+            self._size_history.extend(new_entries)
+        if original_size > 0:
+            self._original_size = original_size
+        self._current_runtime = current_runtime
+        self._setup_plot()
+        self.refresh()
+
+    def on_mount(self) -> None:
+        """Set up the plot on mount."""
+        self._setup_plot()
+
+    def on_resize(self) -> None:
+        """Redraw when resized."""
+        self._setup_plot()
+
+    def _setup_plot(self) -> None:
+        """Configure and draw the plot."""
+        plt = self.plt
+        plt.clear_figure()
+        plt.theme("dark")
+
+        if len(self._size_history) < 2 or self._original_size == 0:
+            plt.xlabel("Time")
+            plt.ylabel("% of original")
+            return
+
+        times = [t for t, _ in self._size_history]
+        sizes = [s for _, s in self._size_history]
+
+        # Calculate percentages of original size
+        percentages = [(s / self._original_size) * 100 for s in sizes]
+
+        # Use log scale for y-axis (percentages)
+        log_percentages = [math.log10(max(0.01, p)) for p in percentages]
+
+        plt.plot(times, log_percentages, marker="braille")
+
+        # Get stable x-axis bounds
+        max_time, x_ticks, x_labels = _get_time_axis_bounds(self._current_runtime)
+        plt.xticks(x_ticks, x_labels)
+        plt.xlim(0, max_time)
+
+        # Get stable y-axis bounds
+        min_pct = min(percentages)
+        lower_bound, y_ticks, y_labels = _get_percentage_axis_bounds(min_pct, 100)
+        plt.yticks(y_ticks, y_labels)
+        plt.ylim(math.log10(max(0.01, lower_bound)), math.log10(100))
+
+        plt.xlabel("Time")
+        plt.ylabel("% of original")
+
+        # Build to apply the plot
+        _ = plt.build()
 
 
 class ContentPreview(Static):
@@ -647,16 +830,34 @@ class ShrinkRayApp(App[None]):
         height: 100%;
     }
 
-    #stats-container {
-        height: auto;
-        border: solid green;
-        padding: 1;
-        margin: 1;
-    }
-
     #status-label {
         text-style: bold;
         margin: 0 1;
+    }
+
+    #stats-area {
+        height: 1fr;
+    }
+
+    #stats-container {
+        border: solid green;
+        margin: 1 1 0 1;
+        padding: 1;
+        width: 1fr;
+        height: 100%;
+    }
+
+    #graph-container {
+        border: solid green;
+        margin: 1 1 0 1;
+        padding: 0;
+        width: 1fr;
+        height: 100%;
+    }
+
+    #size-graph {
+        width: 100%;
+        height: 100%;
     }
 
     #content-area {
@@ -665,7 +866,7 @@ class ShrinkRayApp(App[None]):
 
     #content-container {
         border: solid blue;
-        margin: 1;
+        margin: 0 1 1 1;
         padding: 1;
         width: 1fr;
         height: 100%;
@@ -677,7 +878,7 @@ class ShrinkRayApp(App[None]):
 
     #output-container {
         border: solid blue;
-        margin: 1;
+        margin: 0 1 1 1;
         padding: 1;
         width: 1fr;
         height: 100%;
@@ -745,8 +946,13 @@ class ShrinkRayApp(App[None]):
                 id="status-label",
                 markup=False,
             )
-            with Vertical(id="stats-container"):
-                yield StatsDisplay(id="stats-display")
+            with Horizontal(id="stats-area"):
+                with VerticalScroll(id="stats-container") as stats_scroll:
+                    stats_scroll.border_title = "Statistics"
+                    yield StatsDisplay(id="stats-display")
+                with Vertical(id="graph-container") as graph_container:
+                    graph_container.border_title = "Size Over Time"
+                    yield SizeGraph(id="size-graph")
             with Horizontal(id="content-area"):
                 with VerticalScroll(id="content-container") as content_scroll:
                     content_scroll.border_title = "Recent Reductions"
@@ -812,6 +1018,7 @@ class ShrinkRayApp(App[None]):
             stats_display = self.query_one("#stats-display", StatsDisplay)
             content_preview = self.query_one("#content-preview", ContentPreview)
             output_preview = self.query_one("#output-preview", OutputPreview)
+            size_graph = self.query_one("#size-graph", SizeGraph)
 
             async with aclosing(self._client.get_progress_updates()) as updates:
                 async for update in updates:
@@ -821,6 +1028,11 @@ class ShrinkRayApp(App[None]):
                     )
                     output_preview.update_output(
                         update.test_output_preview, update.active_test_id
+                    )
+                    size_graph.update_graph(
+                        update.new_size_history,
+                        update.original_size,
+                        update.runtime,
                     )
                     self._latest_pass_stats = update.pass_stats
                     self._current_pass_name = update.current_pass_name

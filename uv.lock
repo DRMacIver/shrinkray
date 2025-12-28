@@ -531,6 +531,15 @@ wheels = [
 ]
 
 [[package]]
+name = "plotext"
+version = "5.3.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/d7/f75f397af966fe252d0d34ffd3cae765317fce2134f925f95e7d6725d1ce/plotext-5.3.2.tar.gz", hash = "sha256:52d1e932e67c177bf357a3f0fe6ce14d1a96f7f7d5679d7b455b929df517068e", size = 61967, upload-time = "2024-09-24T15:13:37.728Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f6/1e/12fe7c40cd2099a1f454518754ed229b01beaf3bbb343127f0cc13ce6c22/plotext-5.3.2-py3-none-any.whl", hash = "sha256:394362349c1ddbf319548cfac17ca65e6d5dfc03200c40dfdc0503b3e95a2283", size = 64047, upload-time = "2024-09-24T15:13:36.296Z" },
+]
+
+[[package]]
 name = "pluggy"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -752,6 +761,7 @@ dependencies = [
     { name = "humanize" },
     { name = "libcst" },
     { name = "textual" },
+    { name = "textual-plotext" },
     { name = "trio" },
 ]
 
@@ -796,6 +806,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "syrupy", marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "textual", specifier = ">=0.47.0" },
+    { name = "textual-plotext", specifier = ">=0.2.0" },
     { name = "trio", specifier = ">=0.28.0" },
 ]
 provides-extras = ["dev"]
@@ -845,6 +856,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/55/06/906f86bbc59ec7cd3fb424250e19ce670406d1f28e49e86c2221e9fd7ed2/textual-6.11.0.tar.gz", hash = "sha256:08237ebda0cfbbfd1a4e2fd3039882b35894a73994f6f0fcc12c5b0d78acf3cc", size = 1584292, upload-time = "2025-12-18T10:48:38.033Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b5/fc/5e2988590ff2e0128eea6446806c904445a44e17256c67141573ea16b5a5/textual-6.11.0-py3-none-any.whl", hash = "sha256:9e663b73ed37123a9b13c16a0c85e09ef917a4cfded97814361ed5cccfa40f89", size = 714886, upload-time = "2025-12-18T10:48:36.269Z" },
+]
+
+[[package]]
+name = "textual-plotext"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "plotext" },
+    { name = "textual" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9a/b0/e4e0f38df057db778252db0dd2c08522d7222b8537b6a0181d797b9044bd/textual_plotext-1.0.1.tar.gz", hash = "sha256:836f53a3316756609e194129a35c2875638e7958c261f541e0a794f7c98011be", size = 16489, upload-time = "2024-11-30T19:25:56.625Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/35/53/fba7da208f9d3f59254413660fa0aa6599f2aca806f3ae356670455fd4ea/textual_plotext-1.0.1-py3-none-any.whl", hash = "sha256:6b6bfd00b29f121ddf216eaaf9bdac9d688ed72f40028484d279a10cbbb169ed", size = 16558, upload-time = "2024-11-30T19:25:32.208Z" },
 ]
 
 [[package]]

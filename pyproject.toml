@@ -16,6 +16,7 @@ dependencies = [
     "chardet>=5.2.0",
     "trio>=0.28.0",
     "textual>=0.47.0",
+    "textual-plotext>=0.2.0",
     "humanize>=4.9.0",
     "libcst>=1.1.0",
     "exceptiongroup>=1.2.0",

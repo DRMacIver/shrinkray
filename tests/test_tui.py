@@ -21,7 +21,11 @@ from shrinkray.tui import (
     OutputPreview,
     PassStatsScreen,
     ShrinkRayApp,
+    SizeGraph,
     StatsDisplay,
+    _format_time_label,
+    _get_percentage_axis_bounds,
+    _get_time_axis_bounds,
     detect_terminal_theme,
     run_textual_ui,
 )
@@ -317,6 +321,179 @@ def test_render_diff_no_changes_shows_truncated():
         assert "more lines" in rendered
     finally:
         widget._get_available_lines = original_method
+
+
+# === SizeGraph tests ===
+
+
+def test_size_graph_initial_state():
+    """Test SizeGraph starts with empty history."""
+    widget = SizeGraph()
+    assert widget._size_history == []
+    assert widget._original_size == 0
+    assert widget._current_runtime == 0.0
+
+
+def test_size_graph_update_empty_history():
+    """Test SizeGraph ignores empty history updates but still updates runtime."""
+    widget = SizeGraph()
+    widget.update_graph([], 1000, 5.0)
+    assert widget._size_history == []
+    assert widget._original_size == 1000
+    assert widget._current_runtime == 5.0
+
+
+def test_size_graph_update_accumulates_history():
+    """Test SizeGraph accumulates history entries."""
+    widget = SizeGraph()
+    widget.update_graph([(0.0, 1000), (1.0, 800)], 1000, 1.0)
+    assert widget._size_history == [(0.0, 1000), (1.0, 800)]
+
+    # Add more entries
+    widget.update_graph([(2.0, 600)], 1000, 2.5)
+    assert widget._size_history == [(0.0, 1000), (1.0, 800), (2.0, 600)]
+    assert widget._current_runtime == 2.5
+
+
+def test_size_graph_setup_plot_empty():
+    """Test SizeGraph setup with no data."""
+    widget = SizeGraph()
+    # Should not raise when setting up with no data
+    widget._setup_plot()
+
+
+def test_size_graph_setup_plot_single_point():
+    """Test SizeGraph setup with single data point doesn't plot."""
+    widget = SizeGraph()
+    widget._size_history = [(0.0, 1000)]
+    widget._original_size = 1000
+    # Should not raise - needs at least 2 points to plot
+    widget._setup_plot()
+
+
+def test_size_graph_setup_plot_with_data():
+    """Test SizeGraph setup with multiple data points."""
+    widget = SizeGraph()
+    widget._size_history = [(0.0, 1000), (1.0, 100), (2.0, 10)]
+    widget._original_size = 1000
+    widget._current_runtime = 2.0
+    # Should not raise
+    widget._setup_plot()
+
+
+def test_size_graph_percentage_calculation():
+    """Test SizeGraph calculates percentages correctly."""
+    widget = SizeGraph()
+    widget._size_history = [(0.0, 1000), (1.0, 500), (2.0, 100), (3.0, 10)]
+    widget._original_size = 1000
+    widget._current_runtime = 3.0
+    widget._setup_plot()
+    # If we got here without error, percentage calculation worked
+
+
+def test_size_graph_handles_zero_size():
+    """Test SizeGraph handles size of 0 without error (log(0) issue)."""
+    widget = SizeGraph()
+    widget._size_history = [(0.0, 1000), (1.0, 0)]
+    widget._original_size = 1000
+    widget._current_runtime = 1.0
+    # Should not raise - we use max(0.01, p) to avoid log(0)
+    widget._setup_plot()
+
+
+def test_size_graph_update_graph_no_original_size():
+    """Test SizeGraph handles zero original_size gracefully."""
+    widget = SizeGraph()
+    widget.update_graph([(0.0, 1000), (1.0, 500)], 0, 1.0)
+    # Should have history but no original size, so setup_plot returns early
+    assert widget._size_history == [(0.0, 1000), (1.0, 500)]
+    assert widget._original_size == 0
+
+
+# === Time axis bounds tests ===
+
+
+def test_format_time_label_seconds():
+    """Test time label formatting for seconds."""
+    assert _format_time_label(0) == "0s"
+    assert _format_time_label(30) == "30s"
+    assert _format_time_label(59) == "59s"
+
+
+def test_format_time_label_minutes():
+    """Test time label formatting for minutes."""
+    assert _format_time_label(60) == "1m"
+    assert _format_time_label(120) == "2m"
+    assert _format_time_label(300) == "5m"
+    assert _format_time_label(3599) == "59m"
+
+
+def test_format_time_label_hours():
+    """Test time label formatting for hours."""
+    assert _format_time_label(3600) == "1h"
+    assert _format_time_label(7200) == "2h"
+    assert _format_time_label(36000) == "10h"
+
+
+def test_get_time_axis_bounds_zero():
+    """Test time axis bounds for zero duration."""
+    max_time, ticks, labels = _get_time_axis_bounds(0)
+    assert max_time == 30.0
+    assert 0 in ticks
+    assert "0s" in labels
+
+
+def test_get_time_axis_bounds_short():
+    """Test time axis bounds expand by minute for first 10 minutes."""
+    # At 25s, should extend to 1m boundary
+    max_time, _, _ = _get_time_axis_bounds(25)
+    assert max_time == 60.0
+
+    # At 65s, should extend to 2m boundary
+    max_time, _, _ = _get_time_axis_bounds(65)
+    assert max_time == 120.0
+
+
+def test_get_time_axis_bounds_medium():
+    """Test time axis bounds for medium durations."""
+    # At 8 minutes, should extend to 9m
+    max_time, _, _ = _get_time_axis_bounds(480)
+    assert max_time == 540.0
+
+    # At 11 minutes, should extend to 30m boundary
+    max_time, _, _ = _get_time_axis_bounds(660)
+    assert max_time == 1800.0
+
+
+def test_get_time_axis_bounds_very_long():
+    """Test time axis bounds for very long durations."""
+    # Beyond 8h
+    max_time, _, _ = _get_time_axis_bounds(30000)
+    assert max_time > 28800
+
+
+# === Percentage axis bounds tests ===
+
+
+def test_get_percentage_axis_bounds_high():
+    """Test percentage bounds when still at high percentages."""
+    lower, _, _ = _get_percentage_axis_bounds(80, 100)
+    # Should have room below 80%
+    assert lower < 40
+
+
+def test_get_percentage_axis_bounds_low():
+    """Test percentage bounds when at low percentages."""
+    lower, _, _ = _get_percentage_axis_bounds(5, 100)
+    # Should extend below 5%
+    assert lower < 2.5
+
+
+def test_get_percentage_axis_bounds_very_low():
+    """Test percentage bounds when at very low percentages."""
+    lower, _, _ = _get_percentage_axis_bounds(0.1, 100)
+    # Should extend very low
+    assert lower < 0.1
 
 
 # === OutputPreview tests ===

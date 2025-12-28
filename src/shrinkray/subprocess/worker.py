@@ -320,7 +320,9 @@ class ReducerWorker:
         if self.state is None or self.state.output_manager is None:
             return "", None, None
 
-        output_path, test_id, return_code = self.state.output_manager.get_current_output()
+        output_path, test_id, return_code = (
+            self.state.output_manager.get_current_output()
+        )
 
         if output_path is None:
             return "", None, None

@@ -310,9 +310,25 @@ def _get_percentage_axis_bounds(
     # Standard percentage boundaries (log scale friendly)
     # Extended to handle very small reductions (below 0.01%)
     boundaries = [
-        100, 50, 20, 10, 5, 2, 1,
-        0.5, 0.2, 0.1, 0.05, 0.02, 0.01,
-        0.005, 0.002, 0.001, 0.0005, 0.0002, 0.0001,
+        100,
+        50,
+        20,
+        10,
+        5,
+        2,
+        1,
+        0.5,
+        0.2,
+        0.1,
+        0.05,
+        0.02,
+        0.01,
+        0.005,
+        0.002,
+        0.001,
+        0.0005,
+        0.0002,
+        0.0001,
     ]
 
     # Find the appropriate lower bound - use the first boundary below min_pct * 0.5

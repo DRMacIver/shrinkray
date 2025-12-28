@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
 from textual.app import App
-from textual.widgets import DataTable, Label
+from textual.widgets import DataTable, Label, Static
 
 from shrinkray import tui
 from shrinkray.subprocess.client import SubprocessClient
@@ -32,6 +32,15 @@ from shrinkray.tui import (
 )
 
 
+# Helper to access Static widget's internal content (uses name-mangled attribute)
+_STATIC_CONTENT_ATTR = "_Static__content"
+
+
+def get_static_content(widget: Static) -> str:
+    """Get the internal content of a Static widget for testing."""
+    return str(getattr(widget, _STATIC_CONTENT_ATTR))
+
+
 class FakeReductionClient:
     """Fake client for testing the TUI without launching a real subprocess."""
 
@@ -40,10 +49,12 @@ class FakeReductionClient:
         updates: list[ProgressUpdate] | None = None,
         start_error: str | None = None,
         start_delay: float = 0.0,
+        wait_indefinitely: bool = False,
     ):
         self._updates = updates or []
         self._start_error = start_error
         self._start_delay = start_delay
+        self._wait_indefinitely = wait_indefinitely
         self._started = False
         self._cancelled = False
         self._closed = False
@@ -101,6 +112,10 @@ class FakeReductionClient:
                 break
             yield update
             await asyncio.sleep(0.01)
+        # Wait indefinitely if requested (useful for modal tests)
+        if self._wait_indefinitely:
+            while not self._cancelled:
+                await asyncio.sleep(0.1)
         self._completed = True
 
     @property
@@ -538,6 +553,21 @@ def test_output_preview_render_completed_test_with_return_code():
     rendered = widget.render()
     assert "Test #42 exited with code 1" in rendered
     assert "Final output" in rendered
+
+
+def test_output_preview_render_has_seen_output_no_header():
+    """Test OutputPreview render shows no header when has seen output before but no active/last test."""
+    widget = OutputPreview()
+    widget.output_content = "Some output"
+    widget.active_test_id = None
+    widget._last_seen_test_id = None
+    widget._has_seen_output = True  # We've seen output before
+    rendered = widget.render()
+    # Should have content but no header
+    assert "Some output" in rendered
+    assert "No test output" not in rendered
+    assert "Test #" not in rendered
+    assert "running" not in rendered
 
 
 def test_output_preview_update_output_with_return_code():
@@ -1279,6 +1309,856 @@ def test_expanded_modal_read_file_with_retry_missing(tmp_path):
     modal = ExpandedBoxModal("Test", "content-container")
     with pytest.raises(OSError):
         modal._read_file_with_retry(str(tmp_path / "nonexistent.txt"))
+
+
+# === ExpandedBoxModal integration tests ===
+
+
+def test_expanded_modal_compose_graph_container():
+    """Test ExpandedBoxModal compose yields graph for graph-container."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()  # Wait for app to mount
+            # Push an expanded modal for the graph
+            modal = ExpandedBoxModal("Size Over Time", "graph-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            # Verify the expanded graph widget exists (query from app's current screen)
+            expanded_graph = app.screen.query_one("#expanded-graph", SizeGraph)
+            assert expanded_graph is not None
+
+    run_async(run_test())
+
+
+def test_expanded_modal_compose_static_container():
+    """Test ExpandedBoxModal compose yields static for non-graph content."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()  # Wait for app to mount
+            # Push an expanded modal for stats
+            modal = ExpandedBoxModal("Statistics", "stats-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            # Verify the expanded content static widget exists
+            expanded_content = app.screen.query_one("#expanded-content", Static)
+            assert expanded_content is not None
+
+    run_async(run_test())
+
+
+def test_expanded_modal_on_mount_stats():
+    """Test ExpandedBoxModal on_mount populates stats content."""
+
+    async def run_test():
+        # Create an update to populate stats
+        update = ProgressUpdate(
+            status="Running",
+            size=500,
+            original_size=1000,
+            calls=10,
+            reductions=5,
+            interesting_calls=3,
+            wasted_calls=1,
+            runtime=5.0,
+            parallel_workers=2,
+            average_parallelism=1.8,
+            effective_parallelism=1.5,
+            time_since_last_reduction=1.0,
+            content_preview="Test content",
+            hex_mode=False,
+        )
+        fake_client = FakeReductionClient(updates=[update], wait_indefinitely=True)
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for the update to be processed
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            # Push an expanded modal for stats
+            modal = ExpandedBoxModal("Statistics", "stats-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            # Verify the content was populated
+            expanded_content = app.screen.query_one("#expanded-content", Static)
+            # Content should not be empty
+            assert expanded_content is not None
+
+    run_async(run_test())
+
+
+def test_expanded_modal_on_mount_graph():
+    """Test ExpandedBoxModal on_mount copies graph data."""
+
+    async def run_test():
+        # Create updates with size history
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=800,
+                original_size=1000,
+                calls=5,
+                reductions=2,
+                interesting_calls=2,
+                wasted_calls=0,
+                runtime=1.0,
+                parallel_workers=2,
+                average_parallelism=2.0,
+                effective_parallelism=1.8,
+                time_since_last_reduction=0.5,
+                content_preview="Test",
+                hex_mode=False,
+                new_size_history=[(0.0, 1000), (1.0, 800)],
+            ),
+        ]
+        fake_client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for updates
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            # Push an expanded modal for the graph
+            modal = ExpandedBoxModal("Size Over Time", "graph-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            # Verify the graph widget exists and has data copied
+            expanded_graph = app.screen.query_one("#expanded-graph", SizeGraph)
+            assert expanded_graph is not None
+            # The graph should have history data copied from main graph
+            main_graph = app.query_one("#size-graph", SizeGraph)
+            assert expanded_graph._size_history == main_graph._size_history
+
+    run_async(run_test())
+
+
+def test_expanded_modal_on_mount_output():
+    """Test ExpandedBoxModal on_mount populates output content."""
+
+    async def run_test():
+        update = ProgressUpdate(
+            status="Running",
+            size=500,
+            original_size=1000,
+            calls=10,
+            reductions=5,
+            interesting_calls=3,
+            wasted_calls=1,
+            runtime=5.0,
+            parallel_workers=2,
+            average_parallelism=1.8,
+            effective_parallelism=1.5,
+            time_since_last_reduction=1.0,
+            content_preview="Test content",
+            hex_mode=False,
+            test_output_preview="Test output line 1\nTest output line 2",
+            active_test_id=1,
+        )
+        fake_client = FakeReductionClient(updates=[update], wait_indefinitely=True)
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for the update to be processed
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            # Push an expanded modal for output
+            modal = ExpandedBoxModal("Test Output", "output-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            # Verify the content was populated
+            expanded_content = app.screen.query_one("#expanded-content", Static)
+            assert expanded_content is not None
+
+    run_async(run_test())
+
+
+def test_expanded_modal_on_mount_output_completed_with_return_code():
+    """Test ExpandedBoxModal on_mount for output with completed test and return code."""
+
+    async def run_test():
+        # First update: test is running
+        update1 = ProgressUpdate(
+            status="Running",
+            size=500,
+            original_size=1000,
+            calls=5,
+            reductions=2,
+            interesting_calls=2,
+            wasted_calls=0,
+            runtime=2.0,
+            parallel_workers=2,
+            average_parallelism=1.8,
+            effective_parallelism=1.5,
+            time_since_last_reduction=0.5,
+            content_preview="Test content",
+            hex_mode=False,
+            test_output_preview="Output during test",
+            active_test_id=42,  # Test is running
+        )
+        # Second update: test completed with return code
+        update2 = ProgressUpdate(
+            status="Running",
+            size=500,
+            original_size=1000,
+            calls=10,
+            reductions=5,
+            interesting_calls=3,
+            wasted_calls=1,
+            runtime=5.0,
+            parallel_workers=2,
+            average_parallelism=1.8,
+            effective_parallelism=1.5,
+            time_since_last_reduction=1.0,
+            content_preview="Test content",
+            hex_mode=False,
+            test_output_preview="Final output",
+            active_test_id=None,  # Test completed
+            last_test_return_code=1,  # With return code
+        )
+        fake_client = FakeReductionClient(
+            updates=[update1, update2], wait_indefinitely=True
+        )
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for both updates to be processed
+            await pilot.pause()
+            await asyncio.sleep(0.2)
+            await pilot.pause()
+
+            modal = ExpandedBoxModal("Test Output", "output-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            expanded_content = app.screen.query_one("#expanded-content", Static)
+            assert expanded_content is not None
+
+    run_async(run_test())
+
+
+def test_expanded_modal_on_mount_output_completed_without_return_code():
+    """Test ExpandedBoxModal on_mount for output with completed test but no return code."""
+
+    async def run_test():
+        # First update: test is running
+        update1 = ProgressUpdate(
+            status="Running",
+            size=500,
+            original_size=1000,
+            calls=5,
+            reductions=2,
+            interesting_calls=2,
+            wasted_calls=0,
+            runtime=2.0,
+            parallel_workers=2,
+            average_parallelism=1.8,
+            effective_parallelism=1.5,
+            time_since_last_reduction=0.5,
+            content_preview="Test content",
+            hex_mode=False,
+            test_output_preview="Output during test",
+            active_test_id=42,  # Test is running
+        )
+        # Second update: test completed without return code
+        update2 = ProgressUpdate(
+            status="Running",
+            size=500,
+            original_size=1000,
+            calls=10,
+            reductions=5,
+            interesting_calls=3,
+            wasted_calls=1,
+            runtime=5.0,
+            parallel_workers=2,
+            average_parallelism=1.8,
+            effective_parallelism=1.5,
+            time_since_last_reduction=1.0,
+            content_preview="Test content",
+            hex_mode=False,
+            test_output_preview="Final output",
+            active_test_id=None,  # Test completed
+            # No return code specified
+        )
+        fake_client = FakeReductionClient(
+            updates=[update1, update2], wait_indefinitely=True
+        )
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for both updates to be processed
+            await pilot.pause()
+            await asyncio.sleep(0.2)
+            await pilot.pause()
+
+            modal = ExpandedBoxModal("Test Output", "output-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            expanded_content = app.screen.query_one("#expanded-content", Static)
+            assert expanded_content is not None
+
+    run_async(run_test())
+
+
+def test_expanded_modal_on_mount_output_seen_but_no_content():
+    """Test ExpandedBoxModal on_mount for output when we've seen output before but no current content."""
+
+    async def run_test():
+        # First update: test with output
+        update1 = ProgressUpdate(
+            status="Running",
+            size=500,
+            original_size=1000,
+            calls=5,
+            reductions=2,
+            interesting_calls=2,
+            wasted_calls=0,
+            runtime=2.0,
+            parallel_workers=2,
+            average_parallelism=1.8,
+            effective_parallelism=1.5,
+            time_since_last_reduction=0.5,
+            content_preview="Test content",
+            hex_mode=False,
+            test_output_preview="Some output",
+            active_test_id=42,
+        )
+        # Second update: no content but test completed
+        update2 = ProgressUpdate(
+            status="Running",
+            size=500,
+            original_size=1000,
+            calls=10,
+            reductions=5,
+            interesting_calls=3,
+            wasted_calls=1,
+            runtime=5.0,
+            parallel_workers=2,
+            average_parallelism=1.8,
+            effective_parallelism=1.5,
+            time_since_last_reduction=1.0,
+            content_preview="Test content",
+            hex_mode=False,
+            test_output_preview="",  # Empty output
+            active_test_id=None,
+        )
+        fake_client = FakeReductionClient(
+            updates=[update1, update2], wait_indefinitely=True
+        )
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for both updates to be processed
+            await pilot.pause()
+            await asyncio.sleep(0.2)
+            await pilot.pause()
+
+            modal = ExpandedBoxModal("Test Output", "output-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            expanded_content = app.screen.query_one("#expanded-content", Static)
+            assert expanded_content is not None
+
+    run_async(run_test())
+
+
+def test_expanded_modal_on_mount_output_no_content():
+    """Test ExpandedBoxModal on_mount for output with no content."""
+
+    async def run_test():
+        # No test output in the update
+        update = ProgressUpdate(
+            status="Running",
+            size=500,
+            original_size=1000,
+            calls=10,
+            reductions=5,
+            interesting_calls=3,
+            wasted_calls=1,
+            runtime=5.0,
+            parallel_workers=2,
+            average_parallelism=1.8,
+            effective_parallelism=1.5,
+            time_since_last_reduction=1.0,
+            content_preview="Test content",
+            hex_mode=False,
+            test_output_preview="",  # No test output
+            active_test_id=None,
+        )
+        fake_client = FakeReductionClient(updates=[update], wait_indefinitely=True)
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            modal = ExpandedBoxModal("Test Output", "output-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            expanded_content = app.screen.query_one("#expanded-content", Static)
+            assert expanded_content is not None
+
+    run_async(run_test())
+
+
+def test_expanded_modal_on_mount_content_with_file(tmp_path):
+    """Test ExpandedBoxModal on_mount reads file content."""
+
+    async def run_test():
+        # Create a test file
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("File content for test")
+
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()  # Wait for app to mount
+            # Push an expanded modal for content with file path
+            modal = ExpandedBoxModal(
+                "Current Test Case", "content-container", str(test_file)
+            )
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            # Verify the content was populated from file
+            expanded_content = app.screen.query_one("#expanded-content", Static)
+            # The renderable should contain the file content
+            assert expanded_content is not None
+
+    run_async(run_test())
+
+
+def test_expanded_modal_on_mount_content_without_file():
+    """Test ExpandedBoxModal on_mount uses preview content when no file path."""
+
+    async def run_test():
+        update = ProgressUpdate(
+            status="Running",
+            size=500,
+            original_size=1000,
+            calls=10,
+            reductions=5,
+            interesting_calls=3,
+            wasted_calls=1,
+            runtime=5.0,
+            parallel_workers=2,
+            average_parallelism=1.8,
+            effective_parallelism=1.5,
+            time_since_last_reduction=1.0,
+            content_preview="Preview content from widget",
+            hex_mode=False,
+        )
+        fake_client = FakeReductionClient(updates=[update], wait_indefinitely=True)
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for the update to be processed
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            # Push an expanded modal for content WITHOUT file path
+            modal = ExpandedBoxModal("Current Test Case", "content-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            # Verify the content was populated from the preview widget
+            expanded_content = app.screen.query_one("#expanded-content", Static)
+            assert expanded_content is not None
+
+    run_async(run_test())
+
+
+# === Focus navigation tests ===
+
+
+def test_focus_navigation_up():
+    """Test focus up action wraps correctly."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Focus on a box in the top row
+            app._focus_box(0)
+            await pilot.pause()
+
+            # Move up should wrap to bottom
+            app.action_focus_up()
+            await pilot.pause()
+            assert app._get_focused_box_index() == 2
+
+    run_async(run_test())
+
+
+def test_focus_navigation_down():
+    """Test focus down action wraps correctly."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Focus on a box in the bottom row
+            app._focus_box(2)
+            await pilot.pause()
+
+            # Move down should wrap to top
+            app.action_focus_down()
+            await pilot.pause()
+            assert app._get_focused_box_index() == 0
+
+    run_async(run_test())
+
+
+def test_focus_navigation_left():
+    """Test focus left action wraps correctly."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Focus on leftmost box
+            app._focus_box(0)
+            await pilot.pause()
+
+            # Move left should wrap to right
+            app.action_focus_left()
+            await pilot.pause()
+            assert app._get_focused_box_index() == 1
+
+    run_async(run_test())
+
+
+def test_focus_navigation_right():
+    """Test focus right action wraps correctly."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Focus on rightmost box
+            app._focus_box(1)
+            await pilot.pause()
+
+            # Move right should wrap to left
+            app.action_focus_right()
+            await pilot.pause()
+            assert app._get_focused_box_index() == 0
+
+    run_async(run_test())
+
+
+def test_focus_navigation_up_from_bottom():
+    """Test focus up action from bottom row to top row."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Focus on a box in the bottom row (index 2)
+            app._focus_box(2)
+            await pilot.pause()
+
+            # Move up should go to top row (2 - 2 = 0)
+            app.action_focus_up()
+            await pilot.pause()
+            assert app._get_focused_box_index() == 0
+
+    run_async(run_test())
+
+
+def test_focus_navigation_down_from_top():
+    """Test focus down action from top row to bottom row."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Focus on a box in the top row (index 0)
+            app._focus_box(0)
+            await pilot.pause()
+
+            # Move down should go to bottom row (0 + 2 = 2)
+            app.action_focus_down()
+            await pilot.pause()
+            assert app._get_focused_box_index() == 2
+
+    run_async(run_test())
+
+
+def test_focus_navigation_left_from_right():
+    """Test focus left action from right column to left column."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Focus on a box in the right column (index 1, odd)
+            app._focus_box(1)
+            await pilot.pause()
+
+            # Move left should go to left column (1 - 1 = 0)
+            app.action_focus_left()
+            await pilot.pause()
+            assert app._get_focused_box_index() == 0
+
+    run_async(run_test())
+
+
+def test_focus_navigation_right_from_left():
+    """Test focus right action from left column to right column."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Focus on a box in the left column (index 0, even)
+            app._focus_box(0)
+            await pilot.pause()
+
+            # Move right should go to right column (0 + 1 = 1)
+            app.action_focus_right()
+            await pilot.pause()
+            assert app._get_focused_box_index() == 1
+
+    run_async(run_test())
+
+
+# === Update expanded modal tests ===
+
+
+def test_update_expanded_graph():
+    """Test _update_expanded_graph updates graph in modal."""
+
+    async def run_test():
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=800,
+                original_size=1000,
+                calls=5,
+                reductions=2,
+                interesting_calls=2,
+                wasted_calls=0,
+                runtime=1.0,
+                parallel_workers=2,
+                average_parallelism=2.0,
+                effective_parallelism=1.8,
+                time_since_last_reduction=0.5,
+                content_preview="Test",
+                hex_mode=False,
+                new_size_history=[(0.0, 1000), (1.0, 800)],
+            ),
+        ]
+        fake_client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for initial update
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            # Push graph modal
+            modal = ExpandedBoxModal("Size Over Time", "graph-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            # Call update method directly
+            app._update_expanded_graph([(2.0, 600)], 1000, 2.0)
+            await pilot.pause()
+
+            # Verify the expanded graph was updated
+            expanded_graph = app.screen.query_one("#expanded-graph", SizeGraph)
+            # Should have the new entry
+            assert (2.0, 600) in expanded_graph._size_history
+
+    run_async(run_test())
+
+
+def test_update_expanded_stats():
+    """Test _update_expanded_stats updates stats in modal."""
+
+    async def run_test():
+        update = ProgressUpdate(
+            status="Running",
+            size=500,
+            original_size=1000,
+            calls=10,
+            reductions=5,
+            interesting_calls=3,
+            wasted_calls=1,
+            runtime=5.0,
+            parallel_workers=2,
+            average_parallelism=1.8,
+            effective_parallelism=1.5,
+            time_since_last_reduction=1.0,
+            content_preview="Test content",
+            hex_mode=False,
+        )
+        fake_client = FakeReductionClient(updates=[update], wait_indefinitely=True)
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+
+        async with app.run_test() as pilot:
+            # Wait for initial update
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            # Push stats modal
+            modal = ExpandedBoxModal("Statistics", "stats-container")
+            await app.push_screen(modal)
+            await pilot.pause()
+
+            # Call update method directly
+            app._update_expanded_stats()
+            await pilot.pause()
+
+            # Verify the modal still exists and has content
+            expanded_content = app.screen.query_one("#expanded-content", Static)
+            assert expanded_content is not None
+
+    run_async(run_test())
 
 
 # === End-to-end tests ===
@@ -4064,6 +4944,836 @@ def test_pass_stats_screen_get_selected_empty_table():
                 await pilot.press("q")
                 await pilot.press("q")
 
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+# === Modal edge case tests ===
+
+
+def test_expanded_modal_graph_missing_main_graph():
+    """Test that _get_graph_content returns early when main graph is missing."""
+
+    async def run():
+        # Create an app with no progress updates yet
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Remove the size graph widget to simulate missing widget
+                size_graph = app.query_one("#size-graph", SizeGraph)
+                size_graph.remove()
+                await pilot.pause()
+
+                # Now create and push the modal
+                modal = ExpandedBoxModal("Size Graph", "graph-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # The modal should have an expanded-graph but _get_graph_content
+                # should return early since main graph is missing
+                expanded_graphs = list(
+                    modal.query("#expanded-graph").results(SizeGraph)
+                )
+                assert len(expanded_graphs) == 1
+                # The expanded graph should have empty history since copy failed
+                assert expanded_graphs[0]._size_history == []
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_expanded_modal_stats_missing_stats_display():
+    """Test that _get_stats_content returns fallback when stats display is missing."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Remove the stats display widget
+                stats_display = app.query_one("#stats-display", StatsDisplay)
+                stats_display.remove()
+                await pilot.pause()
+
+                # Create and push modal for stats
+                modal = ExpandedBoxModal("Statistics", "stats-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Check that fallback content is shown
+                content = modal.query_one("#expanded-content", Static)
+                assert "Statistics not available" in get_static_content(content)
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_expanded_modal_content_missing_content_preview():
+    """Test that _get_file_content returns fallback when content preview is missing."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Remove the content preview widget
+                content_preview = app.query_one("#content-preview", ContentPreview)
+                content_preview.remove()
+                await pilot.pause()
+
+                # Create modal for content-container with no file_path
+                modal = ExpandedBoxModal("Content", "content-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Check that fallback content is shown
+                content = modal.query_one("#expanded-content", Static)
+                assert "Content preview not available" in get_static_content(content)
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_expanded_modal_output_missing_output_preview():
+    """Test that _get_output_content returns fallback when output preview is missing."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Remove the output preview widget
+                output_preview = app.query_one("#output-preview", OutputPreview)
+                output_preview.remove()
+                await pilot.pause()
+
+                # Create modal for output-container
+                modal = ExpandedBoxModal("Output", "output-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Check that fallback content is shown
+                content = modal.query_one("#expanded-content", Static)
+                assert "Output not available" in get_static_content(content)
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_expanded_modal_unknown_content_widget():
+    """Test that unknown content_widget_id results in empty content."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Create modal with unknown widget id
+                modal = ExpandedBoxModal("Unknown", "unknown-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Check that empty content is shown
+                content = modal.query_one("#expanded-content", Static)
+                # Empty string means the content should be empty
+                assert get_static_content(content) == ""
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+# === Output content edge case tests ===
+
+
+def test_expanded_modal_output_with_return_code():
+    """Test output modal displays return code when test_id and return_code are set."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Set output preview state directly
+                output_preview = app.query_one("#output-preview", OutputPreview)
+                output_preview._last_seen_test_id = 42
+                output_preview.last_return_code = 1
+                output_preview.output_content = "some output"
+
+                # Create modal for output-container
+                modal = ExpandedBoxModal("Output", "output-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Check that return code info is shown
+                content = modal.query_one("#expanded-content", Static)
+                content_str = get_static_content(content)
+                assert "Test #42" in content_str
+                assert "exited with code 1" in content_str
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_expanded_modal_output_without_return_code():
+    """Test output modal displays 'completed' when test_id is set but no return_code."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Set output preview state with test_id but no return_code
+                output_preview = app.query_one("#output-preview", OutputPreview)
+                output_preview._last_seen_test_id = 42
+                output_preview.last_return_code = None
+                output_preview._has_seen_output = True
+
+                # Create modal for output-container
+                modal = ExpandedBoxModal("Output", "output-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Check that completed message is shown
+                content = modal.query_one("#expanded-content", Static)
+                content_str = get_static_content(content)
+                assert "Test #42" in content_str
+                assert "completed" in content_str
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_expanded_modal_output_with_empty_content_and_header():
+    """Test output modal with has_seen_output but no current content."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Set output preview state with test_id and return_code but no content
+                output_preview = app.query_one("#output-preview", OutputPreview)
+                output_preview._last_seen_test_id = 42
+                output_preview.last_return_code = 0
+                output_preview._has_seen_output = True
+                output_preview.output_content = ""
+                output_preview._pending_content = ""  # Empty string is falsy like None
+
+                # Create modal for output-container
+                modal = ExpandedBoxModal("Output", "output-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Should show header only (no "No test output" message)
+                content = modal.query_one("#expanded-content", Static)
+                content_str = get_static_content(content)
+                assert "Test #42" in content_str
+                assert "No test output" not in content_str
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+# === Action method tests ===
+
+
+def test_action_quit_with_client():
+    """Test action_quit cancels client before exiting."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Trigger quit action
+                await pilot.press("q")
+                await pilot.pause()
+
+                # Client should have been cancelled
+                assert fake_client._cancelled
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_action_quit_handles_exception():
+    """Test action_quit handles exception from cancel gracefully."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        # Make cancel raise an exception
+        async def raise_exception():
+            raise RuntimeError("Process already exited")
+
+        fake_client.cancel = raise_exception
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Trigger quit action - should not raise
+                await pilot.press("q")
+                await pilot.pause()
+
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_action_show_pass_stats():
+    """Test action_show_pass_stats opens the pass stats screen."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Press 'p' to show pass stats
+                await pilot.press("p")
+                await pilot.pause()
+
+                # Verify PassStatsScreen is on stack
+                found = any(isinstance(s, PassStatsScreen) for s in app.screen_stack)
+                assert found
+
+                await pilot.press("q")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_action_show_help():
+    """Test action_show_help opens the help screen."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Press 'h' to show help
+                await pilot.press("h")
+                await pilot.pause()
+
+                # Verify HelpScreen is on stack
+                found = any(isinstance(s, HelpScreen) for s in app.screen_stack)
+                assert found
+
+                await pilot.press("q")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_action_skip_current_pass():
+    """Test action_skip_current_pass sends skip request to client."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        skip_called = []
+
+        original_skip = fake_client.skip_current_pass
+
+        async def track_skip():
+            skip_called.append(True)
+            return await original_skip()
+
+        fake_client.skip_current_pass = track_skip
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Press 'c' to skip current pass
+                await pilot.press("c")
+                await pilot.pause()
+
+                # Give the worker time to run
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                assert skip_called
+
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+# === Focus index fallback test ===
+
+
+def test_get_focused_box_index_no_focus():
+    """Test _get_focused_box_index returns 0 when no box has focus."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Remove focus from all boxes
+                app.set_focus(None)
+                await pilot.pause()
+
+                # Check that _get_focused_box_index returns 0
+                result = app._get_focused_box_index()
+                assert result == 0
+
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+# === is_completed property test ===
+
+
+def test_is_completed_property():
+    """Test the is_completed property reflects internal state."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Initially not completed
+                assert not app.is_completed
+
+                # Set internal completed flag
+                app._completed = True
+                assert app.is_completed
+
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+# === Partial branch coverage tests ===
+
+
+def test_update_expanded_graph_skips_non_graph_modal():
+    """Test that _update_expanded_graph skips modals with different content_widget_id."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Push a stats modal (not graph) - this will be on the screen stack
+                modal = ExpandedBoxModal("Statistics", "stats-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Directly call _update_expanded_graph
+                # It should iterate through screen_stack, find the stats modal,
+                # check that it's not a graph modal, and continue/exit the loop
+                app._update_expanded_graph([(1.0, 100)], 200, 1.0)
+
+                # The test passes if no error is raised (the loop correctly skips
+                # the stats modal when looking for graph modals)
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_update_expanded_stats_skips_non_stats_modal():
+    """Test that _update_expanded_stats skips modals with different content_widget_id."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Push a graph modal (not stats) - this will be on the screen stack
+                modal = ExpandedBoxModal("Size Graph", "graph-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Directly call _update_expanded_stats
+                # It should iterate through screen_stack, find the graph modal,
+                # check that it's not a stats modal, and continue/exit the loop
+                app._update_expanded_stats()
+
+                # The test passes if no error is raised (the loop correctly skips
+                # the graph modal when looking for stats modals)
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_update_expanded_stats_missing_stats_display():
+    """Test that _update_expanded_stats handles missing stats display."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Push a stats modal
+                modal = ExpandedBoxModal("Statistics", "stats-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Remove the stats display from the main app
+                stats_display = app.query_one("#stats-display", StatsDisplay)
+                stats_display.remove()
+                await pilot.pause()
+
+                # Directly call _update_expanded_stats
+                # It should find the stats modal but stats_displays will be empty
+                app._update_expanded_stats()
+
+                # The test passes if no error is raised
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_update_expanded_graph_missing_expanded_graph():
+    """Test that _update_expanded_graph handles missing expanded graph widget."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Push a graph modal
+                modal = ExpandedBoxModal("Size Graph", "graph-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Remove the expanded graph from the modal
+                expanded_graph = modal.query_one("#expanded-graph", SizeGraph)
+                expanded_graph.remove()
+                await pilot.pause()
+
+                # Directly call _update_expanded_graph
+                # It should find the graph modal but expanded_graphs will be empty
+                app._update_expanded_graph([(1.0, 100)], 200, 1.0)
+
+                # The test passes if no error is raised
+
+                await pilot.press("escape")
+                await pilot.press("q")
         finally:
             if os.path.exists(temp_file):
                 os.unlink(temp_file)

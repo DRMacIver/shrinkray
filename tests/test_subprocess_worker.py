@@ -1865,6 +1865,58 @@ async def test_build_progress_update_with_reducer_no_disabled_passes_attr():
     assert update.disabled_passes == []
 
 
+@pytest.mark.trio
+async def test_build_progress_update_periodic_size_history():
+    """Test _build_progress_update records periodic size history when size unchanged (412-413)."""
+
+    worker = ReducerWorker()
+
+    # Set up problem with a start time that gives us control over runtime
+    start_time = time.time()
+
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 500
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = start_time
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.1)
+    worker.problem.current_test_case = b"test content"
+
+    worker.state = Mock()
+    worker.state.parallel_tasks_running = 2
+    worker.state.output_manager = None
+
+    # First call - initializes history with size change from initial
+    update1 = await worker._build_progress_update()
+    assert update1 is not None
+    # Should have initial entry and size change entry
+    assert len(worker._size_history) >= 1
+
+    initial_history_len = len(worker._size_history)
+    recorded_time = worker._last_history_time
+
+    # Now the size stays the same, but not enough time has passed
+    # history_interval is 0.2s for first 5 minutes
+    await worker._build_progress_update()
+    # No new entry should be added (size same, not enough time)
+    assert len(worker._size_history) == initial_history_len
+
+    # Now simulate enough time passing (> 0.2s)
+    # We need to mock time.time to return a later time
+    fake_current_time = start_time + recorded_time + 0.3  # 0.3s after last record
+
+    with patch("shrinkray.subprocess.worker.time.time", return_value=fake_current_time):
+        await worker._build_progress_update()
+
+    # Now a periodic entry should have been added (size same, time passed)
+    assert len(worker._size_history) > initial_history_len
+    assert worker._size_history[-1][1] == 500  # Size is unchanged
+
+
 # === _get_test_output_preview tests ===
 
 

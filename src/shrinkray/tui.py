@@ -7,7 +7,7 @@ import traceback
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from datetime import timedelta
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 import humanize
 from rich.text import Text
@@ -712,9 +712,9 @@ class ExpandedBoxModal(ModalScreen[None]):
                     time.sleep(0.05)  # 50ms delay between retries
 
         # All retries failed - raise the last error to be caught by caller
-        if last_error is not None:
-            raise last_error
-        return "Could not read file"
+        # last_error is always set here since the loop runs at least once (max_retries >= 1)
+        assert last_error is not None
+        raise last_error
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -727,89 +727,99 @@ class ExpandedBoxModal(ModalScreen[None]):
                 with VerticalScroll():
                     yield Static("", id="expanded-content")
 
+    def _get_graph_content(self, app: "ShrinkRayApp") -> None:
+        """Copy graph data from main graph to expanded graph."""
+        main_graphs = list(app.query("#size-graph").results(SizeGraph))
+        expanded_graphs = list(self.query("#expanded-graph").results(SizeGraph))
+        if not main_graphs or not expanded_graphs:
+            return
+        main_graph = main_graphs[0]
+        expanded_graph = expanded_graphs[0]
+        expanded_graph._size_history = main_graph._size_history.copy()
+        expanded_graph._original_size = main_graph._original_size
+        expanded_graph._current_runtime = main_graph._current_runtime
+        expanded_graph._setup_plot()
+
+    def _get_stats_content(self, app: "ShrinkRayApp") -> str:
+        """Get stats content from the stats display widget."""
+        stats_displays = list(app.query("#stats-display").results(StatsDisplay))
+        if not stats_displays:
+            return "Statistics not available"
+        return stats_displays[0].render()
+
+    def _get_file_content(self, app: "ShrinkRayApp") -> str:
+        """Get content from file or preview widget."""
+        if self._file_path:
+            return self._read_file_with_retry(self._file_path)
+        content_previews = list(app.query("#content-preview").results(ContentPreview))
+        if not content_previews:
+            return "Content preview not available"
+        return content_previews[0].preview_content
+
+    def _get_output_content(self, app: "ShrinkRayApp") -> str:
+        """Get output content from the output preview widget."""
+        output_previews = list(app.query("#output-preview").results(OutputPreview))
+        if not output_previews:
+            return "Output not available"
+        output_preview = output_previews[0]
+
+        # Use pending values (most recent) rather than throttled values
+        raw_content = output_preview._pending_content or output_preview.output_content
+        test_id = output_preview._last_seen_test_id
+        if output_preview._pending_test_id is not None:
+            test_id = output_preview._pending_test_id
+        return_code = output_preview._pending_return_code
+        if return_code is None:
+            return_code = output_preview.last_return_code
+        active_test_id = (
+            output_preview._pending_test_id
+            if output_preview._pending_test_id is not None
+            else output_preview.active_test_id
+        )
+        has_seen_output = output_preview._has_seen_output
+
+        # Build header
+        if active_test_id is not None:
+            header = f"[green]Test #{active_test_id} running...[/green]\n\n"
+        elif test_id is not None:
+            if return_code is not None:
+                header = (
+                    f"[dim]Test #{test_id} exited with code {return_code}[/dim]\n\n"
+                )
+            else:
+                header = f"[dim]Test #{test_id} completed[/dim]\n\n"
+        else:
+            header = ""
+
+        if raw_content:
+            return header + raw_content
+        elif has_seen_output or test_id is not None:
+            # We've seen output before - show header only (no "No test output" message)
+            return header.rstrip("\n") if header else ""
+        else:
+            return "[dim]No test output yet...[/dim]"
+
     def on_mount(self) -> None:
         """Populate content from the source widget."""
-        app = self.app
+        # Cast is safe because this modal is only used within ShrinkRayApp
+        app = cast("ShrinkRayApp", self.app)
 
         if self._content_widget_id == "graph-container":
-            # Copy data from the main graph to the expanded graph
-            try:
-                main_graph = app.query_one("#size-graph", SizeGraph)
-                expanded_graph = self.query_one("#expanded-graph", SizeGraph)
-                # Copy the history data
-                expanded_graph._size_history = main_graph._size_history.copy()
-                expanded_graph._original_size = main_graph._original_size
-                expanded_graph._current_runtime = main_graph._current_runtime
-                expanded_graph._setup_plot()
-            except Exception:
-                pass
+            self._get_graph_content(app)
             return
 
         # For non-graph content, populate the static
-        content = ""
-
+        # compose() always creates the #expanded-content widget for non-graph modals
         if self._content_widget_id == "stats-container":
-            try:
-                stats_display = app.query_one("#stats-display", StatsDisplay)
-                content = stats_display.render()
-            except Exception:
-                content = "Statistics not available"
+            content = self._get_stats_content(app)
         elif self._content_widget_id == "content-container":
-            # Read the full current test case file content
-            try:
-                if self._file_path:
-                    content = self._read_file_with_retry(self._file_path)
-                else:
-                    content_preview = app.query_one("#content-preview", ContentPreview)
-                    content = content_preview.preview_content
-            except Exception:
-                content = "Content preview not available"
+            content = self._get_file_content(app)
         elif self._content_widget_id == "output-container":
-            try:
-                output_preview = app.query_one("#output-preview", OutputPreview)
-                # Use pending values (most recent) rather than throttled values
-                raw_content = (
-                    output_preview._pending_content or output_preview.output_content
-                )
-                test_id = output_preview._last_seen_test_id
-                if output_preview._pending_test_id is not None:
-                    test_id = output_preview._pending_test_id
-                return_code = output_preview._pending_return_code
-                if return_code is None:
-                    return_code = output_preview.last_return_code
-                active_test_id = (
-                    output_preview._pending_test_id
-                    if output_preview._pending_test_id is not None
-                    else output_preview.active_test_id
-                )
-                has_seen_output = output_preview._has_seen_output
+            content = self._get_output_content(app)
+        else:
+            content = ""
 
-                # Build header
-                if active_test_id is not None:
-                    header = f"[green]Test #{active_test_id} running...[/green]\n\n"
-                elif test_id is not None:
-                    if return_code is not None:
-                        header = f"[dim]Test #{test_id} exited with code {return_code}[/dim]\n\n"
-                    else:
-                        header = f"[dim]Test #{test_id} completed[/dim]\n\n"
-                else:
-                    header = ""
-
-                if raw_content:
-                    content = header + raw_content
-                elif has_seen_output or test_id is not None:
-                    # We've seen output before - show header only (no "No test output" message)
-                    content = header.rstrip("\n") if header else ""
-                else:
-                    content = "[dim]No test output yet...[/dim]"
-            except Exception:
-                content = "Output not available"
-
-        try:
-            expanded_content = self.query_one("#expanded-content", Static)
-            expanded_content.update(content)
-        except Exception:
-            pass
+        self.query_one("#expanded-content", Static).update(content)
 
 
 class PassStatsScreen(ModalScreen[None]):
@@ -1217,11 +1227,9 @@ class ShrinkRayApp(App[None]):
     def _get_focused_box_index(self) -> int:
         """Get the index of the currently focused box, or 0 if none."""
         for i, box_id in enumerate(self._BOX_IDS):
-            try:
-                if self.query_one(f"#{box_id}").has_focus:
-                    return i
-            except Exception:
-                pass
+            boxes = list(self.query(f"#{box_id}"))
+            if boxes and boxes[0].has_focus:
+                return i
         return 0
 
     def _focus_box(self, index: int) -> None:
@@ -1407,13 +1415,13 @@ class ShrinkRayApp(App[None]):
         for screen in self.screen_stack:
             if isinstance(screen, ExpandedBoxModal):
                 if screen._content_widget_id == "graph-container":
-                    try:
-                        expanded_graph = screen.query_one("#expanded-graph", SizeGraph)
-                        expanded_graph.update_graph(
+                    expanded_graphs = list(
+                        screen.query("#expanded-graph").results(SizeGraph)
+                    )
+                    if expanded_graphs:
+                        expanded_graphs[0].update_graph(
                             new_entries, original_size, current_runtime
                         )
-                    except Exception:
-                        pass
                     break
 
     def _update_expanded_stats(self) -> None:
@@ -1421,12 +1429,14 @@ class ShrinkRayApp(App[None]):
         for screen in self.screen_stack:
             if isinstance(screen, ExpandedBoxModal):
                 if screen._content_widget_id == "stats-container":
-                    try:
-                        stats_display = self.query_one("#stats-display", StatsDisplay)
-                        expanded_content = screen.query_one("#expanded-content", Static)
-                        expanded_content.update(stats_display.render())
-                    except Exception:
-                        pass
+                    stats_displays = list(
+                        self.query("#stats-display").results(StatsDisplay)
+                    )
+                    expanded_contents = list(
+                        screen.query("#expanded-content").results(Static)
+                    )
+                    if stats_displays and expanded_contents:
+                        expanded_contents[0].update(stats_displays[0].render())
                     break
 
     async def action_quit(self) -> None:

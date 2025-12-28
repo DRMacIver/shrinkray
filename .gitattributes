@@ -3,4 +3,3 @@
 # Track binary media files with Git LFS
 *.gif filter=lfs diff=lfs merge=lfs -text
 *.png filter=lfs diff=lfs merge=lfs -text
-*.mp4 filter=lfs diff=lfs merge=lfs -text

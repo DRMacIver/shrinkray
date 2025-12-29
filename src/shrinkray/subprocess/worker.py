@@ -602,8 +602,14 @@ class ReducerWorker:
         if update is not None:
             await self.emit(update)
 
-        while self.running:
+        while True:
             await trio.sleep(0.1)
+            # Keep running while reducer is active or restart is pending.
+            # During restart, running is temporarily False but we need to
+            # keep emitting updates until the restart completes and running
+            # is set back to True.
+            if not self.running and not self._restart_requested:
+                break
             update = await self._build_progress_update()
             if update is not None:
                 await self.emit(update)

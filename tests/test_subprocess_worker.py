@@ -2221,3 +2221,66 @@ async def test_run_loop_restarts_reducer():
 
     # Verify run_reducer was called twice (once initially, once after restart)
     assert len(run_reducer_calls) == 2
+
+
+@pytest.mark.trio
+async def test_emit_progress_updates_continues_during_restart():
+    """Test that emit_progress_updates keeps running during restart.
+
+    This is a regression test for a bug where stats stopped updating after
+    restart because emit_progress_updates exited its loop when running became
+    False, and never resumed even after running was set back to True.
+    """
+    worker = ReducerWorker()
+    updates_emitted = []
+
+    async def mock_build_progress_update():
+        # Record when updates are built
+        updates_emitted.append(
+            {"running": worker.running, "restart_requested": worker._restart_requested}
+        )
+        return None  # Return None so emit isn't called
+
+    worker._build_progress_update = mock_build_progress_update
+
+    # Start with running=True
+    worker.running = True
+    worker._restart_requested = False
+
+    async def simulate_restart():
+        """Simulate a restart after some updates."""
+        await trio.sleep(0.25)  # Let some updates happen
+
+        # Simulate restart: set running=False and _restart_requested=True
+        worker.running = False
+        worker._restart_requested = True
+
+        await trio.sleep(0.25)  # Let updates continue during restart
+
+        # Complete restart: set running=True and _restart_requested=False
+        worker.running = True
+        worker._restart_requested = False
+
+        await trio.sleep(0.25)  # Let updates continue after restart
+
+        # Now complete: set running=False with no restart
+        worker.running = False
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(worker.emit_progress_updates)
+        nursery.start_soon(simulate_restart)
+
+    # Verify we got updates during all phases:
+    # 1. Initial running phase
+    # 2. During restart (running=False, restart_requested=True)
+    # 3. After restart (running=True again)
+
+    # Find updates from each phase
+    initial_updates = [u for u in updates_emitted if u["running"] and not u["restart_requested"]]
+    restart_updates = [u for u in updates_emitted if not u["running"] and u["restart_requested"]]
+
+    # Should have updates from all phases
+    assert len(initial_updates) >= 1, "Should have updates during initial running phase"
+    assert len(restart_updates) >= 1, "Should have updates during restart phase"
+    # The key point is that we didn't exit early during restart - we got updates
+    # while running=False but restart_requested=True

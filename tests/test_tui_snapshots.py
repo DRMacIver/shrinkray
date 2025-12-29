@@ -79,6 +79,11 @@ class FakeReductionClientForSnapshots:
     async def skip_current_pass(self) -> Response:
         return Response(id="skip", result={"status": "skipped"})
 
+    async def restart_from(self, reduction_number: int) -> Response:
+        return Response(
+            id="restart", result={"status": "restarted", "size": 100}
+        )
+
     async def close(self) -> None:
         pass
 

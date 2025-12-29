@@ -528,3 +528,242 @@ def test_record_also_interesting_works_with_record_reductions_false() -> None:
                 assert f.read() == b"also interesting case"
         finally:
             os.chdir(original_cwd)
+
+
+# === get_reduction_content tests ===
+
+
+def test_get_reduction_content_returns_correct_content() -> None:
+    """Test that get_reduction_content returns the file content."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_reduction(b"reduction 1")
+            manager.record_reduction(b"reduction 2")
+            manager.record_reduction(b"reduction 3")
+
+            assert manager.get_reduction_content(1) == b"reduction 1"
+            assert manager.get_reduction_content(2) == b"reduction 2"
+            assert manager.get_reduction_content(3) == b"reduction 3"
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_get_reduction_content_raises_for_nonexistent_reduction() -> None:
+    """Test that get_reduction_content raises FileNotFoundError for invalid number."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_reduction(b"reduction 1")
+
+            with pytest.raises(FileNotFoundError):
+                manager.get_reduction_content(999)
+        finally:
+            os.chdir(original_cwd)
+
+
+# === restart_from_reduction tests ===
+
+
+def test_restart_from_reduction_returns_content_and_exclusion_set() -> None:
+    """Test that restart_from_reduction returns restart content and exclusion set."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_reduction(b"reduction 1")
+            manager.record_reduction(b"reduction 2")
+            manager.record_reduction(b"reduction 3")
+            manager.record_reduction(b"reduction 4")
+
+            # Restart from reduction 2
+            restart_content, excluded = manager.restart_from_reduction(2)
+
+            # Should return content of reduction 2
+            assert restart_content == b"reduction 2"
+
+            # Excluded set should contain reductions 3 and 4
+            assert excluded == {b"reduction 3", b"reduction 4"}
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_restart_from_reduction_moves_entries_to_also_interesting() -> None:
+    """Test that restart_from_reduction moves later reductions to also-interesting."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_reduction(b"r1")
+            manager.record_reduction(b"r2")
+            manager.record_reduction(b"r3")
+            manager.record_reduction(b"r4")
+
+            # Restart from reduction 2
+            manager.restart_from_reduction(2)
+
+            # Reductions 0001 and 0002 should remain
+            reductions_dir = os.path.join(manager.history_dir, "reductions")
+            assert os.path.isdir(os.path.join(reductions_dir, "0001"))
+            assert os.path.isdir(os.path.join(reductions_dir, "0002"))
+            # Reductions 0003 and 0004 should be gone
+            assert not os.path.exists(os.path.join(reductions_dir, "0003"))
+            assert not os.path.exists(os.path.join(reductions_dir, "0004"))
+
+            # They should be in also-interesting now
+            also_interesting_dir = os.path.join(manager.history_dir, "also-interesting")
+            assert os.path.isdir(os.path.join(also_interesting_dir, "0001"))
+            assert os.path.isdir(os.path.join(also_interesting_dir, "0002"))
+
+            # Verify content is correct
+            with open(
+                os.path.join(also_interesting_dir, "0001", "buggy.c"), "rb"
+            ) as f:
+                assert f.read() == b"r3"
+            with open(
+                os.path.join(also_interesting_dir, "0002", "buggy.c"), "rb"
+            ) as f:
+                assert f.read() == b"r4"
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_restart_from_reduction_updates_counters() -> None:
+    """Test that restart_from_reduction updates both counters correctly."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_reduction(b"r1")
+            manager.record_reduction(b"r2")
+            manager.record_reduction(b"r3")
+            manager.record_reduction(b"r4")
+
+            assert manager.reduction_counter == 4
+            assert manager.also_interesting_counter == 0
+
+            # Restart from reduction 2
+            manager.restart_from_reduction(2)
+
+            # Reduction counter should be reset to 2
+            assert manager.reduction_counter == 2
+            # Also-interesting counter should be 2 (moved 2 entries)
+            assert manager.also_interesting_counter == 2
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_restart_from_reduction_preserves_restart_entry() -> None:
+    """Test that restart_from_reduction doesn't move the restart entry itself."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_reduction(b"r1")
+            manager.record_reduction(b"r2")
+            manager.record_reduction(b"r3")
+
+            # Restart from reduction 2
+            manager.restart_from_reduction(2)
+
+            # Reduction 2 should still be in reductions
+            reduction_file = os.path.join(
+                manager.history_dir, "reductions", "0002", "buggy.c"
+            )
+            assert os.path.isfile(reduction_file)
+            with open(reduction_file, "rb") as f:
+                assert f.read() == b"r2"
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_restart_from_reduction_handles_existing_also_interesting() -> None:
+    """Test restart when there are already also-interesting entries."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            # Add some also-interesting entries first
+            manager.record_also_interesting(b"ai1")
+            manager.record_also_interesting(b"ai2")
+
+            manager.record_reduction(b"r1")
+            manager.record_reduction(b"r2")
+            manager.record_reduction(b"r3")
+
+            assert manager.also_interesting_counter == 2
+
+            # Restart from reduction 1
+            manager.restart_from_reduction(1)
+
+            # Should have 4 also-interesting entries now (2 original + 2 moved)
+            assert manager.also_interesting_counter == 4
+
+            # New entries should be numbered 0003 and 0004
+            also_interesting_dir = os.path.join(manager.history_dir, "also-interesting")
+            assert os.path.isdir(os.path.join(also_interesting_dir, "0003"))
+            assert os.path.isdir(os.path.join(also_interesting_dir, "0004"))
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_restart_from_reduction_raises_for_nonexistent_reduction() -> None:
+    """Test that restart_from_reduction raises FileNotFoundError for invalid number."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_reduction(b"r1")
+
+            with pytest.raises(FileNotFoundError):
+                manager.restart_from_reduction(999)
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_restart_from_last_reduction_returns_empty_exclusion_set() -> None:
+    """Test restart from the last reduction returns empty exclusion set."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_reduction(b"r1")
+            manager.record_reduction(b"r2")
+            manager.record_reduction(b"r3")
+
+            # Restart from the last reduction
+            restart_content, excluded = manager.restart_from_reduction(3)
+
+            assert restart_content == b"r3"
+            assert excluded == set()  # Nothing to exclude
+        finally:
+            os.chdir(original_cwd)

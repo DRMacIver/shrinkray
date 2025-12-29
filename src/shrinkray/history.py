@@ -11,13 +11,8 @@ import re
 import shlex
 import shutil
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from attrs import define
-
-
-if TYPE_CHECKING:
-    pass
 
 
 def sanitize_for_filename(s: str) -> str:
@@ -226,3 +221,84 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
             output_name = f"{self.target_basename}.out"
             with open(os.path.join(subdir, output_name), "wb") as f:
                 f.write(output)
+
+    def get_reduction_content(self, reduction_number: int) -> bytes:
+        """Get the content of a specific reduction.
+
+        Args:
+            reduction_number: The reduction number (e.g., 3 for 0003)
+
+        Returns:
+            The file content as bytes
+
+        Raises:
+            FileNotFoundError: If the reduction doesn't exist
+        """
+        file_path = os.path.join(
+            self.history_dir,
+            "reductions",
+            f"{reduction_number:04d}",
+            self.target_basename,
+        )
+        with open(file_path, "rb") as f:
+            return f.read()
+
+    def restart_from_reduction(
+        self, reduction_number: int
+    ) -> tuple[bytes, set[bytes]]:
+        """Move reductions after reduction_number to also-interesting.
+
+        This is used for the "restart from this point" feature. All reductions
+        after the specified point are moved to also-interesting (so they won't
+        be lost) and their contents are returned for exclusion from future
+        interestingness tests.
+
+        Args:
+            reduction_number: The reduction to restart from (e.g., 3 for 0003)
+
+        Returns:
+            tuple: (content_of_reduction_N, set_of_excluded_test_cases)
+
+        Raises:
+            FileNotFoundError: If the reduction doesn't exist
+        """
+        excluded_test_cases: set[bytes] = set()
+        reductions_dir = os.path.join(self.history_dir, "reductions")
+        also_interesting_dir = os.path.join(self.history_dir, "also-interesting")
+        os.makedirs(also_interesting_dir, exist_ok=True)
+
+        # Find all reductions after the restart point
+        entries_to_move: list[tuple[int, str]] = []
+        for entry_name in os.listdir(reductions_dir):
+            try:
+                entry_num = int(entry_name)
+            except ValueError:
+                continue  # Skip non-numeric entries
+            if entry_num > reduction_number:
+                entries_to_move.append((entry_num, entry_name))
+
+        # Sort to process in order
+        entries_to_move.sort()
+
+        for _, entry_name in entries_to_move:
+            entry_path = os.path.join(reductions_dir, entry_name)
+            file_path = os.path.join(entry_path, self.target_basename)
+
+            # Read content for exclusion set
+            with open(file_path, "rb") as f:
+                excluded_test_cases.add(f.read())
+
+            # Move to also-interesting with new numbering
+            self.also_interesting_counter += 1
+            new_path = os.path.join(
+                also_interesting_dir,
+                f"{self.also_interesting_counter:04d}",
+            )
+            shutil.move(entry_path, new_path)
+
+        # Update reduction counter
+        self.reduction_counter = reduction_number
+
+        # Return content to restart from
+        restart_content = self.get_reduction_content(reduction_number)
+        return restart_content, excluded_test_cases

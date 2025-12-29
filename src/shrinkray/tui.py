@@ -133,6 +133,7 @@ class ReductionClientProtocol(Protocol):
     async def disable_pass(self, pass_name: str) -> Response: ...
     async def enable_pass(self, pass_name: str) -> Response: ...
     async def skip_current_pass(self) -> Response: ...
+    async def restart_from(self, reduction_number: int) -> Response: ...
     async def close(self) -> None: ...
 
     @property
@@ -1137,6 +1138,7 @@ class HistoryExplorerModal(ModalScreen[None]):
 
     BINDINGS = [
         ("escape,q,x", "dismiss", "Close"),
+        ("r", "restart_from_here", "Restart from here"),
     ]
 
     def __init__(self, history_dir: str, target_basename: str) -> None:
@@ -1173,7 +1175,7 @@ class HistoryExplorerModal(ModalScreen[None]):
                             with VerticalScroll(id="also-output-content"):
                                 yield Static("", id="also-output-preview")
             yield Static(
-                "↑/↓: Navigate  Tab: Switch Tabs  Esc/q/x: Close",
+                "↑/↓: Navigate  Tab: Switch  r: Restart from here  Esc/q/x: Close",
                 id="history-footer",
             )
 
@@ -1313,6 +1315,33 @@ class HistoryExplorerModal(ModalScreen[None]):
             return hex_display
         except OSError:
             return "[red]Error reading file[/red]"
+
+    def action_restart_from_here(self) -> None:
+        """Restart reduction from the currently selected history point."""
+        # Only works in Reductions tab
+        tabs = self.query_one("#history-tabs", TabbedContent)
+        if tabs.active != "reductions-tab":
+            app = cast("ShrinkRayApp", self.app)
+            app.notify("Restart only available in Reductions tab", severity="warning")
+            return
+
+        # Get the selected reduction number
+        list_view = self.query_one("#reductions-list", ListView)
+        if list_view.index is None or list_view.index >= len(self._reductions_entries):
+            app = cast("ShrinkRayApp", self.app)
+            app.notify("No reduction selected", severity="warning")
+            return
+
+        entry_path = self._reductions_entries[list_view.index]
+        # Extract number from path (e.g., ".../reductions/0003" -> 3)
+        reduction_number = int(os.path.basename(entry_path))
+
+        # Trigger restart via app
+        app = cast("ShrinkRayApp", self.app)
+        app._trigger_restart_from(reduction_number)
+
+        # Close modal
+        self.dismiss()
 
 
 class ShrinkRayApp(App[None]):
@@ -1766,6 +1795,24 @@ class ShrinkRayApp(App[None]):
         """Skip the current pass via the client."""
         if self._client is not None:
             await self._client.skip_current_pass()
+
+    def _trigger_restart_from(self, reduction_number: int) -> None:
+        """Trigger restart from a specific reduction point."""
+        if self._client and not self._completed:
+            self.run_worker(self._do_restart_from(reduction_number))
+
+    async def _do_restart_from(self, reduction_number: int) -> None:
+        """Execute restart command."""
+        if self._client is None:
+            self.notify("No client available", severity="error")
+            return
+        response = await self._client.restart_from(reduction_number)
+        if response.error:
+            self.notify(f"Restart failed: {response.error}", severity="error")
+        else:
+            self.notify(
+                f"Restarted from reduction {reduction_number:04d}", severity="information"
+            )
 
     @property
     def is_completed(self) -> bool:

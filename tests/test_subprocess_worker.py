@@ -14,6 +14,7 @@ import trio
 import shrinkray.subprocess.worker
 from shrinkray.passes.clangdelta import find_clang_delta
 from shrinkray.problem import InvalidInitialExample
+from shrinkray.state import ShrinkRayDirectoryState, ShrinkRayStateSingleFile
 from shrinkray.subprocess.protocol import (
     ProgressUpdate,
     Request,
@@ -1985,3 +1986,103 @@ def test_get_test_output_preview_file_read_error():
     assert preview == ""
     assert test_id == 3
     assert return_code == 1
+
+
+# === _handle_restart_from tests ===
+
+
+@pytest.mark.trio
+async def test_handle_restart_from_missing_reduction_number():
+    """Test restart_from handler with missing reduction_number."""
+    worker = ReducerWorker()
+
+    response = await worker._handle_restart_from("test-id", {})
+    assert response.error == "reduction_number is required"
+
+
+@pytest.mark.trio
+async def test_handle_restart_from_no_state():
+    """Test restart_from handler when state is None."""
+    worker = ReducerWorker()
+    worker.state = None
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 1})
+    assert response.error == "History not available"
+
+
+@pytest.mark.trio
+async def test_handle_restart_from_no_history_manager():
+    """Test restart_from handler when history_manager is None."""
+    worker = ReducerWorker()
+    worker.state = MagicMock()
+    worker.state.history_manager = None
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 1})
+    assert response.error == "History not available"
+
+
+@pytest.mark.trio
+async def test_handle_restart_from_directory_reduction():
+    """Test restart_from handler returns error for directory reductions."""
+    worker = ReducerWorker()
+    # Mock a directory state (not ShrinkRayStateSingleFile)
+    worker.state = MagicMock(spec=ShrinkRayDirectoryState)
+    worker.state.history_manager = MagicMock()
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 1})
+    assert response.error == "Restart from history not supported for directory reductions"
+
+
+@pytest.mark.trio
+async def test_handle_restart_from_nonexistent_reduction():
+    """Test restart_from handler with nonexistent reduction number."""
+    worker = ReducerWorker()
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.history_manager = MagicMock()
+    worker.state.history_manager.restart_from_reduction.side_effect = FileNotFoundError()
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 999})
+    assert response.error is not None and "not found" in response.error
+
+
+@pytest.mark.trio
+async def test_handle_restart_from_success():
+    """Test restart_from handler success case."""
+    worker = ReducerWorker()
+    worker._cancel_scope = None
+    worker.running = True
+
+    # Set up mocks
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.history_manager = MagicMock()
+    worker.state.history_manager.restart_from_reduction.return_value = (
+        b"restart content",
+        {b"excluded1", b"excluded2"},
+    )
+    worker.state.filename = "/tmp/test.c"
+
+    # Mock the reducer
+    mock_reducer = MagicMock()
+    mock_reducer.target = MagicMock()
+    worker.state.reducer = mock_reducer
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 3})
+
+    assert response.result == {"status": "restarted", "size": 15}  # len(b"restart content")
+    worker.state.history_manager.restart_from_reduction.assert_called_once_with(3)
+    worker.state.reset_for_restart.assert_called_once_with(
+        b"restart content", {b"excluded1", b"excluded2"}
+    )
+    assert worker.running is True
+
+
+@pytest.mark.trio
+async def test_handle_command_restart_from():
+    """Test handle_command dispatches restart_from correctly."""
+    worker = ReducerWorker()
+    worker.state = None  # Will cause "History not available" error
+
+    request = Request(id="test-id", command="restart_from", params={"reduction_number": 1})
+    response = await worker.handle_command(request)
+
+    assert response.error == "History not available"

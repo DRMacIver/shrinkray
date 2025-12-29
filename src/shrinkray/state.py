@@ -213,6 +213,10 @@ class ShrinkRayState[TestCase](ABC):
     # When a test returns this code, it's recorded but not used for reduction
     also_interesting_code: int | None = None
 
+    # Set of test cases to exclude from interestingness (for restart-from-point)
+    # These are byte-identical matches of previously reduced values
+    excluded_test_cases: set[bytes] | None = None
+
     # Temp directory for output capture (when not using TUI's output manager)
     _output_tempdir: TemporaryDirectory | None = None
 
@@ -509,7 +513,7 @@ class ShrinkRayState[TestCase](ABC):
     @property
     def reducer(self):
         try:
-            return self.__reducer
+            return self._cached_reducer
         except AttributeError:
             pass
 
@@ -553,8 +557,8 @@ class ShrinkRayState[TestCase](ABC):
                     assert self.history_manager is not None
                     self.history_manager.record_reduction(test_case_bytes, output)
 
-        self.__reducer = self.new_reducer(problem)
-        return self.__reducer
+        self._cached_reducer = self.new_reducer(problem)
+        return self._cached_reducer
 
     @property
     def extra_problem_kwargs(self):
@@ -565,12 +569,43 @@ class ShrinkRayState[TestCase](ABC):
         return self.reducer.target
 
     async def is_interesting(self, test_case: TestCase) -> bool:
+        # Check exclusion set first (for restart-from-point feature)
+        if self.excluded_test_cases is not None:
+            test_case_bytes = self._get_test_case_bytes(test_case)
+            if test_case_bytes is not None and test_case_bytes in self.excluded_test_cases:
+                return False
+
         if self.first_call_time is None:
             self.first_call_time = time.time()
         async with self.is_interesting_limiter:
             exit_code = await self.run_for_exit_code(test_case)
             self._check_also_interesting(exit_code, test_case)
             return exit_code == 0
+
+    def reset_for_restart(self, new_initial: bytes, excluded: set[bytes]) -> None:
+        """Reset state for restart from a history point.
+
+        This clears the cached reducer so it will be recreated with the new
+        initial value, and sets the exclusion set to reject previously
+        reduced values.
+
+        Args:
+            new_initial: The new initial test case content
+            excluded: Set of test cases to reject as uninteresting
+        """
+        self.excluded_test_cases = excluded
+        # Clear cached reducer so it will be recreated on next access
+        try:
+            del self._cached_reducer
+        except AttributeError:
+            pass
+        # Update initial (implementation depends on subclass)
+        self._set_initial_for_restart(new_initial)
+
+    @abstractmethod
+    def _set_initial_for_restart(self, content: bytes) -> None:
+        """Set the initial test case for restart. Subclasses implement."""
+        ...
 
     @property
     def parallel_tasks_running(self) -> int:
@@ -725,6 +760,9 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
     def _get_test_case_bytes(self, test_case: bytes) -> bytes | None:
         return test_case
 
+    def _set_initial_for_restart(self, content: bytes) -> None:
+        self.initial = content
+
     def setup_formatter(self):
         from shrinkray.formatting import (
             default_reformat_data,
@@ -781,6 +819,10 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
             await o.write(test_case)
 
     async def is_interesting(self, test_case: bytes) -> bool:
+        # Check exclusion set first (for restart-from-point feature)
+        if self.excluded_test_cases is not None and test_case in self.excluded_test_cases:
+            return False
+
         async with self.is_interesting_limiter:
             exit_code = await self.run_for_exit_code(test_case)
             self._check_also_interesting(exit_code, test_case)
@@ -852,6 +894,10 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     def _get_test_case_bytes(self, test_case: dict[str, bytes]) -> bytes | None:
         # Directory mode: not supported for history recording
         return None
+
+    def _set_initial_for_restart(self, content: bytes) -> None:
+        # Directory mode: restart from history not supported
+        raise NotImplementedError("Restart from history not supported for directory reduction")
 
     async def write_test_case_to_file_impl(
         self, working: str, test_case: dict[str, bytes]

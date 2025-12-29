@@ -13,6 +13,7 @@ import trio
 from binaryornot.helpers import is_binary_string
 
 from shrinkray.problem import InvalidInitialExample
+from shrinkray.state import ShrinkRayStateSingleFile
 from shrinkray.subprocess.protocol import (
     PassStatsData,
     ProgressUpdate,
@@ -127,6 +128,8 @@ class ReducerWorker:
                 return self._handle_enable_pass(request.id, request.params)
             case "skip_pass":
                 return self._handle_skip_pass(request.id)
+            case "restart_from":
+                return await self._handle_restart_from(request.id, request.params)
             case _:
                 return Response(
                     id=request.id, error=f"Unknown command: {request.command}"
@@ -312,6 +315,69 @@ class ReducerWorker:
             self.reducer.skip_current_pass()
             return Response(id=request_id, result={"status": "skipped"})
         return Response(id=request_id, error="Reducer does not support pass control")
+
+    async def _handle_restart_from(
+        self, request_id: str, params: dict
+    ) -> Response:
+        """Restart reduction from a specific history point.
+
+        This moves all reductions after the specified point to also-interesting,
+        resets the current test case to that point, and modifies the
+        interestingness test to reject previously reduced values.
+        """
+        reduction_number = params.get("reduction_number")
+        if reduction_number is None:
+            return Response(id=request_id, error="reduction_number is required")
+
+        if self.state is None or self.state.history_manager is None:
+            return Response(id=request_id, error="History not available")
+
+        # Restart only works with single-file reductions
+        if not isinstance(self.state, ShrinkRayStateSingleFile):
+            return Response(
+                id=request_id,
+                error="Restart from history not supported for directory reductions",
+            )
+
+        # Cancel current reduction if running
+        if self._cancel_scope is not None:
+            self._cancel_scope.cancel()
+        self.running = False
+
+        try:
+            # Get restart data from history manager
+            new_test_case, excluded_set = (
+                self.state.history_manager.restart_from_reduction(reduction_number)
+            )
+
+            # Reset state with new initial and exclusions
+            self.state.reset_for_restart(new_test_case, excluded_set)
+
+            # Write new test case to file
+            await self.state.write_test_case_to_file(
+                self.state.filename, new_test_case
+            )
+
+            # Get fresh reducer (will create new problem)
+            self.reducer = self.state.reducer
+            self.problem = self.reducer.target
+
+            # Reset size history for progress tracking
+            self._size_history = [(0.0, len(new_test_case))]
+            self._last_sent_history_index = 0
+
+            self.running = True
+            return Response(
+                id=request_id,
+                result={"status": "restarted", "size": len(new_test_case)},
+            )
+        except FileNotFoundError:
+            return Response(
+                id=request_id, error=f"Reduction {reduction_number} not found"
+            )
+        except Exception as e:
+            traceback.print_exc()
+            return Response(id=request_id, error=str(e))
 
     def _get_test_output_preview(self) -> tuple[str, int | None, int | None]:
         """Get preview of current test output, test ID, and return code.

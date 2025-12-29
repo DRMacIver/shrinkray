@@ -207,6 +207,27 @@ class SubprocessClient:
             traceback.print_exc()
             return Response(id="", error="Failed to skip pass")
 
+    async def restart_from(self, reduction_number: int) -> Response:
+        """Restart reduction from a specific history point.
+
+        This moves all reductions after the specified point to also-interesting,
+        resets the current test case to that point, and continues reduction
+        from there, rejecting previously reduced values.
+
+        Args:
+            reduction_number: The reduction entry number to restart from
+                (e.g., 3 for reduction 0003)
+        """
+        if self._completed:
+            return Response(id="", error="Reduction already completed")
+        try:
+            return await self.send_command(
+                "restart_from", {"reduction_number": reduction_number}
+            )
+        except Exception:
+            traceback.print_exc()
+            return Response(id="", error="Failed to send restart command")
+
     async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
         """Yield progress updates as they arrive."""
         while not self._completed:

@@ -3220,3 +3220,154 @@ async def test_also_interesting_skips_directory_mode(tmp_path):
 
     # Should NOT record because _get_test_case_bytes returns None for directory mode
     assert state.history_manager.also_interesting_counter == 0
+
+
+# === reset_for_restart and excluded_test_cases tests ===
+
+
+@pytest.mark.trio
+async def test_excluded_test_cases_rejects_matching(tmp_path):
+    """Test that excluded_test_cases causes is_interesting to return False."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Normally the test case would be interesting
+    assert await state.is_interesting(b"hello") is True
+
+    # Add to exclusion set
+    state.excluded_test_cases = {b"excluded_value"}
+
+    # The excluded value should be rejected
+    assert await state.is_interesting(b"excluded_value") is False
+
+    # Other values should still work
+    assert await state.is_interesting(b"hello") is True
+
+
+@pytest.mark.trio
+async def test_reset_for_restart_clears_reducer(tmp_path):
+    """Test that reset_for_restart clears the cached reducer."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Access the reducer to cache it
+    reducer1 = state.reducer
+
+    # Reset for restart with new initial
+    state.reset_for_restart(b"world", {b"excluded"})
+
+    # Accessing reducer should return a new instance
+    reducer2 = state.reducer
+
+    # Should be different instances
+    assert reducer1 is not reducer2
+
+    # Initial should be updated
+    assert state.initial == b"world"
+
+    # Exclusion set should be set
+    assert state.excluded_test_cases == {b"excluded"}
+
+
+@pytest.mark.trio
+async def test_reset_for_restart_without_existing_reducer(tmp_path):
+    """Test reset_for_restart when reducer hasn't been accessed yet."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Reset without accessing reducer first (should not raise)
+    state.reset_for_restart(b"world", {b"excluded"})
+
+    # Verify state was updated
+    assert state.initial == b"world"
+    assert state.excluded_test_cases == {b"excluded"}
+
+
+def test_directory_state_set_initial_for_restart_raises(tmp_path):
+    """Test that directory state raises NotImplementedError for restart."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    (target_dir / "file.txt").write_text("hello")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target_dir),
+        timeout=5.0,
+        base=target_dir.name,
+        parallelism=1,
+        initial={"file.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    with pytest.raises(NotImplementedError):
+        state._set_initial_for_restart(b"new content")

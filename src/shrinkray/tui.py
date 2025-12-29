@@ -1252,9 +1252,17 @@ class HistoryExplorerModal(ModalScreen[None]):
             # causing DuplicateIds errors when refreshing with new entries
             list_view.append(ListItem(Label(f"{entry_num}  ({size_str})")))
 
-        # Restore selection (clamped to valid range)
+        # Restore selection after DOM updates complete.
+        # clear() and append() are async, so we need to defer this.
         if old_index is not None and entries:
-            list_view.index = min(old_index, len(entries) - 1)
+            new_index = min(old_index, len(entries) - 1)
+            self.call_after_refresh(self._restore_list_selection, list_view, new_index)
+
+    def _restore_list_selection(self, list_view: ListView, index: int) -> None:
+        """Restore selection to a list view after async DOM updates."""
+        child_count = len(list_view.children)
+        if child_count > 0:
+            list_view.index = min(index, child_count - 1)
 
     def _scan_entries(self, subdir: str) -> list[tuple[str, str, int]]:
         """Scan a history subdirectory for entries.

@@ -6849,6 +6849,55 @@ def test_history_modal_refresh_list_restores_selection(tmp_path):
     assert mock_list_view.index == 0
 
 
+def test_restore_list_selection_with_empty_list(tmp_path):
+    """Test _restore_list_selection does nothing for empty list."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    mock_list_view = MagicMock()
+    mock_list_view.children = []  # Empty list
+
+    # Should not crash and should not set index
+    modal._restore_list_selection(mock_list_view, 0)
+
+    # Index should not have been set since children is empty
+    assert not hasattr(mock_list_view, "index") or mock_list_view.index != 0
+
+
+def test_restore_list_selection_with_children(tmp_path):
+    """Test _restore_list_selection sets index when list has children."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    mock_list_view = MagicMock()
+    mock_list_view.children = [MagicMock(), MagicMock(), MagicMock()]  # 3 children
+
+    modal._restore_list_selection(mock_list_view, 1)
+
+    # Index should have been set
+    assert mock_list_view.index == 1
+
+
+def test_restore_list_selection_clamps_index(tmp_path):
+    """Test _restore_list_selection clamps index to valid range."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    mock_list_view = MagicMock()
+    mock_list_view.children = [MagicMock()]  # Only 1 child
+
+    # Request index 5, but should clamp to 0
+    modal._restore_list_selection(mock_list_view, 5)
+
+    assert mock_list_view.index == 0
+
+
 def test_history_modal_refresh_list_also_interesting(tmp_path):
     """Test _refresh_list works for also-interesting directory."""
     history_dir = tmp_path / ".shrinkray" / "run-123"

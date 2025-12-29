@@ -2080,7 +2080,9 @@ async def test_handle_restart_from_success():
     worker.state.reset_for_restart.assert_called_once_with(
         b"restart content", {b"excluded1", b"excluded2"}
     )
-    assert worker.running is True
+    # running is False after restart; the run() loop will set it to True
+    assert worker.running is False
+    # restart_requested must be True so the run() loop continues
     assert worker._restart_requested is True
 
 

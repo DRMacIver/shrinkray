@@ -346,6 +346,10 @@ class ReducerWorker:
         # Cancel current reduction if running
         if self._cancel_scope is not None:
             self._cancel_scope.cancel()
+
+        # Set restart flag BEFORE any await points to avoid race with run() loop
+        # The run() loop checks this flag after run_reducer() returns
+        self._restart_requested = True
         self.running = False
 
         try:
@@ -374,9 +378,7 @@ class ReducerWorker:
             self._size_history = [(0.0, len(new_test_case))]
             self._last_sent_history_index = 0
 
-            # Signal that we need to restart the reduction loop
-            self._restart_requested = True
-            self.running = True
+            # Ready to restart - running will be set to True by the run() loop
             return Response(
                 id=request_id,
                 result={"status": "restarted", "size": len(new_test_case)},

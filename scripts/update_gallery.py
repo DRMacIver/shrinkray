@@ -8,163 +8,13 @@ This script regenerates gallery GIFs when:
 
 It uses git to efficiently check for changes, falling back to file
 modification times if there are uncommitted changes.
-
-Additionally, it generates MP4 versions for GIFs that need them (for README embeds),
-publishing them to the gh-pages branch for GitHub Pages hosting.
 """
 
 import argparse
-import hashlib
 import os
-import re
-import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
-
-# Gallery items that need MP4 versions generated for video embeds
-# Maps gallery item name to base filename (without hash)
-ITEMS_NEEDING_MP4 = {
-    "enterprise-hello": "hello",
-}
-
-# GitHub Pages base URL for video assets
-GITHUB_PAGES_BASE = "https://drmaciver.github.io/shrinkray/assets"
-
-
-def get_content_hash(path: Path) -> str:
-    """Get a short hash of a file's contents."""
-    with open(path, "rb") as f:
-        content_hash = hashlib.sha256(f.read()).hexdigest()[:8]
-    return content_hash
-
-
-def get_remote_url() -> str:
-    """Get the remote URL for origin."""
-    result = subprocess.run(
-        ["git", "remote", "get-url", "origin"],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError("Failed to get origin URL")
-    return result.stdout.strip()
-
-
-def get_gh_pages_checkout() -> Path:
-    """Get or create a gh-pages checkout in .cache directory.
-
-    Returns the path to the checkout directory.
-    """
-    cache_dir = Path(".cache")
-    cache_dir.mkdir(exist_ok=True)
-    gh_pages_dir = cache_dir / "gh-pages"
-
-    remote_url = get_remote_url()
-
-    if gh_pages_dir.exists():
-        # Ensure remote URL is correct (may have been cloned locally)
-        subprocess.run(
-            ["git", "remote", "set-url", "origin", remote_url],
-            cwd=gh_pages_dir,
-            capture_output=True,
-        )
-        # Update existing checkout
-        subprocess.run(
-            ["git", "fetch", "origin", "gh-pages"],
-            cwd=gh_pages_dir,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "reset", "--hard", "origin/gh-pages"],
-            cwd=gh_pages_dir,
-            capture_output=True,
-        )
-    else:
-        # Clone locally (fast) then update remote to point to GitHub
-        result = subprocess.run(
-            [
-                "git",
-                "clone",
-                "--branch",
-                "gh-pages",
-                "--single-branch",
-                ".",
-                str(gh_pages_dir),
-            ],
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            print(f"Failed to clone gh-pages: {result.stderr.decode()}")
-            raise RuntimeError("Failed to clone gh-pages branch")
-
-        # Update origin to point to the actual remote
-        subprocess.run(
-            ["git", "remote", "set-url", "origin", remote_url],
-            cwd=gh_pages_dir,
-            capture_output=True,
-        )
-
-    return gh_pages_dir
-
-
-def publish_to_gh_pages(mp4_path: Path, target_filename: str) -> str:
-    """Publish an MP4 file to the gh-pages branch.
-
-    Args:
-        mp4_path: Path to the MP4 file to publish
-        target_filename: Filename to use on gh-pages (e.g., "hello-aef13.mp4")
-
-    Returns:
-        The GitHub Pages URL for the published video.
-    """
-    gh_pages_dir = get_gh_pages_checkout()
-    assets_dir = gh_pages_dir / "assets"
-    assets_dir.mkdir(exist_ok=True)
-
-    # Remove old versions with same base name
-    base_name = target_filename.rsplit("-", 1)[0]  # "hello-aef13" -> "hello"
-    for old_file in assets_dir.glob(f"{base_name}-*.mp4"):
-        old_file.unlink()
-
-    # Copy the new file
-    target_path = assets_dir / target_filename
-    shutil.copy2(mp4_path, target_path)
-
-    # Commit and push
-    subprocess.run(
-        ["git", "add", "-A"],
-        cwd=gh_pages_dir,
-        capture_output=True,
-    )
-
-    # Check if there are changes to commit
-    result = subprocess.run(
-        ["git", "diff", "--cached", "--quiet"],
-        cwd=gh_pages_dir,
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        # There are changes to commit
-        subprocess.run(
-            ["git", "commit", "-m", f"Update {target_filename}"],
-            cwd=gh_pages_dir,
-            capture_output=True,
-        )
-        result = subprocess.run(
-            ["git", "push", "origin", "gh-pages"],
-            cwd=gh_pages_dir,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            print(f"Failed to push gh-pages: {result.stderr.decode()}")
-            raise RuntimeError("Failed to push to gh-pages branch")
-        print(f"Published {target_filename} to gh-pages")
-    else:
-        print(f"{target_filename} unchanged on gh-pages")
-
-    return f"{GITHUB_PAGES_BASE}/{target_filename}"
 
 
 def git_checkout(paths: list[str]) -> None:
@@ -176,7 +26,7 @@ def git_checkout(paths: list[str]) -> None:
         return
 
     # Filter to only paths that exist in git
-    result = subprocess.run(
+    subprocess.run(
         ["git", "ls-files", "--error-unmatch", "--"] + paths,
         capture_output=True,
     )
@@ -197,7 +47,6 @@ def get_resettable_gallery_paths(tapes: list[Path], include_outputs: bool) -> li
                         during demos (like hello.py being reduced by shrinkray).
 
     Returns all non-executable files except .tape files.
-    Note: MP4 files are published to gh-pages, not stored locally.
     """
     paths = []
     output_extensions = {".gif", ".png"}
@@ -387,105 +236,6 @@ def run_vhs(tape_path: Path) -> bool:
     return result.returncode == 0
 
 
-def convert_gif_to_mp4(gif_path: Path, mp4_path: Path) -> bool:
-    """Convert a GIF to MP4 using ffmpeg. Returns True on success."""
-    if not shutil.which("ffmpeg"):
-        print("Warning: ffmpeg not found, skipping MP4 generation")
-        return False
-
-    print(f"Converting to MP4: {gif_path} -> {mp4_path}")
-
-    # Ensure output directory exists
-    mp4_path.parent.mkdir(parents=True, exist_ok=True)
-
-    result = subprocess.run(
-        [
-            "ffmpeg",
-            "-y",  # Overwrite output
-            "-i",
-            str(gif_path),
-            "-movflags",
-            "faststart",  # Enable streaming
-            "-pix_fmt",
-            "yuv420p",  # Compatible pixel format
-            "-vf",
-            "scale=trunc(iw/2)*2:trunc(ih/2)*2",  # Ensure even dimensions
-            str(mp4_path),
-        ],
-        capture_output=True,
-    )
-    return result.returncode == 0
-
-
-def update_readme_video_urls(published_urls: dict[str, str]) -> bool:
-    """Update README.md with new video URLs.
-
-    Replaces URLs of the form:
-    https://drmaciver.github.io/shrinkray/assets/{base_name}-*.mp4
-
-    with the new hashed URLs.
-
-    Returns True if README was modified.
-    """
-    readme_path = Path("README.md")
-    if not readme_path.exists():
-        return False
-
-    content = readme_path.read_text()
-    modified = False
-
-    for item_name, new_url in published_urls.items():
-        base_name = ITEMS_NEEDING_MP4[item_name]
-        # Match URLs like https://drmaciver.github.io/shrinkray/assets/hello-*.mp4
-        pattern = rf"{re.escape(GITHUB_PAGES_BASE)}/{base_name}-[a-f0-9]+\.mp4"
-        if re.search(pattern, content):
-            content = re.sub(pattern, new_url, content)
-            modified = True
-
-    if modified:
-        readme_path.write_text(content)
-        print("Updated README.md with new video URLs")
-
-    return modified
-
-
-def generate_and_publish_mp4s(updated_tapes: list[Path]) -> dict[str, str]:
-    """Generate MP4 versions and publish them to gh-pages.
-
-    Returns dict mapping item name to GitHub Pages URL.
-    Raises RuntimeError if any step fails.
-    """
-    published_urls: dict[str, str] = {}
-
-    for tape in updated_tapes:
-        item_name = tape.parent.name
-        if item_name not in ITEMS_NEEDING_MP4:
-            continue
-
-        gif_path = tape.with_suffix(".gif")
-        if not gif_path.exists():
-            continue
-
-        base_name = ITEMS_NEEDING_MP4[item_name]
-
-        # Convert to MP4 in a temp directory
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_mp4 = Path(temp_dir) / f"{base_name}.mp4"
-
-            if not convert_gif_to_mp4(gif_path, temp_mp4):
-                raise RuntimeError(f"Failed to convert {gif_path} to MP4")
-
-            # Generate hashed filename based on content
-            content_hash = get_content_hash(temp_mp4)
-            hashed_filename = f"{base_name}-{content_hash}.mp4"
-
-            # Publish to gh-pages
-            url = publish_to_gh_pages(temp_mp4, hashed_filename)
-            published_urls[item_name] = url
-
-    return published_urls
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Update gallery GIFs from VHS tape files"
@@ -542,34 +292,15 @@ def main() -> int:
     # Run VHS on each tape
     print()
     failed = []
-    successful = []
     for tape in updates_needed:
         if not run_vhs(tape):
             failed.append(tape)
-        else:
-            successful.append(tape)
 
     if failed:
         print(f"\nFailed to generate {len(failed)} GIF(s):")
         for tape in failed:
             print(f"  - {tape}")
         # Restore all files before returning (including outputs, since generation failed)
-        print("Restoring gallery files from git...")
-        git_checkout(all_resettable)
-        return 1
-
-    # Generate MP4 versions and publish to gh-pages
-    try:
-        published_urls = generate_and_publish_mp4s(successful)
-        if published_urls:
-            print("\nPublished video URLs:")
-            for item_name, url in published_urls.items():
-                print(f"  {item_name}: {url}")
-            # Update README with new URLs
-            update_readme_video_urls(published_urls)
-    except RuntimeError as e:
-        print(f"\nFailed to generate/publish MP4: {e}")
-        # Restore all files before returning
         print("Restoring gallery files from git...")
         git_checkout(all_resettable)
         return 1

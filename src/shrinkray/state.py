@@ -17,6 +17,7 @@ import humanize
 import trio
 from attrs import define
 
+from shrinkray.history import HistoryManager
 from shrinkray.passes.clangdelta import ClangDelta
 from shrinkray.problem import (
     BasicReductionProblem,
@@ -201,18 +202,70 @@ class ShrinkRayState[TestCase](ABC):
     # Stores the output from the last debug run
     _last_debug_output: str = ""
 
-    # Optional output manager for capturing test output (TUI mode)
+    # Optional output manager for capturing test output (TUI mode or history)
     output_manager: OutputCaptureManager | None = None
+
+    # History recording (enabled by default)
+    history_enabled: bool = True
+    history_manager: HistoryManager | None = None
+
+    # Temp directory for output capture (when not using TUI's output manager)
+    _output_tempdir: TemporaryDirectory | None = None
 
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
         self.setup_formatter()
+        self._setup_history()
 
     @abstractmethod
     def setup_formatter(self): ...
 
+    def _setup_history(self) -> None:
+        """Set up history recording if enabled."""
+        if not self.history_enabled:
+            return
+
+        # Create history manager
+        self.history_manager = HistoryManager.create(self.test, self.filename)
+
+        # Ensure we have an output manager for capturing test output
+        if self.output_manager is None:
+            self._output_tempdir = TemporaryDirectory()
+            self.output_manager = OutputCaptureManager(
+                output_dir=self._output_tempdir.name
+            )
+
+    def _get_last_captured_output(self) -> bytes | None:
+        """Get the output from the most recently completed test.
+
+        Returns the output content if available, None otherwise.
+        """
+        if self.output_manager is None:
+            return None
+        output_path, _, _ = self.output_manager.get_current_output()
+        if output_path is None:
+            return None
+        try:
+            with open(output_path, "rb") as f:
+                return f.read()
+        except OSError:
+            return None
+
     @abstractmethod
     def new_reducer(self, problem: ReductionProblem[TestCase]) -> Reducer[TestCase]: ...
+
+    @abstractmethod
+    def _get_initial_bytes(self) -> bytes:
+        """Get the initial test case as bytes for history recording."""
+        ...
+
+    @abstractmethod
+    def _get_test_case_bytes(self, test_case: TestCase) -> bytes | None:
+        """Convert a test case to bytes for history recording.
+
+        Returns None if history recording is not supported for this test case type.
+        """
+        ...
 
     @abstractmethod
     async def write_test_case_to_file_impl(self, working: str, test_case: TestCase): ...
@@ -458,6 +511,22 @@ class ShrinkRayState[TestCase](ABC):
             async with write_lock:
                 await self.write_test_case_to_file(self.filename, test_case)
 
+        # Initialize history and register callback if enabled
+        if self.history_manager is not None:
+            self.history_manager.initialize(
+                self._get_initial_bytes(),
+                self.test,
+                self.filename,
+            )
+
+            @problem.on_reduce
+            async def record_history(test_case: TestCase):
+                output = self._get_last_captured_output()
+                test_case_bytes = self._get_test_case_bytes(test_case)
+                if test_case_bytes is not None:
+                    assert self.history_manager is not None
+                    self.history_manager.record_reduction(test_case_bytes, output)
+
         self.__reducer = self.new_reducer(problem)
         return self.__reducer
 
@@ -622,6 +691,12 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
     def new_reducer(self, problem: ReductionProblem[bytes]) -> Reducer[bytes]:
         return ShrinkRay(problem, clang_delta=self.clang_delta_executable)
 
+    def _get_initial_bytes(self) -> bytes:
+        return self.initial
+
+    def _get_test_case_bytes(self, test_case: bytes) -> bytes | None:
+        return test_case
+
     def setup_formatter(self):
         from shrinkray.formatting import (
             default_reformat_data,
@@ -739,6 +814,14 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
         return DirectoryShrinkRay(
             target=problem, clang_delta=self.clang_delta_executable
         )
+
+    def _get_initial_bytes(self) -> bytes:
+        # Directory mode: not supported for history recording
+        return b"[Directory mode - history recording not supported]"
+
+    def _get_test_case_bytes(self, test_case: dict[str, bytes]) -> bytes | None:
+        # Directory mode: not supported for history recording
+        return None
 
     async def write_test_case_to_file_impl(
         self, working: str, test_case: dict[str, bytes]

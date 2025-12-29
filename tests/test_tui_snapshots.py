@@ -56,6 +56,8 @@ class FakeReductionClientForSnapshots:
         no_clang_delta: bool = False,
         clang_delta: str = "",
         trivial_is_error: bool = True,
+        skip_validation: bool = False,
+        history_enabled: bool = True,
     ) -> Response:
         return Response(id="start", result={"status": "started"})
 

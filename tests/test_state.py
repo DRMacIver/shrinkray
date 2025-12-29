@@ -2289,3 +2289,624 @@ def test_output_manager_return_code(tmp_path):
     assert output_path == path2
     assert test_id == test_id2
     assert return_code == 0
+
+
+# === History integration tests ===
+
+
+def test_state_with_history_disabled(tmp_path):
+    """Test that history is not set up when history_enabled=False."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # History manager should not be created
+    assert state.history_manager is None
+    # Output manager should not be created (no TUI, no history)
+    assert state.output_manager is None
+
+
+def test_state_with_history_enabled_creates_output_manager(tmp_path):
+    """Test that history enabled creates an output manager for capturing output."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+    )
+
+    # History manager should be created
+    assert state.history_manager is not None
+    # Output manager should be created for capturing output
+    assert state.output_manager is not None
+
+
+def test_get_last_captured_output_with_no_output_manager(tmp_path):
+    """Test _get_last_captured_output returns None when output_manager is None."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,  # Disable history to not create output_manager
+    )
+
+    assert state._get_last_captured_output() is None
+
+
+def test_get_last_captured_output_with_no_output_available(tmp_path):
+    """Test _get_last_captured_output returns None when no output is available."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+    )
+
+    # Output manager exists but has no output yet
+    assert state.output_manager is not None
+    assert state._get_last_captured_output() is None
+
+
+def test_get_last_captured_output_reads_output_file(tmp_path):
+    """Test _get_last_captured_output reads the captured output file."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+    )
+
+    assert state.output_manager is not None
+
+    # Simulate a completed test with output
+    test_id, output_path = state.output_manager.allocate_output_file()
+    with open(output_path, "wb") as f:
+        f.write(b"test output content")
+    state.output_manager.mark_completed(test_id)
+
+    output = state._get_last_captured_output()
+    assert output == b"test output content"
+
+
+def test_get_last_captured_output_handles_oserror(tmp_path, monkeypatch):
+    """Test _get_last_captured_output returns None on OSError."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+    )
+
+    assert state.output_manager is not None
+
+    # Simulate a completed test with output
+    test_id, output_path = state.output_manager.allocate_output_file()
+    with open(output_path, "wb") as f:
+        f.write(b"test output")
+    state.output_manager.mark_completed(test_id)
+
+    # Remove the file to cause OSError
+    os.unlink(output_path)
+
+    assert state._get_last_captured_output() is None
+
+
+def test_directory_state_get_test_case_bytes_returns_none(tmp_path):
+    """Test that directory state returns None for history recording."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    (target_dir / "file.txt").write_text("content")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target_dir),
+        timeout=5.0,
+        base="target",
+        parallelism=1,
+        initial={"file.txt": b"content"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+    )
+
+    # Directory mode should return None for test case bytes
+    assert state._get_test_case_bytes({"file.txt": b"content"}) is None
+    # But should still return something for initial bytes
+    assert state._get_initial_bytes() is not None
+
+
+def test_check_trivial_result_returns_error_message(tmp_path):
+    """Test check_trivial_result returns error message for trivial results."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # Create a mock problem with trivial test case
+    mock_problem = MagicMock()
+    mock_problem.current_test_case = b""  # Empty/trivial
+
+    error = state.check_trivial_result(mock_problem)
+    assert error is not None
+    assert "trivial" in error.lower()
+    assert "size 0" in error
+
+
+def test_check_trivial_result_returns_none_for_non_trivial(tmp_path):
+    """Test check_trivial_result returns None for non-trivial results."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # Create a mock problem with non-trivial test case
+    mock_problem = MagicMock()
+    mock_problem.current_test_case = b"some content"
+
+    error = state.check_trivial_result(mock_problem)
+    assert error is None
+
+
+def test_state_with_history_enabled_uses_existing_output_manager(tmp_path):
+    """Test that history enabled uses an existing output_manager instead of creating a new one."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    # Create an existing output manager (simulating TUI mode)
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    existing_manager = OutputCaptureManager(output_dir=str(output_dir))
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        output_manager=existing_manager,
+    )
+
+    # Should use the provided output_manager, not create a new one
+    assert state.output_manager is existing_manager
+    # History manager should still be created
+    assert state.history_manager is not None
+
+
+@pytest.mark.trio
+async def test_run_script_discards_output_in_quiet_mode_without_history(tmp_path):
+    """Test that output is discarded in quiet mode without history or TUI."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\necho hello\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,  # Not debug mode
+        clang_delta_executable=None,
+        history_enabled=False,  # No history, so no output_manager
+    )
+
+    # Should succeed and discard output
+    exit_code = await state.run_script_on_file(
+        working=str(target),
+        cwd=str(tmp_path),
+        debug=False,
+    )
+    assert exit_code == 0
+
+
+@pytest.mark.trio
+async def test_volume_debug_without_history_or_output_manager(tmp_path):
+    """Test debug mode inherits stderr when no output_manager is present."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\necho 'debug output' >&2\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.debug,  # Debug mode
+        clang_delta_executable=None,
+        history_enabled=False,  # No history, so no output_manager
+    )
+
+    # With history disabled and debug mode, stderr should be inherited
+    # stdout goes to DEVNULL, stderr inherited
+    assert state.output_manager is None
+    exit_code = await state.run_script_on_file(
+        working=str(target),
+        cwd=str(tmp_path),
+        debug=False,
+    )
+    assert exit_code == 0
+
+
+@pytest.mark.trio
+async def test_reducer_property_initializes_history(tmp_path):
+    """Test that accessing reducer property initializes history when enabled."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+    )
+
+    # History manager should exist
+    assert state.history_manager is not None
+    # But not initialized yet (since we haven't accessed reducer)
+    assert not state.history_manager.initialized
+
+    # Access reducer property to trigger initialization
+    reducer = state.reducer
+
+    # History should now be initialized
+    assert state.history_manager.initialized
+    assert reducer is not None
+
+    # Verify history directory was created
+    assert os.path.isdir(state.history_manager.history_dir)
+    initial_dir = os.path.join(state.history_manager.history_dir, "initial")
+    assert os.path.isdir(initial_dir)
+
+
+@pytest.mark.trio
+async def test_reducer_property_without_history(tmp_path):
+    """Test that accessing reducer property works when history is disabled."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # History manager should not exist
+    assert state.history_manager is None
+
+    # Access reducer property should work without history
+    reducer = state.reducer
+
+    # Reducer should be created successfully
+    assert reducer is not None
+
+
+@pytest.mark.trio
+async def test_history_callback_records_reduction(tmp_path):
+    """Test that the history callback records reductions when they happen."""
+    script = tmp_path / "test.sh"
+    # Script that always says "interesting" (exit 0)
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+    )
+
+    # Access reducer to initialize history and register callbacks
+    reducer = state.reducer
+    problem = reducer.target
+
+    assert state.history_manager is not None
+    assert state.history_manager.initialized
+
+    # No reductions yet
+    assert state.history_manager.reduction_counter == 0
+
+    # Setup the problem first (required before calling is_interesting)
+    await problem.setup()
+
+    # Trigger a reduction by calling is_interesting with a smaller test case
+    smaller = b"hello"  # Smaller than "hello world"
+    result = await problem.is_interesting(smaller)
+
+    # The script returns 0, so it should be interesting
+    assert result is True
+
+    # The callback should have recorded the reduction
+    assert state.history_manager.reduction_counter == 1
+
+    # Verify the reduction file exists
+    reductions_dir = os.path.join(state.history_manager.history_dir, "reductions")
+    assert os.path.isdir(reductions_dir)
+    reduction_1 = os.path.join(reductions_dir, "0001")
+    assert os.path.isdir(reduction_1)
+
+    # Verify the content was saved
+    saved_file = os.path.join(reduction_1, "test.txt")
+    assert os.path.isfile(saved_file)
+    with open(saved_file, "rb") as f:
+        assert f.read() == smaller
+
+
+@pytest.mark.trio
+async def test_history_callback_skips_directory_mode(tmp_path):
+    """Test that history callback gracefully skips directory mode (returns None)."""
+    script = tmp_path / "test.sh"
+    # Script that always says "interesting" (exit 0)
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    # Create a target directory with a file
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    (target_dir / "file.txt").write_text("hello world")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target_dir),
+        timeout=5.0,
+        base=target_dir.name,
+        parallelism=1,
+        initial={"file.txt": b"hello world"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+    )
+
+    # Access reducer to initialize history and register callbacks
+    reducer = state.reducer
+    problem = reducer.target
+
+    assert state.history_manager is not None
+    assert state.history_manager.initialized
+
+    # No reductions yet
+    assert state.history_manager.reduction_counter == 0
+
+    # Setup the problem first (required before calling is_interesting)
+    await problem.setup()
+
+    # Trigger a reduction by calling is_interesting with a smaller test case
+    smaller = {"file.txt": b"hello"}  # Smaller than "hello world"
+    result = await problem.is_interesting(smaller)
+
+    # The script returns 0, so it should be interesting
+    assert result is True
+
+    # The callback should NOT have recorded the reduction because
+    # _get_test_case_bytes returns None for directory mode
+    assert state.history_manager.reduction_counter == 0

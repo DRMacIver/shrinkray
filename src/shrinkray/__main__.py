@@ -198,6 +198,16 @@ This behaviour can be disabled by passing --trivial-is-not-error.
     help="Pass this if you do not want to use clang delta for C/C++ transformations.",
 )
 @click.option(
+    "--history/--no-history",
+    default=True,
+    help="""
+Record reduction history to a .shrinkray directory. Each run creates a unique
+subdirectory containing the initial test case and all successful reductions.
+This is useful for debugging and analyzing the reduction process.
+Enabled by default; use --no-history to disable.
+""".strip(),
+)
+@click.option(
     "--clang-delta",
     default="",
     help="Path to your clang_delta executable.",
@@ -224,6 +234,7 @@ def main(
     exit_on_completion: bool,
     ui_type: UIType,
     theme: str,
+    history: bool,
 ) -> None:
     if timeout is not None and timeout <= 0:
         timeout = float("inf")
@@ -304,6 +315,7 @@ def main(
         "seed": seed,
         "volume": volume,
         "clang_delta_executable": clang_delta_executable,
+        "history_enabled": history,
     }
 
     state: ShrinkRayState[Any]
@@ -357,6 +369,7 @@ def main(
             trivial_is_error=trivial_is_error,
             exit_on_completion=exit_on_completion,
             theme=theme,  # type: ignore[arg-type]
+            history_enabled=history,
         )
         return
 

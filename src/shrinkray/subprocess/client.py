@@ -137,6 +137,7 @@ class SubprocessClient:
         clang_delta: str = "",
         trivial_is_error: bool = True,
         skip_validation: bool = False,
+        history_enabled: bool = True,
     ) -> Response:
         """Start the reduction process."""
         params: dict[str, Any] = {
@@ -151,6 +152,7 @@ class SubprocessClient:
             "clang_delta": clang_delta,
             "trivial_is_error": trivial_is_error,
             "skip_validation": skip_validation,
+            "history_enabled": history_enabled,
         }
         if parallelism is not None:
             params["parallelism"] = parallelism

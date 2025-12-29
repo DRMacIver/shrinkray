@@ -215,7 +215,9 @@ Enabled by default; use --no-history to disable.
 Exit code indicating a test case is interesting enough to record but should not
 be used for reduction. When the test script returns this code, the test case is
 saved to the also-interesting/ directory within the history folder.
-Requires --history to be enabled. Set to 0 to disable. Default: 101.
+If --no-history is passed, also-interesting recording is disabled unless
+--also-interesting is explicitly specified (in which case only also-interesting
+cases are recorded, not reductions). Set to 0 to disable. Default: 101.
 """.strip(),
 )
 @click.option(
@@ -314,6 +316,21 @@ def main(
 
     print("\nStarting reduction...", file=sys.stderr, flush=True)
 
+    # Determine if --also-interesting was explicitly passed
+    # If --no-history and --also-interesting not explicit, disable also-interesting
+    ctx = click.get_current_context()
+    also_interesting_explicit = (
+        ctx.get_parameter_source("also_interesting")
+        == click.core.ParameterSource.COMMANDLINE
+    )
+    if also_interesting == 0:
+        also_interesting_code: int | None = None
+    elif not history and not also_interesting_explicit:
+        # --no-history without explicit --also-interesting: disable both
+        also_interesting_code = None
+    else:
+        also_interesting_code = also_interesting
+
     state_kwargs: dict[str, Any] = {
         "input_type": input_type,
         "in_place": in_place,
@@ -328,8 +345,7 @@ def main(
         "volume": volume,
         "clang_delta_executable": clang_delta_executable,
         "history_enabled": history,
-        # 0 disables also-interesting (since 0 already means "interesting")
-        "also_interesting_code": also_interesting if also_interesting != 0 else None,
+        "also_interesting_code": also_interesting_code,
     }
 
     state: ShrinkRayState[Any]
@@ -384,7 +400,7 @@ def main(
             exit_on_completion=exit_on_completion,
             theme=theme,  # type: ignore[arg-type]
             history_enabled=history,
-            also_interesting_code=also_interesting if also_interesting != 0 else None,
+            also_interesting_code=also_interesting_code,
         )
         return
 

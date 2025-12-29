@@ -225,12 +225,17 @@ class ShrinkRayState[TestCase](ABC):
     def setup_formatter(self): ...
 
     def _setup_history(self) -> None:
-        """Set up history recording if enabled."""
-        if not self.history_enabled:
+        """Set up history recording if enabled or also-interesting is configured."""
+        # Create history manager if either:
+        # 1. Full history is enabled, or
+        # 2. also_interesting_code is set (records only also-interesting cases)
+        if not self.history_enabled and self.also_interesting_code is None:
             return
 
-        # Create history manager
-        self.history_manager = HistoryManager.create(self.test, self.filename)
+        # Create history manager (record_reductions=False if only also-interesting)
+        self.history_manager = HistoryManager.create(
+            self.test, self.filename, record_reductions=self.history_enabled
+        )
 
         # Ensure we have an output manager for capturing test output
         if self.output_manager is None:

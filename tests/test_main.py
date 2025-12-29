@@ -1465,6 +1465,65 @@ def test_happy_path_formatter_none(simple_file_target):
     assert len(content) > 1
 
 
+# === also-interesting CLI option tests ===
+
+
+def test_also_interesting_zero_disables_feature(tmp_path):
+    """Test that --also-interesting=0 disables the feature."""
+    # Create a simple test script that always exits 0 (interesting)
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    runner = CliRunner(catch_exceptions=False)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(
+            main,
+            [
+                str(script),
+                str(target),
+                "--ui=basic",
+                "--also-interesting=0",  # Explicit disable
+                "--parallelism=1",
+                "--trivial-is-not-error",  # Allow reducing to empty
+            ],
+        )
+
+    assert result.exit_code == 0, f"Output: {result.output}"
+
+
+def test_no_history_without_explicit_also_interesting_disables_both(tmp_path):
+    """Test that --no-history without explicit --also-interesting disables both."""
+    # Create a test script that exits 0 (interesting)
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    runner = CliRunner(catch_exceptions=False)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(
+            main,
+            [
+                str(script),
+                str(target),
+                "--ui=basic",
+                "--no-history",  # Disable history without explicit --also-interesting
+                "--parallelism=1",
+                "--trivial-is-not-error",  # Allow reducing to empty
+            ],
+        )
+
+    assert result.exit_code == 0, f"Output: {result.output}"
+    # No .shrinkray directory should be created
+    assert not os.path.exists(os.path.join(tmp_path, ".shrinkray"))
+
+
 # === TUI terminal interaction test ===
 
 

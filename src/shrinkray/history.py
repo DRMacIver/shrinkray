@@ -58,14 +58,20 @@ class HistoryManager:
     reduction_counter: int = 0
     also_interesting_counter: int = 0
     initialized: bool = False
+    record_reductions: bool = True  # If False, only record also-interesting
 
     @classmethod
-    def create(cls, test: list[str], filename: str) -> HistoryManager:
+    def create(
+        cls, test: list[str], filename: str, *, record_reductions: bool = True
+    ) -> HistoryManager:
         """Create a new HistoryManager with a unique run ID.
 
         Args:
             test: The interestingness test command (list of strings)
             filename: Path to the target file being reduced
+            record_reductions: If True, record successful reductions. If False,
+                only record also-interesting cases (useful when --no-history
+                but --also-interesting is explicitly passed).
         """
         # Generate run ID: (test-basename)-(filename)-(datetime)-(random hex)
         test_name = sanitize_for_filename(os.path.basename(test[0]))
@@ -81,6 +87,7 @@ class HistoryManager:
             run_id=run_id,
             history_dir=history_dir,
             target_basename=target_basename,
+            record_reductions=record_reductions,
         )
 
     def initialize(
@@ -99,7 +106,8 @@ class HistoryManager:
         # Create directories
         initial_dir = os.path.join(self.history_dir, "initial")
         os.makedirs(initial_dir, exist_ok=True)
-        os.makedirs(os.path.join(self.history_dir, "reductions"), exist_ok=True)
+        if self.record_reductions:
+            os.makedirs(os.path.join(self.history_dir, "reductions"), exist_ok=True)
 
         # Copy original target file
         target_path = os.path.join(initial_dir, self.target_basename)
@@ -169,6 +177,8 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
             test_case: The reduced file content
             output: Combined stdout/stderr from the test, or None if not captured
         """
+        if not self.record_reductions:
+            return
         self.reduction_counter += 1
         subdir = os.path.join(
             self.history_dir,

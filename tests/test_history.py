@@ -446,3 +446,85 @@ def test_record_also_interesting_and_reduction_independent_counters() -> None:
             assert os.path.isdir(os.path.join(also_interesting_dir, "0002"))
         finally:
             os.chdir(original_cwd)
+
+
+# === record_reductions=False tests ===
+
+
+def test_create_with_record_reductions_false() -> None:
+    """Test that create() accepts record_reductions parameter."""
+    manager = HistoryManager.create(
+        ["./test.sh"], "buggy.c", record_reductions=False
+    )
+    assert manager.record_reductions is False
+
+
+def test_initialize_with_record_reductions_false_skips_reductions_dir() -> None:
+    """Test that initialize() doesn't create reductions/ when record_reductions=False."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(
+                ["./test.sh"], "buggy.c", record_reductions=False
+            )
+            manager.initialize(b"original content", ["./test.sh"], "buggy.c")
+
+            # initial/ should be created
+            assert os.path.isdir(os.path.join(manager.history_dir, "initial"))
+            # reductions/ should NOT be created
+            assert not os.path.exists(os.path.join(manager.history_dir, "reductions"))
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_record_reduction_with_record_reductions_false_is_noop() -> None:
+    """Test that record_reduction() does nothing when record_reductions=False."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(
+                ["./test.sh"], "buggy.c", record_reductions=False
+            )
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            # Call record_reduction multiple times
+            manager.record_reduction(b"reduction 1")
+            manager.record_reduction(b"reduction 2")
+
+            # Counter should NOT increment
+            assert manager.reduction_counter == 0
+
+            # No reductions directory or files should exist
+            reductions_dir = os.path.join(manager.history_dir, "reductions")
+            assert not os.path.exists(reductions_dir)
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_record_also_interesting_works_with_record_reductions_false() -> None:
+    """Test that record_also_interesting() works even when record_reductions=False."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(
+                ["./test.sh"], "buggy.c", record_reductions=False
+            )
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            # record_also_interesting should still work
+            manager.record_also_interesting(b"also interesting case")
+
+            assert manager.also_interesting_counter == 1
+
+            # File should exist
+            also_interesting_dir = os.path.join(
+                manager.history_dir, "also-interesting", "0001"
+            )
+            assert os.path.isdir(also_interesting_dir)
+            with open(os.path.join(also_interesting_dir, "buggy.c"), "rb") as f:
+                assert f.read() == b"also interesting case"
+        finally:
+            os.chdir(original_cwd)

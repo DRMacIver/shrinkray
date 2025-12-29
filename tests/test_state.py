@@ -3015,8 +3015,8 @@ async def test_also_interesting_disabled_by_default(tmp_path):
 
 
 @pytest.mark.trio
-async def test_also_interesting_requires_history_manager(tmp_path):
-    """Test that also-interesting does nothing without history manager."""
+async def test_also_interesting_works_without_full_history(tmp_path):
+    """Test that also-interesting works even when history_enabled=False."""
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 101")
     script.chmod(0o755)
@@ -3039,12 +3039,57 @@ async def test_also_interesting_requires_history_manager(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,  # History disabled
-        also_interesting_code=101,
+        also_interesting_code=101,  # But also-interesting is set
     )
 
+    # History manager IS created when also_interesting_code is set
+    assert state.history_manager is not None
+    # But it won't record reductions
+    assert state.history_manager.record_reductions is False
+
+    # Initialize the reducer to set up history
+    _ = state.reducer
+
+    # Call is_interesting
+    result = await state.is_interesting(b"test content")
+    assert result is False
+
+    # Also-interesting should be recorded
+    assert state.history_manager.also_interesting_counter == 1
+
+
+@pytest.mark.trio
+async def test_no_history_manager_when_both_disabled(tmp_path):
+    """Test that no history manager is created when both history and also-interesting are disabled."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 101")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,  # History disabled
+        also_interesting_code=None,  # Also-interesting disabled
+    )
+
+    # No history manager when both are disabled
     assert state.history_manager is None
 
-    # Should work without error even though also_interesting_code is set
+    # Should work without error
     result = await state.is_interesting(b"test content")
     assert result is False
 

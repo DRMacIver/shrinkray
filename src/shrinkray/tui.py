@@ -1248,9 +1248,9 @@ class HistoryExplorerModal(ModalScreen[None]):
 
         for entry_num, _, size in entries:
             size_str = humanize.naturalsize(size, binary=True)
-            list_view.append(
-                ListItem(Label(f"{entry_num}  ({size_str})"), id=f"entry-{entry_num}")
-            )
+            # Don't use IDs - clear() is async and can race with append(),
+            # causing DuplicateIds errors when refreshing with new entries
+            list_view.append(ListItem(Label(f"{entry_num}  ({size_str})")))
 
         # Restore selection (clamped to valid range)
         if old_index is not None and entries:
@@ -1295,9 +1295,8 @@ class HistoryExplorerModal(ModalScreen[None]):
 
         for entry_num, _, size in entries:
             size_str = humanize.naturalsize(size, binary=True)
-            list_view.append(
-                ListItem(Label(f"{entry_num}  ({size_str})"), id=f"entry-{entry_num}")
-            )
+            # Don't use IDs - they conflict with refresh operations
+            list_view.append(ListItem(Label(f"{entry_num}  ({size_str})")))
 
         # Select first item (entries is non-empty here, so we always have children)
         list_view.index = 0

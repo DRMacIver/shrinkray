@@ -6970,3 +6970,66 @@ def test_history_modal_refresh_list_no_change(tmp_path):
 
     # Should NOT have called clear since entries didn't change
     mock_list_view.clear.assert_not_called()
+
+
+def test_history_modal_refresh_with_new_entries_no_duplicate_ids(tmp_path):
+    """Test that refreshing the history modal when new entries are added doesn't crash.
+
+    This is a regression test for a bug where the refresh timer would try to add
+    ListItems with duplicate IDs because clear() is async and doesn't complete
+    before append() is called.
+    """
+
+    # Create a simple app to host the modal
+    class TestApp(App):
+        def compose(self):
+            yield HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Create history directory with initial entries
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    for i in range(1, 4):
+        entry_dir = reductions_dir / f"{i:04d}"
+        entry_dir.mkdir()
+        (entry_dir / "test.txt").write_text(f"content {i}")
+
+    async def run():
+        app = TestApp()
+        async with app.run_test() as pilot:
+            # Let the modal mount and populate
+            await pilot.pause()
+            await asyncio.sleep(0.2)
+            await pilot.pause()
+
+            # Get the modal
+            modal = app.query_one(HistoryExplorerModal)
+            assert len(modal._reductions_entries) == 3
+
+            # Add new entries while modal is open
+            for i in range(4, 7):
+                entry_dir = reductions_dir / f"{i:04d}"
+                entry_dir.mkdir()
+                (entry_dir / "test.txt").write_text(f"content {i}")
+
+            # Manually trigger refresh (simulating timer)
+            # This should NOT raise DuplicateIds
+            modal._refresh_lists()
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            # Verify entries were updated
+            assert len(modal._reductions_entries) == 6
+
+            # Trigger multiple refreshes to stress test
+            for _ in range(3):
+                modal._refresh_lists()
+                await pilot.pause()
+                await asyncio.sleep(0.05)
+
+            # Close modal
+            await pilot.press("escape")
+
+    asyncio.run(run())

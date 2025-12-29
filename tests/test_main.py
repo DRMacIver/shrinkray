@@ -1659,3 +1659,192 @@ sys.exit(0)
         # Clean up if still running
         if child.isalive():
             child.terminate(force=True)
+
+
+@pytest.mark.slow
+def test_tui_history_modal_during_reduction(tmp_path: pathlib.Path):
+    """Test that opening history modal during reduction doesn't crash with duplicate IDs.
+
+    This is a regression test for a bug where the history modal's refresh timer
+    would try to add ListItems with the same IDs as existing items, causing
+    a DuplicateIds exception.
+    """
+    # Create a Python target file similar to enterprise-hello that will
+    # take a while to reduce
+    target = tmp_path / "hello.py"
+    target.write_text(
+        """\
+import sys
+import time
+import os
+import random
+
+def func1():
+    return 1
+
+def func2():
+    return 2
+
+def func3():
+    return 3
+
+def func4():
+    return 4
+
+def func5():
+    return 5
+
+class A:
+    def method1(self):
+        pass
+    def method2(self):
+        pass
+
+class B:
+    def method1(self):
+        pass
+    def method2(self):
+        pass
+
+# The key line that must be preserved
+print("hello")
+
+# More filler code
+def more_stuff():
+    x = 1
+    y = 2
+    z = 3
+    return x + y + z
+
+if __name__ == "__main__":
+    more_stuff()
+"""
+    )
+
+    # Create a test script that runs Python and checks for "hello" in output
+    script = tmp_path / "ishello.sh"
+    log_file = tmp_path / "hello.log"
+    script.write_text(
+        f"""\
+#!/bin/bash
+set -eux
+python "$1" > "{log_file}"
+grep "hello" "{log_file}"
+"""
+    )
+    script.chmod(0o755)
+
+    # Set up pyte screen to parse terminal output
+    screen = pyte.Screen(100, 30)
+    stream = pyte.Stream(screen)
+
+    # Spawn the TUI process
+    child = pexpect.spawn(
+        sys.executable,
+        [
+            "-m",
+            "shrinkray",
+            str(script),
+            str(target),
+            "--ui=textual",
+            "--parallelism=1",
+            "--no-exit-on-completion",
+        ],
+        encoding="utf-8",
+        timeout=30,
+        dimensions=(30, 100),
+    )
+
+    try:
+        # Wait for TUI to start
+        child.expect("Validating interestingness test", timeout=10)
+
+        # Wait for the reducer to be running (showing some stats)
+        start_time = time.time()
+        timeout = 15.0
+
+        while time.time() - start_time < timeout:
+            try:
+                data = child.read_nonblocking(size=4096, timeout=0.1)
+                stream.feed(data)
+            except pexpect.TIMEOUT:
+                pass
+            except pexpect.EOF:
+                break
+
+            screen_text = "\n".join(screen.display)
+            # Check for any reduction activity or that reducer is running
+            # (not yet completed)
+            if "Reduction completed" not in screen_text:
+                if "Calls to interestingness test" in screen_text or "reduction" in screen_text.lower():
+                    break
+
+        # If reduction already completed, test can still exercise the modal
+        # since the bug can occur whenever the modal is open with existing entries
+
+        # Open the history modal with 'x'
+        child.send("x")
+
+        # Wait for modal to open and for the refresh timer to fire multiple times
+        # The bug occurs when the refresh timer fires (every 1 second) while
+        # new reductions are happening
+        error_seen = False
+        process_crashed = False
+        start_time = time.time()
+        timeout = 10.0  # Wait 10 seconds - should see many refresh cycles
+
+        while time.time() - start_time < timeout:
+            try:
+                data = child.read_nonblocking(size=4096, timeout=0.2)
+                stream.feed(data)
+            except pexpect.TIMEOUT:
+                pass
+            except pexpect.EOF:
+                # Process crashed - likely due to the bug
+                process_crashed = True
+                break
+
+            screen_text = "\n".join(screen.display)
+            # Check for DuplicateIds error specifically
+            # Note: don't check for generic "Traceback" since normal test output
+            # can contain Python tracebacks from failed test cases
+            if "DuplicateIds" in screen_text:
+                error_seen = True
+                break
+
+        # Get final screen content before closing
+        final_screen = "\n".join(screen.display)
+
+        if not process_crashed:
+            # Close the modal with Escape
+            child.send("\x1b")  # Escape key
+            time.sleep(0.3)
+
+            # Quit the TUI
+            child.send("q")
+
+            # Wait for process to exit
+            try:
+                child.expect(pexpect.EOF, timeout=5)
+            except pexpect.TIMEOUT:
+                pass
+
+        child.close()
+
+        # Check that no error occurred
+        assert not error_seen, (
+            f"DuplicateIds error in screen output. Screen:\n{final_screen}"
+        )
+        assert not process_crashed, (
+            f"Process crashed (likely DuplicateIds error). Screen:\n{final_screen}"
+        )
+
+        # The process should have exited cleanly
+        if child.exitstatus is not None:
+            assert child.exitstatus == 0, (
+                f"Exit status was {child.exitstatus}. Screen:\n{final_screen}"
+            )
+
+    finally:
+        if child.isalive():
+            child.terminate(force=True)

@@ -1067,3 +1067,33 @@ def test_subprocess_client_skip_current_pass_exception():
         assert response.error == "Failed to skip pass"
 
     asyncio.run(run())
+
+
+# === restart_from tests ===
+
+
+def test_subprocess_client_restart_from_when_completed():
+    """Test restart_from returns error when reduction already completed."""
+
+    async def run():
+        client = SubprocessClient()
+        client._completed = True
+
+        response = await client.restart_from(3)
+        assert response.error == "Reduction already completed"
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_restart_from_exception():
+    """Test restart_from handles send_command exception."""
+
+    async def run():
+        client = SubprocessClient()
+        client._completed = False
+        client.send_command = AsyncMock(side_effect=Exception("Connection failed"))
+
+        response = await client.restart_from(3)
+        assert response.error == "Failed to send restart command"
+
+    asyncio.run(run())

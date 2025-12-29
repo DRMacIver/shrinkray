@@ -404,6 +404,49 @@ async def test_is_interesting_returns_true_for_exit_zero(tmp_path):
     assert state.parallel_tasks_running == 0
 
 
+async def test_is_interesting_stores_no_output_when_none_available(tmp_path):
+    """Test is_interesting handles None output when storing successful result.
+
+    This covers the branch where output is None in the base class is_interesting.
+    Uses ShrinkRayDirectoryState to test the base class method, with history
+    disabled so no output manager is created.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test_dir"
+    target.mkdir()
+    (target / "a.txt").write_text("hello")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test_dir",
+        parallelism=1,
+        initial={"a.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,  # No history = no output manager
+    )
+
+    # Verify no output manager
+    assert state.output_manager is None
+
+    # Call is_interesting - should succeed without storing output
+    result = await state.is_interesting({"a.txt": b"hello"})
+    assert result is True
+
+    # Verify no output was stored (since there was none to capture)
+    assert len(state._successful_outputs) == 0
+
+
 async def test_is_interesting_returns_false_for_non_zero_exit(tmp_path):
     """Test that is_interesting returns False when script exits non-zero."""
     script = tmp_path / "test.sh"

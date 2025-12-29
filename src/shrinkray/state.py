@@ -220,8 +220,13 @@ class ShrinkRayState[TestCase](ABC):
     # Temp directory for output capture (when not using TUI's output manager)
     _output_tempdir: TemporaryDirectory | None = None
 
+    # Stores output from successful tests, keyed by test case bytes
+    # This avoids race conditions when multiple tests run in parallel
+    _successful_outputs: dict[bytes, bytes] = {}
+
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
+        self._successful_outputs = {}  # Initialize mutable default
         self.setup_formatter()
         self._setup_history()
 
@@ -551,8 +556,9 @@ class ShrinkRayState[TestCase](ABC):
 
             @problem.on_reduce
             async def record_history(test_case: TestCase):
-                output = self._get_last_captured_output()
                 test_case_bytes = self._get_test_case_bytes(test_case)
+                # Use output captured at is_interesting time to avoid race conditions
+                output = self._successful_outputs.pop(test_case_bytes, None)
                 assert self.history_manager is not None
                 self.history_manager.record_reduction(test_case_bytes, output)
 
@@ -579,7 +585,15 @@ class ShrinkRayState[TestCase](ABC):
         async with self.is_interesting_limiter:
             exit_code = await self.run_for_exit_code(test_case)
             self._check_also_interesting(exit_code, test_case)
-            return exit_code == 0
+            if exit_code == 0:
+                # Capture output now while still in the limiter to avoid race conditions
+                # where another test starts and overwrites the "current" output
+                test_case_bytes = self._get_test_case_bytes(test_case)
+                output = self._get_last_captured_output()
+                if output is not None:
+                    self._successful_outputs[test_case_bytes] = output
+                return True
+            return False
 
     def reset_for_restart(self, new_initial: bytes, excluded: set[bytes]) -> None:
         """Reset state for restart from a history point.
@@ -598,6 +612,8 @@ class ShrinkRayState[TestCase](ABC):
             del self._cached_reducer
         except AttributeError:
             pass
+        # Clear stored successful outputs (no longer relevant after restart)
+        self._successful_outputs.clear()
         # Update initial (implementation depends on subclass)
         self._set_initial_for_restart(new_initial)
 
@@ -834,7 +850,14 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
         async with self.is_interesting_limiter:
             exit_code = await self.run_for_exit_code(test_case)
             self._check_also_interesting(exit_code, test_case)
-            return exit_code == 0
+            if exit_code == 0:
+                # Capture output now while still in the limiter to avoid race conditions
+                # where another test starts and overwrites the "current" output
+                output = self._get_last_captured_output()
+                if output is not None:
+                    self._successful_outputs[test_case] = output
+                return True
+            return False
 
     async def print_exit_message(self, problem):
         formatting_increase = 0

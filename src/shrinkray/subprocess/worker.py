@@ -656,9 +656,8 @@ class ReducerWorker:
                     if not self._restart_requested:
                         break
 
-                    # Wait for restart to be fully set up
-                    while not self.running:
-                        await trio.sleep(0.01)
+                    # Set running=True here since run_reducer's finally block set it to False
+                    self.running = True
 
                 # Emit final progress update before completion
                 final_update = await self._build_progress_update()

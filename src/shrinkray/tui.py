@@ -1701,9 +1701,10 @@ class ShrinkRayApp(App[None]):
             else:
                 self.update_status("Reduction completed! Press 'q' to exit.")
 
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
-            self.exit(return_code=1, message=f"Error: {e}")
+            # Include full traceback in error message in case stderr isn't visible
+            self.exit(return_code=1, message=f"Error:\n{traceback.format_exc()}")
         finally:
             if self._owns_client and self._client:
                 await self._client.close()

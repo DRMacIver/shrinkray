@@ -110,9 +110,10 @@ class ReducerWorker:
                 return
             response = await self.handle_command(request)
             await self.emit(response)
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
-            await self.emit(Response(id="", error=str(e)))
+            # Include full traceback in error message in case stderr isn't visible
+            await self.emit(Response(id="", error=traceback.format_exc()))
 
     async def handle_command(self, request: Request) -> Response:
         """Handle a command request and return a response."""
@@ -145,6 +146,7 @@ class ReducerWorker:
             await self._start_reduction(params)
             return Response(id=request_id, result={"status": "started"})
         except* InvalidInitialExample as excs:
+            traceback.print_exc()
             assert len(excs.exceptions) == 1
             (e,) = excs.exceptions
             # Build a detailed error message for invalid initial examples
@@ -152,9 +154,10 @@ class ReducerWorker:
                 error_message = await self.state.build_error_message(e)
             else:
                 error_message = str(e)
-        except* Exception as e:
+        except* Exception:
             traceback.print_exc()
-            error_message = str(e.exceptions[0])
+            # Include full traceback in error message in case stderr isn't visible
+            error_message = traceback.format_exc()
         return Response(id=request_id, error=error_message)
 
     async def _start_reduction(self, params: dict) -> None:
@@ -382,9 +385,10 @@ class ReducerWorker:
             return Response(
                 id=request_id, error=f"Reduction {reduction_number} not found"
             )
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
-            return Response(id=request_id, error=str(e))
+            # Include full traceback in error message in case stderr isn't visible
+            return Response(id=request_id, error=traceback.format_exc())
 
     def _get_test_output_preview(self) -> tuple[str, int | None, int | None]:
         """Get preview of current test output, test ID, and return code.
@@ -618,6 +622,7 @@ class ReducerWorker:
                 if trivial_error:
                     await self.emit(Response(id="", error=trivial_error))
         except* InvalidInitialExample as excs:
+            traceback.print_exc()
             assert len(excs.exceptions) == 1
             (e,) = excs.exceptions
             # Build a detailed error message for invalid initial examples
@@ -626,10 +631,10 @@ class ReducerWorker:
             else:
                 error_message = str(e)
             await self.emit(Response(id="", error=error_message))
-        except* Exception as e:
-            # Catch any other exception during reduction and emit as error
+        except* Exception:
             traceback.print_exc()
-            await self.emit(Response(id="", error=str(e.exceptions[0])))
+            # Include full traceback in error message in case stderr isn't visible
+            await self.emit(Response(id="", error=traceback.format_exc()))
         finally:
             self._cancel_scope = None
             self.running = False

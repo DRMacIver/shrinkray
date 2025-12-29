@@ -22,7 +22,11 @@ from shrinkray.subprocess.protocol import (
     deserialize,
     serialize,
 )
-from shrinkray.subprocess.worker import InputStream, ReducerWorker, main
+from shrinkray.subprocess.worker import (
+    InputStream,
+    ReducerWorker,
+    main,
+)
 
 
 # === ReducerWorker initialization tests ===
@@ -2142,7 +2146,10 @@ async def test_handle_restart_from_generic_exception():
 
     response = await worker._handle_restart_from("test-id", {"reduction_number": 1})
 
-    assert response.error == "Something went wrong"
+    # Error now includes full traceback
+    assert response.error is not None
+    assert "Something went wrong" in response.error
+    assert "Traceback" in response.error
 
 
 @pytest.mark.trio

@@ -202,6 +202,11 @@ class ShrinkRayState[TestCase](ABC):
     # Stores the output from the last debug run
     _last_debug_output: str = ""
 
+    # Stores the output from the most recently completed test (for history recording)
+    # This is read immediately after the test's output file is closed to avoid
+    # race conditions with other parallel tests
+    _last_test_output: bytes | None = None
+
     # Optional output manager for capturing test output (TUI mode or history)
     output_manager: OutputCaptureManager | None = None
 
@@ -265,17 +270,10 @@ class ShrinkRayState[TestCase](ABC):
         """Get the output from the most recently completed test.
 
         Returns the output content if available, None otherwise.
+        This returns the output that was captured immediately when the test
+        completed, avoiding race conditions with other parallel tests.
         """
-        if self.output_manager is None:
-            return None
-        output_path, _, _ = self.output_manager.get_current_output()
-        if output_path is None:
-            return None
-        try:
-            with open(output_path, "rb") as f:
-                return f.read()
-        except OSError:
-            return None
+        return self._last_test_output
 
     def _check_also_interesting(self, exit_code: int, test_case: TestCase) -> None:
         """Check if exit code matches also-interesting and record if so.
@@ -383,6 +381,7 @@ class ShrinkRayState[TestCase](ABC):
         # Determine output handling
         test_id: int | None = None
         output_file_handle = None
+        output_path: str | None = None
         exit_code: int | None = None  # Track for output manager
 
         if self.output_manager is not None:
@@ -456,9 +455,19 @@ class ShrinkRayState[TestCase](ABC):
 
                 return result
         finally:
-            # Clean up output file handle and mark test as completed
+            # Clean up output file handle and capture output immediately
             if output_file_handle is not None:
                 output_file_handle.close()
+                # Read the output file NOW, before any other test can interfere
+                # This avoids race conditions where get_current_output() returns
+                # a different test's partial output
+                # output_path must be set since it's assigned with output_file_handle
+                assert output_path is not None
+                try:
+                    with open(output_path, "rb") as f:
+                        self._last_test_output = f.read()
+                except OSError:
+                    self._last_test_output = None
             if test_id is not None and self.output_manager is not None:
                 self.output_manager.mark_completed(test_id, exit_code or 0)
 

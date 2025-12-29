@@ -2461,8 +2461,8 @@ def test_get_last_captured_output_with_no_output_available(tmp_path):
     assert state._get_last_captured_output() is None
 
 
-def test_get_last_captured_output_reads_output_file(tmp_path):
-    """Test _get_last_captured_output reads the captured output file."""
+def test_get_last_captured_output_returns_stored_output(tmp_path):
+    """Test _get_last_captured_output returns the stored _last_test_output."""
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")
     script.chmod(0o755)
@@ -2487,20 +2487,18 @@ def test_get_last_captured_output_reads_output_file(tmp_path):
         history_enabled=True,
     )
 
-    assert state.output_manager is not None
+    # _get_last_captured_output returns _last_test_output (set during run_script_on_file)
+    assert state._get_last_captured_output() is None
 
-    # Simulate a completed test with output
-    test_id, output_path = state.output_manager.allocate_output_file()
-    with open(output_path, "wb") as f:
-        f.write(b"test output content")
-    state.output_manager.mark_completed(test_id)
+    # Directly set the stored output (simulating what run_script_on_file does)
+    state._last_test_output = b"test output content"
 
     output = state._get_last_captured_output()
     assert output == b"test output content"
 
 
-def test_get_last_captured_output_handles_oserror(tmp_path, monkeypatch):
-    """Test _get_last_captured_output returns None on OSError."""
+async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
+    """Test run_script_on_file handles OSError when reading output file."""
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")
     script.chmod(0o755)
@@ -2527,16 +2525,25 @@ def test_get_last_captured_output_handles_oserror(tmp_path, monkeypatch):
 
     assert state.output_manager is not None
 
-    # Simulate a completed test with output
-    test_id, output_path = state.output_manager.allocate_output_file()
-    with open(output_path, "wb") as f:
-        f.write(b"test output")
-    state.output_manager.mark_completed(test_id)
+    # Mock open to raise OSError when reading the output file back
+    original_open = open
+    output_dir = state.output_manager.output_dir
 
-    # Remove the file to cause OSError
-    os.unlink(output_path)
+    def mock_open(path, *args, **kwargs):
+        # Raise OSError when trying to read (rb) an output file
+        path_str = str(path)
+        if path_str.startswith(output_dir) and "rb" in args:
+            raise OSError("Simulated read error")
+        return original_open(path, *args, **kwargs)
 
-    assert state._get_last_captured_output() is None
+    monkeypatch.setattr("builtins.open", mock_open)
+
+    # Run the script - should complete without raising OSError
+    exit_code = await state.run_script_on_file(str(target), debug=False, cwd=str(tmp_path))
+    assert exit_code == 0
+
+    # The OSError was caught, so _last_test_output should be None
+    assert state._last_test_output is None
 
 
 def test_directory_state_get_test_case_bytes_returns_serialized(tmp_path):

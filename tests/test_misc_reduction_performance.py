@@ -6,6 +6,7 @@ import pytest
 from tests.helpers import reduce
 
 
+@pytest.mark.serial  # Timing-sensitive, needs to run without parallel load
 @pytest.mark.parametrize(
     "initial",
     [

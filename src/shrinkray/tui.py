@@ -17,6 +17,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.theme import Theme
+from textual.timer import Timer
 from textual.widgets import (
     DataTable,
     Footer,
@@ -1083,11 +1084,13 @@ class HistoryExplorerModal(ModalScreen[None]):
         height: 1fr;
     }
 
-    HistoryExplorerModal #history-content {
+    HistoryExplorerModal #history-content,
+    HistoryExplorerModal #also-interesting-content {
         height: 1fr;
     }
 
-    HistoryExplorerModal #history-list-container {
+    HistoryExplorerModal #history-list-container,
+    HistoryExplorerModal #also-interesting-list-container {
         width: 30%;
         height: 100%;
         border-right: solid $primary;
@@ -1097,31 +1100,36 @@ class HistoryExplorerModal(ModalScreen[None]):
         height: 100%;
     }
 
-    HistoryExplorerModal #history-preview-container {
+    HistoryExplorerModal #history-preview-container,
+    HistoryExplorerModal #also-interesting-preview-container {
         width: 70%;
         height: 100%;
         padding: 0 1;
     }
 
-    HistoryExplorerModal #file-content-label {
+    HistoryExplorerModal #file-content-label,
+    HistoryExplorerModal #also-file-label {
         text-style: bold;
         height: auto;
         margin-top: 1;
     }
 
-    HistoryExplorerModal #file-content {
+    HistoryExplorerModal #file-content,
+    HistoryExplorerModal #also-file-content {
         height: 1fr;
         border: solid $secondary;
         padding: 1;
     }
 
-    HistoryExplorerModal #output-label {
+    HistoryExplorerModal #output-label,
+    HistoryExplorerModal #also-output-label {
         text-style: bold;
         height: auto;
         margin-top: 1;
     }
 
-    HistoryExplorerModal #output-content {
+    HistoryExplorerModal #output-content,
+    HistoryExplorerModal #also-output-content {
         height: 1fr;
         border: solid $secondary;
         padding: 1;
@@ -1147,6 +1155,9 @@ class HistoryExplorerModal(ModalScreen[None]):
         self._target_basename = target_basename
         self._reductions_entries: list[str] = []  # List of entry paths
         self._also_interesting_entries: list[str] = []
+        self._preview_timer: Timer | None = None
+        self._pending_preview: tuple[str, str, str] | None = None
+        self._refresh_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -1183,6 +1194,67 @@ class HistoryExplorerModal(ModalScreen[None]):
         """Populate the lists with history entries."""
         self._populate_list("reductions", "reductions-list")
         self._populate_list("also-interesting", "also-interesting-list")
+
+        # Focus the reductions list so arrow keys work immediately
+        self.query_one("#reductions-list", ListView).focus()
+
+        # Start periodic refresh of the lists
+        self._refresh_timer = self.set_interval(1.0, self._refresh_lists)
+
+    def on_unmount(self) -> None:
+        """Clean up timers when modal is closed."""
+        if self._preview_timer is not None:
+            self._preview_timer.stop()
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+
+    def _refresh_lists(self) -> None:
+        """Refresh the history lists to show new entries."""
+        self._refresh_list("reductions", "reductions-list")
+        self._refresh_list("also-interesting", "also-interesting-list")
+
+    def _refresh_list(self, subdir: str, list_id: str) -> None:
+        """Refresh a single list, preserving selection."""
+        entries = self._scan_entries(subdir)
+        list_view = self.query_one(f"#{list_id}", ListView)
+
+        # Get current entries for comparison
+        if subdir == "reductions":
+            old_entries = self._reductions_entries
+        else:
+            old_entries = self._also_interesting_entries
+
+        new_entries = [e[1] for e in entries]
+
+        # Only update if entries changed
+        if new_entries == old_entries:
+            return
+
+        # Store new entries
+        if subdir == "reductions":
+            self._reductions_entries = new_entries
+        else:
+            self._also_interesting_entries = new_entries
+
+        # Remember current selection
+        old_index = list_view.index
+
+        # Clear and repopulate
+        list_view.clear()
+
+        if not entries:
+            list_view.append(ListItem(Label("[dim]No entries yet[/dim]")))
+            return
+
+        for entry_num, _, size in entries:
+            size_str = humanize.naturalsize(size, binary=True)
+            list_view.append(
+                ListItem(Label(f"{entry_num}  ({size_str})"), id=f"entry-{entry_num}")
+            )
+
+        # Restore selection (clamped to valid range)
+        if old_index is not None and entries:
+            list_view.index = min(old_index, len(entries) - 1)
 
     def _scan_entries(self, subdir: str) -> list[tuple[str, str, int]]:
         """Scan a history subdirectory for entries.
@@ -1270,7 +1342,19 @@ class HistoryExplorerModal(ModalScreen[None]):
             return
 
         entry_path = entries[list_view.index]
-        self._update_preview(entry_path, file_preview_id, output_preview_id)
+
+        # Debounce preview updates to avoid lag when navigating quickly
+        self._pending_preview = (entry_path, file_preview_id, output_preview_id)
+        if self._preview_timer is not None:
+            self._preview_timer.stop()
+        self._preview_timer = self.set_timer(0.05, self._do_pending_preview)
+
+    def _do_pending_preview(self) -> None:
+        """Execute the pending preview update."""
+        if self._pending_preview is not None:
+            entry_path, file_preview_id, output_preview_id = self._pending_preview
+            self._pending_preview = None
+            self._update_preview(entry_path, file_preview_id, output_preview_id)
 
     def _update_preview(
         self, entry_path: str, file_preview_id: str, output_preview_id: str

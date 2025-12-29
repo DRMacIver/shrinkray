@@ -6755,3 +6755,218 @@ def test_trigger_restart_from_completed(tmp_path):
                 os.unlink(temp_file)
 
     asyncio.run(run())
+
+
+def test_history_modal_refresh_list_when_entries_change(tmp_path):
+    """Test _refresh_list updates the list when entries have changed."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create initial entry
+    entry_dir = reductions_dir / "0001"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("initial")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up initial state
+    modal._reductions_entries = [str(entry_dir)]
+
+    # Add a new entry
+    new_entry_dir = reductions_dir / "0002"
+    new_entry_dir.mkdir()
+    (new_entry_dir / "test.txt").write_text("new entry")
+
+    # Now call _refresh_list - entries have changed
+    # This will fail because modal isn't composed, but we can test the logic
+    # by mocking query_one
+    mock_list_view = MagicMock()
+    mock_list_view.index = 0
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    modal._refresh_list("reductions", "reductions-list")
+
+    # Should have updated entries
+    assert len(modal._reductions_entries) == 2
+    assert modal._reductions_entries[0] == str(entry_dir)
+    assert modal._reductions_entries[1] == str(new_entry_dir)
+
+    # Should have called clear and append on the list view
+    mock_list_view.clear.assert_called_once()
+    assert mock_list_view.append.call_count == 2
+
+
+def test_history_modal_refresh_list_with_empty_new_entries(tmp_path):
+    """Test _refresh_list when entries are deleted."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up with one entry that no longer exists
+    modal._reductions_entries = [str(reductions_dir / "0001")]
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = 0
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    # Refresh with empty directory
+    modal._refresh_list("reductions", "reductions-list")
+
+    # Should have empty entries now
+    assert modal._reductions_entries == []
+    mock_list_view.clear.assert_called_once()
+    # Should have one append for "No entries yet" message
+    assert mock_list_view.append.call_count == 1
+
+
+def test_history_modal_refresh_list_restores_selection(tmp_path):
+    """Test _refresh_list preserves selection when entries change."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create entries
+    for num in ["0001", "0002"]:
+        entry_dir = reductions_dir / num
+        entry_dir.mkdir()
+        (entry_dir / "test.txt").write_text(f"content {num}")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up initial state with just one entry
+    modal._reductions_entries = [str(reductions_dir / "0001")]
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = 0  # Selected first item
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    modal._refresh_list("reductions", "reductions-list")
+
+    # Should have restored index
+    assert mock_list_view.index == 0
+
+
+def test_history_modal_refresh_list_also_interesting(tmp_path):
+    """Test _refresh_list works for also-interesting directory."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    also_dir = history_dir / "also-interesting"
+    also_dir.mkdir(parents=True)
+
+    # Create entry
+    entry_dir = also_dir / "0001"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("content")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up with empty also-interesting
+    modal._also_interesting_entries = []
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = None
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    modal._refresh_list("also-interesting", "also-interesting-list")
+
+    # Should have updated also-interesting entries
+    assert len(modal._also_interesting_entries) == 1
+    assert str(entry_dir) in modal._also_interesting_entries[0]
+
+
+def test_history_modal_do_pending_preview_no_pending(tmp_path):
+    """Test _do_pending_preview does nothing when no pending preview."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    modal._pending_preview = None
+    modal._update_preview = MagicMock()
+
+    # Call the actual method
+    modal._do_pending_preview()
+
+    # Should not call _update_preview
+    modal._update_preview.assert_not_called()
+
+
+def test_history_modal_on_unmount_with_timers(tmp_path):
+    """Test on_unmount stops active timers."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    mock_preview_timer = MagicMock()
+    mock_refresh_timer = MagicMock()
+    modal._preview_timer = mock_preview_timer
+    modal._refresh_timer = mock_refresh_timer
+
+    # Call the actual method
+    modal.on_unmount()
+
+    # Both timers should be stopped
+    mock_preview_timer.stop.assert_called_once()
+    mock_refresh_timer.stop.assert_called_once()
+
+
+def test_history_modal_on_unmount_without_refresh_timer(tmp_path):
+    """Test on_unmount when refresh timer is None."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    mock_preview_timer = MagicMock()
+    modal._preview_timer = mock_preview_timer
+    modal._refresh_timer = None  # Explicitly set to None
+
+    # Call the actual method - should not raise even with None timer
+    modal.on_unmount()
+
+    # Preview timer should still be stopped
+    mock_preview_timer.stop.assert_called_once()
+
+
+def test_history_modal_refresh_lists_calls_both(tmp_path):
+    """Test _refresh_lists calls _refresh_list for both directories."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Mock the _refresh_list method to track calls
+    with patch.object(modal, "_refresh_list") as mock_refresh:
+        modal._refresh_lists()
+
+        # Should have called _refresh_list twice
+        assert mock_refresh.call_count == 2
+        mock_refresh.assert_any_call("reductions", "reductions-list")
+        mock_refresh.assert_any_call("also-interesting", "also-interesting-list")
+
+
+def test_history_modal_refresh_list_no_change(tmp_path):
+    """Test _refresh_list returns early when entries haven't changed."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create entry
+    entry_dir = reductions_dir / "0001"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("content")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up initial state matching what's in the directory
+    modal._reductions_entries = [str(entry_dir)]
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = 0
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    # Refresh with unchanged entries
+    modal._refresh_list("reductions", "reductions-list")
+
+    # Should NOT have called clear since entries didn't change
+    mock_list_view.clear.assert_not_called()

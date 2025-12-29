@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import stat
 import tempfile
@@ -765,5 +767,283 @@ def test_restart_from_last_reduction_returns_empty_exclusion_set() -> None:
 
             assert restart_content == b"r3"
             assert excluded == set()  # Nothing to exclude
+        finally:
+            os.chdir(original_cwd)
+
+
+# === Directory mode tests ===
+
+
+def test_initialize_directory_creates_structure() -> None:
+    """Test that initialize_directory creates the correct structure."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+
+            # Create a test script
+            test_script = os.path.join(tmpdir, "test.sh")
+            with open(test_script, "w") as f:
+                f.write("#!/bin/bash\nexit 0\n")
+            os.chmod(test_script, 0o755)
+
+            manager = HistoryManager.create(
+                [test_script], "target_dir", is_directory=True
+            )
+            initial_content = {"file1.txt": b"hello", "subdir/file2.txt": b"world"}
+            manager.initialize_directory(initial_content, [test_script], "target_dir")
+
+            assert manager.initialized
+            assert manager.is_directory
+
+            # Check directory structure
+            initial_dir = os.path.join(manager.history_dir, "initial", "target_dir")
+            assert os.path.isdir(initial_dir)
+            assert os.path.isfile(os.path.join(initial_dir, "file1.txt"))
+            assert os.path.isfile(os.path.join(initial_dir, "subdir", "file2.txt"))
+
+            with open(os.path.join(initial_dir, "file1.txt"), "rb") as f:
+                assert f.read() == b"hello"
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_initialize_directory_skips_if_already_initialized() -> None:
+    """Test that initialize_directory is idempotent."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+
+            manager = HistoryManager.create(
+                ["./test.sh"], "target_dir", is_directory=True
+            )
+            initial1 = {"file.txt": b"first"}
+            initial2 = {"file.txt": b"second"}
+
+            manager.initialize_directory(initial1, ["./test.sh"], "target_dir")
+            manager.initialize_directory(initial2, ["./test.sh"], "target_dir")
+
+            # Should still have first content
+            initial_dir = os.path.join(manager.history_dir, "initial", "target_dir")
+            with open(os.path.join(initial_dir, "file.txt"), "rb") as f:
+                assert f.read() == b"first"
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_record_reduction_in_directory_mode() -> None:
+    """Test record_reduction works in directory mode."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+
+            manager = HistoryManager.create(
+                ["./test.sh"], "target_dir", is_directory=True
+            )
+            manager.initialize_directory(
+                {"file.txt": b"original"}, ["./test.sh"], "target_dir"
+            )
+
+            # Serialize directory content as the caller would
+            reduced = {"file.txt": b"reduced"}
+            serialized = json.dumps(
+                {k: base64.b64encode(v).decode() for k, v in sorted(reduced.items())},
+                sort_keys=True,
+            ).encode()
+
+            manager.record_reduction(serialized)
+
+            assert manager.reduction_counter == 1
+
+            # Check directory was written
+            reduction_dir = os.path.join(
+                manager.history_dir, "reductions", "0001", "target_dir"
+            )
+            assert os.path.isdir(reduction_dir)
+            with open(os.path.join(reduction_dir, "file.txt"), "rb") as f:
+                assert f.read() == b"reduced"
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_record_also_interesting_in_directory_mode() -> None:
+    """Test record_also_interesting works in directory mode."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+
+            manager = HistoryManager.create(
+                ["./test.sh"], "target_dir", is_directory=True
+            )
+            manager.initialize_directory(
+                {"file.txt": b"original"}, ["./test.sh"], "target_dir"
+            )
+
+            # Serialize directory content
+            also_int = {"file.txt": b"also-interesting"}
+            serialized = json.dumps(
+                {k: base64.b64encode(v).decode() for k, v in sorted(also_int.items())},
+                sort_keys=True,
+            ).encode()
+
+            manager.record_also_interesting(serialized)
+
+            assert manager.also_interesting_counter == 1
+
+            # Check directory was written
+            also_int_dir = os.path.join(
+                manager.history_dir, "also-interesting", "0001", "target_dir"
+            )
+            assert os.path.isdir(also_int_dir)
+            with open(os.path.join(also_int_dir, "file.txt"), "rb") as f:
+                assert f.read() == b"also-interesting"
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_read_directory_content() -> None:
+    """Test _read_directory_content reads directory structure."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+
+            manager = HistoryManager.create(
+                ["./test.sh"], "target_dir", is_directory=True
+            )
+
+            # Create directory structure
+            target = os.path.join(tmpdir, "test_target")
+            os.makedirs(os.path.join(target, "subdir"))
+            with open(os.path.join(target, "file1.txt"), "wb") as f:
+                f.write(b"content1")
+            with open(os.path.join(target, "subdir", "file2.txt"), "wb") as f:
+                f.write(b"content2")
+
+            content = manager._read_directory_content(target)
+
+            assert content == {
+                "file1.txt": b"content1",
+                "subdir/file2.txt": b"content2",
+            }
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_deserialize_directory() -> None:
+    """Test _deserialize_directory parses serialized content."""
+    original = {"file.txt": b"hello\x00world", "other.bin": b"\xff\xfe"}
+    serialized = json.dumps(
+        {k: base64.b64encode(v).decode() for k, v in sorted(original.items())},
+        sort_keys=True,
+    ).encode()
+
+    result = HistoryManager._deserialize_directory(serialized)
+    assert result == original
+
+
+def test_restart_from_reduction_directory_mode() -> None:
+    """Test restart_from_reduction works in directory mode."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+
+            manager = HistoryManager.create(
+                ["./test.sh"], "target_dir", is_directory=True
+            )
+            manager.initialize_directory(
+                {"file.txt": b"original"}, ["./test.sh"], "target_dir"
+            )
+
+            # Serialize directory content
+            def serialize(content):
+                return json.dumps(
+                    {
+                        k: base64.b64encode(v).decode()
+                        for k, v in sorted(content.items())
+                    },
+                    sort_keys=True,
+                ).encode()
+
+            # Record some reductions
+            r1_content = {"file.txt": b"r1"}
+            r2_content = {"file.txt": b"r2"}
+            r3_content = {"file.txt": b"r3"}
+            manager.record_reduction(serialize(r1_content))
+            manager.record_reduction(serialize(r2_content))
+            manager.record_reduction(serialize(r3_content))
+
+            # Restart from reduction 1
+            restart_content, excluded = manager.restart_from_reduction(1)
+
+            # restart_content should be serialized directory content
+            assert restart_content == serialize(r1_content)
+            assert len(excluded) == 2  # r2 and r3 should be excluded
+            assert serialize(r2_content) in excluded
+            assert serialize(r3_content) in excluded
+
+            # Reductions 2 and 3 should be moved to also-interesting
+            also_interesting_dir = os.path.join(manager.history_dir, "also-interesting")
+            assert os.path.isdir(os.path.join(also_interesting_dir, "0001"))
+            assert os.path.isdir(os.path.join(also_interesting_dir, "0002"))
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_restart_skips_non_numeric_entries() -> None:
+    """Test that restart_from_reduction skips non-numeric directory entries."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_reduction(b"r1")
+            manager.record_reduction(b"r2")
+
+            # Create a non-numeric directory in reductions
+            reductions_dir = os.path.join(manager.history_dir, "reductions")
+            os.makedirs(os.path.join(reductions_dir, "readme"))
+            with open(os.path.join(reductions_dir, "readme", "notes.txt"), "w") as f:
+                f.write("These are reduction notes")
+
+            # Restart should work despite non-numeric entry
+            restart_content, excluded = manager.restart_from_reduction(1)
+
+            assert restart_content == b"r1"
+            assert len(excluded) == 1  # Only r2
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_write_directory_content_with_nested_paths() -> None:
+    """Test _write_directory_content handles nested paths."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+
+            manager = HistoryManager.create(
+                ["./test.sh"], "target_dir", is_directory=True
+            )
+
+            target = os.path.join(tmpdir, "test_target")
+            content = {
+                "a/b/c/deep.txt": b"deep content",
+                "file.txt": b"root content",
+            }
+
+            manager._write_directory_content(target, content)
+
+            assert os.path.isfile(os.path.join(target, "file.txt"))
+            assert os.path.isfile(os.path.join(target, "a", "b", "c", "deep.txt"))
+
+            with open(os.path.join(target, "a", "b", "c", "deep.txt"), "rb") as f:
+                assert f.read() == b"deep content"
         finally:
             os.chdir(original_cwd)

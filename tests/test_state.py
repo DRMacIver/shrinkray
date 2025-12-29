@@ -2496,8 +2496,8 @@ def test_get_last_captured_output_handles_oserror(tmp_path, monkeypatch):
     assert state._get_last_captured_output() is None
 
 
-def test_directory_state_get_test_case_bytes_returns_none(tmp_path):
-    """Test that directory state returns None for history recording."""
+def test_directory_state_get_test_case_bytes_returns_serialized(tmp_path):
+    """Test that directory state returns serialized bytes for history recording."""
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")
     script.chmod(0o755)
@@ -2523,10 +2523,17 @@ def test_directory_state_get_test_case_bytes_returns_none(tmp_path):
         history_enabled=True,
     )
 
-    # Directory mode should return None for test case bytes
-    assert state._get_test_case_bytes({"file.txt": b"content"}) is None
-    # But should still return something for initial bytes
-    assert state._get_initial_bytes() is not None
+    # Directory mode should return serialized bytes for test case
+    test_case_bytes = state._get_test_case_bytes({"file.txt": b"content"})
+    assert test_case_bytes is not None
+    assert isinstance(test_case_bytes, bytes)
+
+    # Should also return something for initial bytes
+    initial_bytes = state._get_initial_bytes()
+    assert initial_bytes is not None
+
+    # Both should match for same content
+    assert test_case_bytes == initial_bytes
 
 
 def test_check_trivial_result_returns_error_message(tmp_path):
@@ -2858,8 +2865,8 @@ async def test_history_callback_records_reduction(tmp_path):
 
 
 @pytest.mark.trio
-async def test_history_callback_skips_directory_mode(tmp_path):
-    """Test that history callback gracefully skips directory mode (returns None)."""
+async def test_history_callback_records_directory_mode(tmp_path):
+    """Test that history callback records reductions for directory mode."""
     script = tmp_path / "test.sh"
     # Script that always says "interesting" (exit 0)
     script.write_text("#!/bin/bash\nexit 0")
@@ -2907,9 +2914,21 @@ async def test_history_callback_skips_directory_mode(tmp_path):
     # The script returns 0, so it should be interesting
     assert result is True
 
-    # The callback should NOT have recorded the reduction because
-    # _get_test_case_bytes returns None for directory mode
-    assert state.history_manager.reduction_counter == 0
+    # The callback SHOULD have recorded the reduction for directory mode
+    assert state.history_manager.reduction_counter == 1
+
+    # Verify the directory was saved
+    # For directory mode, files are saved inside target_basename subdirectory
+    reductions_dir = os.path.join(
+        state.history_manager.history_dir, "reductions", "0001"
+    )
+    assert os.path.isdir(reductions_dir)
+    target_subdir = os.path.join(reductions_dir, "target")
+    assert os.path.isdir(target_subdir)
+    saved_file = os.path.join(target_subdir, "file.txt")
+    assert os.path.isfile(saved_file)
+    with open(saved_file, "rb") as f:
+        assert f.read() == b"hello"
 
 
 # === also-interesting tests ===
@@ -3180,8 +3199,8 @@ async def test_also_interesting_exit_code_zero_is_interesting_not_also(tmp_path)
 
 
 @pytest.mark.trio
-async def test_also_interesting_skips_directory_mode(tmp_path):
-    """Test that also-interesting skips recording for directory mode."""
+async def test_also_interesting_records_directory_mode(tmp_path):
+    """Test that also-interesting records for directory mode."""
     script = tmp_path / "test.sh"
     # Script that returns 101 (also-interesting code)
     script.write_text("#!/bin/bash\nexit 101")
@@ -3218,8 +3237,21 @@ async def test_also_interesting_skips_directory_mode(tmp_path):
     # Not interesting (exit 101 != 0)
     assert result is False
 
-    # Should NOT record because _get_test_case_bytes returns None for directory mode
-    assert state.history_manager.also_interesting_counter == 0
+    # SHOULD record for directory mode now
+    assert state.history_manager.also_interesting_counter == 1
+
+    # Verify the directory was saved
+    # For directory mode, files are saved inside target_basename subdirectory
+    also_interesting_dir = os.path.join(
+        state.history_manager.history_dir, "also-interesting", "0001"
+    )
+    assert os.path.isdir(also_interesting_dir)
+    target_subdir = os.path.join(also_interesting_dir, "target")
+    assert os.path.isdir(target_subdir)
+    saved_file = os.path.join(target_subdir, "file.txt")
+    assert os.path.isfile(saved_file)
+    with open(saved_file, "rb") as f:
+        assert f.read() == b"test"
 
 
 # === reset_for_restart and excluded_test_cases tests ===
@@ -3343,8 +3375,8 @@ async def test_reset_for_restart_without_existing_reducer(tmp_path):
     assert state.excluded_test_cases == {b"excluded"}
 
 
-def test_directory_state_set_initial_for_restart_raises(tmp_path):
-    """Test that directory state raises NotImplementedError for restart."""
+def test_directory_state_set_initial_for_restart_works(tmp_path):
+    """Test that directory state can deserialize and set initial for restart."""
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/bash\nexit 0")
     script.chmod(0o755)
@@ -3369,5 +3401,26 @@ def test_directory_state_set_initial_for_restart_raises(tmp_path):
         clang_delta_executable=None,
     )
 
-    with pytest.raises(NotImplementedError):
-        state._set_initial_for_restart(b"new content")
+    # Serialize new content
+    new_content = {"file.txt": b"world", "other.txt": b"test"}
+    serialized = state._serialize_directory(new_content)
+
+    # Set initial for restart
+    state._set_initial_for_restart(serialized)
+
+    # Verify initial was updated
+    assert state.initial == new_content
+
+
+def test_directory_state_serialize_deserialize_roundtrip():
+    """Test that directory serialization is reversible."""
+    original = {
+        "file.txt": b"hello world",
+        "subdir/nested.py": b"print('test')",
+        "binary.bin": bytes(range(256)),  # Binary content
+    }
+
+    serialized = ShrinkRayDirectoryState._serialize_directory(original)
+    deserialized = ShrinkRayDirectoryState._deserialize_directory(serialized)
+
+    assert deserialized == original

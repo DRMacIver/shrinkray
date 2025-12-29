@@ -228,6 +228,11 @@ class ShrinkRayState[TestCase](ABC):
     @abstractmethod
     def setup_formatter(self): ...
 
+    @property
+    def is_directory_mode(self) -> bool:
+        """Whether this state manages directory test cases."""
+        return False
+
     def _setup_history(self) -> None:
         """Set up history recording if enabled or also-interesting is configured."""
         # Create history manager if either:
@@ -238,7 +243,10 @@ class ShrinkRayState[TestCase](ABC):
 
         # Create history manager (record_reductions=False if only also-interesting)
         self.history_manager = HistoryManager.create(
-            self.test, self.filename, record_reductions=self.history_enabled
+            self.test,
+            self.filename,
+            record_reductions=self.history_enabled,
+            is_directory=self.is_directory_mode,
         )
 
         # Ensure we have an output manager for capturing test output
@@ -543,11 +551,7 @@ class ShrinkRayState[TestCase](ABC):
 
         # Initialize history and register callback if enabled
         if self.history_manager is not None:
-            self.history_manager.initialize(
-                self._get_initial_bytes(),
-                self.test,
-                self.filename,
-            )
+            self._initialize_history_manager()
 
             @problem.on_reduce
             async def record_history(test_case: TestCase):
@@ -606,6 +610,15 @@ class ShrinkRayState[TestCase](ABC):
     def _set_initial_for_restart(self, content: bytes) -> None:
         """Set the initial test case for restart. Subclasses implement."""
         ...
+
+    def _initialize_history_manager(self) -> None:
+        """Initialize the history manager. Subclasses can override for different modes."""
+        assert self.history_manager is not None
+        self.history_manager.initialize(
+            self._get_initial_bytes(),
+            self.test,
+            self.filename,
+        )
 
     @property
     def parallel_tasks_running(self) -> int:
@@ -875,6 +888,11 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     def setup_formatter(self): ...
 
     @property
+    def is_directory_mode(self) -> bool:
+        """Whether this state manages directory test cases."""
+        return True
+
+    @property
     def extra_problem_kwargs(self) -> dict[str, Any]:
         return {
             "size": lambda tc: sum(len(v) for v in tc.values()),
@@ -888,16 +906,43 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
         )
 
     def _get_initial_bytes(self) -> bytes:
-        # Directory mode: not supported for history recording
-        return b"[Directory mode - history recording not supported]"
+        # Serialize directory content for history recording
+        return self._serialize_directory(self.initial)
 
     def _get_test_case_bytes(self, test_case: dict[str, bytes]) -> bytes | None:
-        # Directory mode: not supported for history recording
-        return None
+        # Serialize directory content for comparison/exclusion
+        return self._serialize_directory(test_case)
 
     def _set_initial_for_restart(self, content: bytes) -> None:
-        # Directory mode: restart from history not supported
-        raise NotImplementedError("Restart from history not supported for directory reduction")
+        # Deserialize and update initial directory content
+        self.initial = self._deserialize_directory(content)
+
+    def _initialize_history_manager(self) -> None:
+        """Initialize the history manager in directory mode."""
+        assert self.history_manager is not None
+        self.history_manager.initialize_directory(
+            self.initial,
+            self.test,
+            self.filename,
+        )
+
+    @staticmethod
+    def _serialize_directory(content: dict[str, bytes]) -> bytes:
+        """Serialize directory content to bytes for comparison/storage."""
+        import base64
+        import json
+
+        serialized = {k: base64.b64encode(v).decode() for k, v in sorted(content.items())}
+        return json.dumps(serialized, sort_keys=True).encode()
+
+    @staticmethod
+    def _deserialize_directory(data: bytes) -> dict[str, bytes]:
+        """Deserialize bytes back to directory content."""
+        import base64
+        import json
+
+        serialized = json.loads(data.decode())
+        return {k: base64.b64decode(v) for k, v in serialized.items()}
 
     async def write_test_case_to_file_impl(
         self, working: str, test_case: dict[str, bytes]

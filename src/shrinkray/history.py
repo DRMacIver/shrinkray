@@ -54,10 +54,16 @@ class HistoryManager:
     also_interesting_counter: int = 0
     initialized: bool = False
     record_reductions: bool = True  # If False, only record also-interesting
+    is_directory: bool = False  # True if target is a directory
 
     @classmethod
     def create(
-        cls, test: list[str], filename: str, *, record_reductions: bool = True
+        cls,
+        test: list[str],
+        filename: str,
+        *,
+        record_reductions: bool = True,
+        is_directory: bool = False,
     ) -> HistoryManager:
         """Create a new HistoryManager with a unique run ID.
 
@@ -67,6 +73,8 @@ class HistoryManager:
             record_reductions: If True, record successful reductions. If False,
                 only record also-interesting cases (useful when --no-history
                 but --also-interesting is explicitly passed).
+            is_directory: If True, the target is a directory and test cases
+                are dict[str, bytes] instead of bytes.
         """
         # Generate run ID: (test-basename)-(filename)-(datetime)-(random hex)
         test_name = sanitize_for_filename(os.path.basename(test[0]))
@@ -83,6 +91,7 @@ class HistoryManager:
             history_dir=history_dir,
             target_basename=target_basename,
             record_reductions=record_reductions,
+            is_directory=is_directory,
         )
 
     def initialize(
@@ -169,7 +178,7 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
         """Record a successful reduction.
 
         Args:
-            test_case: The reduced file content
+            test_case: The reduced file content (or serialized directory content)
             output: Combined stdout/stderr from the test, or None if not captured
         """
         if not self.record_reductions:
@@ -182,9 +191,15 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
         )
         os.makedirs(subdir, exist_ok=True)
 
-        # Write reduced file
-        with open(os.path.join(subdir, self.target_basename), "wb") as f:
-            f.write(test_case)
+        if self.is_directory:
+            # Deserialize and write directory structure
+            content = self._deserialize_directory(test_case)
+            target_dir = os.path.join(subdir, self.target_basename)
+            self._write_directory_content(target_dir, content)
+        else:
+            # Write reduced file
+            with open(os.path.join(subdir, self.target_basename), "wb") as f:
+                f.write(test_case)
 
         # Write output if available
         if output is not None:
@@ -201,7 +216,7 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
         but have some other interesting property indicated by a special exit code.
 
         Args:
-            test_case: The file content
+            test_case: The file content (or serialized directory content)
             output: Combined stdout/stderr from the test, or None if not captured
         """
         self.also_interesting_counter += 1
@@ -212,9 +227,15 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
         )
         os.makedirs(subdir, exist_ok=True)
 
-        # Write file
-        with open(os.path.join(subdir, self.target_basename), "wb") as f:
-            f.write(test_case)
+        if self.is_directory:
+            # Deserialize and write directory structure
+            content = self._deserialize_directory(test_case)
+            target_dir = os.path.join(subdir, self.target_basename)
+            self._write_directory_content(target_dir, content)
+        else:
+            # Write file
+            with open(os.path.join(subdir, self.target_basename), "wb") as f:
+                f.write(test_case)
 
         # Write output if available
         if output is not None:
@@ -229,19 +250,25 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
             reduction_number: The reduction number (e.g., 3 for 0003)
 
         Returns:
-            The file content as bytes
+            The file content as bytes. For directory mode, returns the serialized
+            directory content for use with _set_initial_for_restart.
 
         Raises:
             FileNotFoundError: If the reduction doesn't exist
         """
-        file_path = os.path.join(
+        target_path = os.path.join(
             self.history_dir,
             "reductions",
             f"{reduction_number:04d}",
             self.target_basename,
         )
-        with open(file_path, "rb") as f:
-            return f.read()
+        if self.is_directory:
+            # For directory mode, read and serialize the directory content
+            content = self._read_directory_content(target_path)
+            return self._serialize_directory(content)
+        else:
+            with open(target_path, "rb") as f:
+                return f.read()
 
     def restart_from_reduction(
         self, reduction_number: int
@@ -282,11 +309,16 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
 
         for _, entry_name in entries_to_move:
             entry_path = os.path.join(reductions_dir, entry_name)
-            file_path = os.path.join(entry_path, self.target_basename)
+            target_path = os.path.join(entry_path, self.target_basename)
 
             # Read content for exclusion set
-            with open(file_path, "rb") as f:
-                excluded_test_cases.add(f.read())
+            if self.is_directory:
+                # For directories, read and serialize content
+                content = self._read_directory_content(target_path)
+                excluded_test_cases.add(self._serialize_directory(content))
+            else:
+                with open(target_path, "rb") as f:
+                    excluded_test_cases.add(f.read())
 
             # Move to also-interesting with new numbering
             self.also_interesting_counter += 1
@@ -302,3 +334,110 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
         # Return content to restart from
         restart_content = self.get_reduction_content(reduction_number)
         return restart_content, excluded_test_cases
+
+    # === Directory mode methods ===
+
+    def initialize_directory(
+        self, initial_content: dict[str, bytes], test: list[str], filename: str
+    ) -> None:
+        """Create initial directory structure for directory test cases.
+
+        Args:
+            initial_content: The original directory content as {path: bytes}
+            test: The interestingness test command
+            filename: Path to the original target directory
+        """
+        if self.initialized:
+            return
+
+        # Create directories
+        initial_dir = os.path.join(self.history_dir, "initial")
+        os.makedirs(initial_dir, exist_ok=True)
+        if self.record_reductions:
+            os.makedirs(os.path.join(self.history_dir, "reductions"), exist_ok=True)
+
+        # Copy original target directory structure
+        target_dir = os.path.join(initial_dir, self.target_basename)
+        self._write_directory_content(target_dir, initial_content)
+
+        # Copy interestingness test if it's a local file
+        test_path = test[0]
+        copied_test_basename: str | None = None
+        if os.path.isfile(test_path):
+            copied_test_basename = os.path.basename(test_path)
+            shutil.copy2(test_path, os.path.join(initial_dir, copied_test_basename))
+
+        # Create wrapper script
+        self._create_wrapper_script(test, copied_test_basename, initial_dir)
+
+        self.initialized = True
+
+    def _write_directory_content(
+        self, target_dir: str, content: dict[str, bytes]
+    ) -> None:
+        """Write directory content to disk.
+
+        Args:
+            target_dir: The directory to write to
+            content: The directory content as {relative_path: bytes}
+        """
+        os.makedirs(target_dir, exist_ok=True)
+        for rel_path, file_content in content.items():
+            file_path = os.path.join(target_dir, rel_path)
+            parent_dir = os.path.dirname(file_path)
+            if parent_dir:  # Only create parent if there is one
+                os.makedirs(parent_dir, exist_ok=True)
+            with open(file_path, "wb") as f:
+                f.write(file_content)
+
+    def _read_directory_content(self, target_dir: str) -> dict[str, bytes]:
+        """Read directory content from disk.
+
+        Args:
+            target_dir: The directory to read from
+
+        Returns:
+            The directory content as {relative_path: bytes}
+        """
+        content: dict[str, bytes] = {}
+        for root, _, files in os.walk(target_dir):
+            for file_name in files:
+                file_path = os.path.join(root, file_name)
+                rel_path = os.path.relpath(file_path, target_dir)
+                with open(file_path, "rb") as f:
+                    content[rel_path] = f.read()
+        return content
+
+    @staticmethod
+    def _deserialize_directory(data: bytes) -> dict[str, bytes]:
+        """Deserialize bytes back to directory content.
+
+        Args:
+            data: JSON-encoded directory content with base64 file contents
+
+        Returns:
+            The directory content as {relative_path: bytes}
+        """
+        import base64
+        import json
+
+        serialized = json.loads(data.decode())
+        return {k: base64.b64decode(v) for k, v in serialized.items()}
+
+    @staticmethod
+    def _serialize_directory(content: dict[str, bytes]) -> bytes:
+        """Serialize directory content to bytes.
+
+        Args:
+            content: The directory content as {relative_path: bytes}
+
+        Returns:
+            JSON-encoded directory content with base64 file contents
+        """
+        import base64
+        import json
+
+        serialized = {
+            k: base64.b64encode(v).decode() for k, v in sorted(content.items())
+        }
+        return json.dumps(serialized, sort_keys=True).encode()

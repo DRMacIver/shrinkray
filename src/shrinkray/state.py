@@ -623,6 +623,9 @@ class ShrinkRayState[TestCase](ABC):
             pass
         # Clear stored successful outputs (no longer relevant after restart)
         self._successful_outputs.clear()
+        # Reset initial_exit_code - the new initial is known to be interesting
+        # (it came from history) so its exit code was 0
+        self.initial_exit_code = 0
         # Update initial (implementation depends on subclass)
         self._set_initial_for_restart(new_initial)
 

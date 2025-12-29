@@ -3425,6 +3425,49 @@ async def test_reset_for_restart_without_existing_reducer(tmp_path):
     assert state.excluded_test_cases == {b"excluded"}
 
 
+@pytest.mark.trio
+async def test_reset_for_restart_resets_initial_exit_code(tmp_path):
+    """Test that reset_for_restart resets initial_exit_code to 0.
+
+    This is a regression test for a bug where initial_exit_code kept its
+    old value after restart, causing assertion failures in build_error_message
+    when the assertion `assert self.initial_exit_code not in (None, 0)` was hit.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Set initial_exit_code to a non-zero value (simulating an earlier run
+    # that had a different exit code scenario)
+    state.initial_exit_code = 1
+
+    # Reset for restart with new initial
+    state.reset_for_restart(b"world", {b"excluded"})
+
+    # initial_exit_code should be reset to 0 since the new initial
+    # (from history) is known to be interesting
+    assert state.initial_exit_code == 0
+
+
 def test_directory_state_set_initial_for_restart_works(tmp_path):
     """Test that directory state can deserialize and set initial for restart."""
     script = tmp_path / "test.sh"

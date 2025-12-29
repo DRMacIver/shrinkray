@@ -19,6 +19,7 @@ from shrinkray.tui import (
     ContentPreview,
     ExpandedBoxModal,
     HelpScreen,
+    HistoryExplorerModal,
     OutputPreview,
     PassStatsScreen,
     ShrinkRayApp,
@@ -5788,6 +5789,449 @@ def test_update_expanded_graph_missing_expanded_graph():
                 # The test passes if no error is raised
 
                 await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+# === HistoryExplorerModal tests ===
+
+
+def test_history_modal_disabled_without_history():
+    """Test that pressing 'x' shows warning when history_dir is not set."""
+
+    async def run():
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                # history_dir is not set (default None)
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Verify history_dir is not set
+                assert app._history_dir is None
+
+                # Press 'x' to try to open history
+                await pilot.press("x")
+                await pilot.pause()
+
+                # The modal should NOT be in the screen stack
+                assert not any(
+                    isinstance(screen, HistoryExplorerModal)
+                    for screen in app.screen_stack
+                )
+
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_history_modal_opens_with_x_key(tmp_path):
+    """Test that pressing 'x' opens the history explorer modal when history_dir is set."""
+
+    async def run():
+        # Create a fake history directory with some entries
+        history_dir = tmp_path / ".shrinkray" / "run-123"
+        reductions_dir = history_dir / "reductions" / "0001"
+        reductions_dir.mkdir(parents=True)
+        (reductions_dir / "test.txt").write_text("reduced content")
+        (reductions_dir / "test.txt.out").write_text("test output")
+
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                history_dir=str(history_dir),
+                target_basename="test.txt",
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Verify history_dir was set from the update
+                assert app._history_dir == str(history_dir)
+
+                # Press 'x' to open history
+                await pilot.press("x")
+                await pilot.pause()
+
+                # The modal should be in the screen stack
+                assert any(
+                    isinstance(screen, HistoryExplorerModal)
+                    for screen in app.screen_stack
+                )
+
+                await pilot.press("escape")
+                await pilot.pause()
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_history_modal_closes_with_escape(tmp_path):
+    """Test that pressing Escape closes the history explorer modal."""
+
+    async def run():
+        # Create a fake history directory
+        history_dir = tmp_path / ".shrinkray" / "run-123"
+        reductions_dir = history_dir / "reductions" / "0001"
+        reductions_dir.mkdir(parents=True)
+        (reductions_dir / "test.txt").write_text("content")
+
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                history_dir=str(history_dir),
+                target_basename="test.txt",
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Open history modal
+                await pilot.press("x")
+                await pilot.pause()
+
+                # Verify it's open
+                assert any(
+                    isinstance(screen, HistoryExplorerModal)
+                    for screen in app.screen_stack
+                )
+
+                # Press Escape to close
+                await pilot.press("escape")
+                await pilot.pause()
+
+                # Verify it's closed
+                assert not any(
+                    isinstance(screen, HistoryExplorerModal)
+                    for screen in app.screen_stack
+                )
+
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_history_modal_bindings():
+    """Test that HistoryExplorerModal has the correct dismiss bindings."""
+    bindings = HistoryExplorerModal.BINDINGS
+    binding_keys = []
+    for binding in bindings:
+        if isinstance(binding, tuple):
+            binding_keys.append(binding[0])
+    # Should have escape, q, and x as dismiss keys
+    assert any("escape" in str(key) for key in binding_keys)
+    assert any("q" in str(key) for key in binding_keys)
+    assert any("x" in str(key) for key in binding_keys)
+
+
+def test_history_modal_scan_entries(tmp_path):
+    """Test that _scan_entries finds and sorts history entries correctly."""
+    # Create a fake history directory with entries
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create entries out of order to test sorting
+    for entry_num in ["0003", "0001", "0002"]:
+        entry_dir = reductions_dir / entry_num
+        entry_dir.mkdir()
+        # Create file with different sizes
+        size = int(entry_num) * 100
+        (entry_dir / "test.txt").write_text("x" * size)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    entries = modal._scan_entries("reductions")
+
+    # Should be sorted by entry number
+    assert len(entries) == 3
+    assert entries[0][0] == "0001"  # entry_num
+    assert entries[0][2] == 100  # size
+    assert entries[1][0] == "0002"
+    assert entries[1][2] == 200
+    assert entries[2][0] == "0003"
+    assert entries[2][2] == 300
+
+
+def test_history_modal_scan_entries_missing_file(tmp_path):
+    """Test that _scan_entries skips directories without the target file."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create entry without target file
+    (reductions_dir / "0001").mkdir()
+    # And one with target file
+    entry_dir = reductions_dir / "0002"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("content")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    entries = modal._scan_entries("reductions")
+
+    # Should only find the entry with the file
+    assert len(entries) == 1
+    assert entries[0][0] == "0002"
+
+
+def test_history_modal_scan_entries_missing_dir(tmp_path):
+    """Test that _scan_entries returns empty list for missing directory."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+    # Don't create reductions/ directory
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    entries = modal._scan_entries("reductions")
+
+    assert entries == []
+
+
+def test_history_modal_read_file_success(tmp_path):
+    """Test _read_file reads file successfully."""
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("Hello World\nLine 2")
+
+    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
+    content = modal._read_file(str(test_file))
+
+    assert content == "Hello World\nLine 2"
+
+
+def test_history_modal_read_file_binary(tmp_path):
+    """Test _read_file handles binary content."""
+    test_file = tmp_path / "test.bin"
+    test_file.write_bytes(b"\x80\x81\x82\x83")
+
+    modal = HistoryExplorerModal(str(tmp_path), "test.bin")
+    content = modal._read_file(str(test_file))
+
+    # Should fall back to hex display
+    assert "Binary content" in content
+
+
+def test_history_modal_read_file_missing(tmp_path):
+    """Test _read_file returns error message for missing file."""
+    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
+    content = modal._read_file(str(tmp_path / "nonexistent.txt"))
+
+    assert "[dim]File not found[/dim]" in content
+
+
+def test_history_modal_shows_empty_message(tmp_path):
+    """Test that history modal shows 'No entries yet' for empty directories."""
+
+    async def run():
+        # Create empty history directory
+        history_dir = tmp_path / ".shrinkray" / "run-123"
+        (history_dir / "reductions").mkdir(parents=True)
+        (history_dir / "also-interesting").mkdir(parents=True)
+
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                history_dir=str(history_dir),
+                target_basename="test.txt",
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Open history modal
+                await pilot.press("x")
+                await pilot.pause()
+
+                # Check that the modal exists and has no entries stored
+                modal = None
+                for screen in app.screen_stack:
+                    if isinstance(screen, HistoryExplorerModal):
+                        modal = screen
+                        break
+
+                assert modal is not None
+                assert modal._reductions_entries == []
+                assert modal._also_interesting_entries == []
+
+                await pilot.press("escape")
+                await pilot.pause()
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_history_modal_populates_entries(tmp_path):
+    """Test that history modal populates entries from history directory."""
+
+    async def run():
+        # Create history directory with entries
+        history_dir = tmp_path / ".shrinkray" / "run-123"
+
+        # Create reductions
+        for i in range(3):
+            entry_dir = history_dir / "reductions" / f"000{i+1}"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "test.txt").write_text(f"reduction {i+1}")
+            (entry_dir / "test.txt.out").write_text(f"output {i+1}")
+
+        # Create also-interesting
+        entry_dir = history_dir / "also-interesting" / "0001"
+        entry_dir.mkdir(parents=True)
+        (entry_dir / "test.txt").write_text("also interesting content")
+        (entry_dir / "test.txt.out").write_text("also interesting output")
+
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                history_dir=str(history_dir),
+                target_basename="test.txt",
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Open history modal
+                await pilot.press("x")
+                await pilot.pause()
+
+                # Check that entries were populated
+                modal = None
+                for screen in app.screen_stack:
+                    if isinstance(screen, HistoryExplorerModal):
+                        modal = screen
+                        break
+
+                assert modal is not None
+                assert len(modal._reductions_entries) == 3
+                assert len(modal._also_interesting_entries) == 1
+
+                await pilot.press("escape")
+                await pilot.pause()
                 await pilot.press("q")
         finally:
             if os.path.exists(temp_file):

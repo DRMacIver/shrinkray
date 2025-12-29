@@ -483,6 +483,13 @@ class ReducerWorker:
         new_entries = self._size_history[self._last_sent_history_index :]
         self._last_sent_history_index = len(self._size_history)
 
+        # Get history directory info for history explorer
+        history_dir: str | None = None
+        target_basename = ""
+        if self.state is not None and self.state.history_manager is not None:
+            history_dir = self.state.history_manager.history_dir
+            target_basename = self.state.history_manager.target_basename
+
         return ProgressUpdate(
             status=self.reducer.status if self.reducer else "",
             size=stats.current_test_case_size,
@@ -505,6 +512,8 @@ class ReducerWorker:
             active_test_id=active_test_id,
             last_test_return_code=last_return_code,
             new_size_history=new_entries,
+            history_dir=history_dir,
+            target_basename=target_basename,
         )
 
     async def emit_progress_updates(self) -> None:

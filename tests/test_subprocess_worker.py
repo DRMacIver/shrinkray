@@ -463,6 +463,7 @@ async def test_worker_emit_progress_updates_loop():
     mock_state = MagicMock()
     mock_state.parallel_tasks_running = 2
     mock_state.output_manager = None  # No test output capture in this mock
+    mock_state.history_manager = None  # No history in this mock
     worker.state = mock_state
 
     # Run for a short time then stop
@@ -714,8 +715,9 @@ async def test_worker_emit_progress_updates_no_parallel_attr():
     worker.reducer = mock_reducer
 
     # State without parallel_tasks_running attribute
-    mock_state = MagicMock(spec=["output_manager"])  # Only output_manager attr
+    mock_state = MagicMock(spec=["output_manager", "history_manager"])
     mock_state.output_manager = None  # No test output capture
+    mock_state.history_manager = None  # No history
     worker.state = mock_state
 
     # Run for a short time then stop

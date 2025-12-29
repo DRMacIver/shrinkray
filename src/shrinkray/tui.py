@@ -17,7 +17,17 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.theme import Theme
-from textual.widgets import DataTable, Footer, Header, Label, Static
+from textual.widgets import (
+    DataTable,
+    Footer,
+    Header,
+    Label,
+    ListItem,
+    ListView,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 from textual_plotext import PlotextPlot
 
 from shrinkray.formatting import try_decode
@@ -1044,6 +1054,267 @@ class PassStatsScreen(ModalScreen[None]):
         self._app.push_screen(HelpScreen())
 
 
+class HistoryExplorerModal(ModalScreen[None]):
+    """Modal for browsing history reductions and also-interesting cases."""
+
+    CSS = """
+    HistoryExplorerModal {
+        align: center middle;
+    }
+
+    HistoryExplorerModal > Vertical {
+        width: 95%;
+        height: 90%;
+        background: $panel;
+        border: thick $primary;
+    }
+
+    HistoryExplorerModal #history-title {
+        text-align: center;
+        text-style: bold;
+        height: auto;
+        width: 100%;
+        padding: 0 1;
+        border-bottom: solid $primary;
+    }
+
+    HistoryExplorerModal TabbedContent {
+        height: 1fr;
+    }
+
+    HistoryExplorerModal #history-content {
+        height: 1fr;
+    }
+
+    HistoryExplorerModal #history-list-container {
+        width: 30%;
+        height: 100%;
+        border-right: solid $primary;
+    }
+
+    HistoryExplorerModal ListView {
+        height: 100%;
+    }
+
+    HistoryExplorerModal #history-preview-container {
+        width: 70%;
+        height: 100%;
+        padding: 0 1;
+    }
+
+    HistoryExplorerModal #file-content-label {
+        text-style: bold;
+        height: auto;
+        margin-top: 1;
+    }
+
+    HistoryExplorerModal #file-content {
+        height: 1fr;
+        border: solid $secondary;
+        padding: 1;
+    }
+
+    HistoryExplorerModal #output-label {
+        text-style: bold;
+        height: auto;
+        margin-top: 1;
+    }
+
+    HistoryExplorerModal #output-content {
+        height: 1fr;
+        border: solid $secondary;
+        padding: 1;
+    }
+
+    HistoryExplorerModal #history-footer {
+        dock: bottom;
+        height: auto;
+        padding: 0 1;
+        text-align: center;
+        border-top: solid $primary;
+    }
+    """
+
+    BINDINGS = [
+        ("escape,q,x", "dismiss", "Close"),
+    ]
+
+    def __init__(self, history_dir: str, target_basename: str) -> None:
+        super().__init__()
+        self._history_dir = history_dir
+        self._target_basename = target_basename
+        self._reductions_entries: list[str] = []  # List of entry paths
+        self._also_interesting_entries: list[str] = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("History Explorer", id="history-title")
+            with TabbedContent(id="history-tabs"):
+                with TabPane("Reductions", id="reductions-tab"):
+                    with Horizontal(id="history-content"):
+                        with Vertical(id="history-list-container"):
+                            yield ListView(id="reductions-list")
+                        with Vertical(id="history-preview-container"):
+                            yield Label("File Content:", id="file-content-label")
+                            with VerticalScroll(id="file-content"):
+                                yield Static("", id="file-preview")
+                            yield Label("Test Output:", id="output-label")
+                            with VerticalScroll(id="output-content"):
+                                yield Static("", id="output-preview")
+                with TabPane("Also-Interesting", id="also-interesting-tab"):
+                    with Horizontal(id="also-interesting-content"):
+                        with Vertical(id="also-interesting-list-container"):
+                            yield ListView(id="also-interesting-list")
+                        with Vertical(id="also-interesting-preview-container"):
+                            yield Label("File Content:", id="also-file-label")
+                            with VerticalScroll(id="also-file-content"):
+                                yield Static("", id="also-file-preview")
+                            yield Label("Test Output:", id="also-output-label")
+                            with VerticalScroll(id="also-output-content"):
+                                yield Static("", id="also-output-preview")
+            yield Static(
+                "↑/↓: Navigate  Tab: Switch Tabs  Esc/q/x: Close",
+                id="history-footer",
+            )
+
+    def on_mount(self) -> None:
+        """Populate the lists with history entries."""
+        self._populate_list("reductions", "reductions-list")
+        self._populate_list("also-interesting", "also-interesting-list")
+
+    def _scan_entries(self, subdir: str) -> list[tuple[str, str, int]]:
+        """Scan a history subdirectory for entries.
+
+        Returns list of (entry_number, entry_path, file_size) tuples, sorted by number.
+        """
+        entries = []
+        dir_path = os.path.join(self._history_dir, subdir)
+        if not os.path.isdir(dir_path):
+            return entries
+
+        for entry_name in os.listdir(dir_path):
+            entry_path = os.path.join(dir_path, entry_name)
+            if os.path.isdir(entry_path):
+                # Get file size
+                file_path = os.path.join(entry_path, self._target_basename)
+                if os.path.isfile(file_path):
+                    size = os.path.getsize(file_path)
+                    entries.append((entry_name, entry_path, size))
+
+        # Sort by entry number
+        entries.sort(key=lambda x: x[0])
+        return entries
+
+    def _populate_list(self, subdir: str, list_id: str) -> None:
+        """Populate a ListView with entries from a history subdirectory."""
+        entries = self._scan_entries(subdir)
+        list_view = self.query_one(f"#{list_id}", ListView)
+
+        if subdir == "reductions":
+            self._reductions_entries = [e[1] for e in entries]
+        else:
+            self._also_interesting_entries = [e[1] for e in entries]
+
+        if not entries:
+            list_view.append(ListItem(Label("[dim]No entries yet[/dim]")))
+            return
+
+        for entry_num, _, size in entries:
+            size_str = humanize.naturalsize(size, binary=True)
+            list_view.append(
+                ListItem(Label(f"{entry_num}  ({size_str})"), id=f"entry-{entry_num}")
+            )
+
+        # Select first item
+        if list_view.children:
+            list_view.index = 0
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Handle selection in a ListView."""
+        list_view = event.list_view
+
+        # Determine which list was selected
+        if list_view.id == "reductions-list":
+            entries = self._reductions_entries
+            file_preview_id = "file-preview"
+            output_preview_id = "output-preview"
+        else:
+            entries = self._also_interesting_entries
+            file_preview_id = "also-file-preview"
+            output_preview_id = "also-output-preview"
+
+        # Get the selected entry path
+        if not entries or list_view.index is None or list_view.index >= len(entries):
+            return
+
+        entry_path = entries[list_view.index]
+        self._update_preview(entry_path, file_preview_id, output_preview_id)
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        """Handle highlighting (cursor movement) in a ListView."""
+        list_view = event.list_view
+
+        # Determine which list was highlighted
+        if list_view.id == "reductions-list":
+            entries = self._reductions_entries
+            file_preview_id = "file-preview"
+            output_preview_id = "output-preview"
+        else:
+            entries = self._also_interesting_entries
+            file_preview_id = "also-file-preview"
+            output_preview_id = "also-output-preview"
+
+        # Get the highlighted entry path
+        if not entries or list_view.index is None or list_view.index >= len(entries):
+            return
+
+        entry_path = entries[list_view.index]
+        self._update_preview(entry_path, file_preview_id, output_preview_id)
+
+    def _update_preview(
+        self, entry_path: str, file_preview_id: str, output_preview_id: str
+    ) -> None:
+        """Update the preview pane with content from the selected entry."""
+        # Read file content
+        file_path = os.path.join(entry_path, self._target_basename)
+        file_content = self._read_file(file_path)
+        self.query_one(f"#{file_preview_id}", Static).update(file_content)
+
+        # Read output content
+        output_path = os.path.join(entry_path, f"{self._target_basename}.out")
+        if os.path.isfile(output_path):
+            output_content = self._read_file(output_path)
+        else:
+            output_content = "[dim]No output captured[/dim]"
+        self.query_one(f"#{output_preview_id}", Static).update(output_content)
+
+    def _read_file(self, file_path: str) -> str:
+        """Read file content, decoding as text if possible."""
+        if not os.path.isfile(file_path):
+            return "[dim]File not found[/dim]"
+        try:
+            with open(file_path, "rb") as f:
+                raw_content = f.read()
+            # Truncate large files
+            max_size = 50000
+            truncated = len(raw_content) > max_size
+            if truncated:
+                raw_content = raw_content[:max_size]
+            # Try to decode as text
+            encoding, text = try_decode(raw_content)
+            if encoding is not None:
+                if truncated:
+                    text += "\n\n[dim]... (truncated)[/dim]"
+                return text
+            # Binary content - hex display
+            hex_display = "[Binary content - hex display]\n\n" + raw_content.hex()
+            if truncated:
+                hex_display += "\n\n[dim]... (truncated)[/dim]"
+            return hex_display
+        except OSError:
+            return "[red]Error reading file[/red]"
+
+
 class ShrinkRayApp(App[None]):
     """Textual app for Shrink Ray."""
 
@@ -1123,6 +1394,7 @@ class ShrinkRayApp(App[None]):
         ("q", "quit", "Quit"),
         ("p", "show_pass_stats", "Pass Stats"),
         ("c", "skip_current_pass", "Skip Pass"),
+        ("x", "show_history", "History"),
         ("h", "show_help", "Help"),
         ("up", "focus_up", "Focus Up"),
         ("down", "focus_down", "Focus Down"),
@@ -1176,6 +1448,9 @@ class ShrinkRayApp(App[None]):
         self._latest_pass_stats: list[PassStatsData] = []
         self._current_pass_name: str = ""
         self._disabled_passes: list[str] = []
+        # History explorer state
+        self._history_dir: str | None = None
+        self._target_basename: str = ""
 
     # Box IDs in navigation order: [top-left, top-right, bottom-left, bottom-right]
     _BOX_IDS = [
@@ -1189,7 +1464,7 @@ class ShrinkRayApp(App[None]):
         yield Header()
         with Vertical(id="main-container"):
             yield Label(
-                "Shrink Ray - [h] help, [p] passes, [c] skip pass, [q] quit",
+                "Shrink Ray - [h] help, [p] passes, [x] history, [c] skip, [q] quit",
                 id="status-label",
                 markup=False,
             )
@@ -1372,6 +1647,10 @@ class ShrinkRayApp(App[None]):
                     self._latest_pass_stats = update.pass_stats
                     self._current_pass_name = update.current_pass_name
                     self._disabled_passes = update.disabled_passes
+                    # Update history info for history explorer
+                    if update.history_dir is not None:
+                        self._history_dir = update.history_dir
+                        self._target_basename = update.target_basename
 
                     # Check if all passes are disabled
                     self._check_all_passes_disabled()
@@ -1468,6 +1747,15 @@ class ShrinkRayApp(App[None]):
     def action_show_help(self) -> None:
         """Show the help modal."""
         self.push_screen(HelpScreen())
+
+    def action_show_history(self) -> None:
+        """Show the history explorer modal."""
+        if self._history_dir is None:
+            self.notify("History not available", severity="warning")
+            return
+        self.push_screen(
+            HistoryExplorerModal(self._history_dir, self._target_basename)
+        )
 
     def action_skip_current_pass(self) -> None:
         """Skip the currently running pass."""

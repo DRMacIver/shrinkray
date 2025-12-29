@@ -64,6 +64,10 @@ class ProgressUpdate:
     # New size history entries since last update: list of (runtime_seconds, size)
     # Client should accumulate these over time
     new_size_history: list[tuple[float, int]] = field(default_factory=list)
+    # History directory path (for browsing reductions/also-interesting)
+    history_dir: str | None = None
+    # Target file basename (for reading history files)
+    target_basename: str = ""
 
 
 @dataclass
@@ -127,6 +131,8 @@ def serialize(msg: Request | Response | ProgressUpdate) -> str:
                 "active_test_id": msg.active_test_id,
                 "last_test_return_code": msg.last_test_return_code,
                 "new_size_history": msg.new_size_history,
+                "history_dir": msg.history_dir,
+                "target_basename": msg.target_basename,
             },
         }
     else:
@@ -178,6 +184,8 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
             active_test_id=d.get("active_test_id"),
             last_test_return_code=d.get("last_test_return_code"),
             new_size_history=[tuple(x) for x in d.get("new_size_history", [])],
+            history_dir=d.get("history_dir"),
+            target_basename=d.get("target_basename", ""),
         )
 
     # Check for response (has "result" or "error" field)

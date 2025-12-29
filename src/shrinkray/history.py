@@ -56,6 +56,7 @@ class HistoryManager:
     history_dir: str  # Path to .shrinkray/<run_id>
     target_basename: str
     reduction_counter: int = 0
+    also_interesting_counter: int = 0
     initialized: bool = False
 
     @classmethod
@@ -177,6 +178,36 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
         os.makedirs(subdir, exist_ok=True)
 
         # Write reduced file
+        with open(os.path.join(subdir, self.target_basename), "wb") as f:
+            f.write(test_case)
+
+        # Write output if available
+        if output is not None:
+            output_name = f"{self.target_basename}.out"
+            with open(os.path.join(subdir, output_name), "wb") as f:
+                f.write(output)
+
+    def record_also_interesting(
+        self, test_case: bytes, output: bytes | None = None
+    ) -> None:
+        """Record an also-interesting test case.
+
+        These are test cases that don't satisfy the main interestingness test
+        but have some other interesting property indicated by a special exit code.
+
+        Args:
+            test_case: The file content
+            output: Combined stdout/stderr from the test, or None if not captured
+        """
+        self.also_interesting_counter += 1
+        subdir = os.path.join(
+            self.history_dir,
+            "also-interesting",
+            f"{self.also_interesting_counter:04d}",
+        )
+        os.makedirs(subdir, exist_ok=True)
+
+        # Write file
         with open(os.path.join(subdir, self.target_basename), "wb") as f:
             f.write(test_case)
 

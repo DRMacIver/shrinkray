@@ -182,6 +182,7 @@ class ReducerWorker:
         trivial_is_error = params.get("trivial_is_error", True)
         skip_validation = params.get("skip_validation", False)
         history_enabled = params.get("history_enabled", True)
+        also_interesting_code = params.get("also_interesting_code")
 
         clang_delta_executable = None
         if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:
@@ -204,6 +205,7 @@ class ReducerWorker:
             "volume": volume,
             "clang_delta_executable": clang_delta_executable,
             "history_enabled": history_enabled,
+            "also_interesting_code": also_interesting_code,
         }
 
         if os.path.isdir(filename):

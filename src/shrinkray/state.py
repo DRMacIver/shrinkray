@@ -209,6 +209,10 @@ class ShrinkRayState[TestCase](ABC):
     history_enabled: bool = True
     history_manager: HistoryManager | None = None
 
+    # Also-interesting exit code (None = disabled)
+    # When a test returns this code, it's recorded but not used for reduction
+    also_interesting_code: int | None = None
+
     # Temp directory for output capture (when not using TUI's output manager)
     _output_tempdir: TemporaryDirectory | None = None
 
@@ -250,6 +254,23 @@ class ShrinkRayState[TestCase](ABC):
                 return f.read()
         except OSError:
             return None
+
+    def _check_also_interesting(self, exit_code: int, test_case: TestCase) -> None:
+        """Check if exit code matches also-interesting and record if so.
+
+        Args:
+            exit_code: The exit code from the test
+            test_case: The test case that was tested
+        """
+        if (
+            self.also_interesting_code is not None
+            and exit_code == self.also_interesting_code
+            and self.history_manager is not None
+        ):
+            test_case_bytes = self._get_test_case_bytes(test_case)
+            if test_case_bytes is not None:
+                output = self._get_last_captured_output()
+                self.history_manager.record_also_interesting(test_case_bytes, output)
 
     @abstractmethod
     def new_reducer(self, problem: ReductionProblem[TestCase]) -> Reducer[TestCase]: ...
@@ -542,7 +563,9 @@ class ShrinkRayState[TestCase](ABC):
         if self.first_call_time is None:
             self.first_call_time = time.time()
         async with self.is_interesting_limiter:
-            return await self.run_for_exit_code(test_case) == 0
+            exit_code = await self.run_for_exit_code(test_case)
+            self._check_also_interesting(exit_code, test_case)
+            return exit_code == 0
 
     @property
     def parallel_tasks_running(self) -> int:
@@ -754,7 +777,9 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
 
     async def is_interesting(self, test_case: bytes) -> bool:
         async with self.is_interesting_limiter:
-            return await self.run_for_exit_code(test_case) == 0
+            exit_code = await self.run_for_exit_code(test_case)
+            self._check_also_interesting(exit_code, test_case)
+            return exit_code == 0
 
     async def print_exit_message(self, problem):
         formatting_increase = 0

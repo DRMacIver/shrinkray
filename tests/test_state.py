@@ -2910,3 +2910,268 @@ async def test_history_callback_skips_directory_mode(tmp_path):
     # The callback should NOT have recorded the reduction because
     # _get_test_case_bytes returns None for directory mode
     assert state.history_manager.reduction_counter == 0
+
+
+# === also-interesting tests ===
+
+
+@pytest.mark.trio
+async def test_is_interesting_records_also_interesting_exit_code(tmp_path):
+    """Test that is_interesting records test cases with also-interesting exit code."""
+    script = tmp_path / "test.sh"
+    # Script that returns 101 (also-interesting code)
+    script.write_text("#!/bin/bash\nexit 101")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        also_interesting_code=101,
+    )
+
+    # Initialize the reducer to set up history
+    _ = state.reducer
+
+    assert state.history_manager is not None
+    assert state.history_manager.also_interesting_counter == 0
+
+    # Call is_interesting - should return False but record the case
+    result = await state.is_interesting(b"test content")
+
+    # Exit code 101 is not 0, so not interesting for reduction
+    assert result is False
+
+    # But it should have been recorded as also-interesting
+    assert state.history_manager.also_interesting_counter == 1
+
+    # Verify the file was saved
+    also_interesting_dir = os.path.join(
+        state.history_manager.history_dir, "also-interesting", "0001"
+    )
+    assert os.path.isdir(also_interesting_dir)
+    saved_file = os.path.join(also_interesting_dir, "test.txt")
+    assert os.path.isfile(saved_file)
+    with open(saved_file, "rb") as f:
+        assert f.read() == b"test content"
+
+
+@pytest.mark.trio
+async def test_also_interesting_disabled_by_default(tmp_path):
+    """Test that also-interesting is disabled when code is None."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 101")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        also_interesting_code=None,  # Disabled
+    )
+
+    # Initialize the reducer to set up history
+    _ = state.reducer
+
+    assert state.history_manager is not None
+    assert state.history_manager.also_interesting_counter == 0
+
+    # Call is_interesting
+    result = await state.is_interesting(b"test content")
+
+    # Still not interesting (exit 101 != 0)
+    assert result is False
+
+    # But nothing should be recorded since also_interesting_code is None
+    assert state.history_manager.also_interesting_counter == 0
+
+
+@pytest.mark.trio
+async def test_also_interesting_requires_history_manager(tmp_path):
+    """Test that also-interesting does nothing without history manager."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 101")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,  # History disabled
+        also_interesting_code=101,
+    )
+
+    assert state.history_manager is None
+
+    # Should work without error even though also_interesting_code is set
+    result = await state.is_interesting(b"test content")
+    assert result is False
+
+
+@pytest.mark.trio
+async def test_also_interesting_different_exit_code_not_recorded(tmp_path):
+    """Test that non-matching exit codes are not recorded."""
+    script = tmp_path / "test.sh"
+    # Script returns 1, but also-interesting is 101
+    script.write_text("#!/bin/bash\nexit 1")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        also_interesting_code=101,  # Different from script's exit code
+    )
+
+    # Initialize the reducer to set up history
+    _ = state.reducer
+
+    assert state.history_manager is not None
+
+    result = await state.is_interesting(b"test content")
+
+    # Not interesting (exit 1 != 0)
+    assert result is False
+
+    # Also not also-interesting (exit 1 != 101)
+    assert state.history_manager.also_interesting_counter == 0
+
+
+@pytest.mark.trio
+async def test_also_interesting_exit_code_zero_is_interesting_not_also(tmp_path):
+    """Test that exit code 0 is interesting, not also-interesting."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        also_interesting_code=101,
+    )
+
+    # Initialize the reducer to set up history
+    _ = state.reducer
+
+    assert state.history_manager is not None
+
+    result = await state.is_interesting(b"test content")
+
+    # Interesting (exit 0)
+    assert result is True
+
+    # Not also-interesting (0 != 101)
+    assert state.history_manager.also_interesting_counter == 0
+
+
+@pytest.mark.trio
+async def test_also_interesting_skips_directory_mode(tmp_path):
+    """Test that also-interesting skips recording for directory mode."""
+    script = tmp_path / "test.sh"
+    # Script that returns 101 (also-interesting code)
+    script.write_text("#!/bin/bash\nexit 101")
+    script.chmod(0o755)
+
+    # Create a target directory with a file
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    (target_dir / "file.txt").write_text("hello")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target_dir),
+        timeout=5.0,
+        base=target_dir.name,
+        parallelism=1,
+        initial={"file.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        also_interesting_code=101,
+    )
+
+    assert state.history_manager is not None
+
+    # Call is_interesting with a test case that returns 101
+    result = await state.is_interesting({"file.txt": b"test"})
+
+    # Not interesting (exit 101 != 0)
+    assert result is False
+
+    # Should NOT record because _get_test_case_bytes returns None for directory mode
+    assert state.history_manager.also_interesting_counter == 0

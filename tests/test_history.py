@@ -318,3 +318,131 @@ def test_record_reduction_counter_increments() -> None:
             assert manager.reduction_counter == 2
         finally:
             os.chdir(original_cwd)
+
+
+# === record_also_interesting tests ===
+
+
+def test_record_also_interesting_creates_numbered_directories() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_also_interesting(b"case 1")
+            manager.record_also_interesting(b"case 2")
+            manager.record_also_interesting(b"case 3")
+
+            also_interesting_dir = os.path.join(
+                manager.history_dir, "also-interesting"
+            )
+            assert os.path.isdir(os.path.join(also_interesting_dir, "0001"))
+            assert os.path.isdir(os.path.join(also_interesting_dir, "0002"))
+            assert os.path.isdir(os.path.join(also_interesting_dir, "0003"))
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_record_also_interesting_writes_file() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_also_interesting(b"interesting content")
+
+            saved_file = os.path.join(
+                manager.history_dir, "also-interesting", "0001", "buggy.c"
+            )
+            with open(saved_file, "rb") as f:
+                assert f.read() == b"interesting content"
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_record_also_interesting_writes_output_file() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_also_interesting(b"case", output=b"test output here")
+
+            output_file = os.path.join(
+                manager.history_dir, "also-interesting", "0001", "buggy.c.out"
+            )
+            with open(output_file, "rb") as f:
+                assert f.read() == b"test output here"
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_record_also_interesting_without_output() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_also_interesting(b"case", output=None)
+
+            output_file = os.path.join(
+                manager.history_dir, "also-interesting", "0001", "buggy.c.out"
+            )
+            assert not os.path.exists(output_file)
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_record_also_interesting_counter_increments() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            assert manager.also_interesting_counter == 0
+            manager.record_also_interesting(b"c1")
+            assert manager.also_interesting_counter == 1
+            manager.record_also_interesting(b"c2")
+            assert manager.also_interesting_counter == 2
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_record_also_interesting_and_reduction_independent_counters() -> None:
+    """Test that also-interesting and reduction counters are independent."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_reduction(b"r1")
+            manager.record_also_interesting(b"a1")
+            manager.record_reduction(b"r2")
+            manager.record_also_interesting(b"a2")
+
+            assert manager.reduction_counter == 2
+            assert manager.also_interesting_counter == 2
+
+            # Both directories should have their respective subdirectories
+            reductions_dir = os.path.join(manager.history_dir, "reductions")
+            also_interesting_dir = os.path.join(
+                manager.history_dir, "also-interesting"
+            )
+            assert os.path.isdir(os.path.join(reductions_dir, "0001"))
+            assert os.path.isdir(os.path.join(reductions_dir, "0002"))
+            assert os.path.isdir(os.path.join(also_interesting_dir, "0001"))
+            assert os.path.isdir(os.path.join(also_interesting_dir, "0002"))
+        finally:
+            os.chdir(original_cwd)

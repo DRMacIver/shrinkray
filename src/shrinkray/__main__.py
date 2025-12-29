@@ -208,6 +208,17 @@ Enabled by default; use --no-history to disable.
 """.strip(),
 )
 @click.option(
+    "--also-interesting",
+    type=int,
+    default=101,
+    help="""
+Exit code indicating a test case is interesting enough to record but should not
+be used for reduction. When the test script returns this code, the test case is
+saved to the also-interesting/ directory within the history folder.
+Requires --history to be enabled. Set to 0 to disable. Default: 101.
+""".strip(),
+)
+@click.option(
     "--clang-delta",
     default="",
     help="Path to your clang_delta executable.",
@@ -235,6 +246,7 @@ def main(
     ui_type: UIType,
     theme: str,
     history: bool,
+    also_interesting: int,
 ) -> None:
     if timeout is not None and timeout <= 0:
         timeout = float("inf")
@@ -316,6 +328,8 @@ def main(
         "volume": volume,
         "clang_delta_executable": clang_delta_executable,
         "history_enabled": history,
+        # 0 disables also-interesting (since 0 already means "interesting")
+        "also_interesting_code": also_interesting if also_interesting != 0 else None,
     }
 
     state: ShrinkRayState[Any]
@@ -370,6 +384,7 @@ def main(
             exit_on_completion=exit_on_completion,
             theme=theme,  # type: ignore[arg-type]
             history_enabled=history,
+            also_interesting_code=also_interesting if also_interesting != 0 else None,
         )
         return
 

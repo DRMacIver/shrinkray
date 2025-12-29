@@ -117,6 +117,7 @@ class ReductionClientProtocol(Protocol):
         trivial_is_error: bool = True,
         skip_validation: bool = False,
         history_enabled: bool = True,
+        also_interesting_code: int | None = None,
     ) -> Response: ...
     async def cancel(self) -> Response: ...
     async def disable_pass(self, pass_name: str) -> Response: ...
@@ -1150,6 +1151,7 @@ class ShrinkRayApp(App[None]):
         client: ReductionClientProtocol | None = None,
         theme: ThemeMode = "auto",
         history_enabled: bool = True,
+        also_interesting_code: int | None = None,
     ) -> None:
         super().__init__()
         self._file_path = file_path
@@ -1170,6 +1172,7 @@ class ShrinkRayApp(App[None]):
         self._completed = False
         self._theme = theme
         self._history_enabled = history_enabled
+        self._also_interesting_code = also_interesting_code
         self._latest_pass_stats: list[PassStatsData] = []
         self._current_pass_name: str = ""
         self._disabled_passes: list[str] = []
@@ -1329,6 +1332,7 @@ class ShrinkRayApp(App[None]):
                     trivial_is_error=self._trivial_is_error,
                     skip_validation=True,
                     history_enabled=self._history_enabled,
+                    also_interesting_code=self._also_interesting_code,
                 )
 
                 if response.error:
@@ -1497,6 +1501,7 @@ def run_textual_ui(
     exit_on_completion: bool = True,
     theme: ThemeMode = "auto",
     history_enabled: bool = True,
+    also_interesting_code: int | None = None,
 ) -> None:
     """Run the textual TUI.
 
@@ -1522,6 +1527,7 @@ def run_textual_ui(
         exit_on_completion=exit_on_completion,
         theme=theme,
         history_enabled=history_enabled,
+        also_interesting_code=also_interesting_code,
     )
     app.run()
     if app.return_code:

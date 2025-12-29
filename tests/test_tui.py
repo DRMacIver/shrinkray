@@ -82,6 +82,7 @@ class FakeReductionClient:
         trivial_is_error: bool = True,
         skip_validation: bool = False,
         history_enabled: bool = True,
+        also_interesting_code: int | None = None,
     ) -> Response:
         if self._start_error:
             return Response(id="start", error=self._start_error)
@@ -2893,6 +2894,7 @@ def test_run_textual_ui_creates_and_runs_app():
             exit_on_completion=True,
             theme="dark",
             history_enabled=True,
+            also_interesting_code=None,
         )
 
         # Verify app was created with correct arguments
@@ -2912,6 +2914,7 @@ def test_run_textual_ui_creates_and_runs_app():
             exit_on_completion=True,
             theme="dark",
             history_enabled=True,
+            also_interesting_code=None,
         )
 
         # Verify run() was called

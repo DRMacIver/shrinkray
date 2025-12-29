@@ -138,6 +138,7 @@ class SubprocessClient:
         trivial_is_error: bool = True,
         skip_validation: bool = False,
         history_enabled: bool = True,
+        also_interesting_code: int | None = None,
     ) -> Response:
         """Start the reduction process."""
         params: dict[str, Any] = {
@@ -153,6 +154,7 @@ class SubprocessClient:
             "trivial_is_error": trivial_is_error,
             "skip_validation": skip_validation,
             "history_enabled": history_enabled,
+            "also_interesting_code": also_interesting_code,
         }
         if parallelism is not None:
             params["parallelism"] = parallelism

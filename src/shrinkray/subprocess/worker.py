@@ -51,6 +51,7 @@ class ReducerWorker:
         self.problem = None
         self.state = None
         self._cancel_scope: trio.CancelScope | None = None
+        self._restart_requested = False
         # Parallelism tracking
         self._parallel_samples = 0
         self._parallel_total = 0
@@ -345,6 +346,10 @@ class ReducerWorker:
         self.running = False
 
         try:
+            # Clear old test output to avoid showing stale output from before restart
+            if self.state.output_manager is not None:
+                self.state.output_manager.cleanup_all()
+
             # Get restart data from history manager
             new_test_case, excluded_set = (
                 self.state.history_manager.restart_from_reduction(reduction_number)
@@ -366,6 +371,8 @@ class ReducerWorker:
             self._size_history = [(0.0, len(new_test_case))]
             self._last_sent_history_index = 0
 
+            # Signal that we need to restart the reduction loop
+            self._restart_requested = True
             self.running = True
             return Response(
                 id=request_id,
@@ -637,9 +644,21 @@ class ReducerWorker:
                 while not self.running:
                     await trio.sleep(0.01)
 
-                # Start progress updates and reducer
+                # Start progress updates
                 nursery.start_soon(self.emit_progress_updates)
-                await self.run_reducer()
+
+                # Run reducer, looping if restart is requested
+                while True:
+                    self._restart_requested = False
+                    await self.run_reducer()
+
+                    # Check if we should restart
+                    if not self._restart_requested:
+                        break
+
+                    # Wait for restart to be fully set up
+                    while not self.running:
+                        await trio.sleep(0.01)
 
                 # Emit final progress update before completion
                 final_update = await self._build_progress_update()

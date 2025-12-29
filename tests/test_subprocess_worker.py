@@ -22,7 +22,7 @@ from shrinkray.subprocess.protocol import (
     deserialize,
     serialize,
 )
-from shrinkray.subprocess.worker import ReducerWorker, main
+from shrinkray.subprocess.worker import InputStream, ReducerWorker, main
 
 
 # === ReducerWorker initialization tests ===
@@ -35,6 +35,7 @@ def test_worker_initial_state():
     assert worker.problem is None
     assert worker.state is None
     assert worker._cancel_scope is None
+    assert worker._restart_requested is False
     assert worker._parallel_samples == 0
     assert worker._parallel_total == 0
 
@@ -2040,6 +2041,7 @@ async def test_handle_restart_from_nonexistent_reduction():
     worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
     worker.state.history_manager = MagicMock()
     worker.state.history_manager.restart_from_reduction.side_effect = FileNotFoundError()
+    worker.state.output_manager = None
 
     response = await worker._handle_restart_from("test-id", {"reduction_number": 999})
     assert response.error is not None and "not found" in response.error
@@ -2060,6 +2062,7 @@ async def test_handle_restart_from_success():
         {b"excluded1", b"excluded2"},
     )
     worker.state.filename = "/tmp/test.c"
+    worker.state.output_manager = None
 
     # Mock the reducer
     mock_reducer = MagicMock()
@@ -2074,6 +2077,7 @@ async def test_handle_restart_from_success():
         b"restart content", {b"excluded1", b"excluded2"}
     )
     assert worker.running is True
+    assert worker._restart_requested is True
 
 
 @pytest.mark.trio
@@ -2106,6 +2110,7 @@ async def test_handle_restart_from_cancels_running_scope():
         set(),
     )
     worker.state.filename = "/tmp/test.c"
+    worker.state.output_manager = None
 
     # Mock the reducer
     mock_reducer = MagicMock()
@@ -2129,6 +2134,7 @@ async def test_handle_restart_from_generic_exception():
     # Set up mocks
     worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
     worker.state.history_manager = MagicMock()
+    worker.state.output_manager = None
     # Raise a generic exception
     worker.state.history_manager.restart_from_reduction.side_effect = RuntimeError(
         "Something went wrong"
@@ -2137,3 +2143,72 @@ async def test_handle_restart_from_generic_exception():
     response = await worker._handle_restart_from("test-id", {"reduction_number": 1})
 
     assert response.error == "Something went wrong"
+
+
+@pytest.mark.trio
+async def test_handle_restart_from_clears_output_manager():
+    """Test restart_from clears the output manager to avoid stale output display."""
+    worker = ReducerWorker()
+    worker._cancel_scope = None
+    worker.running = True
+
+    # Set up mocks
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.history_manager = MagicMock()
+    worker.state.history_manager.restart_from_reduction.return_value = (
+        b"restart content",
+        set(),
+    )
+    worker.state.filename = "/tmp/test.c"
+    worker.state.output_manager = MagicMock()
+
+    # Mock the reducer
+    mock_reducer = MagicMock()
+    mock_reducer.target = MagicMock()
+    worker.state.reducer = mock_reducer
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 1})
+
+    # Output manager should have been cleaned up to clear stale output
+    worker.state.output_manager.cleanup_all.assert_called_once()
+    assert response.result == {"status": "restarted", "size": 15}
+
+
+@pytest.mark.trio
+async def test_run_loop_restarts_reducer():
+    """Test that run() loop re-runs reducer when _restart_requested is True."""
+    worker = ReducerWorker()
+    run_reducer_calls = []
+
+    async def mock_run_reducer():
+        run_reducer_calls.append(len(run_reducer_calls))
+        # On first call, simulate restart being requested
+        if len(run_reducer_calls) == 1:
+            worker._restart_requested = True
+            worker.running = True
+        # On second call, just complete normally
+
+    async def mock_read_commands(
+        input_stream: InputStream | None = None,
+        task_status: trio.TaskStatus[None] = trio.TASK_STATUS_IGNORED,
+    ) -> None:
+        task_status.started()
+        # Just wait indefinitely (will be cancelled when run completes)
+        await trio.sleep_forever()
+
+    # Mock the methods
+    worker.run_reducer = mock_run_reducer
+    worker.emit_progress_updates = AsyncMock()
+    worker._build_progress_update = AsyncMock(return_value=None)
+    worker.emit = AsyncMock()
+    worker.read_commands = mock_read_commands
+
+    # Start the worker
+    worker.running = True
+
+    # Run with a timeout to avoid infinite loop in case of bug
+    with trio.move_on_after(1):
+        await worker.run()
+
+    # Verify run_reducer was called twice (once initially, once after restart)
+    assert len(run_reducer_calls) == 2

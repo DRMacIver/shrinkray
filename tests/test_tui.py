@@ -6071,6 +6071,28 @@ def test_history_modal_scan_entries_missing_dir(tmp_path):
     assert entries == []
 
 
+def test_history_modal_scan_entries_ignores_files(tmp_path):
+    """Test that _scan_entries ignores files (not directories) in the folder."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create a regular file in reductions (not a directory)
+    (reductions_dir / "stray_file.txt").write_text("should be ignored")
+
+    # Create a valid entry directory
+    entry_dir = reductions_dir / "0001"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("valid content")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    entries = modal._scan_entries("reductions")
+
+    # Should only find the directory entry, not the stray file
+    assert len(entries) == 1
+    assert entries[0][0] == "0001"
+
+
 def test_history_modal_read_file_success(tmp_path):
     """Test _read_file reads file successfully."""
     test_file = tmp_path / "test.txt"

@@ -1047,3 +1047,27 @@ def test_write_directory_content_with_nested_paths() -> None:
                 assert f.read() == b"deep content"
         finally:
             os.chdir(original_cwd)
+
+
+def test_initialize_directory_without_record_reductions() -> None:
+    """Test initialize_directory with record_reductions=False."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+
+            manager = HistoryManager.create(
+                ["./test.sh"], "target_dir", is_directory=True, record_reductions=False
+            )
+            initial_content = {"file.txt": b"content"}
+            manager.initialize_directory(initial_content, ["./test.sh"], "target_dir")
+
+            assert manager.initialized
+            # reductions directory should NOT be created
+            assert not os.path.exists(
+                os.path.join(manager.history_dir, "reductions")
+            )
+            # But initial directory should still exist
+            assert os.path.isdir(os.path.join(manager.history_dir, "initial"))
+        finally:
+            os.chdir(original_cwd)

@@ -285,9 +285,8 @@ class ShrinkRayState[TestCase](ABC):
             and self.history_manager is not None
         ):
             test_case_bytes = self._get_test_case_bytes(test_case)
-            if test_case_bytes is not None:
-                output = self._get_last_captured_output()
-                self.history_manager.record_also_interesting(test_case_bytes, output)
+            output = self._get_last_captured_output()
+            self.history_manager.record_also_interesting(test_case_bytes, output)
 
     @abstractmethod
     def new_reducer(self, problem: ReductionProblem[TestCase]) -> Reducer[TestCase]: ...
@@ -298,11 +297,8 @@ class ShrinkRayState[TestCase](ABC):
         ...
 
     @abstractmethod
-    def _get_test_case_bytes(self, test_case: TestCase) -> bytes | None:
-        """Convert a test case to bytes for history recording.
-
-        Returns None if history recording is not supported for this test case type.
-        """
+    def _get_test_case_bytes(self, test_case: TestCase) -> bytes:
+        """Convert a test case to bytes for history recording."""
         ...
 
     @abstractmethod
@@ -557,9 +553,8 @@ class ShrinkRayState[TestCase](ABC):
             async def record_history(test_case: TestCase):
                 output = self._get_last_captured_output()
                 test_case_bytes = self._get_test_case_bytes(test_case)
-                if test_case_bytes is not None:
-                    assert self.history_manager is not None
-                    self.history_manager.record_reduction(test_case_bytes, output)
+                assert self.history_manager is not None
+                self.history_manager.record_reduction(test_case_bytes, output)
 
         self._cached_reducer = self.new_reducer(problem)
         return self._cached_reducer
@@ -576,7 +571,7 @@ class ShrinkRayState[TestCase](ABC):
         # Check exclusion set first (for restart-from-point feature)
         if self.excluded_test_cases is not None:
             test_case_bytes = self._get_test_case_bytes(test_case)
-            if test_case_bytes is not None and test_case_bytes in self.excluded_test_cases:
+            if test_case_bytes in self.excluded_test_cases:
                 return False
 
         if self.first_call_time is None:
@@ -770,7 +765,7 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
     def _get_initial_bytes(self) -> bytes:
         return self.initial
 
-    def _get_test_case_bytes(self, test_case: bytes) -> bytes | None:
+    def _get_test_case_bytes(self, test_case: bytes) -> bytes:
         return test_case
 
     def _set_initial_for_restart(self, content: bytes) -> None:
@@ -909,7 +904,7 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
         # Serialize directory content for history recording
         return self._serialize_directory(self.initial)
 
-    def _get_test_case_bytes(self, test_case: dict[str, bytes]) -> bytes | None:
+    def _get_test_case_bytes(self, test_case: dict[str, bytes]) -> bytes:
         # Serialize directory content for comparison/exclusion
         return self._serialize_directory(test_case)
 

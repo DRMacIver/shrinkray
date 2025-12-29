@@ -384,9 +384,9 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
         os.makedirs(target_dir, exist_ok=True)
         for rel_path, file_content in content.items():
             file_path = os.path.join(target_dir, rel_path)
+            # parent_dir is always non-empty since file_path includes target_dir
             parent_dir = os.path.dirname(file_path)
-            if parent_dir:  # Only create parent if there is one
-                os.makedirs(parent_dir, exist_ok=True)
+            os.makedirs(parent_dir, exist_ok=True)
             with open(file_path, "wb") as f:
                 f.write(file_content)
 

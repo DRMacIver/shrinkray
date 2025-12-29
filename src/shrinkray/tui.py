@@ -1227,9 +1227,8 @@ class HistoryExplorerModal(ModalScreen[None]):
                 ListItem(Label(f"{entry_num}  ({size_str})"), id=f"entry-{entry_num}")
             )
 
-        # Select first item
-        if list_view.children:
-            list_view.index = 0
+        # Select first item (entries is non-empty here, so we always have children)
+        list_view.index = 0
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle selection in a ListView."""

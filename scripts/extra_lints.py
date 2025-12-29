@@ -8,6 +8,7 @@ Rules:
 4. No swallowing exception stack traces (str(e) without traceback logging)
 5. No mutable default arguments
 6. No bool | None function arguments (use enum or separate parameters)
+7. No Test-prefixed classes in non-test files (confuses pytest)
 
 Uses a cache in .cache/extra_lints_cache.json to skip unchanged files.
 """
@@ -156,6 +157,18 @@ class LintVisitor(cst.CSTVisitor):
                 node,
                 "no-class-tests",
                 f"Class-based test '{node.name.value}' found. Use module-level test functions instead.",
+            )
+        # Rule 7: No Test-prefixed classes in non-test files (confuses pytest)
+        if (
+            not self._is_test_file
+            and self._nesting_depth == 0
+            and node.name.value.startswith("Test")
+        ):
+            self._add_error(
+                node,
+                "no-test-prefix-in-src",
+                f"Class '{node.name.value}' starts with 'Test' in a non-test file. "
+                "This confuses pytest. Rename the class (e.g., 'OutputCaptureManager' instead of 'TestOutputManager').",
             )
         self._nesting_depth += 1
         return True

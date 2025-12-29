@@ -38,7 +38,12 @@ shrinkray (or any other test-case reducer) then systematically tries smaller and
 
 While it runs, you will see the following user interface:
 
-![Demo of shrink ray running](demo.png)
+<video controls poster="gallery/enterprise-hello/hello.png">
+  <source src="https://drmaciver.github.io/shrinkray/assets/hello.mp4" type="video/mp4">
+  Your browser doesn't support video. <a href="gallery/enterprise-hello/hello.gif">View the GIF instead</a>.
+</video>
+
+(This is a toy example based on reducing a ridiculously bad version of hello world)
 
 When it finishes you will be left with the reduced test case in `mytestcase.py`.
 

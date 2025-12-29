@@ -480,8 +480,11 @@ async def test_worker_emit_progress_updates_loop():
 
 
 # === Integration tests with real files ===
+# These tests run actual bash scripts with tight timeouts, so they need to run
+# sequentially to avoid timeout failures under parallel load.
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_single_file(tmp_path):
     """Test _start_reduction with a real single file."""
     # Create a test file
@@ -554,6 +557,7 @@ async def test_worker_start_reduction_skip_validation(tmp_path):
     assert worker.problem is not None
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_directory(tmp_path):
     """Test _start_reduction with a directory."""
     # Create a test directory with files
@@ -804,6 +808,7 @@ def test_worker_get_content_preview_decode_exception():
     assert hex_mode is True
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_with_clang_delta(tmp_path):
     """Test _start_reduction with a C file and clang_delta enabled."""
 
@@ -843,6 +848,7 @@ async def test_worker_start_reduction_with_clang_delta(tmp_path):
     assert worker.running is True
 
 
+@pytest.mark.serial
 async def test_worker_full_run_with_mock(tmp_path):
     """Test the full run() method with mocked reducer."""
     # Create a test file
@@ -907,6 +913,7 @@ def test_worker_main_guard():
     assert hasattr(shrinkray.subprocess.worker, "main")
 
 
+@pytest.mark.serial
 async def test_worker_run_waits_for_start(tmp_path):
     """Test that run() waits for start command before proceeding."""
     # Create a test file
@@ -973,6 +980,7 @@ async def test_worker_run_waits_for_start(tmp_path):
     assert b"started" in output.data
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_clang_delta_not_found(tmp_path):
     """Test _start_reduction when find_clang_delta returns empty string."""
     # Create a C file
@@ -1005,6 +1013,7 @@ async def test_worker_start_reduction_clang_delta_not_found(tmp_path):
     # The test passes because we successfully started reduction
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_clang_delta_found(tmp_path):
     """Test _start_reduction when find_clang_delta returns a path."""
     # Create a C file
@@ -1039,6 +1048,7 @@ async def test_worker_start_reduction_clang_delta_found(tmp_path):
     mock_clang_delta.assert_called_once_with("/fake/clang_delta")
 
 
+@pytest.mark.serial
 async def test_worker_start_reduction_clang_delta_path_provided(tmp_path):
     """Test _start_reduction when clang_delta path is provided directly."""
     # Create a C file
@@ -1865,6 +1875,58 @@ async def test_build_progress_update_with_reducer_no_disabled_passes_attr():
     assert update.disabled_passes == []
 
 
+@pytest.mark.trio
+async def test_build_progress_update_periodic_size_history():
+    """Test _build_progress_update records periodic size history when size unchanged (412-413)."""
+
+    worker = ReducerWorker()
+
+    # Set up problem with a start time that gives us control over runtime
+    start_time = time.time()
+
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 500
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = start_time
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.1)
+    worker.problem.current_test_case = b"test content"
+
+    worker.state = Mock()
+    worker.state.parallel_tasks_running = 2
+    worker.state.output_manager = None
+
+    # First call - initializes history with size change from initial
+    update1 = await worker._build_progress_update()
+    assert update1 is not None
+    # Should have initial entry and size change entry
+    assert len(worker._size_history) >= 1
+
+    initial_history_len = len(worker._size_history)
+    recorded_time = worker._last_history_time
+
+    # Now the size stays the same, but not enough time has passed
+    # history_interval is 0.2s for first 5 minutes
+    await worker._build_progress_update()
+    # No new entry should be added (size same, not enough time)
+    assert len(worker._size_history) == initial_history_len
+
+    # Now simulate enough time passing (> 0.2s)
+    # We need to mock time.time to return a later time
+    fake_current_time = start_time + recorded_time + 0.3  # 0.3s after last record
+
+    with patch("shrinkray.subprocess.worker.time.time", return_value=fake_current_time):
+        await worker._build_progress_update()
+
+    # Now a periodic entry should have been added (size same, time passed)
+    assert len(worker._size_history) > initial_history_len
+    assert worker._size_history[-1][1] == 500  # Size is unchanged
+
+
 # === _get_test_output_preview tests ===
 
 
@@ -1873,15 +1935,15 @@ def test_get_test_output_preview_no_output_path():
     worker = ReducerWorker()
     worker.state = MagicMock()
 
-    # Output manager with no output path
+    # Output manager with no output yet
     manager = MagicMock()
-    manager.get_active_test_id.return_value = 5
-    manager.get_current_output_path.return_value = None
+    manager.get_current_output.return_value = (None, None, None)
     worker.state.output_manager = manager
 
-    preview, test_id = worker._get_test_output_preview()
+    preview, test_id, return_code = worker._get_test_output_preview()
     assert preview == ""
-    assert test_id == 5
+    assert test_id is None
+    assert return_code is None
 
 
 def test_get_test_output_preview_large_file(tmp_path):
@@ -1895,12 +1957,13 @@ def test_get_test_output_preview_large_file(tmp_path):
     output_file.write_text(content)
 
     manager = MagicMock()
-    manager.get_active_test_id.return_value = 10
-    manager.get_current_output_path.return_value = str(output_file)
+    # Return running test (return_code=None)
+    manager.get_current_output.return_value = (str(output_file), 10, None)
     worker.state.output_manager = manager
 
-    preview, test_id = worker._get_test_output_preview()
+    preview, test_id, return_code = worker._get_test_output_preview()
     assert test_id == 10
+    assert return_code is None
     # Should get last 4KB
     assert len(preview.encode()) <= 4096
     assert "LAST PART" in preview
@@ -1912,10 +1975,11 @@ def test_get_test_output_preview_file_read_error():
     worker.state = MagicMock()
 
     manager = MagicMock()
-    manager.get_active_test_id.return_value = 3
-    manager.get_current_output_path.return_value = "/nonexistent/path/file.log"
+    # Return completed test with return code, but file doesn't exist
+    manager.get_current_output.return_value = ("/nonexistent/path/file.log", 3, 1)
     worker.state.output_manager = manager
 
-    preview, test_id = worker._get_test_output_preview()
+    preview, test_id, return_code = worker._get_test_output_preview()
     assert preview == ""
     assert test_id == 3
+    assert return_code == 1

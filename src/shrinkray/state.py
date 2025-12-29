@@ -57,7 +57,7 @@ def compute_dynamic_timeout(runtime: float) -> float:
 
 
 @define
-class TestOutputManager:
+class OutputCaptureManager:
     """Manages temporary files for test output capture.
 
     Allocates unique files for each test's stdout/stderr output,
@@ -74,7 +74,8 @@ class TestOutputManager:
 
     _sequence: int = 0
     _active_outputs: dict[int, str] = {}
-    _completed_outputs: deque[tuple[int, str, float]] = deque()
+    # Completed outputs: (test_id, file_path, completion_time, return_code)
+    _completed_outputs: deque[tuple[int, str, float, int]] = deque()
 
     def __attrs_post_init__(self) -> None:
         # Initialize mutable defaults
@@ -89,11 +90,13 @@ class TestOutputManager:
         self._active_outputs[test_id] = file_path
         return test_id, file_path
 
-    def mark_completed(self, test_id: int) -> None:
+    def mark_completed(self, test_id: int, return_code: int = 0) -> None:
         """Mark a test as completed and move to completed queue."""
         if test_id in self._active_outputs:
             file_path = self._active_outputs.pop(test_id)
-            self._completed_outputs.append((test_id, file_path, time.time()))
+            self._completed_outputs.append(
+                (test_id, file_path, time.time(), return_code)
+            )
             self._cleanup_old_files()
 
     def _cleanup_old_files(self) -> None:
@@ -104,65 +107,55 @@ class TestOutputManager:
             self._completed_outputs
             and now - self._completed_outputs[0][2] > self.max_age_seconds
         ):
-            _, file_path, _ = self._completed_outputs.popleft()
+            _, file_path, _, _ = self._completed_outputs.popleft()
             self._safe_delete(file_path)
         # Remove excess files beyond max_files
         while len(self._completed_outputs) > self.max_files:
-            _, file_path, _ = self._completed_outputs.popleft()
+            _, file_path, _, _ = self._completed_outputs.popleft()
             self._safe_delete(file_path)
 
-    def _should_show_completed(self) -> tuple[int, str] | None:
-        """Check if we should show a completed test's output.
+    @staticmethod
+    def _file_has_content(path: str) -> bool:
+        """Check if a file exists and has non-zero size."""
+        try:
+            return os.path.getsize(path) > 0
+        except OSError:
+            return False
 
-        Note: This method is only called when there are no active tests.
-        It returns the completed test info if within the display window
-        (min_display_seconds + grace_period).
+    def get_current_output(self) -> tuple[str | None, int | None, int | None]:
+        """Get the current output to display.
+
+        Returns (file_path, test_id, return_code) where:
+        - file_path: path to the output file to display
+        - test_id: the test ID (for display in header)
+        - return_code: the return code (None if test is still running)
+
+        Active tests take priority only if they have produced output.
+        Otherwise, shows recently completed test output for min_display_seconds,
+        plus an additional grace_period if no new test has started.
         """
-        if not self._completed_outputs:
-            return None
-        test_id, file_path, completion_time = self._completed_outputs[-1]
-        elapsed = time.time() - completion_time
-
-        # Show completed test during the full display window
-        if elapsed < self.min_display_seconds + self.grace_period_seconds:
-            return test_id, file_path
-
-        return None
-
-    def get_current_output_path(self) -> str | None:
-        """Get the most relevant output file path.
-
-        Active tests always take priority. If no active test, shows
-        recently completed test output for min_display_seconds, plus
-        an additional grace_period if no new test has started.
-        """
-        # Active tests always take priority
+        # Active tests take priority only if they have content
         if self._active_outputs:
             max_id = max(self._active_outputs.keys())
-            return self._active_outputs[max_id]
-        # Then check for recently completed test that should stay visible
-        recent = self._should_show_completed()
-        if recent is not None:
-            return recent[1]
-        # Fall back to most recent completed (even if past display window)
+            active_path = self._active_outputs[max_id]
+            if self._file_has_content(active_path):
+                # Active test with output - no return code yet
+                return active_path, max_id, None
+            # Active test has no output yet - fall through to show previous output
+
+        # Check for recently completed test that should stay visible,
+        # or fall back to most recent completed (even if past display window)
         if self._completed_outputs:
-            return self._completed_outputs[-1][1]
-        return None
+            test_id, file_path, _, return_code = self._completed_outputs[-1]
+            return file_path, test_id, return_code
 
-    def get_active_test_id(self) -> int | None:
-        """Get the currently running test ID, if any.
-
-        Returns the active test ID if one is running, None otherwise.
-        """
-        if self._active_outputs:
-            return max(self._active_outputs.keys())
-        return None
+        return None, None, None
 
     def cleanup_all(self) -> None:
         """Clean up all output files (called on shutdown)."""
         for file_path in self._active_outputs.values():
             self._safe_delete(file_path)
-        for _, file_path, _ in self._completed_outputs:
+        for _, file_path, _, _ in self._completed_outputs:
             self._safe_delete(file_path)
         self._active_outputs.clear()
         self._completed_outputs.clear()
@@ -209,7 +202,7 @@ class ShrinkRayState[TestCase](ABC):
     _last_debug_output: str = ""
 
     # Optional output manager for capturing test output (TUI mode)
-    output_manager: TestOutputManager | None = None
+    output_manager: OutputCaptureManager | None = None
 
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
@@ -298,6 +291,7 @@ class ShrinkRayState[TestCase](ABC):
         # Determine output handling
         test_id: int | None = None
         output_file_handle = None
+        exit_code: int | None = None  # Track for output manager
 
         if self.output_manager is not None:
             # Capture output to a file for TUI display
@@ -366,6 +360,7 @@ class ShrinkRayState[TestCase](ABC):
 
                 result: int | None = sp.returncode
                 assert result is not None
+                exit_code = result
 
                 return result
         finally:
@@ -373,7 +368,7 @@ class ShrinkRayState[TestCase](ABC):
             if output_file_handle is not None:
                 output_file_handle.close()
             if test_id is not None and self.output_manager is not None:
-                self.output_manager.mark_completed(test_id)
+                self.output_manager.mark_completed(test_id, exit_code or 0)
 
     async def run_for_exit_code(self, test_case: TestCase, debug: bool = False) -> int:
         # Lazy import

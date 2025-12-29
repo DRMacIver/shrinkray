@@ -58,6 +58,11 @@ class ReducerWorker:
         self._output_stream = output_stream
         # Output directory for test output capture (cleaned up on shutdown)
         self._output_dir: str | None = None
+        # Size history for graphing: list of (runtime_seconds, size) tuples
+        self._size_history: list[tuple[float, int]] = []
+        self._last_sent_history_index: int = 0
+        self._last_recorded_size: int = 0
+        self._last_history_time: float = 0.0
 
     async def emit(self, msg: Response | ProgressUpdate) -> None:
         """Write a message to the output stream."""
@@ -157,9 +162,9 @@ class ReducerWorker:
             find_clang_delta,
         )
         from shrinkray.state import (
+            OutputCaptureManager,
             ShrinkRayDirectoryState,
             ShrinkRayStateSingleFile,
-            TestOutputManager,
         )
         from shrinkray.work import Volume
 
@@ -213,7 +218,7 @@ class ReducerWorker:
 
         # Create output manager for test output capture (always enabled for TUI)
         self._output_dir = tempfile.mkdtemp(prefix="shrinkray-output-")
-        self.state.output_manager = TestOutputManager(output_dir=self._output_dir)
+        self.state.output_manager = OutputCaptureManager(output_dir=self._output_dir)
 
         self.problem = self.state.problem
         self.reducer = self.state.reducer
@@ -304,17 +309,23 @@ class ReducerWorker:
             return Response(id=request_id, result={"status": "skipped"})
         return Response(id=request_id, error="Reducer does not support pass control")
 
-    def _get_test_output_preview(self) -> tuple[str, int | None]:
-        """Get preview of current test output and active test ID."""
-        if self.state is None or self.state.output_manager is None:
-            return "", None
+    def _get_test_output_preview(self) -> tuple[str, int | None, int | None]:
+        """Get preview of current test output, test ID, and return code.
 
-        manager = self.state.output_manager
-        active_test_id = manager.get_active_test_id()
-        output_path = manager.get_current_output_path()
+        Returns (content, test_id, return_code) where:
+        - content: the last 4KB of the output file
+        - test_id: the test ID being displayed
+        - return_code: None if test is still running, otherwise the exit code
+        """
+        if self.state is None or self.state.output_manager is None:
+            return "", None, None
+
+        output_path, test_id, return_code = (
+            self.state.output_manager.get_current_output()
+        )
 
         if output_path is None:
-            return "", active_test_id
+            return "", None, None
 
         # Read last 4KB of file
         try:
@@ -326,9 +337,13 @@ class ReducerWorker:
                 else:
                     f.seek(0)
                 data = f.read()
-            return data.decode("utf-8", errors="replace"), active_test_id
+            return (
+                data.decode("utf-8", errors="replace"),
+                test_id,
+                return_code,
+            )
         except OSError:
-            return "", active_test_id
+            return "", test_id, return_code
 
     def _get_content_preview(self) -> tuple[str, bool]:
         """Get a preview of the current test case content."""
@@ -379,6 +394,29 @@ class ReducerWorker:
             return None
 
         stats = self.problem.stats
+        runtime = time.time() - stats.start_time
+        current_size = stats.current_test_case_size
+
+        # Record size history when size changes or periodically
+        # Use 200ms interval for first 5 minutes, then 1s (ticks are at 1-minute intervals)
+        history_interval = 1.0 if runtime >= 300 else 0.2
+
+        if not self._size_history:
+            # First sample: record initial size at time 0
+            self._size_history.append((0.0, stats.initial_test_case_size))
+            self._last_recorded_size = stats.initial_test_case_size
+            self._last_history_time = 0.0
+
+        if current_size != self._last_recorded_size:
+            # Size changed - always record
+            self._size_history.append((runtime, current_size))
+            self._last_recorded_size = current_size
+            self._last_history_time = runtime
+        elif runtime - self._last_history_time >= history_interval:
+            # No size change but interval passed - record periodic update
+            self._size_history.append((runtime, current_size))
+            self._last_history_time = runtime
+
         content_preview, hex_mode = self._get_content_preview()
 
         # Get parallel workers count and track average
@@ -433,7 +471,13 @@ class ReducerWorker:
             disabled_passes = []
 
         # Get test output preview
-        test_output_preview, active_test_id = self._get_test_output_preview()
+        test_output_preview, active_test_id, last_return_code = (
+            self._get_test_output_preview()
+        )
+
+        # Get new size history entries since last update
+        new_entries = self._size_history[self._last_sent_history_index :]
+        self._last_sent_history_index = len(self._size_history)
 
         return ProgressUpdate(
             status=self.reducer.status if self.reducer else "",
@@ -443,7 +487,7 @@ class ReducerWorker:
             reductions=stats.reductions,
             interesting_calls=stats.interesting_calls,
             wasted_calls=stats.wasted_interesting_calls,
-            runtime=time.time() - stats.start_time,
+            runtime=runtime,
             parallel_workers=parallel_workers,
             average_parallelism=average_parallelism,
             effective_parallelism=effective_parallelism,
@@ -455,6 +499,8 @@ class ReducerWorker:
             disabled_passes=disabled_passes,
             test_output_preview=test_output_preview,
             active_test_id=active_test_id,
+            last_test_return_code=last_return_code,
+            new_size_history=new_entries,
         )
 
     async def emit_progress_updates(self) -> None:

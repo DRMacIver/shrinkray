@@ -696,6 +696,7 @@ async def test_failure_with_no_temp_dirs():
 # =============================================================================
 
 
+@pytest.mark.slow
 def test_validation_output_streams_immediately():
     """Test that validation output appears immediately, not buffered until completion.
 

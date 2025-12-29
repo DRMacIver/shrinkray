@@ -8,12 +8,11 @@ install:
 
 # Run tests with coverage enforcement (skips slow tests when no args given)
 test *args: install
-    uv run coverage run -m pytest {{ if args == "" { "tests  -m 'not slow' --durations=10" } else { args } }}
-    {{ if args == "" { "uv run coverage report" } else { "" } }}
+    {{ if args == "" { "uv run pytest tests -n auto -m 'not slow and not serial' --durations=10 --cov --cov-report= && uv run pytest tests -n 0 -m 'serial and not slow' --cov --cov-append --cov-report=term-missing --cov-fail-under=100" } else { "uv run pytest " + args } }}
 
 # Run tests without coverage (faster for development)
 test-quick *args: install
-    uv run python -m pytest tests/ {{ args }}
+    uv run pytest tests/ -n auto {{ args }}
 
 # Lint and type-check
 lint: install
@@ -67,3 +66,15 @@ release-publish:
 # Full release: update version, build, and publish
 release: release-version release-build release-publish
     @echo "Release complete!"
+
+# Update gallery GIFs from VHS tape files (only if needed)
+gallery:
+    uv run python scripts/update_gallery.py
+
+# Check if gallery GIFs need updating (returns non-zero if updates needed)
+gallery-check:
+    uv run python scripts/update_gallery.py --check
+
+# Force regeneration of all gallery GIFs
+gallery-force:
+    uv run python scripts/update_gallery.py --force

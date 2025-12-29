@@ -1,12 +1,13 @@
 """Textual-based TUI for Shrink Ray."""
 
+import math
 import os
 import time
 import traceback
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from datetime import timedelta
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 import humanize
 from rich.text import Text
@@ -17,7 +18,9 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.widgets import DataTable, Footer, Header, Label, Static
+from textual_plotext import PlotextPlot
 
+from shrinkray.formatting import try_decode
 from shrinkray.subprocess.client import SubprocessClient
 from shrinkray.subprocess.protocol import (
     PassStatsData,
@@ -223,6 +226,219 @@ class StatsDisplay(Static):
         return "\n".join(lines)
 
 
+def _format_time_label(seconds: float) -> str:
+    """Format a time value for axis labels."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    elif seconds < 3600:
+        minutes = int(seconds / 60)
+        return f"{minutes}m"
+    else:
+        hours = int(seconds / 3600)
+        return f"{hours}h"
+
+
+def _get_time_axis_bounds(current_time: float) -> tuple[float, list[float], list[str]]:
+    """Get stable x-axis bounds and labeled positions.
+
+    Returns (max_time, positions, labels) where:
+    - max_time: the stable right boundary of the axis
+    - positions: numeric positions where axis labels should appear (e.g., [0, 60, 120])
+    - labels: formatted strings for each position (e.g., ["0s", "1m", "2m"])
+
+    The axis only rescales when current_time exceeds the current boundary.
+    """
+    if current_time <= 0:
+        ticks = [0.0, 10.0, 20.0, 30.0]
+        labels = [_format_time_label(t) for t in ticks]
+        return (30.0, ticks, labels)
+
+    # For the first 10 minutes, expand one minute at a time with 1-minute ticks
+    if current_time < 600:
+        # Round up to next minute
+        minutes = int(current_time / 60) + 1
+        max_time = float(minutes * 60)
+        interval = 60.0
+    else:
+        # After 10 minutes, use larger boundaries
+        # (boundary, tick_interval) - axis extends to boundary, ticks at interval
+        boundaries = [
+            (1800, 300),  # 30m with 5m ticks
+            (3600, 600),  # 1h with 10m ticks
+            (7200, 1200),  # 2h with 20m ticks
+            (14400, 1800),  # 4h with 30m ticks
+            (28800, 3600),  # 8h with 1h ticks
+        ]
+
+        # Find the first boundary that exceeds current_time
+        max_time = 1800.0
+        interval = 300.0
+        for boundary, tick_interval in boundaries:
+            if current_time < boundary:
+                max_time = float(boundary)
+                interval = float(tick_interval)
+                break
+        else:
+            # Beyond 8h: extend in 4h increments with 1h ticks
+            hours = int(current_time / 14400) + 1
+            max_time = float(hours * 14400)
+            interval = 3600.0
+
+    # Generate ticks from 0 to max_time
+    ticks = []
+    t = 0.0
+    while t <= max_time:
+        ticks.append(t)
+        t += interval
+
+    labels = [_format_time_label(t) for t in ticks]
+    return (max_time, ticks, labels)
+
+
+def _get_percentage_axis_bounds(
+    min_pct: float, max_pct: float
+) -> tuple[float, list[float], list[str]]:
+    """Get stable y-axis bounds for percentage values on log scale.
+
+    Returns (min_pct_bound, positions, labels) where:
+    - min_pct_bound: the stable lower boundary of the axis
+    - positions: log10 positions where axis labels should appear
+    - labels: formatted percentage strings for each position
+
+    The axis only rescales when min_pct gets close to the current lower boundary.
+    """
+    # Standard percentage boundaries (log scale friendly)
+    # Extended to handle very small reductions (below 0.01%)
+    boundaries = [
+        100,
+        50,
+        20,
+        10,
+        5,
+        2,
+        1,
+        0.5,
+        0.2,
+        0.1,
+        0.05,
+        0.02,
+        0.01,
+        0.005,
+        0.002,
+        0.001,
+        0.0005,
+        0.0002,
+        0.0001,
+    ]
+
+    # Find the appropriate lower bound - use the first boundary below min_pct * 0.5
+    # This gives us some room before we need to rescale
+    lower_bound = boundaries[-1]  # Default to smallest boundary
+    for b in boundaries:
+        if b < min_pct * 0.5:
+            lower_bound = b
+            break
+
+    # Find which percentage values to show as ticks (between lower_bound and 100%)
+    # Since boundaries always includes 100 and lower_bound <= 100, this is never empty
+    tick_pcts = [p for p in boundaries if p >= lower_bound and p <= 100]
+
+    # Convert to log scale
+    ticks = [math.log10(max(0.0001, p)) for p in tick_pcts]
+
+    # Format labels
+    labels = []
+    for p in tick_pcts:
+        if p >= 1:
+            labels.append(f"{p:.0f}%")
+        else:
+            labels.append(f"{p}%")
+
+    return (lower_bound, ticks, labels)
+
+
+class SizeGraph(PlotextPlot):
+    """Widget to display test case size over time on a log scale."""
+
+    _size_history: list[tuple[float, int]]
+    _original_size: int
+    _current_runtime: float
+
+    def __init__(
+        self,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
+        disabled: bool = False,
+    ) -> None:
+        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
+        self._size_history = []
+        self._original_size = 0
+        self._current_runtime = 0.0
+
+    def update_graph(
+        self,
+        new_entries: list[tuple[float, int]],
+        original_size: int,
+        current_runtime: float,
+    ) -> None:
+        """Update the graph with new data."""
+        if new_entries:
+            self._size_history.extend(new_entries)
+        if original_size > 0:
+            self._original_size = original_size
+        self._current_runtime = current_runtime
+        self._setup_plot()
+        self.refresh()
+
+    def on_mount(self) -> None:
+        """Set up the plot on mount."""
+        self._setup_plot()
+
+    def on_resize(self) -> None:
+        """Redraw when resized."""
+        self._setup_plot()
+
+    def _setup_plot(self) -> None:
+        """Configure and draw the plot."""
+        plt = self.plt
+        plt.clear_figure()
+        plt.theme("dark")
+
+        if len(self._size_history) < 2 or self._original_size == 0:
+            plt.xlabel("Time")
+            plt.ylabel("% of original")
+            return
+
+        times = [t for t, _ in self._size_history]
+        sizes = [s for _, s in self._size_history]
+
+        # Calculate percentages of original size
+        percentages = [(s / self._original_size) * 100 for s in sizes]
+
+        # Use log scale for y-axis (percentages)
+        log_percentages = [math.log10(max(0.01, p)) for p in percentages]
+
+        plt.plot(times, log_percentages, marker="braille")
+
+        # Get stable x-axis bounds
+        max_time, x_ticks, x_labels = _get_time_axis_bounds(self._current_runtime)
+        plt.xticks(x_ticks, x_labels)
+        plt.xlim(0, max_time)
+
+        # Get stable y-axis bounds
+        min_pct = min(percentages)
+        lower_bound, y_ticks, y_labels = _get_percentage_axis_bounds(min_pct, 100)
+        plt.yticks(y_ticks, y_labels)
+        plt.ylim(math.log10(max(0.01, lower_bound)), math.log10(100))
+
+        plt.xlabel("Time")
+        plt.ylabel("% of original")
+
+        # Build to apply the plot
+        _ = plt.build()
+
+
 class ContentPreview(Static):
     """Widget to display the current test case content preview."""
 
@@ -313,21 +529,37 @@ class OutputPreview(Static):
 
     output_content = reactive("")
     active_test_id: reactive[int | None] = reactive(None)
+    last_return_code: reactive[int | None] = reactive(None)
     _last_update_time: float = 0.0
-    _last_seen_test_id: int | None = None  # Track last test ID for "completed" message
+    # Pending updates that haven't been applied yet (due to throttling)
+    _pending_content: str = ""
+    _pending_test_id: int | None = None
+    _pending_return_code: int | None = None
+    # Track if we've ever seen any output (once true, never show "No test output yet...")
+    _has_seen_output: bool = False
 
-    def update_output(self, content: str, test_id: int | None) -> None:
-        # Throttle updates to every 200ms
+    def update_output(
+        self, content: str, test_id: int | None, return_code: int | None = None
+    ) -> None:
+        # Only update pending content if there's actual content to show
+        # This prevents switching to empty output when we have previous output
+        if content:
+            self._pending_content = content
+            self._has_seen_output = True
+        self._pending_test_id = test_id
+        self._pending_return_code = return_code
+
+        # Throttle display updates to every 200ms
         now = time.time()
         if now - self._last_update_time < 0.2:
             return
 
         self._last_update_time = now
-        self.output_content = content
-        # Track the last test ID we've seen (for showing in "completed" message)
-        if test_id is not None:
-            self._last_seen_test_id = test_id
-        self.active_test_id = test_id
+        # Only update output_content if we have new content
+        if self._pending_content:
+            self.output_content = self._pending_content
+        self.active_test_id = self._pending_test_id
+        self.last_return_code = self._pending_return_code
         self.refresh(layout=True)
 
     def _get_available_lines(self) -> int:
@@ -345,11 +577,15 @@ class OutputPreview(Static):
         return 30
 
     def render(self) -> str:
-        # Header line
-        if self.active_test_id is not None:
+        # Header line - use return_code to determine if test is running
+        # (return_code is None means still running, has value means completed)
+        if self.active_test_id is not None and self.last_return_code is None:
             header = f"[green]Test #{self.active_test_id} running...[/green]"
-        elif self.output_content and self._last_seen_test_id is not None:
-            header = f"[dim]Test #{self._last_seen_test_id} completed[/dim]"
+        elif self.active_test_id is not None:
+            header = f"[dim]Test #{self.active_test_id} exited with code {self.last_return_code}[/dim]"
+        elif self._has_seen_output or self.output_content:
+            # Have seen output before - show without header
+            header = ""
         else:
             header = "[dim]No test output yet...[/dim]"
 
@@ -359,14 +595,17 @@ class OutputPreview(Static):
         available_lines = self._get_available_lines()
         lines = self.output_content.split("\n")
 
+        # Build prefix (header + newline, or empty if no header)
+        prefix = f"{header}\n" if header else ""
+
         # Show tail of output (most recent lines)
         if len(lines) <= available_lines:
-            return f"{header}\n{self.output_content}"
+            return f"{prefix}{self.output_content}"
 
         # Truncate from the beginning
         truncated_lines = lines[-(available_lines):]
         skipped = len(lines) - available_lines
-        return f"{header}\n... ({skipped} earlier lines)\n" + "\n".join(truncated_lines)
+        return f"{prefix}... ({skipped} earlier lines)\n" + "\n".join(truncated_lines)
 
 
 class HelpScreen(ModalScreen[None]):
@@ -422,6 +661,169 @@ class HelpScreen(ModalScreen[None]):
             yield Static("  [green]q[/green]     Close modal")
             yield Static("")
             yield Static("[dim]Press any key to close[/dim]")
+
+
+class ExpandedBoxModal(ModalScreen[None]):
+    """Modal screen showing an expanded view of a content box."""
+
+    CSS = """
+    ExpandedBoxModal {
+        align: center middle;
+    }
+
+    ExpandedBoxModal > Vertical {
+        width: 95%;
+        height: 90%;
+        background: $panel;
+        border: thick $primary;
+        padding: 0 1 1 1;
+    }
+
+    ExpandedBoxModal #expanded-title {
+        text-align: center;
+        text-style: bold;
+        height: auto;
+        width: 100%;
+        border-bottom: solid $primary;
+        padding: 0;
+        margin-bottom: 1;
+    }
+
+    ExpandedBoxModal VerticalScroll {
+        width: 100%;
+        height: 1fr;
+    }
+
+    ExpandedBoxModal #expanded-content {
+        width: 100%;
+    }
+
+    ExpandedBoxModal #expanded-graph {
+        width: 100%;
+        height: 1fr;
+    }
+    """
+
+    BINDINGS = [
+        ("escape,enter,q", "dismiss", "Close"),
+    ]
+
+    def __init__(
+        self, title: str, content_widget_id: str, file_path: str | None = None
+    ) -> None:
+        super().__init__()
+        self._title = title
+        self._content_widget_id = content_widget_id
+        self._file_path = file_path
+
+    def _read_file(self, file_path: str) -> str:
+        """Read file content, decoding as text if possible."""
+        with open(file_path, "rb") as f:
+            raw_content = f.read()
+        # Try to decode as text, fall back to hex display if binary
+        encoding, text = try_decode(raw_content)
+        if encoding is not None:
+            return text
+        return "[Binary content - hex display]\n\n" + raw_content.hex()
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(self._title, id="expanded-title")
+            if self._content_widget_id == "graph-container":
+                # For graph, create a new SizeGraph widget
+                yield SizeGraph(id="expanded-graph")
+            else:
+                # For other content, use a scrollable static
+                with VerticalScroll():
+                    yield Static("", id="expanded-content")
+
+    def _get_graph_content(self, app: "ShrinkRayApp") -> None:
+        """Copy graph data from main graph to expanded graph."""
+        main_graphs = list(app.query("#size-graph").results(SizeGraph))
+        expanded_graphs = list(self.query("#expanded-graph").results(SizeGraph))
+        if not main_graphs or not expanded_graphs:
+            return
+        main_graph = main_graphs[0]
+        expanded_graph = expanded_graphs[0]
+        expanded_graph._size_history = main_graph._size_history.copy()
+        expanded_graph._original_size = main_graph._original_size
+        expanded_graph._current_runtime = main_graph._current_runtime
+        expanded_graph._setup_plot()
+
+    def _get_stats_content(self, app: "ShrinkRayApp") -> str:
+        """Get stats content from the stats display widget."""
+        stats_displays = list(app.query("#stats-display").results(StatsDisplay))
+        if not stats_displays:
+            return "Statistics not available"
+        return stats_displays[0].render()
+
+    def _get_file_content(self, app: "ShrinkRayApp") -> str:
+        """Get content from file or preview widget."""
+        if self._file_path:
+            return self._read_file(self._file_path)
+        content_previews = list(app.query("#content-preview").results(ContentPreview))
+        if not content_previews:
+            return "Content preview not available"
+        return content_previews[0].preview_content
+
+    def _get_output_content(self, app: "ShrinkRayApp") -> str:
+        """Get output content from the output preview widget."""
+        output_previews = list(app.query("#output-preview").results(OutputPreview))
+        if not output_previews:
+            return "Output not available"
+        output_preview = output_previews[0]
+
+        # Use pending values (most recent) rather than throttled values
+        raw_content = output_preview._pending_content or output_preview.output_content
+        test_id = (
+            output_preview._pending_test_id
+            if output_preview._pending_test_id is not None
+            else output_preview.active_test_id
+        )
+        return_code = (
+            output_preview._pending_return_code
+            if output_preview._pending_return_code is not None
+            else output_preview.last_return_code
+        )
+        has_seen_output = output_preview._has_seen_output
+
+        # Build header - return_code is None means test is still running
+        if test_id is not None and return_code is None:
+            header = f"[green]Test #{test_id} running...[/green]\n\n"
+        elif test_id is not None:
+            header = f"[dim]Test #{test_id} exited with code {return_code}[/dim]\n\n"
+        else:
+            header = ""
+
+        if raw_content:
+            return header + raw_content
+        elif has_seen_output or test_id is not None:
+            # We've seen output before - show header only (no "No test output" message)
+            return header.rstrip("\n") if header else ""
+        else:
+            return "[dim]No test output yet...[/dim]"
+
+    def on_mount(self) -> None:
+        """Populate content from the source widget."""
+        # Cast is safe because this modal is only used within ShrinkRayApp
+        app = cast("ShrinkRayApp", self.app)
+
+        if self._content_widget_id == "graph-container":
+            self._get_graph_content(app)
+            return
+
+        # For non-graph content, populate the static
+        # compose() always creates the #expanded-content widget for non-graph modals
+        if self._content_widget_id == "stats-container":
+            content = self._get_stats_content(app)
+        elif self._content_widget_id == "content-container":
+            content = self._get_file_content(app)
+        elif self._content_widget_id == "output-container":
+            content = self._get_output_content(app)
+        else:
+            content = ""
+
+        self.query_one("#expanded-content", Static).update(content)
 
 
 class PassStatsScreen(ModalScreen[None]):
@@ -647,16 +1049,42 @@ class ShrinkRayApp(App[None]):
         height: 100%;
     }
 
-    #stats-container {
-        height: auto;
-        border: solid green;
-        padding: 1;
-        margin: 1;
-    }
-
     #status-label {
         text-style: bold;
         margin: 0 1;
+    }
+
+    #stats-area {
+        height: 1fr;
+    }
+
+    #stats-container {
+        border: solid $primary;
+        margin: 0;
+        padding: 1;
+        width: 1fr;
+        height: 100%;
+    }
+
+    #stats-container:focus {
+        border: thick $primary;
+    }
+
+    #graph-container {
+        border: solid $primary;
+        margin: 0;
+        padding: 1;
+        width: 1fr;
+        height: 100%;
+    }
+
+    #graph-container:focus {
+        border: thick $primary;
+    }
+
+    #size-graph {
+        width: 100%;
+        height: 100%;
     }
 
     #content-area {
@@ -664,27 +1092,27 @@ class ShrinkRayApp(App[None]):
     }
 
     #content-container {
-        border: solid blue;
-        margin: 1;
+        border: solid $primary;
+        margin: 0;
         padding: 1;
         width: 1fr;
         height: 100%;
     }
 
-    #content-container:dark {
-        border: solid lightskyblue;
+    #content-container:focus {
+        border: thick $primary;
     }
 
     #output-container {
-        border: solid blue;
-        margin: 1;
+        border: solid $primary;
+        margin: 0;
         padding: 1;
         width: 1fr;
         height: 100%;
     }
 
-    #output-container:dark {
-        border: solid lightskyblue;
+    #output-container:focus {
+        border: thick $primary;
     }
     """
 
@@ -693,6 +1121,11 @@ class ShrinkRayApp(App[None]):
         ("p", "show_pass_stats", "Pass Stats"),
         ("c", "skip_current_pass", "Skip Pass"),
         ("h", "show_help", "Help"),
+        ("up", "focus_up", "Focus Up"),
+        ("down", "focus_down", "Focus Down"),
+        ("left", "focus_left", "Focus Left"),
+        ("right", "focus_right", "Focus Right"),
+        ("enter", "expand_box", "Expand"),
     ]
 
     ENABLE_COMMAND_PALETTE = False
@@ -737,6 +1170,14 @@ class ShrinkRayApp(App[None]):
         self._current_pass_name: str = ""
         self._disabled_passes: list[str] = []
 
+    # Box IDs in navigation order: [top-left, top-right, bottom-left, bottom-right]
+    _BOX_IDS = [
+        "stats-container",
+        "graph-container",
+        "content-container",
+        "output-container",
+    ]
+
     def compose(self) -> ComposeResult:
         yield Header()
         with Vertical(id="main-container"):
@@ -745,14 +1186,23 @@ class ShrinkRayApp(App[None]):
                 id="status-label",
                 markup=False,
             )
-            with Vertical(id="stats-container"):
-                yield StatsDisplay(id="stats-display")
+            with Horizontal(id="stats-area"):
+                with VerticalScroll(id="stats-container") as stats_scroll:
+                    stats_scroll.border_title = "Statistics"
+                    stats_scroll.can_focus = True
+                    yield StatsDisplay(id="stats-display")
+                with Vertical(id="graph-container") as graph_container:
+                    graph_container.border_title = "Size Over Time"
+                    graph_container.can_focus = True
+                    yield SizeGraph(id="size-graph")
             with Horizontal(id="content-area"):
                 with VerticalScroll(id="content-container") as content_scroll:
                     content_scroll.border_title = "Recent Reductions"
+                    content_scroll.can_focus = True
                     yield ContentPreview(id="content-preview")
                 with VerticalScroll(id="output-container") as output_scroll:
                     output_scroll.border_title = "Test Output"
+                    output_scroll.can_focus = True
                     yield OutputPreview(id="output-preview")
         yield Footer()
 
@@ -772,7 +1222,80 @@ class ShrinkRayApp(App[None]):
 
         self.title = "Shrink Ray"
         self.sub_title = self._file_path
+
+        # Set initial focus to first box
+        self.query_one("#stats-container").focus()
+
         self.run_reduction()
+
+    def _get_focused_box_index(self) -> int:
+        """Get the index of the currently focused box, or 0 if none."""
+        for i, box_id in enumerate(self._BOX_IDS):
+            boxes = list(self.query(f"#{box_id}"))
+            if boxes and boxes[0].has_focus:
+                return i
+        return 0
+
+    def _focus_box(self, index: int) -> None:
+        """Focus the box at the given index (with wrapping)."""
+        index = index % len(self._BOX_IDS)
+        box_id = self._BOX_IDS[index]
+        self.query_one(f"#{box_id}").focus()
+
+    def action_focus_up(self) -> None:
+        """Move focus to the box above."""
+        current = self._get_focused_box_index()
+        # Grid is 2x2: top row is 0,1; bottom row is 2,3
+        # Moving up: 2->0, 3->1, 0->2, 1->3 (wraps)
+        if current >= 2:
+            self._focus_box(current - 2)
+        else:
+            self._focus_box(current + 2)
+
+    def action_focus_down(self) -> None:
+        """Move focus to the box below."""
+        current = self._get_focused_box_index()
+        # Moving down: 0->2, 1->3, 2->0, 3->1 (wraps)
+        if current < 2:
+            self._focus_box(current + 2)
+        else:
+            self._focus_box(current - 2)
+
+    def action_focus_left(self) -> None:
+        """Move focus to the box on the left."""
+        current = self._get_focused_box_index()
+        # Moving left within row: 0->1, 1->0, 2->3, 3->2 (wraps within row)
+        if current % 2 == 0:
+            self._focus_box(current + 1)
+        else:
+            self._focus_box(current - 1)
+
+    def action_focus_right(self) -> None:
+        """Move focus to the box on the right."""
+        current = self._get_focused_box_index()
+        # Moving right within row: 0->1, 1->0, 2->3, 3->2 (wraps within row)
+        if current % 2 == 0:
+            self._focus_box(current + 1)
+        else:
+            self._focus_box(current - 1)
+
+    def action_expand_box(self) -> None:
+        """Expand the currently focused box to a modal."""
+        current = self._get_focused_box_index()
+        box_id = self._BOX_IDS[current]
+
+        # Get the title from the container's border_title
+        titles = {
+            "stats-container": "Statistics",
+            "graph-container": "Size Over Time",
+            "content-container": "Current Test Case",
+            "output-container": "Test Output",
+        }
+        title = titles.get(box_id, "Details")
+
+        # Pass file_path for content-container to enable full file reading
+        file_path = self._file_path if box_id == "content-container" else None
+        self.push_screen(ExpandedBoxModal(title, box_id, file_path=file_path))
 
     @work(exclusive=True)
     async def run_reduction(self) -> None:
@@ -812,6 +1335,7 @@ class ShrinkRayApp(App[None]):
             stats_display = self.query_one("#stats-display", StatsDisplay)
             content_preview = self.query_one("#content-preview", ContentPreview)
             output_preview = self.query_one("#output-preview", OutputPreview)
+            size_graph = self.query_one("#size-graph", SizeGraph)
 
             async with aclosing(self._client.get_progress_updates()) as updates:
                 async for update in updates:
@@ -820,8 +1344,22 @@ class ShrinkRayApp(App[None]):
                         update.content_preview, update.hex_mode
                     )
                     output_preview.update_output(
-                        update.test_output_preview, update.active_test_id
+                        update.test_output_preview,
+                        update.active_test_id,
+                        update.last_test_return_code,
                     )
+                    size_graph.update_graph(
+                        update.new_size_history,
+                        update.original_size,
+                        update.runtime,
+                    )
+                    # Also update expanded modals if they exist
+                    self._update_expanded_graph(
+                        update.new_size_history,
+                        update.original_size,
+                        update.runtime,
+                    )
+                    self._update_expanded_stats()
                     self._latest_pass_stats = update.pass_stats
                     self._current_pass_name = update.current_pass_name
                     self._disabled_passes = update.disabled_passes
@@ -869,6 +1407,41 @@ class ShrinkRayApp(App[None]):
             self.query_one("#status-label", Label).update(message)
         except Exception:
             pass  # Widget not yet mounted
+
+    def _update_expanded_graph(
+        self,
+        new_entries: list[tuple[float, int]],
+        original_size: int,
+        current_runtime: float,
+    ) -> None:
+        """Update the expanded graph if it exists in a modal screen."""
+        # Check if there's an ExpandedBoxModal for the graph on the screen stack
+        for screen in self.screen_stack:
+            if isinstance(screen, ExpandedBoxModal):
+                if screen._content_widget_id == "graph-container":
+                    expanded_graphs = list(
+                        screen.query("#expanded-graph").results(SizeGraph)
+                    )
+                    if expanded_graphs:
+                        expanded_graphs[0].update_graph(
+                            new_entries, original_size, current_runtime
+                        )
+                    break
+
+    def _update_expanded_stats(self) -> None:
+        """Update the expanded stats if it exists in a modal screen."""
+        for screen in self.screen_stack:
+            if isinstance(screen, ExpandedBoxModal):
+                if screen._content_widget_id == "stats-container":
+                    stats_displays = list(
+                        self.query("#stats-display").results(StatsDisplay)
+                    )
+                    expanded_contents = list(
+                        screen.query("#expanded-content").results(Static)
+                    )
+                    if stats_displays and expanded_contents:
+                        expanded_contents[0].update(stats_displays[0].render())
+                    break
 
     async def action_quit(self) -> None:
         """Quit the application with graceful cancellation."""

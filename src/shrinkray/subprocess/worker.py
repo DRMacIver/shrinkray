@@ -65,6 +65,8 @@ class ReducerWorker:
         self._last_sent_history_index: int = 0
         self._last_recorded_size: int = 0
         self._last_history_time: float = 0.0
+        # Original start time - preserved across restarts for consistent graphing
+        self._original_start_time: float | None = None
 
     async def emit(self, msg: Response | ProgressUpdate) -> None:
         """Write a message to the output stream."""
@@ -374,9 +376,13 @@ class ReducerWorker:
             self.reducer = self.state.reducer
             self.problem = self.reducer.target
 
-            # Reset size history for progress tracking
-            self._size_history = [(0.0, len(new_test_case))]
-            self._last_sent_history_index = 0
+            # Record the upward jump in size at current runtime.
+            # Don't reset history - this preserves the graph continuity.
+            if self._size_history and self._original_start_time is not None:
+                current_runtime = time.time() - self._original_start_time
+                self._size_history.append((current_runtime, len(new_test_case)))
+                self._last_recorded_size = len(new_test_case)
+                self._last_history_time = current_runtime
 
             # Ready to restart - running will be set to True by the run() loop
             return Response(
@@ -477,7 +483,12 @@ class ReducerWorker:
             return None
 
         stats = self.problem.stats
-        runtime = time.time() - stats.start_time
+
+        # Use original start time for consistent graphing across restarts.
+        # Capture it on first call.
+        if self._original_start_time is None:
+            self._original_start_time = stats.start_time
+        runtime = time.time() - self._original_start_time
         current_size = stats.current_test_case_size
 
         # Record size history when size changes or periodically

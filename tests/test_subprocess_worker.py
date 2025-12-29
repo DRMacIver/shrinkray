@@ -2087,6 +2087,65 @@ async def test_handle_restart_from_success():
 
 
 @pytest.mark.trio
+async def test_handle_restart_from_preserves_size_history():
+    """Test that restart_from appends to size history instead of resetting it.
+
+    This is a regression test for a bug where the graph would get confused
+    after restart because size_history was reset to start at time 0.
+    """
+    worker = ReducerWorker()
+    worker._cancel_scope = None
+    worker.running = True
+
+    # Set up existing size history (simulating reduction progress before restart)
+    start_time = time.time() - 60  # Started 60 seconds ago
+    worker._original_start_time = start_time
+    worker._size_history = [
+        (0.0, 1000),  # Initial size
+        (10.0, 800),  # After 10s, reduced to 800
+        (30.0, 500),  # After 30s, reduced to 500
+    ]
+    worker._last_recorded_size = 500
+    worker._last_history_time = 30.0
+
+    # Set up mocks
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.history_manager = MagicMock()
+    worker.state.history_manager.restart_from_reduction.return_value = (
+        b"x" * 750,  # Restart from 750 bytes (larger than current 500)
+        set(),
+    )
+    worker.state.filename = "/tmp/test.c"
+    worker.state.output_manager = None
+
+    # Mock the reducer
+    mock_reducer = MagicMock()
+    mock_reducer.target = MagicMock()
+    worker.state.reducer = mock_reducer
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 2})
+
+    assert response.result == {"status": "restarted", "size": 750}
+
+    # Size history should have 4 entries now (original 3 + restart jump)
+    assert len(worker._size_history) == 4
+
+    # First 3 entries should be unchanged
+    assert worker._size_history[0] == (0.0, 1000)
+    assert worker._size_history[1] == (10.0, 800)
+    assert worker._size_history[2] == (30.0, 500)
+
+    # 4th entry should be the restart point (upward jump to 750)
+    restart_time, restart_size = worker._size_history[3]
+    assert restart_size == 750
+    # Time should be approximately 60 seconds (current time - original start)
+    assert restart_time >= 55  # Allow some tolerance
+
+    # Last recorded size should be updated
+    assert worker._last_recorded_size == 750
+
+
+@pytest.mark.trio
 async def test_handle_command_restart_from():
     """Test handle_command dispatches restart_from correctly."""
     worker = ReducerWorker()

@@ -3412,6 +3412,52 @@ def test_directory_state_set_initial_for_restart_works(tmp_path):
     assert state.initial == new_content
 
 
+@pytest.mark.trio
+async def test_directory_state_excluded_test_cases(tmp_path):
+    """Test that excluded_test_cases works for directory state.
+
+    This tests the base class is_interesting method which uses
+    _get_test_case_bytes for comparison.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    (target_dir / "file.txt").write_text("hello")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target_dir),
+        timeout=5.0,
+        base="target",
+        parallelism=1,
+        initial={"file.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+    )
+
+    # Normally the test case would be interesting
+    assert await state.is_interesting({"file.txt": b"hello"}) is True
+
+    # Create exclusion set with serialized directory content
+    excluded_content = {"file.txt": b"excluded"}
+    excluded_serialized = state._serialize_directory(excluded_content)
+    state.excluded_test_cases = {excluded_serialized}
+
+    # The excluded value should be rejected
+    assert await state.is_interesting({"file.txt": b"excluded"}) is False
+
+    # Other values should still work
+    assert await state.is_interesting({"file.txt": b"hello"}) is True
+
+
 def test_directory_state_serialize_deserialize_roundtrip():
     """Test that directory serialization is reversible."""
     original = {

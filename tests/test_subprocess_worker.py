@@ -2086,3 +2086,54 @@ async def test_handle_command_restart_from():
     response = await worker.handle_command(request)
 
     assert response.error == "History not available"
+
+
+@pytest.mark.trio
+async def test_handle_restart_from_cancels_running_scope():
+    """Test restart_from cancels the running cancel scope."""
+    worker = ReducerWorker()
+
+    # Create a mock cancel scope
+    mock_cancel_scope = MagicMock()
+    worker._cancel_scope = mock_cancel_scope
+    worker.running = True
+
+    # Set up mocks
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.history_manager = MagicMock()
+    worker.state.history_manager.restart_from_reduction.return_value = (
+        b"restart content",
+        set(),
+    )
+    worker.state.filename = "/tmp/test.c"
+
+    # Mock the reducer
+    mock_reducer = MagicMock()
+    mock_reducer.target = MagicMock()
+    worker.state.reducer = mock_reducer
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 1})
+
+    # Cancel scope should have been cancelled
+    mock_cancel_scope.cancel.assert_called_once()
+    assert response.result == {"status": "restarted", "size": 15}
+
+
+@pytest.mark.trio
+async def test_handle_restart_from_generic_exception():
+    """Test restart_from handles generic exceptions."""
+    worker = ReducerWorker()
+    worker._cancel_scope = None
+    worker.running = True
+
+    # Set up mocks
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.history_manager = MagicMock()
+    # Raise a generic exception
+    worker.state.history_manager.restart_from_reduction.side_effect = RuntimeError(
+        "Something went wrong"
+    )
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 1})
+
+    assert response.error == "Something went wrong"

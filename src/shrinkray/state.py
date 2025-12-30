@@ -1,7 +1,5 @@
 """State management for shrink ray reduction sessions."""
 
-import base64
-import json
 import math
 import os
 import random
@@ -21,7 +19,11 @@ from attrs import define
 
 from shrinkray.cli import InputType
 from shrinkray.formatting import default_reformat_data, determine_formatter_command
-from shrinkray.history import HistoryManager
+from shrinkray.history import (
+    HistoryManager,
+    deserialize_directory,
+    serialize_directory,
+)
 from shrinkray.passes.clangdelta import ClangDelta
 from shrinkray.problem import (
     BasicReductionProblem,
@@ -933,15 +935,11 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
 
     @staticmethod
     def _serialize_directory(content: dict[str, bytes]) -> bytes:
-        """Serialize directory content to bytes for comparison/storage."""
-        serialized = {k: base64.b64encode(v).decode() for k, v in sorted(content.items())}
-        return json.dumps(serialized, sort_keys=True).encode()
+        return serialize_directory(content)
 
     @staticmethod
     def _deserialize_directory(data: bytes) -> dict[str, bytes]:
-        """Deserialize bytes back to directory content."""
-        serialized = json.loads(data.decode())
-        return {k: base64.b64decode(v) for k, v in serialized.items()}
+        return deserialize_directory(data)
 
     async def write_test_case_to_file_impl(
         self, working: str, test_case: dict[str, bytes]

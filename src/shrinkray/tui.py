@@ -732,13 +732,18 @@ class ExpandedBoxModal(ModalScreen[None]):
 
     def _read_file(self, file_path: str) -> str:
         """Read file content, decoding as text if possible."""
-        with open(file_path, "rb") as f:
-            raw_content = f.read()
-        # Try to decode as text, fall back to hex display if binary
-        encoding, text = try_decode(raw_content)
-        if encoding is not None:
-            return text
-        return "[Binary content - hex display]\n\n" + raw_content.hex()
+        if not os.path.isfile(file_path):
+            return "[dim]File not found[/dim]"
+        try:
+            with open(file_path, "rb") as f:
+                raw_content = f.read()
+            # Try to decode as text, fall back to hex display if binary
+            encoding, text = try_decode(raw_content)
+            if encoding is not None:
+                return text
+            return "[Binary content - hex display]\n\n" + raw_content.hex()
+        except OSError:
+            return "[red]Error reading file[/red]"
 
     def compose(self) -> ComposeResult:
         with Vertical():

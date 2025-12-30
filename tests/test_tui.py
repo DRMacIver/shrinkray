@@ -1321,10 +1321,21 @@ def test_expanded_modal_read_file_binary(tmp_path):
 
 
 def test_expanded_modal_read_file_missing(tmp_path):
-    """Test _read_file raises OSError for missing file."""
+    """Test _read_file returns error message for missing file."""
     modal = ExpandedBoxModal("Test", "content-container")
-    with pytest.raises(OSError):
-        modal._read_file(str(tmp_path / "nonexistent.txt"))
+    result = modal._read_file(str(tmp_path / "nonexistent.txt"))
+    assert "[dim]File not found[/dim]" in result
+
+
+def test_expanded_modal_read_file_oserror(tmp_path):
+    """Test _read_file returns error message on OSError."""
+    modal = ExpandedBoxModal("Test", "content-container")
+    # Create a file that exists but can't be read
+    test_file = tmp_path / "unreadable.txt"
+    test_file.write_text("content")
+    with patch("builtins.open", side_effect=OSError("Permission denied")):
+        result = modal._read_file(str(test_file))
+    assert "[red]Error reading file[/red]" in result
 
 
 # === ExpandedBoxModal integration tests ===

@@ -412,28 +412,36 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
 
     @staticmethod
     def _deserialize_directory(data: bytes) -> dict[str, bytes]:
-        """Deserialize bytes back to directory content.
-
-        Args:
-            data: JSON-encoded directory content with base64 file contents
-
-        Returns:
-            The directory content as {relative_path: bytes}
-        """
-        serialized = json.loads(data.decode())
-        return {k: base64.b64decode(v) for k, v in serialized.items()}
+        return deserialize_directory(data)
 
     @staticmethod
     def _serialize_directory(content: dict[str, bytes]) -> bytes:
-        """Serialize directory content to bytes.
+        return serialize_directory(content)
 
-        Args:
-            content: The directory content as {relative_path: bytes}
 
-        Returns:
-            JSON-encoded directory content with base64 file contents
-        """
-        serialized = {
-            k: base64.b64encode(v).decode() for k, v in sorted(content.items())
-        }
-        return json.dumps(serialized, sort_keys=True).encode()
+def serialize_directory(content: dict[str, bytes]) -> bytes:
+    """Serialize directory content to bytes.
+
+    Args:
+        content: The directory content as {relative_path: bytes}
+
+    Returns:
+        JSON-encoded directory content with base64 file contents
+    """
+    serialized = {
+        k: base64.b64encode(v).decode() for k, v in sorted(content.items())
+    }
+    return json.dumps(serialized, sort_keys=True).encode()
+
+
+def deserialize_directory(data: bytes) -> dict[str, bytes]:
+    """Deserialize bytes back to directory content.
+
+    Args:
+        data: JSON-encoded directory content with base64 file contents
+
+    Returns:
+        The directory content as {relative_path: bytes}
+    """
+    serialized = json.loads(data.decode())
+    return {k: base64.b64decode(v) for k, v in serialized.items()}

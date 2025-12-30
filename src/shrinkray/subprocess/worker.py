@@ -67,6 +67,8 @@ class ReducerWorker:
         self._last_history_time: float = 0.0
         # Original start time - preserved across restarts for consistent graphing
         self._original_start_time: float | None = None
+        # Log file for stderr redirection (cleaned up on shutdown)
+        self._log_file: Any = None
 
     async def emit(self, msg: Response | ProgressUpdate) -> None:
         """Write a message to the output stream."""
@@ -232,6 +234,17 @@ class ReducerWorker:
         # Create output manager for test output capture (always enabled for TUI)
         self._output_dir = tempfile.mkdtemp(prefix="shrinkray-output-")
         self.state.output_manager = OutputCaptureManager(output_dir=self._output_dir)
+
+        # Redirect stderr to the history directory if history is enabled
+        # This ensures errors are logged to the per-run directory
+        if self.state.history_manager is not None:
+            log_path = os.path.join(
+                self.state.history_manager.history_dir, "shrinkray.log"
+            )
+            # Ensure directory exists (history_manager creates it, but be safe)
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            self._log_file = open(log_path, "a", encoding="utf-8")
+            sys.stderr = self._log_file
 
         self.problem = self.state.problem
         self.reducer = self.state.reducer
@@ -697,6 +710,12 @@ class ReducerWorker:
                 self.state.output_manager.cleanup_all()
             if self._output_dir is not None and os.path.isdir(self._output_dir):
                 shutil.rmtree(self._output_dir, ignore_errors=True)
+            # Close log file if we opened one
+            if self._log_file is not None:
+                try:
+                    self._log_file.close()
+                except Exception:
+                    pass
 
 
 def main() -> None:

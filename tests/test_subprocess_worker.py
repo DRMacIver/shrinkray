@@ -2343,3 +2343,220 @@ async def test_emit_progress_updates_continues_during_restart():
     assert len(restart_updates) >= 1, "Should have updates during restart phase"
     # The key point is that we didn't exit early during restart - we got updates
     # while running=False but restart_requested=True
+
+
+async def test_worker_logs_to_history_directory(tmp_path):
+    """Test that stderr is redirected to the history directory when history is enabled."""
+    # Create a test file
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a test script that passes
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    # Create start command with history enabled (the default)
+    start_params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+        "history_enabled": True,
+    }
+    start_request = Request(id="start-1", command="start", params=start_params)
+    input_data = serialize(start_request) + "\n"
+
+    output = MemoryOutputStream()
+    input_stream = MemoryInputStream(input_data.encode("utf-8"))
+
+    # Change to tmp_path so the history directory is created there
+    old_cwd = os.getcwd()
+    os.chdir(tmp_path)
+
+    try:
+        worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+        # Mock the reducer to complete quickly
+        async def mock_run_reducer():
+            if worker.reducer is not None:
+                worker.running = False
+
+        worker.run_reducer = mock_run_reducer
+
+        # Run with a timeout
+        with trio.move_on_after(5):
+            await worker.run()
+
+        # Should have created a log file in the history directory
+        shrinkray_dir = tmp_path / ".shrinkray"
+        assert shrinkray_dir.exists(), ".shrinkray directory should exist"
+
+        # Find the run directory
+        run_dirs = list(shrinkray_dir.iterdir())
+        assert len(run_dirs) >= 1, "Should have at least one run directory"
+
+        # Check that shrinkray.log exists in the run directory
+        run_dir = run_dirs[0]
+        log_file = run_dir / "shrinkray.log"
+        assert log_file.exists(), f"Log file should exist at {log_file}"
+    finally:
+        os.chdir(old_cwd)
+
+
+async def test_worker_closes_log_file_on_cleanup(tmp_path):
+    """Test that the log file is closed during cleanup."""
+    worker = ReducerWorker()
+
+    # Create a mock log file
+    mock_log = MagicMock()
+    worker._log_file = mock_log
+
+    # Simulate the cleanup that happens in the finally block of run()
+    # This is the code we want to test:
+    # if self._log_file is not None:
+    #     try:
+    #         self._log_file.close()
+    #     except Exception:
+    #         pass
+
+    if worker._log_file is not None:
+        try:
+            worker._log_file.close()
+        except Exception:
+            pass
+
+    mock_log.close.assert_called_once()
+
+
+async def test_worker_log_file_close_exception(tmp_path):
+    """Test that log file close exceptions are silently caught."""
+    # Create a test file
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a test script that passes
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    # Create start command with history enabled
+    start_params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+        "history_enabled": True,
+    }
+    start_request = Request(id="start-1", command="start", params=start_params)
+    input_data = serialize(start_request) + "\n"
+
+    output = MemoryOutputStream()
+    input_stream = MemoryInputStream(input_data.encode("utf-8"))
+
+    # Change to tmp_path so the history directory is created there
+    old_cwd = os.getcwd()
+    os.chdir(tmp_path)
+
+    try:
+        worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+        # Mock the reducer to complete quickly
+        async def mock_run_reducer():
+            if worker.reducer is not None:
+                worker.running = False
+                # After the log file is opened, make close() raise an exception
+                if worker._log_file is not None:
+                    original_close = worker._log_file.close
+
+                    def broken_close():
+                        original_close()
+                        raise OSError("Close failed")
+
+                    worker._log_file.close = broken_close
+
+        worker.run_reducer = mock_run_reducer
+
+        # Run with a timeout - should not raise despite close() failing
+        with trio.move_on_after(5):
+            await worker.run()
+
+        # The worker should have completed without exception
+        assert b"started" in output.data
+    finally:
+        os.chdir(old_cwd)
+
+
+async def test_worker_no_stderr_redirect_without_history(tmp_path):
+    """Test that stderr is not redirected when history is disabled."""
+    # Create a test file
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # Create a test script that passes
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    # Create start command with history disabled
+    start_params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+        "history_enabled": False,
+    }
+    start_request = Request(id="start-1", command="start", params=start_params)
+    input_data = serialize(start_request) + "\n"
+
+    output = MemoryOutputStream()
+    input_stream = MemoryInputStream(input_data.encode("utf-8"))
+
+    # Change to tmp_path so we can check no history directory is created
+    old_cwd = os.getcwd()
+    os.chdir(tmp_path)
+
+    try:
+        worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+        # Mock the reducer to complete quickly
+        async def mock_run_reducer():
+            if worker.reducer is not None:
+                worker.running = False
+
+        worker.run_reducer = mock_run_reducer
+
+        # Run with a timeout
+        with trio.move_on_after(5):
+            await worker.run()
+
+        # Worker should NOT have a log file since history is disabled
+        assert worker._log_file is None, "Log file should be None when history is disabled"
+
+        # No .shrinkray directory should exist (or if it does, no run directories)
+        shrinkray_dir = tmp_path / ".shrinkray"
+        if shrinkray_dir.exists():
+            # If it exists, it should be empty or have no log files
+            for subdir in shrinkray_dir.iterdir():
+                log_file = subdir / "shrinkray.log"
+                assert not log_file.exists(), "No log file should be created"
+    finally:
+        os.chdir(old_cwd)

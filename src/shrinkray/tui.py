@@ -1220,23 +1220,50 @@ class HistoryExplorerModal(ModalScreen[None]):
         self._refresh_list("also-interesting", "also-interesting-list")
 
     def _refresh_list(self, subdir: str, list_id: str) -> None:
-        """Refresh a single list, preserving selection."""
+        """Refresh a single list, preserving selection.
+
+        This uses an incremental update strategy: only add new entries rather
+        than clearing and repopulating. This preserves ListView selection
+        naturally without fighting async DOM updates.
+        """
         entries = self._scan_entries(subdir)
         list_view = self.query_one(f"#{list_id}", ListView)
 
         # Get current entries for comparison
         if subdir == "reductions":
             old_entries = self._reductions_entries
-            selected_path = self._selected_reductions_path
         else:
             old_entries = self._also_interesting_entries
-            selected_path = self._selected_also_interesting_path
 
         new_entries = [e[1] for e in entries]
 
         # Only update if entries changed
         if new_entries == old_entries:
             return
+
+        # Check if this is purely additive (common case: new reductions added)
+        # In this case, we can just append the new items without touching selection
+        if old_entries and new_entries[: len(old_entries)] == old_entries:
+            # New entries were added at the end - just append them
+            new_items = entries[len(old_entries) :]
+            for entry_num, _, size in new_items:
+                size_str = humanize.naturalsize(size, binary=True)
+                list_view.append(ListItem(Label(f"{entry_num}  ({size_str})")))
+
+            # Update stored entries
+            if subdir == "reductions":
+                self._reductions_entries = new_entries
+            else:
+                self._also_interesting_entries = new_entries
+            return
+
+        # Entries changed in a non-additive way (items removed or reordered).
+        # This happens during restart-from-point. Do a full rebuild.
+        selected_path = (
+            self._selected_reductions_path
+            if subdir == "reductions"
+            else self._selected_also_interesting_path
+        )
 
         # Store new entries
         if subdir == "reductions":
@@ -1249,8 +1276,7 @@ class HistoryExplorerModal(ModalScreen[None]):
         if selected_path is not None and selected_path in new_entries:
             new_index = new_entries.index(selected_path)
 
-        # Guard against Highlighted events during clear/repopulate overwriting
-        # the saved selection path
+        # Guard against Highlighted events during clear/repopulate
         self._refreshing = True
 
         # Clear and repopulate
@@ -1263,12 +1289,9 @@ class HistoryExplorerModal(ModalScreen[None]):
 
         for entry_num, _, size in entries:
             size_str = humanize.naturalsize(size, binary=True)
-            # Don't use IDs - clear() is async and can race with append(),
-            # causing DuplicateIds errors when refreshing with new entries
             list_view.append(ListItem(Label(f"{entry_num}  ({size_str})")))
 
-        # Restore selection after DOM updates complete.
-        # clear() and append() are async, so we need to defer this.
+        # Restore selection after DOM updates complete
         if new_index is not None:
             self.call_after_refresh(self._restore_list_selection, list_view, new_index)
         else:

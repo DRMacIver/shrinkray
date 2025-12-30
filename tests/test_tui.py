@@ -6758,7 +6758,11 @@ def test_trigger_restart_from_completed(tmp_path):
 
 
 def test_history_modal_refresh_list_when_entries_change(tmp_path):
-    """Test _refresh_list updates the list when entries have changed."""
+    """Test _refresh_list updates the list when entries have changed.
+
+    When new entries are added at the end (the common case), we only append
+    the new items without clearing - this preserves ListView selection.
+    """
     history_dir = tmp_path / ".shrinkray" / "run-123"
     reductions_dir = history_dir / "reductions"
     reductions_dir.mkdir(parents=True)
@@ -6792,9 +6796,10 @@ def test_history_modal_refresh_list_when_entries_change(tmp_path):
     assert modal._reductions_entries[0] == str(entry_dir)
     assert modal._reductions_entries[1] == str(new_entry_dir)
 
-    # Should have called clear and append on the list view
-    mock_list_view.clear.assert_called_once()
-    assert mock_list_view.append.call_count == 2
+    # With incremental updates, we should NOT call clear - only append new items
+    mock_list_view.clear.assert_not_called()
+    # Should have only appended the ONE new entry
+    assert mock_list_view.append.call_count == 1
 
 
 def test_history_modal_refresh_list_with_empty_new_entries(tmp_path):
@@ -6923,6 +6928,88 @@ def test_history_modal_refresh_list_also_interesting(tmp_path):
     # Should have updated also-interesting entries
     assert len(modal._also_interesting_entries) == 1
     assert str(entry_dir) in modal._also_interesting_entries[0]
+
+
+def test_history_modal_refresh_list_also_interesting_incremental(tmp_path):
+    """Test incremental update path for also-interesting directory."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    also_dir = history_dir / "also-interesting"
+    also_dir.mkdir(parents=True)
+
+    # Create first entry
+    entry_dir1 = also_dir / "0001"
+    entry_dir1.mkdir()
+    (entry_dir1 / "test.txt").write_text("content 1")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up with first entry already present
+    modal._also_interesting_entries = [str(entry_dir1)]
+
+    # Create second entry
+    entry_dir2 = also_dir / "0002"
+    entry_dir2.mkdir()
+    (entry_dir2 / "test.txt").write_text("content 2")
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = 0
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    modal._refresh_list("also-interesting", "also-interesting-list")
+
+    # Should have updated entries (incremental path)
+    assert len(modal._also_interesting_entries) == 2
+    # Should NOT have called clear (incremental update)
+    mock_list_view.clear.assert_not_called()
+    # Should have appended only the new entry
+    assert mock_list_view.append.call_count == 1
+
+
+def test_history_modal_refresh_list_full_rebuild_with_selection(tmp_path):
+    """Test full rebuild path when entries change non-additively."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create entries 0002, 0003 (not 0001 - simulates restart scenario)
+    entry_dir2 = reductions_dir / "0002"
+    entry_dir2.mkdir()
+    (entry_dir2 / "test.txt").write_text("content 2")
+
+    entry_dir3 = reductions_dir / "0003"
+    entry_dir3.mkdir()
+    (entry_dir3 / "test.txt").write_text("content 3")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up with 0001, 0002, 0003 as old entries (0001 was removed by restart)
+    old_entry_dir1 = reductions_dir / "0001"  # doesn't exist on disk
+    modal._reductions_entries = [
+        str(old_entry_dir1),
+        str(entry_dir2),
+        str(entry_dir3),
+    ]
+    # User had 0002 selected
+    modal._selected_reductions_path = str(entry_dir2)
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = 1  # Selected 0002
+    modal.query_one = MagicMock(return_value=mock_list_view)
+    modal.call_after_refresh = MagicMock()
+
+    modal._refresh_list("reductions", "reductions-list")
+
+    # Should have updated entries (only 0002, 0003 exist)
+    assert len(modal._reductions_entries) == 2
+
+    # Should have called clear (full rebuild since entries changed non-additively)
+    mock_list_view.clear.assert_called_once()
+
+    # Should call call_after_refresh to restore selection to index 0 (0002 is now first)
+    modal.call_after_refresh.assert_called_once()
+    call_args = modal.call_after_refresh.call_args
+    assert call_args[0][0] == modal._restore_list_selection
+    assert call_args[0][2] == 0  # new index of 0002
 
 
 def test_history_modal_do_pending_preview_no_pending(tmp_path):

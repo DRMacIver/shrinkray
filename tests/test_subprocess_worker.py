@@ -1013,7 +1013,8 @@ async def test_worker_start_reduction_clang_delta_not_found(tmp_path):
     }
 
     # Mock find_clang_delta to return empty string
-    with patch("shrinkray.passes.clangdelta.find_clang_delta", return_value=""):
+    # Patch where it's imported (worker module), not where it's defined
+    with patch("shrinkray.subprocess.worker.find_clang_delta", return_value=""):
         await worker._start_reduction(params)
 
     assert worker.running is True

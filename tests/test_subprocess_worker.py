@@ -2727,6 +2727,7 @@ async def test_restart_integration_stats_continue(tmp_path):
         await input_stream.aclose()
 
 
+@pytest.mark.slow
 @pytest.mark.trio
 async def test_restart_integration_from_history_point(tmp_path):
     """Integration test: restart from a specific history point and verify stats.

@@ -3900,6 +3900,7 @@ def test_help_screen_can_be_imported():
     assert HelpScreen is not None
 
 
+@pytest.mark.slow
 def test_pass_stats_modal_refresh_triggers_update():
     """Test that the periodic refresh updates the table when data changes."""
 

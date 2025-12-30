@@ -124,6 +124,7 @@ except AssertionError:
     assert format(c.read_text()) == "from a import x\n\nassert x"
 
 
+@pytest.mark.slow
 def test_gives_informative_error_when_script_does_not_work_outside_current_directory(
     tmpdir,
 ):

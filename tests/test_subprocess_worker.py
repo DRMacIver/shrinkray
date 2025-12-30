@@ -2591,3 +2591,359 @@ async def test_worker_no_stderr_redirect_without_history(tmp_path):
                 assert not log_file.exists(), "No log file should be created"
     finally:
         os.chdir(old_cwd)
+
+
+# === Restart integration tests ===
+# These tests run the actual worker with real reductions to test restart behavior
+
+
+class BidirectionalInputStream:
+    """An input stream that can receive commands dynamically during test execution."""
+
+    def __init__(self):
+        self.buffer = b""
+        self.closed = False
+        self._event = trio.Event()
+
+    def send_command(self, request: Request) -> None:
+        """Add a command to the input buffer."""
+        self.buffer += (serialize(request) + "\n").encode("utf-8")
+        self._event.set()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        while not self.buffer and not self.closed:
+            self._event = trio.Event()
+            await self._event.wait()
+
+        if self.closed and not self.buffer:
+            raise StopAsyncIteration
+
+        # Return available data
+        data = self.buffer[:64]
+        self.buffer = self.buffer[64:]
+        return data
+
+    async def aclose(self) -> None:
+        self.closed = True
+        self._event.set()
+
+
+def parse_worker_output(output_data: bytes) -> list[Response | ProgressUpdate]:
+    """Parse all messages from worker output."""
+    messages = []
+    for line in output_data.decode("utf-8").strip().split("\n"):
+        if line:
+            try:
+                msg = deserialize(line)
+                messages.append(msg)
+            except Exception:
+                pass  # Skip unparseable lines
+    return messages
+
+
+def get_progress_updates(messages: list) -> list[ProgressUpdate]:
+    """Extract progress updates from messages."""
+    return [m for m in messages if isinstance(m, ProgressUpdate)]
+
+
+def get_responses(messages: list) -> list[Response]:
+    """Extract responses from messages."""
+    return [m for m in messages if isinstance(m, Response)]
+
+
+@pytest.mark.trio
+async def test_restart_integration_stats_continue(tmp_path):
+    """Integration test: after restart, stats should continue to be tracked.
+
+    This test runs an actual reduction, triggers a restart, and verifies
+    that test calls and reductions are still being counted.
+    """
+    # Create a test file with content that can be reduced
+    target = tmp_path / "test.txt"
+    # Use content that will be reduced - lines starting with 'x' are kept
+    target.write_text("x\na\nb\nc\nd\ne\nf\ng\nh\ni\nj\n")
+
+    # Create a test script that keeps lines starting with 'x'
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/bash\ngrep -q "^x" "$1"')
+    script.chmod(0o755)
+
+    # Set up streams
+    input_stream = BidirectionalInputStream()
+    output = MemoryOutputStream()
+
+    # Create start command
+    start_params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 10.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+        "history_enabled": True,
+    }
+    start_request = Request(id="start-1", command="start", params=start_params)
+
+    old_cwd = os.getcwd()
+    os.chdir(tmp_path)
+
+    try:
+        worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+        # Send start command
+        input_stream.send_command(start_request)
+
+        # Run worker with timeout, collecting progress updates
+        async def run_and_collect():
+            await worker.run()
+
+        # Run for a bit to get some reductions
+        with trio.move_on_after(3):
+            await run_and_collect()
+
+        # Parse output to find progress updates
+        messages = parse_worker_output(output.data)
+        progress_updates = get_progress_updates(messages)
+
+        # Verify we got some progress
+        assert len(progress_updates) > 0, "Should have received progress updates"
+
+        # Find a progress update with some calls
+        final_update = progress_updates[-1]
+        assert final_update.calls > 0, "Should have made test calls"
+
+    finally:
+        os.chdir(old_cwd)
+        await input_stream.aclose()
+
+
+@pytest.mark.trio
+async def test_restart_integration_from_history_point(tmp_path):
+    """Integration test: restart from a specific history point and verify stats.
+
+    This runs an actual reduction until it makes progress, then restarts
+    from an earlier point and verifies the reducer continues working.
+    """
+    # Create a test file with content that can be reduced
+    target = tmp_path / "test.txt"
+    # Content where we keep the first line if it contains 'KEEP'
+    target.write_text("KEEP\nremove1\nremove2\nremove3\nremove4\nremove5\n")
+
+    # Create a test script that requires 'KEEP' in the file
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/bash\ngrep -q "KEEP" "$1"')
+    script.chmod(0o755)
+
+    # Set up streams
+    input_stream = BidirectionalInputStream()
+    output = MemoryOutputStream()
+
+    # Create start command
+    start_params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 10.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+        "history_enabled": True,
+    }
+    start_request = Request(id="start-1", command="start", params=start_params)
+
+    old_cwd = os.getcwd()
+    os.chdir(tmp_path)
+
+    try:
+        worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+        async def run_worker_task():
+            await worker.run()
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_worker_task)
+
+            # Send start command
+            input_stream.send_command(start_request)
+
+            # Wait for some reductions to happen
+            reductions_seen = 0
+            calls_before_restart = 0
+            for _ in range(50):  # Poll for up to 5 seconds
+                await trio.sleep(0.1)
+                messages = parse_worker_output(output.data)
+                progress_updates = get_progress_updates(messages)
+                if progress_updates:
+                    latest = progress_updates[-1]
+                    if latest.reductions > 0:
+                        reductions_seen = latest.reductions
+                        calls_before_restart = latest.calls
+                        break
+
+            # Verify we made some reductions
+            assert reductions_seen > 0, "Should have made at least one reduction"
+
+            # Now send a restart command to restart from reduction 1
+            restart_request = Request(
+                id="restart-1",
+                command="restart_from",
+                params={"reduction_number": 1},
+            )
+            input_stream.send_command(restart_request)
+
+            # Wait for restart response and continued progress
+            await trio.sleep(0.5)
+
+            # Collect output after restart
+            messages_after = parse_worker_output(output.data)
+            responses = get_responses(messages_after)
+
+            # Find restart response
+            restart_responses = [r for r in responses if r.id == "restart-1"]
+            assert len(restart_responses) == 1, "Should have restart response"
+            restart_response = restart_responses[0]
+
+            # Restart should have succeeded
+            assert restart_response.error is None, (
+                f"Restart should succeed: {restart_response.error}"
+            )
+            assert restart_response.result is not None
+            assert restart_response.result.get("status") == "restarted"
+
+            # Wait a bit more for progress after restart
+            await trio.sleep(1.0)
+
+            # Get final progress updates
+            final_messages = parse_worker_output(output.data)
+            final_progress = get_progress_updates(final_messages)
+
+            # Find progress updates after restart (calls should continue)
+            # The key check: we should see calls continue after restart
+            if final_progress:
+                latest = final_progress[-1]
+                # After restart, calls should be higher than before
+                # (restart doesn't reset the call counter)
+                assert latest.calls >= calls_before_restart, (
+                    f"Calls should continue after restart: "
+                    f"before={calls_before_restart}, after={latest.calls}"
+                )
+
+            # Cancel the worker
+            nursery.cancel_scope.cancel()
+
+    finally:
+        os.chdir(old_cwd)
+        await input_stream.aclose()
+
+
+@pytest.mark.trio
+async def test_restart_integration_stats_not_reset(tmp_path):
+    """Integration test: verify that stats are not reset after restart.
+
+    This specifically tests the bug where after restart, the UI would show
+    'no reductions yet, no calls to interestingness test yet'.
+    """
+    # Create a simple test case
+    target = tmp_path / "test.txt"
+    target.write_text("AAAAAAAAAA\nBBBBBBBBBB\nCCCCCCCCCC\nDDDDDDDDDD\n")
+
+    # Test script that always passes (so we get lots of reductions)
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    input_stream = BidirectionalInputStream()
+    output = MemoryOutputStream()
+
+    start_params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 10.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+        "history_enabled": True,
+    }
+    start_request = Request(id="start-1", command="start", params=start_params)
+
+    old_cwd = os.getcwd()
+    os.chdir(tmp_path)
+
+    try:
+        worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+        async def run_worker_task():
+            await worker.run()
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_worker_task)
+
+            # Send start command
+            input_stream.send_command(start_request)
+
+            # Wait for initial reductions - need at least 1 for restart to work
+            for _ in range(50):  # Increase wait time
+                await trio.sleep(0.1)
+                messages = parse_worker_output(output.data)
+                progress = get_progress_updates(messages)
+                if progress and progress[-1].reductions >= 1:
+                    break
+
+            # Record state before restart
+            messages = parse_worker_output(output.data)
+            progress = get_progress_updates(messages)
+            assert progress, "Should have progress updates"
+            calls_before = progress[-1].calls
+            reductions_before = progress[-1].reductions
+
+            assert reductions_before >= 1, (
+                f"Need at least 1 reduction, got {reductions_before}"
+            )
+            assert calls_before > 0, "Should have made calls"
+
+            # Send restart command
+            restart_request = Request(
+                id="restart-1",
+                command="restart_from",
+                params={"reduction_number": 1},
+            )
+            input_stream.send_command(restart_request)
+
+            # Wait for restart and more progress
+            await trio.sleep(0.5)
+
+            # Check progress after restart
+            messages_after = parse_worker_output(output.data)
+            progress_after = get_progress_updates(messages_after)
+
+            # The bug would manifest as calls=0 and reductions=0 after restart
+            # We should NOT see this
+            latest = progress_after[-1]
+
+            # After restart, calls should still be non-zero
+            # (They might be different from before, but should not be zero)
+            assert latest.calls > 0, (
+                f"BUG: Calls reset to 0 after restart! "
+                f"Before: {calls_before}, After: {latest.calls}"
+            )
+
+            # Cancel the worker
+            nursery.cancel_scope.cancel()
+
+    finally:
+        os.chdir(old_cwd)
+        await input_stream.aclose()

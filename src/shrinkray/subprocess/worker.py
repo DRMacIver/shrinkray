@@ -69,6 +69,12 @@ class ReducerWorker:
         self._original_start_time: float | None = None
         # Log file for stderr redirection (cleaned up on shutdown)
         self._log_file: Any = None
+        # Accumulated stats across restarts - when a restart happens, the problem
+        # gets a fresh ReductionStats object, so we need to preserve the counts
+        self._accumulated_calls: int = 0
+        self._accumulated_reductions: int = 0
+        self._accumulated_interesting_calls: int = 0
+        self._accumulated_wasted_calls: int = 0
 
     async def emit(self, msg: Response | ProgressUpdate) -> None:
         """Write a message to the output stream."""
@@ -373,6 +379,14 @@ class ReducerWorker:
             traceback.print_exc()
             return Response(id=request_id, error=traceback.format_exc())
 
+        # Save current stats before restart - the new problem will have fresh stats
+        if self.problem is not None:
+            stats = self.problem.stats
+            self._accumulated_calls += stats.calls
+            self._accumulated_reductions += stats.reductions
+            self._accumulated_interesting_calls += stats.interesting_calls
+            self._accumulated_wasted_calls += stats.wasted_interesting_calls
+
         # Now we know restart will succeed, cancel current reduction
         if self._cancel_scope is not None:
             self._cancel_scope.cancel()
@@ -541,13 +555,19 @@ class ReducerWorker:
             self._parallel_samples += 1
             self._parallel_total += parallel_workers
 
+        # Calculate total stats including accumulated from previous runs (before restarts)
+        total_calls = stats.calls + self._accumulated_calls
+        total_reductions = stats.reductions + self._accumulated_reductions
+        total_interesting_calls = stats.interesting_calls + self._accumulated_interesting_calls
+        total_wasted_calls = stats.wasted_interesting_calls + self._accumulated_wasted_calls
+
         # Calculate parallelism stats
         average_parallelism = 0.0
         effective_parallelism = 0.0
         if self._parallel_samples > 0:
             average_parallelism = self._parallel_total / self._parallel_samples
             wasteage = (
-                stats.wasted_interesting_calls / stats.calls if stats.calls > 0 else 0.0
+                total_wasted_calls / total_calls if total_calls > 0 else 0.0
             )
             effective_parallelism = average_parallelism * (1.0 - wasteage)
 
@@ -605,10 +625,10 @@ class ReducerWorker:
             status=self.reducer.status if self.reducer else "",
             size=stats.current_test_case_size,
             original_size=stats.initial_test_case_size,
-            calls=stats.calls,
-            reductions=stats.reductions,
-            interesting_calls=stats.interesting_calls,
-            wasted_calls=stats.wasted_interesting_calls,
+            calls=total_calls,
+            reductions=total_reductions,
+            interesting_calls=total_interesting_calls,
+            wasted_calls=total_wasted_calls,
             runtime=runtime,
             parallel_workers=parallel_workers,
             average_parallelism=average_parallelism,

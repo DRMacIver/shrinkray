@@ -358,7 +358,22 @@ class ReducerWorker:
                 error="Restart from history not supported for directory reductions",
             )
 
-        # Cancel current reduction if running
+        # First, try to get restart data - this validates the reduction exists
+        # Do this BEFORE cancelling the current reduction to avoid leaving
+        # things in an inconsistent state if the restart fails
+        try:
+            new_test_case, excluded_set = (
+                self.state.history_manager.restart_from_reduction(reduction_number)
+            )
+        except FileNotFoundError:
+            return Response(
+                id=request_id, error=f"Reduction {reduction_number} not found"
+            )
+        except Exception:
+            traceback.print_exc()
+            return Response(id=request_id, error=traceback.format_exc())
+
+        # Now we know restart will succeed, cancel current reduction
         if self._cancel_scope is not None:
             self._cancel_scope.cancel()
 
@@ -371,11 +386,6 @@ class ReducerWorker:
             # Clear old test output to avoid showing stale output from before restart
             if self.state.output_manager is not None:
                 self.state.output_manager.cleanup_all()
-
-            # Get restart data from history manager
-            new_test_case, excluded_set = (
-                self.state.history_manager.restart_from_reduction(reduction_number)
-            )
 
             # Reset state with new initial and exclusions
             self.state.reset_for_restart(new_test_case, excluded_set)
@@ -402,12 +412,10 @@ class ReducerWorker:
                 id=request_id,
                 result={"status": "restarted", "size": len(new_test_case)},
             )
-        except FileNotFoundError:
-            return Response(
-                id=request_id, error=f"Reduction {reduction_number} not found"
-            )
         except Exception:
             traceback.print_exc()
+            # Reset restart flag - we can't restart, so don't try
+            self._restart_requested = False
             # Include full traceback in error message in case stderr isn't visible
             return Response(id=request_id, error=traceback.format_exc())
 

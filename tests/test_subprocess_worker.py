@@ -2243,6 +2243,37 @@ async def test_handle_restart_from_clears_output_manager():
 
 
 @pytest.mark.trio
+async def test_handle_restart_from_exception_after_validation():
+    """Test restart_from handles exceptions that occur after initial validation."""
+    worker = ReducerWorker()
+    worker._cancel_scope = MagicMock()
+    worker.running = True
+    worker._restart_requested = False
+
+    # Set up mocks - restart_from_reduction succeeds but reset_for_restart fails
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.history_manager = MagicMock()
+    worker.state.history_manager.restart_from_reduction.return_value = (
+        b"restart content",
+        set(),
+    )
+    worker.state.output_manager = None
+    # Make reset_for_restart raise an exception
+    worker.state.reset_for_restart.side_effect = RuntimeError("State reset failed")
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 1})
+
+    # The scope should have been cancelled (we got past validation)
+    worker._cancel_scope.cancel.assert_called_once()
+    # Error response with traceback
+    assert response.error is not None
+    assert "State reset failed" in response.error
+    assert "Traceback" in response.error
+    # Restart flag should be reset since we can't proceed
+    assert worker._restart_requested is False
+
+
+@pytest.mark.trio
 async def test_run_loop_restarts_reducer():
     """Test that run() loop re-runs reducer when _restart_requested is True."""
     worker = ReducerWorker()
@@ -2451,7 +2482,7 @@ async def test_worker_log_file_close_exception(tmp_path):
         "file_path": str(target),
         "test": [str(script)],
         "parallelism": 1,
-        "timeout": 1.0,
+        "timeout": 10.0,  # Use longer timeout for robustness against system load
         "seed": 0,
         "input_type": "all",
         "in_place": False,

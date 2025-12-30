@@ -744,7 +744,8 @@ class ExpandedBoxModal(ModalScreen[None]):
             # Try to decode as text, fall back to hex display if binary
             encoding, text = try_decode(raw_content)
             if encoding is not None:
-                return text
+                # Escape Rich markup to prevent interpretation of [ ] etc
+                return escape_markup(text)
             return "[Binary content - hex display]\n\n" + raw_content.hex()
         except OSError:
             return "[red]Error reading file[/red]"
@@ -1464,6 +1465,8 @@ class HistoryExplorerModal(ModalScreen[None]):
             # Try to decode as text
             encoding, text = try_decode(raw_content)
             if encoding is not None:
+                # Escape Rich markup to prevent interpretation of [ ] etc
+                text = escape_markup(text)
                 if truncated:
                     text += "\n\n[dim]... (truncated)[/dim]"
                 return text

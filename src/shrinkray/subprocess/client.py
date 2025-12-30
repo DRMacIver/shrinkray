@@ -1,10 +1,12 @@
 """Client for communicating with the reducer subprocess."""
 
 import asyncio
+import os
 import sys
 import traceback
 import uuid
 from collections.abc import AsyncGenerator
+from io import TextIOWrapper
 from typing import Any
 
 from shrinkray.subprocess.protocol import (
@@ -27,18 +29,24 @@ class SubprocessClient:
         self._completed = False
         self._error_message: str | None = None
         self._debug_mode = debug_mode
+        self._stderr_log_file: TextIOWrapper | None = None
 
     async def start(self) -> None:
         """Launch the subprocess."""
-        # In debug mode, inherit stderr so interestingness test output
-        # goes directly to the parent process's stderr
+        # Log subprocess stderr to .shrinkray/shrinkray.log for debugging.
+        # This captures error messages that would otherwise be lost.
+        shrinkray_dir = ".shrinkray"
+        os.makedirs(shrinkray_dir, exist_ok=True)
+        log_path = os.path.join(shrinkray_dir, "shrinkray.log")
+        self._stderr_log_file = open(log_path, "a", encoding="utf-8")
+
         self._process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
             "shrinkray.subprocess.worker",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=sys.stderr,
+            stderr=self._stderr_log_file,
         )
         self._reader_task = asyncio.create_task(self._read_output())
 
@@ -272,6 +280,13 @@ class SubprocessClient:
                     await self._process.wait()
                 except ProcessLookupError:
                     pass  # Process already exited
+
+        # Close the stderr log file
+        if self._stderr_log_file is not None:
+            try:
+                self._stderr_log_file.close()
+            except Exception:
+                pass
 
     async def __aenter__(self) -> "SubprocessClient":
         await self.start()

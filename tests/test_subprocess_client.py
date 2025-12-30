@@ -1097,3 +1097,23 @@ def test_subprocess_client_restart_from_exception():
         assert response.error == "Failed to send restart command"
 
     asyncio.run(run())
+
+
+def test_subprocess_client_close_handles_stderr_log_file_exception():
+    """Test close handles exception when closing stderr log file."""
+
+    async def run():
+        client = SubprocessClient()
+
+        # Create a mock file that raises on close
+        mock_file = MagicMock()
+        mock_file.close.side_effect = Exception("Cannot close file")
+        client._stderr_log_file = mock_file
+
+        # Should not raise even if file.close() fails
+        await client.close()
+
+        # File close should have been attempted
+        mock_file.close.assert_called_once()
+
+    asyncio.run(run())

@@ -212,6 +212,7 @@ class ShrinkRayState[TestCase](ABC):
 
     # History recording (enabled by default)
     history_enabled: bool = True
+    history_base_dir: str | None = None  # Base directory for .shrinkray folder
     history_manager: HistoryManager | None = None
 
     # Also-interesting exit code (None = disabled)
@@ -257,6 +258,7 @@ class ShrinkRayState[TestCase](ABC):
             self.filename,
             record_reductions=self.history_enabled,
             is_directory=self.is_directory_mode,
+            base_dir=self.history_base_dir,
         )
 
         # Ensure we have an output manager for capturing test output

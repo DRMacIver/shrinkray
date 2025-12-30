@@ -100,6 +100,7 @@ except AssertionError:
                 str(script),
                 str(target),
                 "--ui=basic",
+                "--no-history",
             ],
         )
     else:
@@ -111,6 +112,7 @@ except AssertionError:
                 str(script),
                 str(target),
                 "--ui=basic",
+                "--no-history",
             ],
         )
 
@@ -156,6 +158,7 @@ if sys.argv[1] != {repr(str(target))}:
                 str(script),
                 str(target),
                 "--ui=basic",
+                "--no-history",
             ],
             check=True,
             stderr=subprocess.PIPE,
@@ -193,6 +196,7 @@ sys.exit(1)
                 str(script),
                 str(target),
                 "--ui=basic",
+                "--no-history",
             ],
             check=True,
             stderr=subprocess.PIPE,
@@ -279,6 +283,7 @@ grep hello {str(target)}
             "--in-place",
             "--input-type=basename",
             "--parallelism=2",
+            "--no-history",
         ],
     )
     assert result.exit_code != 0
@@ -307,6 +312,7 @@ exit 1
             str(script),
             str(target),
             "--ui=basic",
+                "--no-history",
         ],
     )
     assert result.exit_code != 0
@@ -340,6 +346,7 @@ def test_timeout_zero_sets_infinite(basic_shrink_target):
             basic_shrink_target.test_case,
             "--ui=basic",
             "--timeout=0",
+            "--no-history",
         ],
     )
     # Should complete successfully with infinite timeout
@@ -561,6 +568,7 @@ def test_default_backup_filename(basic_shrink_target):
             basic_shrink_target.interestingness_test,
             basic_shrink_target.test_case,
             "--ui=basic",
+                "--no-history",
         ],
     )
     assert result.exit_code == 0
@@ -654,6 +662,7 @@ def test_textual_ui_path(basic_shrink_target, monkeypatch):
             basic_shrink_target.interestingness_test,
             basic_shrink_target.test_case,
             "--ui=textual",
+            "--no-history",
         ],
     )
 
@@ -941,6 +950,7 @@ exit 0
             str(target),
             "--ui=basic",
             "--timeout=0.01",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -985,6 +995,7 @@ exit 0
             str(target),
             "--ui=textual",
             "--timeout=0.01",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -1021,6 +1032,7 @@ def test_invalid_initial_shows_error_message_basic(tmp_path):
             str(script),
             str(target),
             "--ui=basic",
+                "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -1051,6 +1063,7 @@ def test_invalid_initial_shows_error_message_tui(tmp_path):
             str(script),
             str(target),
             "--ui=textual",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -1096,6 +1109,7 @@ sys.exit(0)
             str(script),
             str(target),
             "--ui=textual",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -1134,6 +1148,7 @@ sys.exit(1)
             str(script),
             str(target),
             "--ui=textual",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -1211,6 +1226,7 @@ def test_happy_path_basic_ui_single_file(simple_file_target):
             simple_file_target.test_case,
             "--ui=basic",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1235,6 +1251,7 @@ def test_happy_path_basic_ui_directory(simple_directory_target):
             "--ui=basic",
             "--input-type=arg",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1260,6 +1277,7 @@ def test_happy_path_tui_single_file(simple_file_target):
             simple_file_target.test_case,
             "--ui=textual",
             "--parallelism=1",
+            "--no-history",
         ],
         capture_output=True,
         text=True,
@@ -1322,6 +1340,7 @@ def test_trivial_is_not_error_basic_ui(tmp_path):
             "--ui=basic",
             "--trivial-is-not-error",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1348,6 +1367,7 @@ def test_trivial_is_error_basic_ui(tmp_path):
             str(target),
             "--ui=basic",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1380,6 +1400,7 @@ def test_trivial_is_not_error_tui(tmp_path, monkeypatch):
             "--ui=textual",
             "--trivial-is-not-error",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1398,6 +1419,7 @@ def test_happy_path_with_parallelism(simple_file_target):
             simple_file_target.test_case,
             "--ui=basic",
             "--parallelism=2",
+            "--no-history",
         ],
     )
 
@@ -1434,6 +1456,7 @@ def test_happy_path_in_place_single_file(tmp_path, monkeypatch):
             "--ui=basic",
             "--in-place",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1456,6 +1479,7 @@ def test_happy_path_formatter_none(simple_file_target):
             "--ui=basic",
             "--formatter=none",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1750,6 +1774,7 @@ grep "hello" "{log_file}"
             "--ui=textual",
             "--parallelism=1",
             "--no-exit-on-completion",
+            "--no-history",
         ],
         encoding="utf-8",
         timeout=30,

@@ -517,6 +517,7 @@ async def test_worker_start_reduction_single_file(tmp_path):
         "formatter": "none",
         "volume": "quiet",
         "no_clang_delta": True,
+        "history_enabled": False,
     }
 
     await worker._start_reduction(params)
@@ -592,6 +593,7 @@ async def test_worker_start_reduction_directory(tmp_path):
         "formatter": "none",
         "volume": "quiet",
         "no_clang_delta": True,
+        "history_enabled": False,
     }
 
     await worker._start_reduction(params)
@@ -880,6 +882,7 @@ async def test_worker_full_run_with_mock(tmp_path):
         "formatter": "none",
         "volume": "quiet",
         "no_clang_delta": True,
+        "history_enabled": False,
     }
     start_request = Request(id="start-1", command="start", params=start_params)
     input_data = serialize(start_request) + "\n"
@@ -1187,6 +1190,7 @@ async def test_worker_start_with_failing_interestingness_test(tmp_path):
         "formatter": "none",
         "volume": "quiet",
         "no_clang_delta": True,
+        "history_enabled": False,
     }
 
     # Start the reduction - should fail immediately with detailed error
@@ -1222,6 +1226,7 @@ async def test_worker_start_validates_initial_example(tmp_path):
         "formatter": "none",
         "volume": "quiet",
         "no_clang_delta": True,
+        "history_enabled": False,
     }
 
     with pytest.raises(InvalidInitialExample):
@@ -1250,6 +1255,7 @@ async def test_worker_full_run_with_failing_test(tmp_path):
         "formatter": "none",
         "volume": "quiet",
         "no_clang_delta": True,
+        "history_enabled": False,
     }
     start_request = Request(id="start-fail", command="start", params=start_params)
     input_data = serialize(start_request) + "\n"
@@ -1303,6 +1309,7 @@ async def test_worker_timeout_on_initial_test(tmp_path):
         "formatter": "none",
         "volume": "quiet",
         "no_clang_delta": True,
+        "history_enabled": False,
     }
 
     # Start should fail with timeout error during initial validation
@@ -1340,6 +1347,7 @@ async def test_worker_error_message_is_detailed(tmp_path):
         "formatter": "none",
         "volume": "quiet",
         "no_clang_delta": True,
+        "history_enabled": False,
     }
 
     # Start should fail with detailed error message

@@ -3,11 +3,11 @@
 import asyncio
 import os
 import sys
+import tempfile
 import traceback
 import uuid
 from collections.abc import AsyncGenerator
-from io import TextIOWrapper
-from typing import Any
+from typing import IO, Any
 
 from shrinkray.subprocess.protocol import (
     ProgressUpdate,
@@ -29,16 +29,20 @@ class SubprocessClient:
         self._completed = False
         self._error_message: str | None = None
         self._debug_mode = debug_mode
-        self._stderr_log_file: TextIOWrapper | None = None
+        self._stderr_log_file: IO[str] | None = None
+        self._stderr_log_path: str | None = None
 
     async def start(self) -> None:
         """Launch the subprocess."""
-        # Log subprocess stderr to .shrinkray/shrinkray.log for debugging.
-        # This captures error messages that would otherwise be lost.
-        shrinkray_dir = ".shrinkray"
-        os.makedirs(shrinkray_dir, exist_ok=True)
-        log_path = os.path.join(shrinkray_dir, "shrinkray.log")
-        self._stderr_log_file = open(log_path, "a", encoding="utf-8")
+        # Log subprocess stderr to a temp file for debugging.
+        # This captures bootstrap errors before history is set up.
+        # Once the worker starts with history enabled, it redirects its own
+        # stderr to the per-run history directory.
+        fd, self._stderr_log_path = tempfile.mkstemp(
+            prefix="shrinkray-stderr-",
+            suffix=".log",
+        )
+        self._stderr_log_file = os.fdopen(fd, "w", encoding="utf-8")
 
         self._process = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -281,10 +285,15 @@ class SubprocessClient:
                 except ProcessLookupError:
                     pass  # Process already exited
 
-        # Close the stderr log file
+        # Close and remove the stderr log file
         if self._stderr_log_file is not None:
             try:
                 self._stderr_log_file.close()
+            except Exception:
+                pass
+        if self._stderr_log_path is not None:
+            try:
+                os.unlink(self._stderr_log_path)
             except Exception:
                 pass
 

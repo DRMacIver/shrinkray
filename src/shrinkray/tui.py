@@ -13,6 +13,7 @@ from difflib import unified_diff
 from typing import Literal, Protocol, cast
 
 import humanize
+from rich.markup import escape as escape_markup
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
@@ -607,14 +608,17 @@ class OutputPreview(Static):
             return header
 
         available_lines = self._get_available_lines()
-        lines = self.output_content.split("\n")
+        # Escape the output content to prevent Rich markup interpretation
+        # (test output may contain characters like ^ that have special meaning)
+        escaped_content = escape_markup(self.output_content)
+        lines = escaped_content.split("\n")
 
         # Build prefix (header + newline, or empty if no header)
         prefix = f"{header}\n" if header else ""
 
         # Show tail of output (most recent lines)
         if len(lines) <= available_lines:
-            return f"{prefix}{self.output_content}"
+            return f"{prefix}{escaped_content}"
 
         # Truncate from the beginning
         truncated_lines = lines[-(available_lines):]

@@ -262,6 +262,7 @@ def test_subprocess_client_start_reduction():
                 volume="quiet",
                 no_clang_delta=True,
                 clang_delta="",
+                history_enabled=False,
             )
             # Should get a response (even if it fails)
             assert response is not None
@@ -682,6 +683,7 @@ def test_subprocess_client_start_reduction_without_parallelism():
             response = await client.start_reduction(
                 file_path="/tmp/test.txt",
                 test=["test.sh"],
+                history_enabled=False,
             )
             # Should get a response (even if it fails to start)
             assert response is not None
@@ -830,6 +832,7 @@ def test_subprocess_client_handle_error_response_integration(tmp_path):
                 formatter="none",
                 volume="quiet",
                 no_clang_delta=True,
+                history_enabled=False,
             )
 
             # The start command should return an error immediately

@@ -66,6 +66,7 @@ class HistoryManager:
         *,
         record_reductions: bool = True,
         is_directory: bool = False,
+        base_dir: str | None = None,
     ) -> HistoryManager:
         """Create a new HistoryManager with a unique run ID.
 
@@ -77,6 +78,7 @@ class HistoryManager:
                 but --also-interesting is explicitly passed).
             is_directory: If True, the target is a directory and test cases
                 are dict[str, bytes] instead of bytes.
+            base_dir: Base directory for .shrinkray folder. Defaults to cwd.
         """
         # Generate run ID: (test-basename)-(filename)-(datetime)-(random hex)
         test_name = sanitize_for_filename(os.path.basename(test[0]))
@@ -85,7 +87,10 @@ class HistoryManager:
         random_hex = os.urandom(4).hex()
         run_id = f"{test_name}-{file_name}-{timestamp}-{random_hex}"
 
-        history_dir = os.path.join(os.getcwd(), ".shrinkray", run_id)
+        if base_dir is None:
+            # Check environment variable first, then fall back to cwd
+            base_dir = os.environ.get("SHRINKRAY_DIRECTORY") or os.getcwd()
+        history_dir = os.path.join(base_dir, ".shrinkray", run_id)
         target_basename = os.path.basename(filename)
 
         return cls(

@@ -7082,3 +7082,54 @@ def test_history_modal_refresh_with_new_entries_no_duplicate_ids(tmp_path):
             await pilot.press("escape")
 
     asyncio.run(run())
+
+
+def test_history_modal_finish_refresh(tmp_path):
+    """Test _finish_refresh clears the refreshing flag."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    modal._refreshing = True
+
+    modal._finish_refresh()
+
+    assert modal._refreshing is False
+
+
+def test_history_modal_highlighted_skipped_during_refresh(tmp_path):
+    """Test on_list_view_highlighted skips updates when refreshing."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create an entry
+    entry_dir = reductions_dir / "0001"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("content")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    modal._reductions_entries = [str(entry_dir)]
+    modal._selected_reductions_path = str(entry_dir)
+
+    # Set refreshing flag
+    modal._refreshing = True
+
+    # Create a mock event
+    mock_event = MagicMock()
+    mock_event.list_view = MagicMock()
+    mock_event.list_view.id = "reductions-list"
+    mock_event.list_view.index = 0
+
+    # Track if any methods were called
+    modal._update_preview = MagicMock()
+    modal.set_timer = MagicMock()
+
+    # Call the handler
+    modal.on_list_view_highlighted(mock_event)
+
+    # Should return early without updating anything
+    modal._update_preview.assert_not_called()
+    modal.set_timer.assert_not_called()
+    # Selection path should remain unchanged
+    assert modal._selected_reductions_path == str(entry_dir)

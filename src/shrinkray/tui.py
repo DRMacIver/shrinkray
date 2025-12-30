@@ -1161,6 +1161,9 @@ class HistoryExplorerModal(ModalScreen[None]):
         # Track selected entry by path (more robust than by index)
         self._selected_reductions_path: str | None = None
         self._selected_also_interesting_path: str | None = None
+        # Guard against updating selection during refresh (clear/append triggers
+        # Highlighted events that would overwrite the saved selection path)
+        self._refreshing: bool = False
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -1246,11 +1249,16 @@ class HistoryExplorerModal(ModalScreen[None]):
         if selected_path is not None and selected_path in new_entries:
             new_index = new_entries.index(selected_path)
 
+        # Guard against Highlighted events during clear/repopulate overwriting
+        # the saved selection path
+        self._refreshing = True
+
         # Clear and repopulate
         list_view.clear()
 
         if not entries:
             list_view.append(ListItem(Label("[dim]No entries yet[/dim]")))
+            self.call_after_refresh(self._finish_refresh)
             return
 
         for entry_num, _, size in entries:
@@ -1263,12 +1271,19 @@ class HistoryExplorerModal(ModalScreen[None]):
         # clear() and append() are async, so we need to defer this.
         if new_index is not None:
             self.call_after_refresh(self._restore_list_selection, list_view, new_index)
+        else:
+            self.call_after_refresh(self._finish_refresh)
+
+    def _finish_refresh(self) -> None:
+        """Mark refresh as complete, allowing selection tracking to resume."""
+        self._refreshing = False
 
     def _restore_list_selection(self, list_view: ListView, index: int) -> None:
         """Restore selection to a list view after async DOM updates."""
         child_count = len(list_view.children)
         if child_count > 0:
             list_view.index = min(index, child_count - 1)
+        self._refreshing = False
 
     def _scan_entries(self, subdir: str) -> list[tuple[str, str, int]]:
         """Scan a history subdirectory for entries.
@@ -1343,6 +1358,12 @@ class HistoryExplorerModal(ModalScreen[None]):
 
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         """Handle highlighting (cursor movement) in a ListView."""
+        # During refresh, clear/append trigger Highlighted events that would
+        # overwrite the saved selection path. Skip updating selection tracking
+        # during refresh - the selection will be restored by _restore_list_selection.
+        if self._refreshing:
+            return
+
         list_view = event.list_view
 
         # Determine which list was highlighted

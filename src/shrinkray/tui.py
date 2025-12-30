@@ -1158,6 +1158,9 @@ class HistoryExplorerModal(ModalScreen[None]):
         self._preview_timer: Timer | None = None
         self._pending_preview: tuple[str, str, str] | None = None
         self._refresh_timer: Timer | None = None
+        # Track selected entry by path (more robust than by index)
+        self._selected_reductions_path: str | None = None
+        self._selected_also_interesting_path: str | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -1221,8 +1224,10 @@ class HistoryExplorerModal(ModalScreen[None]):
         # Get current entries for comparison
         if subdir == "reductions":
             old_entries = self._reductions_entries
+            selected_path = self._selected_reductions_path
         else:
             old_entries = self._also_interesting_entries
+            selected_path = self._selected_also_interesting_path
 
         new_entries = [e[1] for e in entries]
 
@@ -1236,8 +1241,10 @@ class HistoryExplorerModal(ModalScreen[None]):
         else:
             self._also_interesting_entries = new_entries
 
-        # Remember current selection
-        old_index = list_view.index
+        # Find the index of the previously selected path in the new entries
+        new_index: int | None = None
+        if selected_path is not None and selected_path in new_entries:
+            new_index = new_entries.index(selected_path)
 
         # Clear and repopulate
         list_view.clear()
@@ -1254,8 +1261,7 @@ class HistoryExplorerModal(ModalScreen[None]):
 
         # Restore selection after DOM updates complete.
         # clear() and append() are async, so we need to defer this.
-        if old_index is not None and entries:
-            new_index = min(old_index, len(entries) - 1)
+        if new_index is not None:
             self.call_after_refresh(self._restore_list_selection, list_view, new_index)
 
     def _restore_list_selection(self, list_view: ListView, index: int) -> None:
@@ -1292,10 +1298,11 @@ class HistoryExplorerModal(ModalScreen[None]):
         entries = self._scan_entries(subdir)
         list_view = self.query_one(f"#{list_id}", ListView)
 
+        entry_paths = [e[1] for e in entries]
         if subdir == "reductions":
-            self._reductions_entries = [e[1] for e in entries]
+            self._reductions_entries = entry_paths
         else:
-            self._also_interesting_entries = [e[1] for e in entries]
+            self._also_interesting_entries = entry_paths
 
         if not entries:
             list_view.append(ListItem(Label("[dim]No entries yet[/dim]")))
@@ -1306,8 +1313,12 @@ class HistoryExplorerModal(ModalScreen[None]):
             # Don't use IDs - they conflict with refresh operations
             list_view.append(ListItem(Label(f"{entry_num}  ({size_str})")))
 
-        # Select first item (entries is non-empty here, so we always have children)
+        # Select first item and track its path
         list_view.index = 0
+        if subdir == "reductions":
+            self._selected_reductions_path = entry_paths[0]
+        else:
+            self._selected_also_interesting_path = entry_paths[0]
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle selection in a ListView."""
@@ -1349,6 +1360,12 @@ class HistoryExplorerModal(ModalScreen[None]):
             return
 
         entry_path = entries[list_view.index]
+
+        # Track the selected path for restoration after refresh
+        if list_view.id == "reductions-list":
+            self._selected_reductions_path = entry_path
+        else:
+            self._selected_also_interesting_path = entry_path
 
         # Debounce preview updates to avoid lag when navigating quickly
         self._pending_preview = (entry_path, file_preview_id, output_preview_id)

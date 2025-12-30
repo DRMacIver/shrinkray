@@ -2,11 +2,14 @@
 
 import math
 import os
+import subprocess
+import sys
 import time
 import traceback
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from datetime import timedelta
+from difflib import unified_diff
 from typing import Literal, Protocol, cast
 
 import humanize
@@ -89,8 +92,6 @@ def detect_terminal_theme() -> bool:
         apple_interface = os.environ.get("__CFBundleIdentifier", "")
         if not apple_interface:
             try:
-                import subprocess
-
                 result = subprocess.run(
                     ["defaults", "read", "-g", "AppleInterfaceStyle"],
                     capture_output=True,
@@ -523,8 +524,6 @@ class ContentPreview(Static):
             self._last_displayed_content
             and self._last_displayed_content != self.preview_content
         ):
-            from difflib import unified_diff
-
             prev_lines = self._last_displayed_content.split("\n")
             curr_lines = self.preview_content.split("\n")
             diff = list(unified_diff(prev_lines, curr_lines, lineterm=""))
@@ -1995,8 +1994,6 @@ def run_textual_ui(
     Note: Validation must be done before calling this function.
     The caller (main()) is responsible for running run_validation() first.
     """
-    import sys
-
     # Start the TUI app - validation has already been done by main()
     app = ShrinkRayApp(
         file_path=file_path,

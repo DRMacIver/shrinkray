@@ -12,8 +12,14 @@ from typing import Any, Protocol
 import trio
 from binaryornot.helpers import is_binary_string
 
+from shrinkray.cli import InputType
+from shrinkray.passes.clangdelta import C_FILE_EXTENSIONS, ClangDelta, find_clang_delta
 from shrinkray.problem import InvalidInitialExample
-from shrinkray.state import ShrinkRayStateSingleFile
+from shrinkray.state import (
+    OutputCaptureManager,
+    ShrinkRayDirectoryState,
+    ShrinkRayStateSingleFile,
+)
 from shrinkray.subprocess.protocol import (
     PassStatsData,
     ProgressUpdate,
@@ -22,6 +28,7 @@ from shrinkray.subprocess.protocol import (
     deserialize,
     serialize,
 )
+from shrinkray.work import Volume
 
 
 class InputStream(Protocol):
@@ -172,19 +179,6 @@ class ReducerWorker:
 
     async def _start_reduction(self, params: dict) -> None:
         """Initialize and start the reduction."""
-        from shrinkray.cli import InputType
-        from shrinkray.passes.clangdelta import (
-            C_FILE_EXTENSIONS,
-            ClangDelta,
-            find_clang_delta,
-        )
-        from shrinkray.state import (
-            OutputCaptureManager,
-            ShrinkRayDirectoryState,
-            ShrinkRayStateSingleFile,
-        )
-        from shrinkray.work import Volume
-
         filename = params["file_path"]
         test = params["test"]
         parallelism = params.get("parallelism", os.cpu_count() or 1)

@@ -2,11 +2,15 @@
 """Generate a Mermaid diagram of the internal import graph for src/shrinkray/.
 
 Only shows imports between modules within the package, not external dependencies.
+Uses libcst for consistency with other tooling in the project.
 """
 
-import ast
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+
+import libcst as cst
+from libcst.metadata import MetadataWrapper
 
 
 def get_module_name(path: Path, src_dir: Path) -> str:
@@ -28,42 +32,78 @@ def get_short_name(module: str) -> str:
     return module
 
 
+@dataclass
+class ImportVisitor(cst.CSTVisitor):
+    """Visitor that collects all imports (including those inside functions)."""
+
+    current_module: str
+    package_prefix: str
+    imports: set[str] = field(default_factory=set)
+
+    def visit_Import(self, node: cst.Import) -> bool:
+        # Handle "import foo.bar.baz"
+        if isinstance(node.names, cst.ImportStar):
+            return True
+        for name_item in node.names:
+            if isinstance(name_item.name, cst.Name):
+                module_name = name_item.name.value
+            elif isinstance(name_item.name, cst.Attribute):
+                # Build the full dotted name
+                module_name = self._get_dotted_name(name_item.name)
+            else:
+                continue
+            if module_name.startswith(self.package_prefix):
+                self.imports.add(module_name)
+        return True
+
+    def visit_ImportFrom(self, node: cst.ImportFrom) -> bool:
+        # Calculate the base module from relative imports
+        current_parts = self.current_module.split(".")
+        level = len(node.relative) if isinstance(node.relative, tuple) else 0
+
+        if level == 0:
+            # Absolute import
+            if node.module is None:
+                return True
+            module_name = self._get_dotted_name(node.module)
+            if module_name.startswith(self.package_prefix):
+                self.imports.add(module_name)
+        else:
+            # Relative import
+            if level <= len(current_parts):
+                base_parts = current_parts[:-level]
+                if node.module is not None:
+                    resolved = ".".join(base_parts + [self._get_dotted_name(node.module)])
+                else:
+                    resolved = ".".join(base_parts)
+                if resolved.startswith(self.package_prefix):
+                    self.imports.add(resolved)
+
+        return True
+
+    def _get_dotted_name(self, node: cst.Attribute | cst.Name) -> str:
+        """Convert an Attribute or Name node to a dotted string."""
+        if isinstance(node, cst.Name):
+            return node.value
+        # It's an Attribute
+        return f"{self._get_dotted_name(node.value)}.{node.attr.value}"
+
+
 def resolve_relative_imports(
     path: Path, src_dir: Path, package_prefix: str
 ) -> set[str]:
     """Extract and resolve all imports including relative ones."""
     try:
-        tree = ast.parse(path.read_text())
-    except SyntaxError:
+        source = path.read_text()
+        tree = cst.parse_module(source)
+    except (SyntaxError, cst.ParserSyntaxError):
         return set()
 
-    imports: set[str] = set()
     current_module = get_module_name(path, src_dir)
-    current_parts = current_module.split(".")
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name.startswith(package_prefix):
-                    imports.add(alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            if node.level == 0:
-                # Absolute import
-                if node.module and node.module.startswith(package_prefix):
-                    imports.add(node.module)
-            else:
-                # Relative import
-                # Go up 'level' directories from current module
-                if node.level <= len(current_parts):
-                    base_parts = current_parts[: -node.level]
-                    if node.module:
-                        resolved = ".".join(base_parts + [node.module])
-                    else:
-                        resolved = ".".join(base_parts)
-                    if resolved.startswith(package_prefix):
-                        imports.add(resolved)
-
-    return imports
+    visitor = ImportVisitor(current_module=current_module, package_prefix=package_prefix)
+    wrapper = MetadataWrapper(tree, unsafe_skip_copy=True)
+    wrapper.visit(visitor)
+    return visitor.imports
 
 
 def normalize_to_file_module(module: str, all_modules: set[str]) -> str | None:

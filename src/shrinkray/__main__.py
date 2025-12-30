@@ -426,7 +426,10 @@ def main(
 
 def worker_main() -> None:
     """Entry point for the worker subprocess."""
-    from shrinkray.subprocess.worker import main as worker_entry
+    # Lazy import to avoid loading worker module in main process (fast CLI startup)
+    from shrinkray.subprocess.worker import (  # noqa: I001, no-import-in-function
+        main as worker_entry,
+    )
 
     worker_entry()
 

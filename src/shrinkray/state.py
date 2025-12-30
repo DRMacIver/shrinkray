@@ -1,5 +1,7 @@
 """State management for shrink ray reduction sessions."""
 
+import base64
+import json
 import math
 import os
 import random
@@ -17,6 +19,8 @@ import humanize
 import trio
 from attrs import define
 
+from shrinkray.cli import InputType
+from shrinkray.formatting import default_reformat_data, determine_formatter_command
 from shrinkray.history import HistoryManager
 from shrinkray.passes.clangdelta import ClangDelta
 from shrinkray.problem import (
@@ -25,6 +29,7 @@ from shrinkray.problem import (
     ReductionProblem,
     sort_key_for_initial,
 )
+from shrinkray.process import interrupt_wait_and_kill
 from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
 
@@ -192,13 +197,6 @@ class ShrinkRayState[TestCase](ABC):
 
     first_call_time: float | None = None
 
-    # Lazy imports to break circular dependencies:
-    # - shrinkray.process imports from shrinkray.work which imports from here
-    # - shrinkray.cli imports from here for state configuration
-    # These are cached after first import for performance.
-    _interrupt_wait_and_kill: Any = None
-    _InputType: Any = None  # InputType enum from shrinkray.cli
-
     # Stores the output from the last debug run
     _last_debug_output: str = ""
 
@@ -313,19 +311,9 @@ class ShrinkRayState[TestCase](ABC):
     async def run_script_on_file(
         self, working: str, cwd: str, debug: bool = False
     ) -> int:
-        # Lazy import to avoid circular dependency
-        if self._interrupt_wait_and_kill is None:
-            from shrinkray.process import interrupt_wait_and_kill
-
-            self._interrupt_wait_and_kill = interrupt_wait_and_kill
-        if self._InputType is None:
-            from shrinkray.cli import InputType
-
-            self._InputType = InputType
-
         if not os.path.exists(working):
             raise ValueError(f"No such file {working}")
-        if self.input_type.enabled(self._InputType.arg):
+        if self.input_type.enabled(InputType.arg):
             command = self.test + [working]
         else:
             command = self.test
@@ -336,9 +324,7 @@ class ShrinkRayState[TestCase](ABC):
             "cwd": cwd,
             "check": False,
         }
-        if self.input_type.enabled(self._InputType.stdin) and not os.path.isdir(
-            working
-        ):
+        if self.input_type.enabled(InputType.stdin) and not os.path.isdir(working):
             with open(working, "rb") as i:
                 kwargs["stdin"] = i.read()
         else:
@@ -428,7 +414,7 @@ class ShrinkRayState[TestCase](ABC):
 
                     if sp.returncode is None:
                         # Process didn't terminate before timeout - kill it
-                        await self._interrupt_wait_and_kill(sp)
+                        await interrupt_wait_and_kill(sp)
 
                     # Check for timeout violation (only when timeout is explicitly set)
                     if (
@@ -472,14 +458,8 @@ class ShrinkRayState[TestCase](ABC):
                 self.output_manager.mark_completed(test_id, exit_code or 0)
 
     async def run_for_exit_code(self, test_case: TestCase, debug: bool = False) -> int:
-        # Lazy import
-        if self._InputType is None:
-            from shrinkray.cli import InputType
-
-            self._InputType = InputType
-
         if self.in_place:
-            if self.input_type == self._InputType.basename:
+            if self.input_type == InputType.basename:
                 working = self.filename
                 await self.write_test_case_to_file(working, test_case)
 
@@ -800,11 +780,6 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
         self.initial = content
 
     def setup_formatter(self):
-        from shrinkray.formatting import (
-            default_reformat_data,
-            determine_formatter_command,
-        )
-
         if self.formatter.lower() == "none":
 
             async def format_data(test_case: bytes) -> bytes | None:
@@ -959,18 +934,12 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     @staticmethod
     def _serialize_directory(content: dict[str, bytes]) -> bytes:
         """Serialize directory content to bytes for comparison/storage."""
-        import base64
-        import json
-
         serialized = {k: base64.b64encode(v).decode() for k, v in sorted(content.items())}
         return json.dumps(serialized, sort_keys=True).encode()
 
     @staticmethod
     def _deserialize_directory(data: bytes) -> dict[str, bytes]:
         """Deserialize bytes back to directory content."""
-        import base64
-        import json
-
         serialized = json.loads(data.decode())
         return {k: base64.b64decode(v) for k, v in serialized.items()}
 

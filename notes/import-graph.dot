@@ -4,8 +4,8 @@ digraph imports {
 
     "shrinkray";
     "cli";
-    "display";
     "formatting";
+    "history";
     "passes";
     "passes.bytes";
     "passes.clangdelta";
@@ -26,10 +26,11 @@ digraph imports {
     "subprocess.worker";
     "tui";
     "ui";
+    "validation";
     "work";
 
-    "passes.bytes" -> "passes.definitions";
     "passes.bytes" -> "passes.patching";
+    "passes.bytes" -> "problem";
     "passes.clangdelta" -> "passes.definitions";
     "passes.clangdelta" -> "problem";
     "passes.clangdelta" -> "work";
@@ -66,6 +67,7 @@ digraph imports {
     "reducer" -> "problem";
     "state" -> "cli";
     "state" -> "formatting";
+    "state" -> "history";
     "state" -> "passes.clangdelta";
     "state" -> "problem";
     "state" -> "process";
@@ -80,8 +82,10 @@ digraph imports {
     "subprocess.worker" -> "state";
     "subprocess.worker" -> "subprocess.protocol";
     "subprocess.worker" -> "work";
+    "tui" -> "formatting";
     "tui" -> "subprocess.client";
     "tui" -> "subprocess.protocol";
     "ui" -> "problem";
     "ui" -> "state";
+    "validation" -> "cli";
 }

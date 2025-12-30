@@ -2815,7 +2815,7 @@ def test_content_preview_diff_is_empty():
 
     with (
         patch.object(widget, "_get_available_lines", return_value=10),
-        patch("difflib.unified_diff", return_value=[]),
+        patch("shrinkray.tui.unified_diff", return_value=[]),
     ):
         result = widget.render()
 

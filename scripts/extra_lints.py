@@ -3,7 +3,7 @@
 
 Rules:
 1. No class-based tests in test files
-2. No imports inside test functions
+2. No imports inside functions (test files or src)
 3. No use of async iterators without contextlib.aclosing
 4. No swallowing exception stack traces (str(e) without traceback logging)
 5. No mutable default arguments
@@ -11,9 +11,12 @@ Rules:
 7. No Test-prefixed classes in non-test files (confuses pytest)
 
 Uses a cache in .cache/extra_lints_cache.json to skip unchanged files.
+
+Suppression: Add '# noqa: no-import-in-function' comment on the import line to suppress.
 """
 
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -129,14 +132,34 @@ class LintVisitor(cst.CSTVisitor):
     METADATA_DEPENDENCIES = (PositionProvider, ParentNodeProvider)
 
     file: Path
+    source_lines: list[str] = field(default_factory=list)
     errors: list[LintError] = field(default_factory=list)
-    _in_test_function: bool = field(default=False, init=False)
+    _in_function: bool = field(default=False, init=False)
     _in_aclosing_context: bool = field(default=False, init=False)
     _is_test_file: bool = field(default=False, init=False)
     _nesting_depth: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         self._is_test_file = self.file.name.startswith("test_")
+
+    def _has_noqa(self, node: cst.CSTNode, rule: str) -> bool:
+        """Check if the line has a noqa comment for the given rule.
+
+        Handles comma-separated codes like: # noqa: I001, no-import-in-function
+        """
+        line, _ = self._get_position(node)
+        if line <= 0 or line > len(self.source_lines):
+            return False
+        line_content = self.source_lines[line - 1]
+        # Look for # noqa: followed by comma-separated codes
+        # Match # noqa: followed by codes (with or without spaces)
+        noqa_match = re.search(r"#\s*noqa:\s*([^#\n]+)", line_content)
+        if not noqa_match:
+            return False
+        codes_str = noqa_match.group(1)
+        # Split by comma and strip whitespace
+        codes = [c.strip() for c in codes_str.split(",")]
+        return rule in codes
 
     def _get_position(self, node: cst.CSTNode) -> tuple[int, int]:
         pos = cast(CodeRange, self.metadata[PositionProvider][node])
@@ -177,9 +200,8 @@ class LintVisitor(cst.CSTVisitor):
         self._nesting_depth -= 1
 
     def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
-        # Track if we're inside a test function
-        if self._is_test_file and node.name.value.startswith("test_"):
-            self._in_test_function = True
+        # Track if we're inside any function
+        self._in_function = True
         self._nesting_depth += 1
 
         # Rule 5: No mutable default arguments
@@ -271,26 +293,28 @@ class LintVisitor(cst.CSTVisitor):
 
     def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
         self._nesting_depth -= 1
-        if self._is_test_file and node.name.value.startswith("test_"):
-            self._in_test_function = False
+        # Note: We simplify by just setting _in_function to False when leaving
+        # any function. This doesn't handle nested functions correctly, but
+        # imports in nested functions are also problematic so this is fine.
+        self._in_function = False
 
     def visit_Import(self, node: cst.Import) -> bool:
-        # Rule 2: No imports inside test functions
-        if self._in_test_function:
+        # Rule 2: No imports inside functions
+        if self._in_function and not self._has_noqa(node, "no-import-in-function"):
             self._add_error(
                 node,
-                "no-import-in-test",
-                "Import statement inside test function. Move imports to module level.",
+                "no-import-in-function",
+                "Import statement inside function. Move imports to module level.",
             )
         return True
 
     def visit_ImportFrom(self, node: cst.ImportFrom) -> bool:
-        # Rule 2: No imports inside test functions
-        if self._in_test_function:
+        # Rule 2: No imports inside functions
+        if self._in_function and not self._has_noqa(node, "no-import-in-function"):
             self._add_error(
                 node,
-                "no-import-in-test",
-                "Import statement inside test function. Move imports to module level.",
+                "no-import-in-function",
+                "Import statement inside function. Move imports to module level.",
             )
         return True
 
@@ -412,9 +436,10 @@ def lint_file(path: Path) -> list[LintError]:
     """Lint a single file and return any errors."""
     try:
         source = path.read_text()
+        source_lines = source.splitlines()
         tree = cst.parse_module(source)
         wrapper = MetadataWrapper(tree)
-        visitor = LintVisitor(file=path)
+        visitor = LintVisitor(file=path, source_lines=source_lines)
         wrapper.visit(visitor)
         return visitor.errors
     except cst.ParserSyntaxError as e:

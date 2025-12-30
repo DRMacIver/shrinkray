@@ -6,6 +6,8 @@ allowing analysis and reproduction of reduction runs.
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import re
 import shlex
@@ -418,9 +420,6 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
         Returns:
             The directory content as {relative_path: bytes}
         """
-        import base64
-        import json
-
         serialized = json.loads(data.decode())
         return {k: base64.b64decode(v) for k, v in serialized.items()}
 
@@ -434,9 +433,6 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
         Returns:
             JSON-encoded directory content with base64 file contents
         """
-        import base64
-        import json
-
         serialized = {
             k: base64.b64encode(v).decode() for k, v in sorted(content.items())
         }

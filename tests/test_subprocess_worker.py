@@ -1046,10 +1046,11 @@ async def test_worker_start_reduction_clang_delta_found(tmp_path):
     }
 
     # Mock find_clang_delta to return a fake path and ClangDelta
+    # Patch where they're imported (worker module), not where they're defined
     with patch(
-        "shrinkray.passes.clangdelta.find_clang_delta", return_value="/fake/clang_delta"
+        "shrinkray.subprocess.worker.find_clang_delta", return_value="/fake/clang_delta"
     ):
-        with patch("shrinkray.passes.clangdelta.ClangDelta") as mock_clang_delta:
+        with patch("shrinkray.subprocess.worker.ClangDelta") as mock_clang_delta:
             await worker._start_reduction(params)
 
     assert worker.running is True
@@ -1081,7 +1082,8 @@ async def test_worker_start_reduction_clang_delta_path_provided(tmp_path):
     }
 
     # Mock ClangDelta since the path doesn't exist
-    with patch("shrinkray.passes.clangdelta.ClangDelta") as mock_clang_delta:
+    # Patch where it's imported (worker module), not where it's defined
+    with patch("shrinkray.subprocess.worker.ClangDelta") as mock_clang_delta:
         await worker._start_reduction(params)
 
     assert worker.running is True
@@ -3027,6 +3029,7 @@ async def test_restart_integration_status_updates(tmp_path):
             input_stream.send_command(restart_request)
 
             # Wait for restart response
+            restart_responses: list[Response] = []
             for _ in range(20):
                 await trio.sleep(0.1)
                 messages = parse_worker_output(output.data)

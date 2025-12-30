@@ -387,14 +387,16 @@ class ReducerWorker:
             self._accumulated_interesting_calls += stats.interesting_calls
             self._accumulated_wasted_calls += stats.wasted_interesting_calls
 
-        # Now we know restart will succeed, cancel current reduction
-        if self._cancel_scope is not None:
-            self._cancel_scope.cancel()
-
-        # Set restart flag BEFORE any await points to avoid race with run() loop
-        # The run() loop checks this flag after run_reducer() returns
+        # Set restart flag BEFORE cancelling the scope to avoid race condition.
+        # The run() loop checks this flag after run_reducer() returns - if we
+        # cancel first and the flag isn't set, the loop will exit instead of
+        # restarting.
         self._restart_requested = True
         self.running = False
+
+        # Now cancel current reduction
+        if self._cancel_scope is not None:
+            self._cancel_scope.cancel()
 
         try:
             # Clear old test output to avoid showing stale output from before restart
@@ -404,12 +406,10 @@ class ReducerWorker:
             # Reset state with new initial and exclusions
             self.state.reset_for_restart(new_test_case, excluded_set)
 
-            # Write new test case to file
-            await self.state.write_test_case_to_file(
-                self.state.filename, new_test_case
-            )
-
-            # Get fresh reducer (will create new problem)
+            # Get fresh reducer BEFORE any await points to avoid race condition.
+            # After we cancel the scope, the main run() loop may loop back and
+            # call run_reducer() while we're still in an await. We need the new
+            # reducer to be set before that happens.
             self.reducer = self.state.reducer
             self.problem = self.reducer.target
 
@@ -420,6 +420,11 @@ class ReducerWorker:
                 self._size_history.append((current_runtime, len(new_test_case)))
                 self._last_recorded_size = len(new_test_case)
                 self._last_history_time = current_runtime
+
+            # Write new test case to file (can happen after reducer is set up)
+            await self.state.write_test_case_to_file(
+                self.state.filename, new_test_case
+            )
 
             # Ready to restart - running will be set to True by the run() loop
             return Response(

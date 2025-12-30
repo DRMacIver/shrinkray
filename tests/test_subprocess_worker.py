@@ -2947,3 +2947,136 @@ async def test_restart_integration_stats_not_reset(tmp_path):
     finally:
         os.chdir(old_cwd)
         await input_stream.aclose()
+
+
+@pytest.mark.trio
+async def test_restart_integration_status_updates(tmp_path):
+    """Integration test: verify status shows running passes after restart.
+
+    This tests the bug where after restart, status is stuck on
+    'Selecting reduction pass...' even though reduction is running.
+    """
+    # Create a test file with content that can be reduced
+    target = tmp_path / "test.txt"
+    target.write_text("KEEP\nremove1\nremove2\nremove3\nremove4\nremove5\n")
+
+    # Create a test script that requires 'KEEP' in the file
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/bash\ngrep -q "KEEP" "$1"')
+    script.chmod(0o755)
+
+    input_stream = BidirectionalInputStream()
+    output = MemoryOutputStream()
+
+    start_params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 10.0,
+        "seed": 0,
+        "input_type": "all",
+        "in_place": False,
+        "formatter": "none",
+        "volume": "quiet",
+        "no_clang_delta": True,
+        "history_enabled": True,
+    }
+    start_request = Request(id="start-1", command="start", params=start_params)
+
+    old_cwd = os.getcwd()
+    os.chdir(tmp_path)
+
+    try:
+        worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+        async def run_worker_task():
+            await worker.run()
+
+        async with trio.open_nursery() as nursery:
+            nursery.start_soon(run_worker_task)
+
+            # Send start command
+            input_stream.send_command(start_request)
+
+            # Wait for initial reductions and verify we see "Running reduction pass"
+            saw_running_pass_before = False
+            for _ in range(50):
+                await trio.sleep(0.1)
+                messages = parse_worker_output(output.data)
+                progress = get_progress_updates(messages)
+                if progress:
+                    latest = progress[-1]
+                    if "Running reduction pass" in latest.status:
+                        saw_running_pass_before = True
+                    if latest.reductions >= 1 and saw_running_pass_before:
+                        break
+
+            assert saw_running_pass_before, (
+                "Should have seen 'Running reduction pass' status before restart"
+            )
+
+            # Record the output length so we can find new messages after restart
+            output_len_before_restart = len(output.data)
+
+            # Send restart command
+            restart_request = Request(
+                id="restart-1",
+                command="restart_from",
+                params={"reduction_number": 1},
+            )
+            input_stream.send_command(restart_request)
+
+            # Wait for restart response
+            for _ in range(20):
+                await trio.sleep(0.1)
+                messages = parse_worker_output(output.data)
+                responses = get_responses(messages)
+                restart_responses = [r for r in responses if r.id == "restart-1"]
+                if restart_responses:
+                    break
+
+            assert restart_responses, "Should have received restart response"
+            assert restart_responses[0].error is None, (
+                f"Restart should succeed: {restart_responses[0].error}"
+            )
+
+            # Now wait and verify we see "Running reduction pass" status AFTER restart
+            # This is the bug: status gets stuck on "Selecting reduction pass"
+            saw_running_pass_after = False
+            statuses_after_restart = []
+            calls_after_restart = []
+            for _ in range(30):
+                await trio.sleep(0.1)
+                # Only look at new output after restart
+                new_output = output.data[output_len_before_restart:]
+                messages = parse_worker_output(new_output)
+                progress = get_progress_updates(messages)
+                for p in progress:
+                    statuses_after_restart.append(p.status)
+                    calls_after_restart.append(p.calls)
+                    if "Running reduction pass" in p.status:
+                        saw_running_pass_after = True
+                        break
+                if saw_running_pass_after:
+                    break
+
+            # Debug: check if calls are increasing (indicating reducer is running)
+            calls_increasing = (
+                len(calls_after_restart) >= 2
+                and calls_after_restart[-1] > calls_after_restart[0]
+            )
+
+            assert saw_running_pass_after, (
+                f"BUG: Status stuck after restart! "
+                f"Should have seen 'Running reduction pass' but only saw: "
+                f"{statuses_after_restart[-5:] if statuses_after_restart else 'no statuses'}. "
+                f"Calls progression: {calls_after_restart[-5:] if calls_after_restart else 'none'}. "
+                f"Calls increasing: {calls_increasing}"
+            )
+
+            # Cancel the worker
+            nursery.cancel_scope.cancel()
+
+    finally:
+        os.chdir(old_cwd)
+        await input_stream.aclose()

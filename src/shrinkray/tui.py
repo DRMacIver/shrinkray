@@ -2,14 +2,18 @@
 
 import math
 import os
+import subprocess
+import sys
 import time
 import traceback
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from datetime import timedelta
+from difflib import unified_diff
 from typing import Literal, Protocol, cast
 
 import humanize
+from rich.markup import escape as escape_markup
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
@@ -17,7 +21,18 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.theme import Theme
-from textual.widgets import DataTable, Footer, Header, Label, Static
+from textual.timer import Timer
+from textual.widgets import (
+    DataTable,
+    Footer,
+    Header,
+    Label,
+    ListItem,
+    ListView,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 from textual_plotext import PlotextPlot
 
 from shrinkray.formatting import try_decode
@@ -78,8 +93,6 @@ def detect_terminal_theme() -> bool:
         apple_interface = os.environ.get("__CFBundleIdentifier", "")
         if not apple_interface:
             try:
-                import subprocess
-
                 result = subprocess.run(
                     ["defaults", "read", "-g", "AppleInterfaceStyle"],
                     capture_output=True,
@@ -115,11 +128,15 @@ class ReductionClientProtocol(Protocol):
         no_clang_delta: bool = False,
         clang_delta: str = "",
         trivial_is_error: bool = True,
+        skip_validation: bool = False,
+        history_enabled: bool = True,
+        also_interesting_code: int | None = None,
     ) -> Response: ...
     async def cancel(self) -> Response: ...
     async def disable_pass(self, pass_name: str) -> Response: ...
     async def enable_pass(self, pass_name: str) -> Response: ...
     async def skip_current_pass(self) -> Response: ...
+    async def restart_from(self, reduction_number: int) -> Response: ...
     async def close(self) -> None: ...
 
     @property
@@ -508,8 +525,6 @@ class ContentPreview(Static):
             self._last_displayed_content
             and self._last_displayed_content != self.preview_content
         ):
-            from difflib import unified_diff
-
             prev_lines = self._last_displayed_content.split("\n")
             curr_lines = self.preview_content.split("\n")
             diff = list(unified_diff(prev_lines, curr_lines, lineterm=""))
@@ -593,14 +608,17 @@ class OutputPreview(Static):
             return header
 
         available_lines = self._get_available_lines()
-        lines = self.output_content.split("\n")
+        # Escape the output content to prevent Rich markup interpretation
+        # (test output may contain characters like ^ that have special meaning)
+        escaped_content = escape_markup(self.output_content)
+        lines = escaped_content.split("\n")
 
         # Build prefix (header + newline, or empty if no header)
         prefix = f"{header}\n" if header else ""
 
         # Show tail of output (most recent lines)
         if len(lines) <= available_lines:
-            return f"{prefix}{self.output_content}"
+            return f"{prefix}{escaped_content}"
 
         # Truncate from the beginning
         truncated_lines = lines[-(available_lines):]
@@ -718,13 +736,19 @@ class ExpandedBoxModal(ModalScreen[None]):
 
     def _read_file(self, file_path: str) -> str:
         """Read file content, decoding as text if possible."""
-        with open(file_path, "rb") as f:
-            raw_content = f.read()
-        # Try to decode as text, fall back to hex display if binary
-        encoding, text = try_decode(raw_content)
-        if encoding is not None:
-            return text
-        return "[Binary content - hex display]\n\n" + raw_content.hex()
+        if not os.path.isfile(file_path):
+            return "[dim]File not found[/dim]"
+        try:
+            with open(file_path, "rb") as f:
+                raw_content = f.read()
+            # Try to decode as text, fall back to hex display if binary
+            encoding, text = try_decode(raw_content)
+            if encoding is not None:
+                # Escape Rich markup to prevent interpretation of [ ] etc
+                return escape_markup(text)
+            return "[Binary content - hex display]\n\n" + raw_content.hex()
+        except OSError:
+            return "[red]Error reading file[/red]"
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -1041,6 +1065,447 @@ class PassStatsScreen(ModalScreen[None]):
         self._app.push_screen(HelpScreen())
 
 
+class HistoryExplorerModal(ModalScreen[None]):
+    """Modal for browsing history reductions and also-interesting cases."""
+
+    CSS = """
+    HistoryExplorerModal {
+        align: center middle;
+    }
+
+    HistoryExplorerModal > Vertical {
+        width: 95%;
+        height: 90%;
+        background: $panel;
+        border: thick $primary;
+    }
+
+    HistoryExplorerModal #history-title {
+        text-align: center;
+        text-style: bold;
+        height: auto;
+        width: 100%;
+        padding: 0 1;
+        border-bottom: solid $primary;
+    }
+
+    HistoryExplorerModal TabbedContent {
+        height: 1fr;
+    }
+
+    HistoryExplorerModal #history-content,
+    HistoryExplorerModal #also-interesting-content {
+        height: 1fr;
+    }
+
+    HistoryExplorerModal #history-list-container,
+    HistoryExplorerModal #also-interesting-list-container {
+        width: 30%;
+        height: 100%;
+        border-right: solid $primary;
+    }
+
+    HistoryExplorerModal ListView {
+        height: 100%;
+    }
+
+    HistoryExplorerModal #history-preview-container,
+    HistoryExplorerModal #also-interesting-preview-container {
+        width: 70%;
+        height: 100%;
+        padding: 0 1;
+    }
+
+    HistoryExplorerModal #file-content-label,
+    HistoryExplorerModal #also-file-label {
+        text-style: bold;
+        height: auto;
+        margin-top: 1;
+    }
+
+    HistoryExplorerModal #file-content,
+    HistoryExplorerModal #also-file-content {
+        height: 1fr;
+        border: solid $secondary;
+        padding: 1;
+    }
+
+    HistoryExplorerModal #output-label,
+    HistoryExplorerModal #also-output-label {
+        text-style: bold;
+        height: auto;
+        margin-top: 1;
+    }
+
+    HistoryExplorerModal #output-content,
+    HistoryExplorerModal #also-output-content {
+        height: 1fr;
+        border: solid $secondary;
+        padding: 1;
+    }
+
+    HistoryExplorerModal #history-footer {
+        dock: bottom;
+        height: auto;
+        padding: 0 1;
+        text-align: center;
+        border-top: solid $primary;
+    }
+    """
+
+    BINDINGS = [
+        ("escape,q,x", "dismiss", "Close"),
+        ("r", "restart_from_here", "Restart from here"),
+    ]
+
+    def __init__(self, history_dir: str, target_basename: str) -> None:
+        super().__init__()
+        self._history_dir = history_dir
+        self._target_basename = target_basename
+        self._reductions_entries: list[str] = []  # List of entry paths
+        self._also_interesting_entries: list[str] = []
+        self._preview_timer: Timer | None = None
+        self._pending_preview: tuple[str, str, str] | None = None
+        self._refresh_timer: Timer | None = None
+        # Track selected entry by path (more robust than by index)
+        self._selected_reductions_path: str | None = None
+        self._selected_also_interesting_path: str | None = None
+        # Guard against updating selection during refresh (clear/append triggers
+        # Highlighted events that would overwrite the saved selection path)
+        self._refreshing: bool = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("History Explorer", id="history-title")
+            with TabbedContent(id="history-tabs"):
+                with TabPane("Reductions", id="reductions-tab"):
+                    with Horizontal(id="history-content"):
+                        with Vertical(id="history-list-container"):
+                            yield ListView(id="reductions-list")
+                        with Vertical(id="history-preview-container"):
+                            yield Label("File Content:", id="file-content-label")
+                            with VerticalScroll(id="file-content"):
+                                yield Static("", id="file-preview")
+                            yield Label("Test Output:", id="output-label")
+                            with VerticalScroll(id="output-content"):
+                                yield Static("", id="output-preview")
+                with TabPane("Also-Interesting", id="also-interesting-tab"):
+                    with Horizontal(id="also-interesting-content"):
+                        with Vertical(id="also-interesting-list-container"):
+                            yield ListView(id="also-interesting-list")
+                        with Vertical(id="also-interesting-preview-container"):
+                            yield Label("File Content:", id="also-file-label")
+                            with VerticalScroll(id="also-file-content"):
+                                yield Static("", id="also-file-preview")
+                            yield Label("Test Output:", id="also-output-label")
+                            with VerticalScroll(id="also-output-content"):
+                                yield Static("", id="also-output-preview")
+            yield Static(
+                "↑/↓: Navigate  Tab: Switch  r: Restart from here  Esc/q/x: Close",
+                id="history-footer",
+            )
+
+    def on_mount(self) -> None:
+        """Populate the lists with history entries."""
+        self._populate_list("reductions", "reductions-list")
+        self._populate_list("also-interesting", "also-interesting-list")
+
+        # Focus the reductions list so arrow keys work immediately
+        self.query_one("#reductions-list", ListView).focus()
+
+        # Start periodic refresh of the lists
+        self._refresh_timer = self.set_interval(1.0, self._refresh_lists)
+
+    def on_unmount(self) -> None:
+        """Clean up timers when modal is closed."""
+        if self._preview_timer is not None:
+            self._preview_timer.stop()
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+
+    def _refresh_lists(self) -> None:
+        """Refresh the history lists to show new entries."""
+        self._refresh_list("reductions", "reductions-list")
+        self._refresh_list("also-interesting", "also-interesting-list")
+
+    def _refresh_list(self, subdir: str, list_id: str) -> None:
+        """Refresh a single list, preserving selection.
+
+        This uses an incremental update strategy: only add new entries rather
+        than clearing and repopulating. This preserves ListView selection
+        naturally without fighting async DOM updates.
+        """
+        entries = self._scan_entries(subdir)
+        list_view = self.query_one(f"#{list_id}", ListView)
+
+        # Get current entries for comparison
+        if subdir == "reductions":
+            old_entries = self._reductions_entries
+        else:
+            old_entries = self._also_interesting_entries
+
+        new_entries = [e[1] for e in entries]
+
+        # Only update if entries changed
+        if new_entries == old_entries:
+            return
+
+        # Check if this is purely additive (common case: new reductions added)
+        # In this case, we can just append the new items without touching selection
+        if old_entries and new_entries[: len(old_entries)] == old_entries:
+            # New entries were added at the end - just append them
+            new_items = entries[len(old_entries) :]
+            for entry_num, _, size in new_items:
+                size_str = humanize.naturalsize(size, binary=True)
+                list_view.append(ListItem(Label(f"{entry_num}  ({size_str})")))
+
+            # Update stored entries
+            if subdir == "reductions":
+                self._reductions_entries = new_entries
+            else:
+                self._also_interesting_entries = new_entries
+            return
+
+        # Entries changed in a non-additive way (items removed or reordered).
+        # This happens during restart-from-point. Do a full rebuild.
+        selected_path = (
+            self._selected_reductions_path
+            if subdir == "reductions"
+            else self._selected_also_interesting_path
+        )
+
+        # Store new entries
+        if subdir == "reductions":
+            self._reductions_entries = new_entries
+        else:
+            self._also_interesting_entries = new_entries
+
+        # Find the index of the previously selected path in the new entries
+        new_index: int | None = None
+        if selected_path is not None and selected_path in new_entries:
+            new_index = new_entries.index(selected_path)
+
+        # Guard against Highlighted events during clear/repopulate
+        self._refreshing = True
+
+        # Clear and repopulate
+        list_view.clear()
+
+        if not entries:
+            list_view.append(ListItem(Label("[dim]No entries yet[/dim]")))
+            self.call_after_refresh(self._finish_refresh)
+            return
+
+        for entry_num, _, size in entries:
+            size_str = humanize.naturalsize(size, binary=True)
+            list_view.append(ListItem(Label(f"{entry_num}  ({size_str})")))
+
+        # Restore selection after DOM updates complete
+        if new_index is not None:
+            self.call_after_refresh(self._restore_list_selection, list_view, new_index)
+        else:
+            self.call_after_refresh(self._finish_refresh)
+
+    def _finish_refresh(self) -> None:
+        """Mark refresh as complete, allowing selection tracking to resume."""
+        self._refreshing = False
+
+    def _restore_list_selection(self, list_view: ListView, index: int) -> None:
+        """Restore selection to a list view after async DOM updates."""
+        child_count = len(list_view.children)
+        if child_count > 0:
+            list_view.index = min(index, child_count - 1)
+        self._refreshing = False
+
+    def _scan_entries(self, subdir: str) -> list[tuple[str, str, int]]:
+        """Scan a history subdirectory for entries.
+
+        Returns list of (entry_number, entry_path, file_size) tuples, sorted by number.
+        """
+        entries = []
+        dir_path = os.path.join(self._history_dir, subdir)
+        if not os.path.isdir(dir_path):
+            return entries
+
+        for entry_name in os.listdir(dir_path):
+            entry_path = os.path.join(dir_path, entry_name)
+            if os.path.isdir(entry_path):
+                # Get file size
+                file_path = os.path.join(entry_path, self._target_basename)
+                if os.path.isfile(file_path):
+                    size = os.path.getsize(file_path)
+                    entries.append((entry_name, entry_path, size))
+
+        # Sort by entry number
+        entries.sort(key=lambda x: x[0])
+        return entries
+
+    def _populate_list(self, subdir: str, list_id: str) -> None:
+        """Populate a ListView with entries from a history subdirectory."""
+        entries = self._scan_entries(subdir)
+        list_view = self.query_one(f"#{list_id}", ListView)
+
+        entry_paths = [e[1] for e in entries]
+        if subdir == "reductions":
+            self._reductions_entries = entry_paths
+        else:
+            self._also_interesting_entries = entry_paths
+
+        if not entries:
+            list_view.append(ListItem(Label("[dim]No entries yet[/dim]")))
+            return
+
+        for entry_num, _, size in entries:
+            size_str = humanize.naturalsize(size, binary=True)
+            # Don't use IDs - they conflict with refresh operations
+            list_view.append(ListItem(Label(f"{entry_num}  ({size_str})")))
+
+        # Select first item and track its path
+        list_view.index = 0
+        if subdir == "reductions":
+            self._selected_reductions_path = entry_paths[0]
+        else:
+            self._selected_also_interesting_path = entry_paths[0]
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Handle selection in a ListView."""
+        list_view = event.list_view
+
+        # Determine which list was selected
+        if list_view.id == "reductions-list":
+            entries = self._reductions_entries
+            file_preview_id = "file-preview"
+            output_preview_id = "output-preview"
+        else:
+            entries = self._also_interesting_entries
+            file_preview_id = "also-file-preview"
+            output_preview_id = "also-output-preview"
+
+        # Get the selected entry path
+        if not entries or list_view.index is None or list_view.index >= len(entries):
+            return
+
+        entry_path = entries[list_view.index]
+        self._update_preview(entry_path, file_preview_id, output_preview_id)
+
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        """Handle highlighting (cursor movement) in a ListView."""
+        # During refresh, clear/append trigger Highlighted events that would
+        # overwrite the saved selection path. Skip updating selection tracking
+        # during refresh - the selection will be restored by _restore_list_selection.
+        if self._refreshing:
+            return
+
+        list_view = event.list_view
+
+        # Determine which list was highlighted
+        if list_view.id == "reductions-list":
+            entries = self._reductions_entries
+            file_preview_id = "file-preview"
+            output_preview_id = "output-preview"
+        else:
+            entries = self._also_interesting_entries
+            file_preview_id = "also-file-preview"
+            output_preview_id = "also-output-preview"
+
+        # Get the highlighted entry path
+        if not entries or list_view.index is None or list_view.index >= len(entries):
+            return
+
+        entry_path = entries[list_view.index]
+
+        # Track the selected path for restoration after refresh
+        if list_view.id == "reductions-list":
+            self._selected_reductions_path = entry_path
+        else:
+            self._selected_also_interesting_path = entry_path
+
+        # Debounce preview updates to avoid lag when navigating quickly
+        self._pending_preview = (entry_path, file_preview_id, output_preview_id)
+        if self._preview_timer is not None:
+            self._preview_timer.stop()
+        self._preview_timer = self.set_timer(0.05, self._do_pending_preview)
+
+    def _do_pending_preview(self) -> None:
+        """Execute the pending preview update."""
+        if self._pending_preview is not None:
+            entry_path, file_preview_id, output_preview_id = self._pending_preview
+            self._pending_preview = None
+            self._update_preview(entry_path, file_preview_id, output_preview_id)
+
+    def _update_preview(
+        self, entry_path: str, file_preview_id: str, output_preview_id: str
+    ) -> None:
+        """Update the preview pane with content from the selected entry."""
+        # Read file content
+        file_path = os.path.join(entry_path, self._target_basename)
+        file_content = self._read_file(file_path)
+        self.query_one(f"#{file_preview_id}", Static).update(file_content)
+
+        # Read output content
+        output_path = os.path.join(entry_path, f"{self._target_basename}.out")
+        if os.path.isfile(output_path):
+            output_content = self._read_file(output_path)
+        else:
+            output_content = "[dim]No output captured[/dim]"
+        self.query_one(f"#{output_preview_id}", Static).update(output_content)
+
+    def _read_file(self, file_path: str) -> str:
+        """Read file content, decoding as text if possible."""
+        if not os.path.isfile(file_path):
+            return "[dim]File not found[/dim]"
+        try:
+            with open(file_path, "rb") as f:
+                raw_content = f.read()
+            # Truncate large files
+            max_size = 50000
+            truncated = len(raw_content) > max_size
+            if truncated:
+                raw_content = raw_content[:max_size]
+            # Try to decode as text
+            encoding, text = try_decode(raw_content)
+            if encoding is not None:
+                # Escape Rich markup to prevent interpretation of [ ] etc
+                text = escape_markup(text)
+                if truncated:
+                    text += "\n\n[dim]... (truncated)[/dim]"
+                return text
+            # Binary content - hex display
+            hex_display = "[Binary content - hex display]\n\n" + raw_content.hex()
+            if truncated:
+                hex_display += "\n\n[dim]... (truncated)[/dim]"
+            return hex_display
+        except OSError:
+            return "[red]Error reading file[/red]"
+
+    def action_restart_from_here(self) -> None:
+        """Restart reduction from the currently selected history point."""
+        # Only works in Reductions tab
+        tabs = self.query_one("#history-tabs", TabbedContent)
+        if tabs.active != "reductions-tab":
+            app = cast("ShrinkRayApp", self.app)
+            app.notify("Restart only available in Reductions tab", severity="warning")
+            return
+
+        # Get the selected reduction number
+        list_view = self.query_one("#reductions-list", ListView)
+        if list_view.index is None or list_view.index >= len(self._reductions_entries):
+            app = cast("ShrinkRayApp", self.app)
+            app.notify("No reduction selected", severity="warning")
+            return
+
+        entry_path = self._reductions_entries[list_view.index]
+        # Extract number from path (e.g., ".../reductions/0003" -> 3)
+        reduction_number = int(os.path.basename(entry_path))
+
+        # Trigger restart via app
+        app = cast("ShrinkRayApp", self.app)
+        app._trigger_restart_from(reduction_number)
+
+        # Close modal
+        self.dismiss()
+
+
 class ShrinkRayApp(App[None]):
     """Textual app for Shrink Ray."""
 
@@ -1120,6 +1585,7 @@ class ShrinkRayApp(App[None]):
         ("q", "quit", "Quit"),
         ("p", "show_pass_stats", "Pass Stats"),
         ("c", "skip_current_pass", "Skip Pass"),
+        ("x", "show_history", "History"),
         ("h", "show_help", "Help"),
         ("up", "focus_up", "Focus Up"),
         ("down", "focus_down", "Focus Down"),
@@ -1147,6 +1613,8 @@ class ShrinkRayApp(App[None]):
         exit_on_completion: bool = True,
         client: ReductionClientProtocol | None = None,
         theme: ThemeMode = "auto",
+        history_enabled: bool = True,
+        also_interesting_code: int | None = None,
     ) -> None:
         super().__init__()
         self._file_path = file_path
@@ -1166,9 +1634,14 @@ class ShrinkRayApp(App[None]):
         self._owns_client = client is None
         self._completed = False
         self._theme = theme
+        self._history_enabled = history_enabled
+        self._also_interesting_code = also_interesting_code
         self._latest_pass_stats: list[PassStatsData] = []
         self._current_pass_name: str = ""
         self._disabled_passes: list[str] = []
+        # History explorer state
+        self._history_dir: str | None = None
+        self._target_basename: str = ""
 
     # Box IDs in navigation order: [top-left, top-right, bottom-left, bottom-right]
     _BOX_IDS = [
@@ -1182,7 +1655,7 @@ class ShrinkRayApp(App[None]):
         yield Header()
         with Vertical(id="main-container"):
             yield Label(
-                "Shrink Ray - [h] help, [p] passes, [c] skip pass, [q] quit",
+                "Shrink Ray - [h] help, [p] passes, [x] history, [c] skip, [q] quit",
                 id="status-label",
                 markup=False,
             )
@@ -1324,6 +1797,8 @@ class ShrinkRayApp(App[None]):
                     clang_delta=self._clang_delta,
                     trivial_is_error=self._trivial_is_error,
                     skip_validation=True,
+                    history_enabled=self._history_enabled,
+                    also_interesting_code=self._also_interesting_code,
                 )
 
                 if response.error:
@@ -1363,6 +1838,10 @@ class ShrinkRayApp(App[None]):
                     self._latest_pass_stats = update.pass_stats
                     self._current_pass_name = update.current_pass_name
                     self._disabled_passes = update.disabled_passes
+                    # Update history info for history explorer
+                    if update.history_dir is not None:
+                        self._history_dir = update.history_dir
+                        self._target_basename = update.target_basename
 
                     # Check if all passes are disabled
                     self._check_all_passes_disabled()
@@ -1385,9 +1864,10 @@ class ShrinkRayApp(App[None]):
             else:
                 self.update_status("Reduction completed! Press 'q' to exit.")
 
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
-            self.exit(return_code=1, message=f"Error: {e}")
+            # Include full traceback in error message in case stderr isn't visible
+            self.exit(return_code=1, message=f"Error:\n{traceback.format_exc()}")
         finally:
             if self._owns_client and self._client:
                 await self._client.close()
@@ -1460,6 +1940,13 @@ class ShrinkRayApp(App[None]):
         """Show the help modal."""
         self.push_screen(HelpScreen())
 
+    def action_show_history(self) -> None:
+        """Show the history explorer modal."""
+        if self._history_dir is None:
+            self.notify("History not available", severity="warning")
+            return
+        self.push_screen(HistoryExplorerModal(self._history_dir, self._target_basename))
+
     def action_skip_current_pass(self) -> None:
         """Skip the currently running pass."""
         if self._client and not self._completed:
@@ -1469,6 +1956,25 @@ class ShrinkRayApp(App[None]):
         """Skip the current pass via the client."""
         if self._client is not None:
             await self._client.skip_current_pass()
+
+    def _trigger_restart_from(self, reduction_number: int) -> None:
+        """Trigger restart from a specific reduction point."""
+        if self._client and not self._completed:
+            self.run_worker(self._do_restart_from(reduction_number))
+
+    async def _do_restart_from(self, reduction_number: int) -> None:
+        """Execute restart command."""
+        if self._client is None:
+            self.notify("No client available", severity="error")
+            return
+        response = await self._client.restart_from(reduction_number)
+        if response.error:
+            self.notify(f"Restart failed: {response.error}", severity="error")
+        else:
+            self.notify(
+                f"Restarted from reduction {reduction_number:04d}",
+                severity="information",
+            )
 
     @property
     def is_completed(self) -> bool:
@@ -1491,14 +1997,14 @@ def run_textual_ui(
     trivial_is_error: bool = True,
     exit_on_completion: bool = True,
     theme: ThemeMode = "auto",
+    history_enabled: bool = True,
+    also_interesting_code: int | None = None,
 ) -> None:
     """Run the textual TUI.
 
     Note: Validation must be done before calling this function.
     The caller (main()) is responsible for running run_validation() first.
     """
-    import sys
-
     # Start the TUI app - validation has already been done by main()
     app = ShrinkRayApp(
         file_path=file_path,
@@ -1515,6 +2021,8 @@ def run_textual_ui(
         trivial_is_error=trivial_is_error,
         exit_on_completion=exit_on_completion,
         theme=theme,
+        history_enabled=history_enabled,
+        also_interesting_code=also_interesting_code,
     )
     app.run()
     if app.return_code:

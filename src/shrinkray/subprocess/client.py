@@ -1,11 +1,13 @@
 """Client for communicating with the reducer subprocess."""
 
 import asyncio
+import os
 import sys
+import tempfile
 import traceback
 import uuid
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import IO, Any
 
 from shrinkray.subprocess.protocol import (
     ProgressUpdate,
@@ -27,18 +29,28 @@ class SubprocessClient:
         self._completed = False
         self._error_message: str | None = None
         self._debug_mode = debug_mode
+        self._stderr_log_file: IO[str] | None = None
+        self._stderr_log_path: str | None = None
 
     async def start(self) -> None:
         """Launch the subprocess."""
-        # In debug mode, inherit stderr so interestingness test output
-        # goes directly to the parent process's stderr
+        # Log subprocess stderr to a temp file for debugging.
+        # This captures bootstrap errors before history is set up.
+        # Once the worker starts with history enabled, it redirects its own
+        # stderr to the per-run history directory.
+        fd, self._stderr_log_path = tempfile.mkstemp(
+            prefix="shrinkray-stderr-",
+            suffix=".log",
+        )
+        self._stderr_log_file = os.fdopen(fd, "w", encoding="utf-8")
+
         self._process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
             "shrinkray.subprocess.worker",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=sys.stderr,
+            stderr=self._stderr_log_file,
         )
         self._reader_task = asyncio.create_task(self._read_output())
 
@@ -137,6 +149,8 @@ class SubprocessClient:
         clang_delta: str = "",
         trivial_is_error: bool = True,
         skip_validation: bool = False,
+        history_enabled: bool = True,
+        also_interesting_code: int | None = None,
     ) -> Response:
         """Start the reduction process."""
         params: dict[str, Any] = {
@@ -151,6 +165,8 @@ class SubprocessClient:
             "clang_delta": clang_delta,
             "trivial_is_error": trivial_is_error,
             "skip_validation": skip_validation,
+            "history_enabled": history_enabled,
+            "also_interesting_code": also_interesting_code,
         }
         if parallelism is not None:
             params["parallelism"] = parallelism
@@ -203,6 +219,27 @@ class SubprocessClient:
             traceback.print_exc()
             return Response(id="", error="Failed to skip pass")
 
+    async def restart_from(self, reduction_number: int) -> Response:
+        """Restart reduction from a specific history point.
+
+        This moves all reductions after the specified point to also-interesting,
+        resets the current test case to that point, and continues reduction
+        from there, rejecting previously reduced values.
+
+        Args:
+            reduction_number: The reduction entry number to restart from
+                (e.g., 3 for reduction 0003)
+        """
+        if self._completed:
+            return Response(id="", error="Reduction already completed")
+        try:
+            return await self.send_command(
+                "restart_from", {"reduction_number": reduction_number}
+            )
+        except Exception:
+            traceback.print_exc()
+            return Response(id="", error="Failed to send restart command")
+
     async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
         """Yield progress updates as they arrive."""
         while not self._completed:
@@ -247,6 +284,18 @@ class SubprocessClient:
                     await self._process.wait()
                 except ProcessLookupError:
                     pass  # Process already exited
+
+        # Close and remove the stderr log file
+        if self._stderr_log_file is not None:
+            try:
+                self._stderr_log_file.close()
+            except Exception:
+                pass
+        if self._stderr_log_path is not None:
+            try:
+                os.unlink(self._stderr_log_path)
+            except Exception:
+                pass
 
     async def __aenter__(self) -> "SubprocessClient":
         await self.start()

@@ -56,6 +56,9 @@ class FakeReductionClientForSnapshots:
         no_clang_delta: bool = False,
         clang_delta: str = "",
         trivial_is_error: bool = True,
+        skip_validation: bool = False,
+        history_enabled: bool = True,
+        also_interesting_code: int | None = None,
     ) -> Response:
         return Response(id="start", result={"status": "started"})
 
@@ -75,6 +78,9 @@ class FakeReductionClientForSnapshots:
 
     async def skip_current_pass(self) -> Response:
         return Response(id="skip", result={"status": "skipped"})
+
+    async def restart_from(self, reduction_number: int) -> Response:
+        return Response(id="restart", result={"status": "restarted", "size": 100})
 
     async def close(self) -> None:
         pass
@@ -428,3 +434,91 @@ def test_long_test_output(snap_compare, update_with_long_output):
     """Snapshot test showing truncated long output."""
     app = make_app_with_updates([update_with_long_output])
     assert snap_compare(app, terminal_size=(120, 40), run_before=wait_for_render)
+
+
+# === History explorer modal snapshot tests ===
+
+
+@pytest.fixture
+def history_dir_with_entries(tmp_path):
+    """Create a history directory with test entries for snapshot testing."""
+    history_dir = tmp_path / ".shrinkray" / "run-snapshot-test"
+
+    # Create some reductions
+    for i in range(5):
+        entry_dir = history_dir / "reductions" / f"000{i + 1}"
+        entry_dir.mkdir(parents=True)
+        # Each reduction gets progressively smaller
+        content = f"// Reduction {i + 1}\nint main() {{\n    return {5 - i};\n}}"
+        (entry_dir / "test.c").write_text(content)
+        (entry_dir / "test.c.out").write_text("Exit code: 0\nCompiled successfully")
+
+    # Create some also-interesting entries
+    for i in range(2):
+        entry_dir = history_dir / "also-interesting" / f"000{i + 1}"
+        entry_dir.mkdir(parents=True)
+        content = f"// Also interesting {i + 1}\nint main() {{ return {10 + i}; }}"
+        (entry_dir / "test.c").write_text(content)
+        (entry_dir / "test.c.out").write_text(
+            f"Exit code: {10 + i}\nInteresting behavior"
+        )
+
+    return str(history_dir)
+
+
+@pytest.fixture
+def update_with_history(history_dir_with_entries) -> ProgressUpdate:
+    """A progress update with history directory set."""
+    return ProgressUpdate(
+        status="Running DeleteChunks",
+        size=5000,
+        original_size=10000,
+        calls=150,
+        reductions=25,
+        interesting_calls=50,
+        wasted_calls=10,
+        runtime=30.5,
+        parallel_workers=4,
+        average_parallelism=3.8,
+        effective_parallelism=3.5,
+        time_since_last_reduction=2.5,
+        content_preview="int main() {\n    return 0;\n}",
+        hex_mode=False,
+        history_dir=history_dir_with_entries,
+        target_basename="test.c",
+    )
+
+
+def test_history_modal_reductions_tab(snap_compare, update_with_history):
+    """Snapshot test for history modal with reductions tab visible."""
+
+    async def open_history(pilot):
+        # Wait for app to render
+        await pilot.pause()
+        # Press 'x' to open history modal
+        await pilot.press("x")
+        # Wait for modal to render
+        await pilot.pause()
+
+    app = make_app_with_updates([update_with_history])
+    assert snap_compare(app, terminal_size=(120, 40), run_before=open_history)
+
+
+def test_history_modal_also_interesting_tab(snap_compare, update_with_history):
+    """Snapshot test for history modal with also-interesting tab visible."""
+
+    async def open_history_and_switch_tab(pilot):
+        # Wait for app to render
+        await pilot.pause()
+        # Press 'x' to open history modal
+        await pilot.press("x")
+        # Wait for modal to render
+        await pilot.pause()
+        # Press tab to switch to also-interesting tab
+        await pilot.press("tab")
+        await pilot.pause()
+
+    app = make_app_with_updates([update_with_history])
+    assert snap_compare(
+        app, terminal_size=(120, 40), run_before=open_history_and_switch_tab
+    )

@@ -17,6 +17,13 @@ import humanize
 import trio
 from attrs import define
 
+from shrinkray.cli import InputType
+from shrinkray.formatting import default_reformat_data, determine_formatter_command
+from shrinkray.history import (
+    HistoryManager,
+    deserialize_directory,
+    serialize_directory,
+)
 from shrinkray.passes.clangdelta import ClangDelta
 from shrinkray.problem import (
     BasicReductionProblem,
@@ -24,6 +31,7 @@ from shrinkray.problem import (
     ReductionProblem,
     sort_key_for_initial,
 )
+from shrinkray.process import interrupt_wait_and_kill
 from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
 
@@ -191,28 +199,112 @@ class ShrinkRayState[TestCase](ABC):
 
     first_call_time: float | None = None
 
-    # Lazy imports to break circular dependencies:
-    # - shrinkray.process imports from shrinkray.work which imports from here
-    # - shrinkray.cli imports from here for state configuration
-    # These are cached after first import for performance.
-    _interrupt_wait_and_kill: Any = None
-    _InputType: Any = None  # InputType enum from shrinkray.cli
-
     # Stores the output from the last debug run
     _last_debug_output: str = ""
 
-    # Optional output manager for capturing test output (TUI mode)
+    # Stores the output from the most recently completed test (for history recording)
+    # This is read immediately after the test's output file is closed to avoid
+    # race conditions with other parallel tests
+    _last_test_output: bytes | None = None
+
+    # Optional output manager for capturing test output (TUI mode or history)
     output_manager: OutputCaptureManager | None = None
+
+    # History recording (enabled by default)
+    history_enabled: bool = True
+    history_base_dir: str | None = None  # Base directory for .shrinkray folder
+    history_manager: HistoryManager | None = None
+
+    # Also-interesting exit code (None = disabled)
+    # When a test returns this code, it's recorded but not used for reduction
+    also_interesting_code: int | None = None
+
+    # Set of test cases to exclude from interestingness (for restart-from-point)
+    # These are byte-identical matches of previously reduced values
+    excluded_test_cases: set[bytes] | None = None
+
+    # Temp directory for output capture (when not using TUI's output manager)
+    _output_tempdir: TemporaryDirectory | None = None
+
+    # Stores output from successful tests, keyed by test case bytes
+    # This avoids race conditions when multiple tests run in parallel
+    _successful_outputs: dict[bytes, bytes] = {}
 
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
+        self._successful_outputs = {}  # Initialize mutable default
         self.setup_formatter()
+        self._setup_history()
 
     @abstractmethod
     def setup_formatter(self): ...
 
+    @property
+    def is_directory_mode(self) -> bool:
+        """Whether this state manages directory test cases."""
+        return False
+
+    def _setup_history(self) -> None:
+        """Set up history recording if enabled or also-interesting is configured."""
+        # Create history manager if either:
+        # 1. Full history is enabled, or
+        # 2. also_interesting_code is set (records only also-interesting cases)
+        if not self.history_enabled and self.also_interesting_code is None:
+            return
+
+        # Create history manager (record_reductions=False if only also-interesting)
+        self.history_manager = HistoryManager.create(
+            self.test,
+            self.filename,
+            record_reductions=self.history_enabled,
+            is_directory=self.is_directory_mode,
+            base_dir=self.history_base_dir,
+        )
+
+        # Ensure we have an output manager for capturing test output
+        if self.output_manager is None:
+            self._output_tempdir = TemporaryDirectory()
+            self.output_manager = OutputCaptureManager(
+                output_dir=self._output_tempdir.name
+            )
+
+    def _get_last_captured_output(self) -> bytes | None:
+        """Get the output from the most recently completed test.
+
+        Returns the output content if available, None otherwise.
+        This returns the output that was captured immediately when the test
+        completed, avoiding race conditions with other parallel tests.
+        """
+        return self._last_test_output
+
+    def _check_also_interesting(self, exit_code: int, test_case: TestCase) -> None:
+        """Check if exit code matches also-interesting and record if so.
+
+        Args:
+            exit_code: The exit code from the test
+            test_case: The test case that was tested
+        """
+        if (
+            self.also_interesting_code is not None
+            and exit_code == self.also_interesting_code
+            and self.history_manager is not None
+        ):
+            test_case_bytes = self._get_test_case_bytes(test_case)
+            output = self._get_last_captured_output()
+            self.history_manager.record_also_interesting(test_case_bytes, output)
+
     @abstractmethod
     def new_reducer(self, problem: ReductionProblem[TestCase]) -> Reducer[TestCase]: ...
+
+    @abstractmethod
+    def _get_initial_bytes(self) -> bytes:
+        """Get the initial test case as bytes for history recording."""
+        ...
+
+    @abstractmethod
+    def _get_test_case_bytes(self, test_case: TestCase) -> bytes:
+        """Convert a test case to bytes for history recording."""
+        ...
 
     @abstractmethod
     async def write_test_case_to_file_impl(self, working: str, test_case: TestCase): ...
@@ -223,19 +315,9 @@ class ShrinkRayState[TestCase](ABC):
     async def run_script_on_file(
         self, working: str, cwd: str, debug: bool = False
     ) -> int:
-        # Lazy import to avoid circular dependency
-        if self._interrupt_wait_and_kill is None:
-            from shrinkray.process import interrupt_wait_and_kill
-
-            self._interrupt_wait_and_kill = interrupt_wait_and_kill
-        if self._InputType is None:
-            from shrinkray.cli import InputType
-
-            self._InputType = InputType
-
         if not os.path.exists(working):
             raise ValueError(f"No such file {working}")
-        if self.input_type.enabled(self._InputType.arg):
+        if self.input_type.enabled(InputType.arg):
             command = self.test + [working]
         else:
             command = self.test
@@ -246,9 +328,7 @@ class ShrinkRayState[TestCase](ABC):
             "cwd": cwd,
             "check": False,
         }
-        if self.input_type.enabled(self._InputType.stdin) and not os.path.isdir(
-            working
-        ):
+        if self.input_type.enabled(InputType.stdin) and not os.path.isdir(working):
             with open(working, "rb") as i:
                 kwargs["stdin"] = i.read()
         else:
@@ -291,6 +371,7 @@ class ShrinkRayState[TestCase](ABC):
         # Determine output handling
         test_id: int | None = None
         output_file_handle = None
+        output_path: str | None = None
         exit_code: int | None = None  # Track for output manager
 
         if self.output_manager is not None:
@@ -337,7 +418,7 @@ class ShrinkRayState[TestCase](ABC):
 
                     if sp.returncode is None:
                         # Process didn't terminate before timeout - kill it
-                        await self._interrupt_wait_and_kill(sp)
+                        await interrupt_wait_and_kill(sp)
 
                     # Check for timeout violation (only when timeout is explicitly set)
                     if (
@@ -364,21 +445,25 @@ class ShrinkRayState[TestCase](ABC):
 
                 return result
         finally:
-            # Clean up output file handle and mark test as completed
+            # Clean up output file handle and capture output immediately
             if output_file_handle is not None:
                 output_file_handle.close()
+                # Read the output file NOW, before any other test can interfere
+                # This avoids race conditions where get_current_output() returns
+                # a different test's partial output
+                # output_path must be set since it's assigned with output_file_handle
+                assert output_path is not None
+                try:
+                    with open(output_path, "rb") as f:
+                        self._last_test_output = f.read()
+                except OSError:
+                    self._last_test_output = None
             if test_id is not None and self.output_manager is not None:
                 self.output_manager.mark_completed(test_id, exit_code or 0)
 
     async def run_for_exit_code(self, test_case: TestCase, debug: bool = False) -> int:
-        # Lazy import
-        if self._InputType is None:
-            from shrinkray.cli import InputType
-
-            self._InputType = InputType
-
         if self.in_place:
-            if self.input_type == self._InputType.basename:
+            if self.input_type == InputType.basename:
                 working = self.filename
                 await self.write_test_case_to_file(working, test_case)
 
@@ -430,7 +515,7 @@ class ShrinkRayState[TestCase](ABC):
     @property
     def reducer(self):
         try:
-            return self.__reducer
+            return self._cached_reducer
         except AttributeError:
             pass
 
@@ -458,8 +543,20 @@ class ShrinkRayState[TestCase](ABC):
             async with write_lock:
                 await self.write_test_case_to_file(self.filename, test_case)
 
-        self.__reducer = self.new_reducer(problem)
-        return self.__reducer
+        # Initialize history and register callback if enabled
+        if self.history_manager is not None:
+            self._initialize_history_manager()
+
+            @problem.on_reduce
+            async def record_history(test_case: TestCase):
+                test_case_bytes = self._get_test_case_bytes(test_case)
+                # Use output captured at is_interesting time to avoid race conditions
+                output = self._successful_outputs.pop(test_case_bytes, None)
+                assert self.history_manager is not None
+                self.history_manager.record_reduction(test_case_bytes, output)
+
+        self._cached_reducer = self.new_reducer(problem)
+        return self._cached_reducer
 
     @property
     def extra_problem_kwargs(self):
@@ -470,10 +567,65 @@ class ShrinkRayState[TestCase](ABC):
         return self.reducer.target
 
     async def is_interesting(self, test_case: TestCase) -> bool:
+        # Check exclusion set first (for restart-from-point feature)
+        if self.excluded_test_cases is not None:
+            test_case_bytes = self._get_test_case_bytes(test_case)
+            if test_case_bytes in self.excluded_test_cases:
+                return False
+
         if self.first_call_time is None:
             self.first_call_time = time.time()
         async with self.is_interesting_limiter:
-            return await self.run_for_exit_code(test_case) == 0
+            exit_code = await self.run_for_exit_code(test_case)
+            self._check_also_interesting(exit_code, test_case)
+            if exit_code == 0:
+                # Capture output now while still in the limiter to avoid race conditions
+                # where another test starts and overwrites the "current" output
+                test_case_bytes = self._get_test_case_bytes(test_case)
+                output = self._get_last_captured_output()
+                if output is not None:
+                    self._successful_outputs[test_case_bytes] = output
+                return True
+            return False
+
+    def reset_for_restart(self, new_initial: bytes, excluded: set[bytes]) -> None:
+        """Reset state for restart from a history point.
+
+        This clears the cached reducer so it will be recreated with the new
+        initial value, and sets the exclusion set to reject previously
+        reduced values.
+
+        Args:
+            new_initial: The new initial test case content
+            excluded: Set of test cases to reject as uninteresting
+        """
+        self.excluded_test_cases = excluded
+        # Clear cached reducer so it will be recreated on next access
+        try:
+            del self._cached_reducer
+        except AttributeError:
+            pass
+        # Clear stored successful outputs (no longer relevant after restart)
+        self._successful_outputs.clear()
+        # Reset initial_exit_code - the new initial is known to be interesting
+        # (it came from history) so its exit code was 0
+        self.initial_exit_code = 0
+        # Update initial (implementation depends on subclass)
+        self._set_initial_for_restart(new_initial)
+
+    @abstractmethod
+    def _set_initial_for_restart(self, content: bytes) -> None:
+        """Set the initial test case for restart. Subclasses implement."""
+        ...
+
+    def _initialize_history_manager(self) -> None:
+        """Initialize the history manager. Subclasses can override for different modes."""
+        assert self.history_manager is not None
+        self.history_manager.initialize(
+            self._get_initial_bytes(),
+            self.test,
+            self.filename,
+        )
 
     @property
     def parallel_tasks_running(self) -> int:
@@ -622,12 +774,16 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
     def new_reducer(self, problem: ReductionProblem[bytes]) -> Reducer[bytes]:
         return ShrinkRay(problem, clang_delta=self.clang_delta_executable)
 
-    def setup_formatter(self):
-        from shrinkray.formatting import (
-            default_reformat_data,
-            determine_formatter_command,
-        )
+    def _get_initial_bytes(self) -> bytes:
+        return self.initial
 
+    def _get_test_case_bytes(self, test_case: bytes) -> bytes:
+        return test_case
+
+    def _set_initial_for_restart(self, content: bytes) -> None:
+        self.initial = content
+
+    def setup_formatter(self):
         if self.formatter.lower() == "none":
 
             async def format_data(test_case: bytes) -> bytes | None:
@@ -678,8 +834,24 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
             await o.write(test_case)
 
     async def is_interesting(self, test_case: bytes) -> bool:
+        # Check exclusion set first (for restart-from-point feature)
+        if (
+            self.excluded_test_cases is not None
+            and test_case in self.excluded_test_cases
+        ):
+            return False
+
         async with self.is_interesting_limiter:
-            return await self.run_for_exit_code(test_case) == 0
+            exit_code = await self.run_for_exit_code(test_case)
+            self._check_also_interesting(exit_code, test_case)
+            if exit_code == 0:
+                # Capture output now while still in the limiter to avoid race conditions
+                # where another test starts and overwrites the "current" output
+                output = self._get_last_captured_output()
+                if output is not None:
+                    self._successful_outputs[test_case] = output
+                return True
+            return False
 
     async def print_exit_message(self, problem):
         formatting_increase = 0
@@ -728,6 +900,11 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     def setup_formatter(self): ...
 
     @property
+    def is_directory_mode(self) -> bool:
+        """Whether this state manages directory test cases."""
+        return True
+
+    @property
     def extra_problem_kwargs(self) -> dict[str, Any]:
         return {
             "size": lambda tc: sum(len(v) for v in tc.values()),
@@ -739,6 +916,35 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
         return DirectoryShrinkRay(
             target=problem, clang_delta=self.clang_delta_executable
         )
+
+    def _get_initial_bytes(self) -> bytes:
+        # Serialize directory content for history recording
+        return self._serialize_directory(self.initial)
+
+    def _get_test_case_bytes(self, test_case: dict[str, bytes]) -> bytes:
+        # Serialize directory content for comparison/exclusion
+        return self._serialize_directory(test_case)
+
+    def _set_initial_for_restart(self, content: bytes) -> None:
+        # Deserialize and update initial directory content
+        self.initial = self._deserialize_directory(content)
+
+    def _initialize_history_manager(self) -> None:
+        """Initialize the history manager in directory mode."""
+        assert self.history_manager is not None
+        self.history_manager.initialize_directory(
+            self.initial,
+            self.test,
+            self.filename,
+        )
+
+    @staticmethod
+    def _serialize_directory(content: dict[str, bytes]) -> bytes:
+        return serialize_directory(content)
+
+    @staticmethod
+    def _deserialize_directory(data: bytes) -> dict[str, bytes]:
+        return deserialize_directory(data)
 
     async def write_test_case_to_file_impl(
         self, working: str, test_case: dict[str, bytes]

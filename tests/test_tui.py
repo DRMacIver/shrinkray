@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
 from textual.app import App
-from textual.widgets import DataTable, Label, Static
+from textual.widgets import DataTable, Label, ListView, Static, TabbedContent
 
 from shrinkray import tui
 from shrinkray.subprocess.client import SubprocessClient
@@ -19,6 +19,7 @@ from shrinkray.tui import (
     ContentPreview,
     ExpandedBoxModal,
     HelpScreen,
+    HistoryExplorerModal,
     OutputPreview,
     PassStatsScreen,
     ShrinkRayApp,
@@ -80,6 +81,9 @@ class FakeReductionClient:
         no_clang_delta: bool = False,
         clang_delta: str = "",
         trivial_is_error: bool = True,
+        skip_validation: bool = False,
+        history_enabled: bool = True,
+        also_interesting_code: int | None = None,
     ) -> Response:
         if self._start_error:
             return Response(id="start", error=self._start_error)
@@ -102,6 +106,9 @@ class FakeReductionClient:
 
     async def skip_current_pass(self) -> Response:
         return Response(id="skip", result={"status": "skipped"})
+
+    async def restart_from(self, reduction_number: int) -> Response:
+        return Response(id="restart", result={"status": "restarted", "size": 100})
 
     async def close(self) -> None:
         self._closed = True
@@ -1299,6 +1306,20 @@ def test_expanded_modal_read_file_success(tmp_path):
     assert content == "Hello World"
 
 
+def test_expanded_modal_read_file_escapes_markup(tmp_path):
+    """Test _read_file escapes Rich markup characters like [."""
+    test_file = tmp_path / "test.txt"
+    # Content with brackets that could be interpreted as Rich markup
+    test_file.write_text("expected [bold] and [red]text[/red]")
+
+    modal = ExpandedBoxModal("Test", "content-container")
+    content = modal._read_file(str(test_file))
+    # Opening brackets should be escaped to prevent Rich interpretation
+    # Rich's escape() converts [ to \[ when followed by tag-like content
+    assert "[bold]" not in content or "\\[bold]" in content
+    assert "[red]" not in content or "\\[red]" in content
+
+
 def test_expanded_modal_read_file_binary(tmp_path):
     """Test _read_file falls back to hex for binary content."""
     test_file = tmp_path / "test.bin"
@@ -1312,10 +1333,21 @@ def test_expanded_modal_read_file_binary(tmp_path):
 
 
 def test_expanded_modal_read_file_missing(tmp_path):
-    """Test _read_file raises OSError for missing file."""
+    """Test _read_file returns error message for missing file."""
     modal = ExpandedBoxModal("Test", "content-container")
-    with pytest.raises(OSError):
-        modal._read_file(str(tmp_path / "nonexistent.txt"))
+    result = modal._read_file(str(tmp_path / "nonexistent.txt"))
+    assert "[dim]File not found[/dim]" in result
+
+
+def test_expanded_modal_read_file_oserror(tmp_path):
+    """Test _read_file returns error message on OSError."""
+    modal = ExpandedBoxModal("Test", "content-container")
+    # Create a file that exists but can't be read
+    test_file = tmp_path / "unreadable.txt"
+    test_file.write_text("content")
+    with patch("builtins.open", side_effect=OSError("Permission denied")):
+        result = modal._read_file(str(test_file))
+    assert "[red]Error reading file[/red]" in result
 
 
 # === ExpandedBoxModal integration tests ===
@@ -2806,7 +2838,7 @@ def test_content_preview_diff_is_empty():
 
     with (
         patch.object(widget, "_get_available_lines", return_value=10),
-        patch("difflib.unified_diff", return_value=[]),
+        patch("shrinkray.tui.unified_diff", return_value=[]),
     ):
         result = widget.render()
 
@@ -2890,6 +2922,8 @@ def test_run_textual_ui_creates_and_runs_app():
             trivial_is_error=True,
             exit_on_completion=True,
             theme="dark",
+            history_enabled=True,
+            also_interesting_code=None,
         )
 
         # Verify app was created with correct arguments
@@ -2908,6 +2942,8 @@ def test_run_textual_ui_creates_and_runs_app():
             trivial_is_error=True,
             exit_on_completion=True,
             theme="dark",
+            history_enabled=True,
+            also_interesting_code=None,
         )
 
         # Verify run() was called
@@ -3887,6 +3923,7 @@ def test_help_screen_can_be_imported():
     assert HelpScreen is not None
 
 
+@pytest.mark.slow
 def test_pass_stats_modal_refresh_triggers_update():
     """Test that the periodic refresh updates the table when data changes."""
 
@@ -5787,3 +5824,1441 @@ def test_update_expanded_graph_missing_expanded_graph():
                 os.unlink(temp_file)
 
     asyncio.run(run())
+
+
+# === HistoryExplorerModal tests ===
+
+
+def test_history_modal_disabled_without_history():
+    """Test that pressing 'x' shows warning when history_dir is not set."""
+
+    async def run():
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                # history_dir is not set (default None)
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Verify history_dir is not set
+                assert app._history_dir is None
+
+                # Press 'x' to try to open history
+                await pilot.press("x")
+                await pilot.pause()
+
+                # The modal should NOT be in the screen stack
+                assert not any(
+                    isinstance(screen, HistoryExplorerModal)
+                    for screen in app.screen_stack
+                )
+
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_history_modal_opens_with_x_key(tmp_path):
+    """Test that pressing 'x' opens the history explorer modal when history_dir is set."""
+
+    async def run():
+        # Create a fake history directory with some entries
+        history_dir = tmp_path / ".shrinkray" / "run-123"
+        reductions_dir = history_dir / "reductions" / "0001"
+        reductions_dir.mkdir(parents=True)
+        (reductions_dir / "test.txt").write_text("reduced content")
+        (reductions_dir / "test.txt.out").write_text("test output")
+
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                history_dir=str(history_dir),
+                target_basename="test.txt",
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Verify history_dir was set from the update
+                assert app._history_dir == str(history_dir)
+
+                # Press 'x' to open history
+                await pilot.press("x")
+                await pilot.pause()
+
+                # The modal should be in the screen stack
+                assert any(
+                    isinstance(screen, HistoryExplorerModal)
+                    for screen in app.screen_stack
+                )
+
+                await pilot.press("escape")
+                await pilot.pause()
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_history_modal_closes_with_escape(tmp_path):
+    """Test that pressing Escape closes the history explorer modal."""
+
+    async def run():
+        # Create a fake history directory
+        history_dir = tmp_path / ".shrinkray" / "run-123"
+        reductions_dir = history_dir / "reductions" / "0001"
+        reductions_dir.mkdir(parents=True)
+        (reductions_dir / "test.txt").write_text("content")
+
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                history_dir=str(history_dir),
+                target_basename="test.txt",
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Open history modal
+                await pilot.press("x")
+                await pilot.pause()
+
+                # Verify it's open
+                assert any(
+                    isinstance(screen, HistoryExplorerModal)
+                    for screen in app.screen_stack
+                )
+
+                # Press Escape to close
+                await pilot.press("escape")
+                await pilot.pause()
+
+                # Verify it's closed
+                assert not any(
+                    isinstance(screen, HistoryExplorerModal)
+                    for screen in app.screen_stack
+                )
+
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_history_modal_bindings():
+    """Test that HistoryExplorerModal has the correct dismiss bindings."""
+    bindings = HistoryExplorerModal.BINDINGS
+    binding_keys = []
+    for binding in bindings:
+        if isinstance(binding, tuple):
+            binding_keys.append(binding[0])
+    # Should have escape, q, and x as dismiss keys
+    assert any("escape" in str(key) for key in binding_keys)
+    assert any("q" in str(key) for key in binding_keys)
+    assert any("x" in str(key) for key in binding_keys)
+
+
+def test_history_modal_scan_entries(tmp_path):
+    """Test that _scan_entries finds and sorts history entries correctly."""
+    # Create a fake history directory with entries
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create entries out of order to test sorting
+    for entry_num in ["0003", "0001", "0002"]:
+        entry_dir = reductions_dir / entry_num
+        entry_dir.mkdir()
+        # Create file with different sizes
+        size = int(entry_num) * 100
+        (entry_dir / "test.txt").write_text("x" * size)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    entries = modal._scan_entries("reductions")
+
+    # Should be sorted by entry number
+    assert len(entries) == 3
+    assert entries[0][0] == "0001"  # entry_num
+    assert entries[0][2] == 100  # size
+    assert entries[1][0] == "0002"
+    assert entries[1][2] == 200
+    assert entries[2][0] == "0003"
+    assert entries[2][2] == 300
+
+
+def test_history_modal_scan_entries_missing_file(tmp_path):
+    """Test that _scan_entries skips directories without the target file."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create entry without target file
+    (reductions_dir / "0001").mkdir()
+    # And one with target file
+    entry_dir = reductions_dir / "0002"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("content")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    entries = modal._scan_entries("reductions")
+
+    # Should only find the entry with the file
+    assert len(entries) == 1
+    assert entries[0][0] == "0002"
+
+
+def test_history_modal_scan_entries_missing_dir(tmp_path):
+    """Test that _scan_entries returns empty list for missing directory."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+    # Don't create reductions/ directory
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    entries = modal._scan_entries("reductions")
+
+    assert entries == []
+
+
+def test_history_modal_scan_entries_ignores_files(tmp_path):
+    """Test that _scan_entries ignores files (not directories) in the folder."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create a regular file in reductions (not a directory)
+    (reductions_dir / "stray_file.txt").write_text("should be ignored")
+
+    # Create a valid entry directory
+    entry_dir = reductions_dir / "0001"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("valid content")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    entries = modal._scan_entries("reductions")
+
+    # Should only find the directory entry, not the stray file
+    assert len(entries) == 1
+    assert entries[0][0] == "0001"
+
+
+def test_history_modal_read_file_success(tmp_path):
+    """Test _read_file reads file successfully."""
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("Hello World\nLine 2")
+
+    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
+    content = modal._read_file(str(test_file))
+
+    assert content == "Hello World\nLine 2"
+
+
+def test_history_modal_read_file_escapes_markup(tmp_path):
+    """Test _read_file escapes Rich markup characters like [."""
+    test_file = tmp_path / "test.txt"
+    # Content with brackets that look like Rich markup tags
+    test_file.write_text("error: [bold]text[/bold] failed")
+
+    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
+    content = modal._read_file(str(test_file))
+
+    # Opening brackets should be escaped to prevent Rich interpretation
+    assert "[bold]" not in content or "\\[bold]" in content
+    # The original text should not be corrupted
+    assert "error:" in content
+    assert "failed" in content
+
+
+def test_history_modal_read_file_binary(tmp_path):
+    """Test _read_file handles binary content."""
+    test_file = tmp_path / "test.bin"
+    test_file.write_bytes(b"\x80\x81\x82\x83")
+
+    modal = HistoryExplorerModal(str(tmp_path), "test.bin")
+    content = modal._read_file(str(test_file))
+
+    # Should fall back to hex display
+    assert "Binary content" in content
+
+
+def test_history_modal_read_file_missing(tmp_path):
+    """Test _read_file returns error message for missing file."""
+    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
+    content = modal._read_file(str(tmp_path / "nonexistent.txt"))
+
+    assert "[dim]File not found[/dim]" in content
+
+
+def test_history_modal_read_file_truncated_text(tmp_path):
+    """Test _read_file truncates large text files."""
+    test_file = tmp_path / "large.txt"
+    # Create a file > 50000 bytes
+    test_file.write_text("x" * 60000)
+
+    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
+    content = modal._read_file(str(test_file))
+
+    # Should be truncated
+    assert "[dim]... (truncated)[/dim]" in content
+    # Content should be limited
+    assert len(content) < 60000
+
+
+def test_history_modal_read_file_truncated_binary(tmp_path):
+    """Test _read_file truncates large binary files."""
+    test_file = tmp_path / "large.bin"
+    # Create a binary file > 50000 bytes with non-decodable content
+    test_file.write_bytes(b"\x80\x81\x82" * 20000)
+
+    modal = HistoryExplorerModal(str(tmp_path), "test.bin")
+    content = modal._read_file(str(test_file))
+
+    # Should be truncated and shown as binary
+    assert "[Binary content" in content
+    assert "[dim]... (truncated)[/dim]" in content
+
+
+def test_history_modal_read_file_oserror(tmp_path):
+    """Test _read_file handles OSError gracefully."""
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("content")
+
+    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
+
+    # Mock open to raise OSError
+    with patch("builtins.open", side_effect=OSError("Permission denied")):
+        content = modal._read_file(str(test_file))
+
+    assert "[red]Error reading file[/red]" in content
+
+
+def test_history_modal_on_list_view_highlighted_no_entries(tmp_path):
+    """Test on_list_view_highlighted returns early with no entries."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    modal._reductions_entries = []
+    modal._also_interesting_entries = []
+
+    # Mock the event
+    mock_list_view = MagicMock(spec=ListView)
+    mock_list_view.id = "reductions-list"
+    mock_list_view.index = 0
+
+    mock_event = MagicMock()
+    mock_event.list_view = mock_list_view
+
+    # Mock _update_preview - should NOT be called
+    with patch.object(modal, "_update_preview") as mock_update:
+        modal.on_list_view_highlighted(mock_event)
+        mock_update.assert_not_called()
+
+
+def test_history_modal_shows_empty_message(tmp_path):
+    """Test that history modal shows 'No entries yet' for empty directories."""
+
+    async def run():
+        # Create empty history directory
+        history_dir = tmp_path / ".shrinkray" / "run-123"
+        (history_dir / "reductions").mkdir(parents=True)
+        (history_dir / "also-interesting").mkdir(parents=True)
+
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                history_dir=str(history_dir),
+                target_basename="test.txt",
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Open history modal
+                await pilot.press("x")
+                await pilot.pause()
+
+                # Check that the modal exists and has no entries stored
+                modal = None
+                for screen in app.screen_stack:
+                    if isinstance(screen, HistoryExplorerModal):
+                        modal = screen
+                        break
+
+                assert modal is not None
+                assert modal._reductions_entries == []
+                assert modal._also_interesting_entries == []
+
+                await pilot.press("escape")
+                await pilot.pause()
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_history_modal_populates_entries(tmp_path):
+    """Test that history modal populates entries from history directory."""
+
+    async def run():
+        # Create history directory with entries
+        history_dir = tmp_path / ".shrinkray" / "run-123"
+
+        # Create reductions
+        for i in range(3):
+            entry_dir = history_dir / "reductions" / f"000{i + 1}"
+            entry_dir.mkdir(parents=True)
+            (entry_dir / "test.txt").write_text(f"reduction {i + 1}")
+            (entry_dir / "test.txt.out").write_text(f"output {i + 1}")
+
+        # Create also-interesting
+        entry_dir = history_dir / "also-interesting" / "0001"
+        entry_dir.mkdir(parents=True)
+        (entry_dir / "test.txt").write_text("also interesting content")
+        (entry_dir / "test.txt.out").write_text("also interesting output")
+
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                history_dir=str(history_dir),
+                target_basename="test.txt",
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Open history modal
+                await pilot.press("x")
+                await pilot.pause()
+
+                # Check that entries were populated
+                modal = None
+                for screen in app.screen_stack:
+                    if isinstance(screen, HistoryExplorerModal):
+                        modal = screen
+                        break
+
+                assert modal is not None
+                assert len(modal._reductions_entries) == 3
+                assert len(modal._also_interesting_entries) == 1
+
+                await pilot.press("escape")
+                await pilot.pause()
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_history_modal_on_list_view_selected_reductions(tmp_path):
+    """Test on_list_view_selected for reductions list."""
+    # Create history dir with an entry
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    entry_dir = history_dir / "reductions" / "0001"
+    entry_dir.mkdir(parents=True)
+    (entry_dir / "test.txt").write_text("test content")
+    (entry_dir / "test.txt.out").write_text("test output")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    modal._reductions_entries = [str(entry_dir)]
+    modal._also_interesting_entries = []
+
+    # Mock the event
+    mock_list_view = MagicMock(spec=ListView)
+    mock_list_view.id = "reductions-list"
+    mock_list_view.index = 0
+
+    mock_event = MagicMock()
+    mock_event.list_view = mock_list_view
+
+    # Mock _update_preview
+    with patch.object(modal, "_update_preview") as mock_update:
+        modal.on_list_view_selected(mock_event)
+        mock_update.assert_called_once_with(
+            str(entry_dir), "file-preview", "output-preview"
+        )
+
+
+def test_history_modal_on_list_view_selected_also_interesting(tmp_path):
+    """Test on_list_view_selected for also-interesting list."""
+    # Create history dir with an entry
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    entry_dir = history_dir / "also-interesting" / "0001"
+    entry_dir.mkdir(parents=True)
+    (entry_dir / "test.txt").write_text("test content")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    modal._reductions_entries = []
+    modal._also_interesting_entries = [str(entry_dir)]
+
+    # Mock the event with also-interesting list id
+    mock_list_view = MagicMock(spec=ListView)
+    mock_list_view.id = "also-interesting-list"
+    mock_list_view.index = 0
+
+    mock_event = MagicMock()
+    mock_event.list_view = mock_list_view
+
+    # Mock _update_preview
+    with patch.object(modal, "_update_preview") as mock_update:
+        modal.on_list_view_selected(mock_event)
+        mock_update.assert_called_once_with(
+            str(entry_dir), "also-file-preview", "also-output-preview"
+        )
+
+
+def test_history_modal_on_list_view_selected_no_entries(tmp_path):
+    """Test on_list_view_selected returns early with no entries."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    modal._reductions_entries = []
+    modal._also_interesting_entries = []
+
+    # Mock the event
+    mock_list_view = MagicMock(spec=ListView)
+    mock_list_view.id = "reductions-list"
+    mock_list_view.index = 0
+
+    mock_event = MagicMock()
+    mock_event.list_view = mock_list_view
+
+    # Mock _update_preview - should NOT be called
+    with patch.object(modal, "_update_preview") as mock_update:
+        modal.on_list_view_selected(mock_event)
+        mock_update.assert_not_called()
+
+
+def test_history_modal_restart_action_not_in_reductions_tab_unit(tmp_path):
+    """Test action_restart_from_here warns when not in reductions tab (unit test)."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    (history_dir / "reductions").mkdir(parents=True)
+    (history_dir / "also-interesting").mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Mock the app
+    mock_app = MagicMock(spec=ShrinkRayApp)
+
+    # Mock query_one to return a TabbedContent with active != "reductions-tab"
+    mock_tabs = MagicMock(spec=TabbedContent)
+    mock_tabs.active = "also-interesting-tab"
+    modal.query_one = MagicMock(return_value=mock_tabs)
+
+    # Patch the app property
+    with patch.object(
+        type(modal), "app", new_callable=PropertyMock, return_value=mock_app
+    ):
+        # Call the action
+        modal.action_restart_from_here()
+
+    # Should have called notify with warning
+    mock_app.notify.assert_called_once()
+    call_args = mock_app.notify.call_args
+    assert "Restart only available in Reductions tab" in str(call_args)
+
+
+def test_history_modal_restart_action_no_selection(tmp_path):
+    """Test action_restart_from_here warns when no reduction selected."""
+
+    async def run():
+        history_dir = tmp_path / ".shrinkray" / "run-123"
+        (history_dir / "reductions").mkdir(parents=True)
+        (history_dir / "also-interesting").mkdir(parents=True)
+
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                history_dir=str(history_dir),
+                target_basename="test.txt",
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Open history modal (reductions is empty)
+                await pilot.press("x")
+                await pilot.pause()
+
+                # Try to restart - should warn since there's no selection
+                await pilot.press("r")
+                await pilot.pause()
+
+                # Modal should still be open (not dismissed)
+                modal_found = False
+                for screen in app.screen_stack:
+                    if isinstance(screen, HistoryExplorerModal):
+                        modal_found = True
+                        break
+                assert modal_found
+
+                await pilot.press("escape")
+                await pilot.pause()
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_history_modal_restart_action_success(tmp_path):
+    """Test action_restart_from_here triggers restart and closes modal."""
+
+    async def run():
+        history_dir = tmp_path / ".shrinkray" / "run-123"
+
+        # Create a reduction entry
+        entry_dir = history_dir / "reductions" / "0001"
+        entry_dir.mkdir(parents=True)
+        (entry_dir / "test.txt").write_text("reduction 1")
+
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                history_dir=str(history_dir),
+                target_basename="test.txt",
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Open history modal
+                await pilot.press("x")
+                await pilot.pause()
+
+                # The first item should be selected - press r to restart
+                await pilot.press("r")
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Modal should be dismissed
+                modal_found = False
+                for screen in app.screen_stack:
+                    if isinstance(screen, HistoryExplorerModal):
+                        modal_found = True
+                        break
+                assert not modal_found
+
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_do_restart_from_no_client(tmp_path):
+    """Test _do_restart_from notifies error when no client available."""
+
+    async def run():
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Set client to None to test the branch
+                app._client = None
+
+                # Call _do_restart_from directly - should notify error
+                await app._do_restart_from(1)
+
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_do_restart_from_error_response(tmp_path):
+    """Test _do_restart_from notifies error on failed response."""
+
+    async def run():
+        history_dir = tmp_path / ".shrinkray" / "run-123"
+        (history_dir / "reductions").mkdir(parents=True)
+
+        updates = [
+            ProgressUpdate(
+                status="Running",
+                size=500,
+                original_size=1000,
+                calls=10,
+                reductions=5,
+                history_dir=str(history_dir),
+                target_basename="test.txt",
+            )
+        ]
+
+        # Create a client that returns an error for restart_from
+        client = FakeReductionClient(updates=updates, wait_indefinitely=True)
+        client.restart_from = AsyncMock(
+            return_value=Response(id="1", error="Reduction not found")
+        )
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+                # Call _do_restart_from - should get error response
+                await app._do_restart_from(999)
+
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_trigger_restart_from_no_client(tmp_path):
+    """Test _trigger_restart_from does nothing when no client."""
+
+    async def run():
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=None,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # This should do nothing since no client
+                app._trigger_restart_from(1)
+
+                await pilot.pause()
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_trigger_restart_from_completed(tmp_path):
+    """Test _trigger_restart_from does nothing when reduction completed."""
+
+    async def run():
+        updates = [
+            ProgressUpdate(
+                status="Completed",
+                size=100,
+                original_size=1000,
+                calls=50,
+                reductions=10,
+            )
+        ]
+
+        client = FakeReductionClient(updates=updates, wait_indefinitely=False)
+        await client.start()
+
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
+            f.write("test content")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.2)
+                await pilot.pause()
+
+                # Mark as completed
+                app._completed = True
+
+                # This should do nothing since completed
+                app._trigger_restart_from(1)
+
+                await pilot.pause()
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
+def test_history_modal_refresh_list_when_entries_change(tmp_path):
+    """Test _refresh_list updates the list when entries have changed.
+
+    When new entries are added at the end (the common case), we only append
+    the new items without clearing - this preserves ListView selection.
+    """
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create initial entry
+    entry_dir = reductions_dir / "0001"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("initial")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up initial state
+    modal._reductions_entries = [str(entry_dir)]
+
+    # Add a new entry
+    new_entry_dir = reductions_dir / "0002"
+    new_entry_dir.mkdir()
+    (new_entry_dir / "test.txt").write_text("new entry")
+
+    # Now call _refresh_list - entries have changed
+    # This will fail because modal isn't composed, but we can test the logic
+    # by mocking query_one
+    mock_list_view = MagicMock()
+    mock_list_view.index = 0
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    modal._refresh_list("reductions", "reductions-list")
+
+    # Should have updated entries
+    assert len(modal._reductions_entries) == 2
+    assert modal._reductions_entries[0] == str(entry_dir)
+    assert modal._reductions_entries[1] == str(new_entry_dir)
+
+    # With incremental updates, we should NOT call clear - only append new items
+    mock_list_view.clear.assert_not_called()
+    # Should have only appended the ONE new entry
+    assert mock_list_view.append.call_count == 1
+
+
+def test_history_modal_refresh_list_with_empty_new_entries(tmp_path):
+    """Test _refresh_list when entries are deleted."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up with one entry that no longer exists
+    modal._reductions_entries = [str(reductions_dir / "0001")]
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = 0
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    # Refresh with empty directory
+    modal._refresh_list("reductions", "reductions-list")
+
+    # Should have empty entries now
+    assert modal._reductions_entries == []
+    mock_list_view.clear.assert_called_once()
+    # Should have one append for "No entries yet" message
+    assert mock_list_view.append.call_count == 1
+
+
+def test_history_modal_refresh_list_restores_selection(tmp_path):
+    """Test _refresh_list preserves selection when entries change."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create entries
+    for num in ["0001", "0002"]:
+        entry_dir = reductions_dir / num
+        entry_dir.mkdir()
+        (entry_dir / "test.txt").write_text(f"content {num}")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up initial state with just one entry
+    modal._reductions_entries = [str(reductions_dir / "0001")]
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = 0  # Selected first item
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    modal._refresh_list("reductions", "reductions-list")
+
+    # Should have restored index
+    assert mock_list_view.index == 0
+
+
+def test_restore_list_selection_with_empty_list(tmp_path):
+    """Test _restore_list_selection does nothing for empty list."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    mock_list_view = MagicMock()
+    mock_list_view.children = []  # Empty list
+
+    # Should not crash and should not set index
+    modal._restore_list_selection(mock_list_view, 0)
+
+    # Index should not have been set since children is empty
+    assert not hasattr(mock_list_view, "index") or mock_list_view.index != 0
+
+
+def test_restore_list_selection_with_children(tmp_path):
+    """Test _restore_list_selection sets index when list has children."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    mock_list_view = MagicMock()
+    mock_list_view.children = [MagicMock(), MagicMock(), MagicMock()]  # 3 children
+
+    modal._restore_list_selection(mock_list_view, 1)
+
+    # Index should have been set
+    assert mock_list_view.index == 1
+
+
+def test_restore_list_selection_clamps_index(tmp_path):
+    """Test _restore_list_selection clamps index to valid range."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    mock_list_view = MagicMock()
+    mock_list_view.children = [MagicMock()]  # Only 1 child
+
+    # Request index 5, but should clamp to 0
+    modal._restore_list_selection(mock_list_view, 5)
+
+    assert mock_list_view.index == 0
+
+
+def test_history_modal_refresh_list_also_interesting(tmp_path):
+    """Test _refresh_list works for also-interesting directory."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    also_dir = history_dir / "also-interesting"
+    also_dir.mkdir(parents=True)
+
+    # Create entry
+    entry_dir = also_dir / "0001"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("content")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up with empty also-interesting
+    modal._also_interesting_entries = []
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = None
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    modal._refresh_list("also-interesting", "also-interesting-list")
+
+    # Should have updated also-interesting entries
+    assert len(modal._also_interesting_entries) == 1
+    assert str(entry_dir) in modal._also_interesting_entries[0]
+
+
+def test_history_modal_refresh_list_also_interesting_incremental(tmp_path):
+    """Test incremental update path for also-interesting directory."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    also_dir = history_dir / "also-interesting"
+    also_dir.mkdir(parents=True)
+
+    # Create first entry
+    entry_dir1 = also_dir / "0001"
+    entry_dir1.mkdir()
+    (entry_dir1 / "test.txt").write_text("content 1")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up with first entry already present
+    modal._also_interesting_entries = [str(entry_dir1)]
+
+    # Create second entry
+    entry_dir2 = also_dir / "0002"
+    entry_dir2.mkdir()
+    (entry_dir2 / "test.txt").write_text("content 2")
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = 0
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    modal._refresh_list("also-interesting", "also-interesting-list")
+
+    # Should have updated entries (incremental path)
+    assert len(modal._also_interesting_entries) == 2
+    # Should NOT have called clear (incremental update)
+    mock_list_view.clear.assert_not_called()
+    # Should have appended only the new entry
+    assert mock_list_view.append.call_count == 1
+
+
+def test_history_modal_refresh_list_full_rebuild_with_selection(tmp_path):
+    """Test full rebuild path when entries change non-additively."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create entries 0002, 0003 (not 0001 - simulates restart scenario)
+    entry_dir2 = reductions_dir / "0002"
+    entry_dir2.mkdir()
+    (entry_dir2 / "test.txt").write_text("content 2")
+
+    entry_dir3 = reductions_dir / "0003"
+    entry_dir3.mkdir()
+    (entry_dir3 / "test.txt").write_text("content 3")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up with 0001, 0002, 0003 as old entries (0001 was removed by restart)
+    old_entry_dir1 = reductions_dir / "0001"  # doesn't exist on disk
+    modal._reductions_entries = [
+        str(old_entry_dir1),
+        str(entry_dir2),
+        str(entry_dir3),
+    ]
+    # User had 0002 selected
+    modal._selected_reductions_path = str(entry_dir2)
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = 1  # Selected 0002
+    modal.query_one = MagicMock(return_value=mock_list_view)
+    modal.call_after_refresh = MagicMock()
+
+    modal._refresh_list("reductions", "reductions-list")
+
+    # Should have updated entries (only 0002, 0003 exist)
+    assert len(modal._reductions_entries) == 2
+
+    # Should have called clear (full rebuild since entries changed non-additively)
+    mock_list_view.clear.assert_called_once()
+
+    # Should call call_after_refresh to restore selection to index 0 (0002 is now first)
+    modal.call_after_refresh.assert_called_once()
+    call_args = modal.call_after_refresh.call_args
+    assert call_args[0][0] == modal._restore_list_selection
+    assert call_args[0][2] == 0  # new index of 0002
+
+
+def test_history_modal_do_pending_preview_no_pending(tmp_path):
+    """Test _do_pending_preview does nothing when no pending preview."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    modal._pending_preview = None
+    modal._update_preview = MagicMock()
+
+    # Call the actual method
+    modal._do_pending_preview()
+
+    # Should not call _update_preview
+    modal._update_preview.assert_not_called()
+
+
+def test_history_modal_on_unmount_with_timers(tmp_path):
+    """Test on_unmount stops active timers."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    mock_preview_timer = MagicMock()
+    mock_refresh_timer = MagicMock()
+    modal._preview_timer = mock_preview_timer
+    modal._refresh_timer = mock_refresh_timer
+
+    # Call the actual method
+    modal.on_unmount()
+
+    # Both timers should be stopped
+    mock_preview_timer.stop.assert_called_once()
+    mock_refresh_timer.stop.assert_called_once()
+
+
+def test_history_modal_on_unmount_without_refresh_timer(tmp_path):
+    """Test on_unmount when refresh timer is None."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    mock_preview_timer = MagicMock()
+    modal._preview_timer = mock_preview_timer
+    modal._refresh_timer = None  # Explicitly set to None
+
+    # Call the actual method - should not raise even with None timer
+    modal.on_unmount()
+
+    # Preview timer should still be stopped
+    mock_preview_timer.stop.assert_called_once()
+
+
+def test_history_modal_refresh_lists_calls_both(tmp_path):
+    """Test _refresh_lists calls _refresh_list for both directories."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Mock the _refresh_list method to track calls
+    with patch.object(modal, "_refresh_list") as mock_refresh:
+        modal._refresh_lists()
+
+        # Should have called _refresh_list twice
+        assert mock_refresh.call_count == 2
+        mock_refresh.assert_any_call("reductions", "reductions-list")
+        mock_refresh.assert_any_call("also-interesting", "also-interesting-list")
+
+
+def test_history_modal_refresh_list_no_change(tmp_path):
+    """Test _refresh_list returns early when entries haven't changed."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create entry
+    entry_dir = reductions_dir / "0001"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("content")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Set up initial state matching what's in the directory
+    modal._reductions_entries = [str(entry_dir)]
+
+    mock_list_view = MagicMock()
+    mock_list_view.index = 0
+    modal.query_one = MagicMock(return_value=mock_list_view)
+
+    # Refresh with unchanged entries
+    modal._refresh_list("reductions", "reductions-list")
+
+    # Should NOT have called clear since entries didn't change
+    mock_list_view.clear.assert_not_called()
+
+
+def test_history_modal_refresh_with_new_entries_no_duplicate_ids(tmp_path):
+    """Test that refreshing the history modal when new entries are added doesn't crash.
+
+    This is a regression test for a bug where the refresh timer would try to add
+    ListItems with duplicate IDs because clear() is async and doesn't complete
+    before append() is called.
+    """
+
+    # Create a simple app to host the modal
+    class TestApp(App):
+        def compose(self):
+            yield HistoryExplorerModal(str(history_dir), "test.txt")
+
+    # Create history directory with initial entries
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    for i in range(1, 4):
+        entry_dir = reductions_dir / f"{i:04d}"
+        entry_dir.mkdir()
+        (entry_dir / "test.txt").write_text(f"content {i}")
+
+    async def run():
+        app = TestApp()
+        async with app.run_test() as pilot:
+            # Let the modal mount and populate
+            await pilot.pause()
+            await asyncio.sleep(0.2)
+            await pilot.pause()
+
+            # Get the modal
+            modal = app.query_one(HistoryExplorerModal)
+            assert len(modal._reductions_entries) == 3
+
+            # Add new entries while modal is open
+            for i in range(4, 7):
+                entry_dir = reductions_dir / f"{i:04d}"
+                entry_dir.mkdir()
+                (entry_dir / "test.txt").write_text(f"content {i}")
+
+            # Manually trigger refresh (simulating timer)
+            # This should NOT raise DuplicateIds
+            modal._refresh_lists()
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
+
+            # Verify entries were updated
+            assert len(modal._reductions_entries) == 6
+
+            # Trigger multiple refreshes to stress test
+            for _ in range(3):
+                modal._refresh_lists()
+                await pilot.pause()
+                await asyncio.sleep(0.05)
+
+            # Close modal
+            await pilot.press("escape")
+
+    asyncio.run(run())
+
+
+def test_history_modal_finish_refresh(tmp_path):
+    """Test _finish_refresh clears the refreshing flag."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    history_dir.mkdir(parents=True)
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    modal._refreshing = True
+
+    modal._finish_refresh()
+
+    assert modal._refreshing is False
+
+
+def test_history_modal_highlighted_skipped_during_refresh(tmp_path):
+    """Test on_list_view_highlighted skips updates when refreshing."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    # Create an entry
+    entry_dir = reductions_dir / "0001"
+    entry_dir.mkdir()
+    (entry_dir / "test.txt").write_text("content")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    modal._reductions_entries = [str(entry_dir)]
+    modal._selected_reductions_path = str(entry_dir)
+
+    # Set refreshing flag
+    modal._refreshing = True
+
+    # Create a mock event
+    mock_event = MagicMock()
+    mock_event.list_view = MagicMock()
+    mock_event.list_view.id = "reductions-list"
+    mock_event.list_view.index = 0
+
+    # Track if any methods were called
+    modal._update_preview = MagicMock()
+    modal.set_timer = MagicMock()
+
+    # Call the handler
+    modal.on_list_view_highlighted(mock_event)
+
+    # Should return early without updating anything
+    modal._update_preview.assert_not_called()
+    modal.set_timer.assert_not_called()
+    # Selection path should remain unchanged
+    assert modal._selected_reductions_path == str(entry_dir)

@@ -1,12 +1,7 @@
-"""Vendored copy of pytest-textual-snapshot with syrupy 5.0 compatibility.
+"""Snapshot testing utilities for Textual apps.
 
-Source: https://github.com/Textualize/pytest-textual-snapshot
-
-The upstream package uses `_file_extension = "svg"` but syrupy 5.0 changed
-the attribute to `file_extension` (no underscore), causing snapshots to be
-saved as .raw files instead of .svg files.
-
-This vendored copy fixes the attribute name.
+Derived from pytest-textual-snapshot (https://github.com/Textualize/pytest-textual-snapshot)
+and extensively modified for this project.
 
 ---
 
@@ -58,6 +53,8 @@ from jinja2 import Template
 from rich.console import Console
 from syrupy.assertion import SnapshotAssertion
 from syrupy.extensions.single_file import SingleFileSnapshotExtension, WriteMode
+from textual._doc import take_svg_screenshot
+from textual._import_app import import_app
 from textual.app import App
 
 
@@ -178,8 +175,6 @@ def snap_compare(
         Returns:
             Whether the screenshot matches the snapshot.
         """
-        from textual._import_app import import_app
-
         node = request.node
 
         if isinstance(app, App):
@@ -198,8 +193,6 @@ def snap_compare(
                 resolved = (node_path / app).resolve()
                 app_path = str(resolved)
                 app_instance = import_app(app_path)
-
-        from textual._doc import take_svg_screenshot
 
         actual_screenshot = take_svg_screenshot(
             app=app_instance,

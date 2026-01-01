@@ -12,7 +12,14 @@ from typing import Any, Protocol
 import trio
 from binaryornot.helpers import is_binary_string
 
+from shrinkray.cli import InputType
+from shrinkray.passes.clangdelta import C_FILE_EXTENSIONS, ClangDelta, find_clang_delta
 from shrinkray.problem import InvalidInitialExample
+from shrinkray.state import (
+    OutputCaptureManager,
+    ShrinkRayDirectoryState,
+    ShrinkRayStateSingleFile,
+)
 from shrinkray.subprocess.protocol import (
     PassStatsData,
     ProgressUpdate,
@@ -21,6 +28,7 @@ from shrinkray.subprocess.protocol import (
     deserialize,
     serialize,
 )
+from shrinkray.work import Volume
 
 
 class InputStream(Protocol):
@@ -50,6 +58,7 @@ class ReducerWorker:
         self.problem = None
         self.state = None
         self._cancel_scope: trio.CancelScope | None = None
+        self._restart_requested = False
         # Parallelism tracking
         self._parallel_samples = 0
         self._parallel_total = 0
@@ -63,6 +72,16 @@ class ReducerWorker:
         self._last_sent_history_index: int = 0
         self._last_recorded_size: int = 0
         self._last_history_time: float = 0.0
+        # Original start time - preserved across restarts for consistent graphing
+        self._original_start_time: float | None = None
+        # Log file for stderr redirection (cleaned up on shutdown)
+        self._log_file: Any = None
+        # Accumulated stats across restarts - when a restart happens, the problem
+        # gets a fresh ReductionStats object, so we need to preserve the counts
+        self._accumulated_calls: int = 0
+        self._accumulated_reductions: int = 0
+        self._accumulated_interesting_calls: int = 0
+        self._accumulated_wasted_calls: int = 0
 
     async def emit(self, msg: Response | ProgressUpdate) -> None:
         """Write a message to the output stream."""
@@ -108,9 +127,10 @@ class ReducerWorker:
                 return
             response = await self.handle_command(request)
             await self.emit(response)
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
-            await self.emit(Response(id="", error=str(e)))
+            # Include full traceback in error message in case stderr isn't visible
+            await self.emit(Response(id="", error=traceback.format_exc()))
 
     async def handle_command(self, request: Request) -> Response:
         """Handle a command request and return a response."""
@@ -127,6 +147,8 @@ class ReducerWorker:
                 return self._handle_enable_pass(request.id, request.params)
             case "skip_pass":
                 return self._handle_skip_pass(request.id)
+            case "restart_from":
+                return await self._handle_restart_from(request.id, request.params)
             case _:
                 return Response(
                     id=request.id, error=f"Unknown command: {request.command}"
@@ -141,6 +163,7 @@ class ReducerWorker:
             await self._start_reduction(params)
             return Response(id=request_id, result={"status": "started"})
         except* InvalidInitialExample as excs:
+            traceback.print_exc()
             assert len(excs.exceptions) == 1
             (e,) = excs.exceptions
             # Build a detailed error message for invalid initial examples
@@ -148,26 +171,14 @@ class ReducerWorker:
                 error_message = await self.state.build_error_message(e)
             else:
                 error_message = str(e)
-        except* Exception as e:
+        except* Exception:
             traceback.print_exc()
-            error_message = str(e.exceptions[0])
+            # Include full traceback in error message in case stderr isn't visible
+            error_message = traceback.format_exc()
         return Response(id=request_id, error=error_message)
 
     async def _start_reduction(self, params: dict) -> None:
         """Initialize and start the reduction."""
-        from shrinkray.cli import InputType
-        from shrinkray.passes.clangdelta import (
-            C_FILE_EXTENSIONS,
-            ClangDelta,
-            find_clang_delta,
-        )
-        from shrinkray.state import (
-            OutputCaptureManager,
-            ShrinkRayDirectoryState,
-            ShrinkRayStateSingleFile,
-        )
-        from shrinkray.work import Volume
-
         filename = params["file_path"]
         test = params["test"]
         parallelism = params.get("parallelism", os.cpu_count() or 1)
@@ -181,6 +192,8 @@ class ReducerWorker:
         clang_delta_path = params.get("clang_delta", "")
         trivial_is_error = params.get("trivial_is_error", True)
         skip_validation = params.get("skip_validation", False)
+        history_enabled = params.get("history_enabled", True)
+        also_interesting_code = params.get("also_interesting_code")
 
         clang_delta_executable = None
         if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:
@@ -202,6 +215,8 @@ class ReducerWorker:
             "seed": seed,
             "volume": volume,
             "clang_delta_executable": clang_delta_executable,
+            "history_enabled": history_enabled,
+            "also_interesting_code": also_interesting_code,
         }
 
         if os.path.isdir(filename):
@@ -219,6 +234,17 @@ class ReducerWorker:
         # Create output manager for test output capture (always enabled for TUI)
         self._output_dir = tempfile.mkdtemp(prefix="shrinkray-output-")
         self.state.output_manager = OutputCaptureManager(output_dir=self._output_dir)
+
+        # Redirect stderr to the history directory if history is enabled
+        # This ensures errors are logged to the per-run directory
+        if self.state.history_manager is not None:
+            log_path = os.path.join(
+                self.state.history_manager.history_dir, "shrinkray.log"
+            )
+            # Ensure directory exists (history_manager creates it, but be safe)
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            self._log_file = open(log_path, "a", encoding="utf-8")
+            sys.stderr = self._log_file
 
         self.problem = self.state.problem
         self.reducer = self.state.reducer
@@ -309,6 +335,99 @@ class ReducerWorker:
             return Response(id=request_id, result={"status": "skipped"})
         return Response(id=request_id, error="Reducer does not support pass control")
 
+    async def _handle_restart_from(self, request_id: str, params: dict) -> Response:
+        """Restart reduction from a specific history point.
+
+        This moves all reductions after the specified point to also-interesting,
+        resets the current test case to that point, and modifies the
+        interestingness test to reject previously reduced values.
+        """
+        reduction_number = params.get("reduction_number")
+        if reduction_number is None:
+            return Response(id=request_id, error="reduction_number is required")
+
+        if self.state is None or self.state.history_manager is None:
+            return Response(id=request_id, error="History not available")
+
+        # Restart only works with single-file reductions
+        if not isinstance(self.state, ShrinkRayStateSingleFile):
+            return Response(
+                id=request_id,
+                error="Restart from history not supported for directory reductions",
+            )
+
+        # First, try to get restart data - this validates the reduction exists
+        # Do this BEFORE cancelling the current reduction to avoid leaving
+        # things in an inconsistent state if the restart fails
+        try:
+            new_test_case, excluded_set = (
+                self.state.history_manager.restart_from_reduction(reduction_number)
+            )
+        except FileNotFoundError:
+            return Response(
+                id=request_id, error=f"Reduction {reduction_number} not found"
+            )
+        except Exception:
+            traceback.print_exc()
+            return Response(id=request_id, error=traceback.format_exc())
+
+        # Save current stats before restart - the new problem will have fresh stats
+        if self.problem is not None:
+            stats = self.problem.stats
+            self._accumulated_calls += stats.calls
+            self._accumulated_reductions += stats.reductions
+            self._accumulated_interesting_calls += stats.interesting_calls
+            self._accumulated_wasted_calls += stats.wasted_interesting_calls
+
+        # Set restart flag BEFORE cancelling the scope to avoid race condition.
+        # The run() loop checks this flag after run_reducer() returns - if we
+        # cancel first and the flag isn't set, the loop will exit instead of
+        # restarting.
+        self._restart_requested = True
+        self.running = False
+
+        # Now cancel current reduction
+        if self._cancel_scope is not None:
+            self._cancel_scope.cancel()
+
+        try:
+            # Clear old test output to avoid showing stale output from before restart
+            if self.state.output_manager is not None:
+                self.state.output_manager.cleanup_all()
+
+            # Reset state with new initial and exclusions
+            self.state.reset_for_restart(new_test_case, excluded_set)
+
+            # Get fresh reducer BEFORE any await points to avoid race condition.
+            # After we cancel the scope, the main run() loop may loop back and
+            # call run_reducer() while we're still in an await. We need the new
+            # reducer to be set before that happens.
+            self.reducer = self.state.reducer
+            self.problem = self.reducer.target
+
+            # Record the upward jump in size at current runtime.
+            # Don't reset history - this preserves the graph continuity.
+            if self._size_history and self._original_start_time is not None:
+                current_runtime = time.time() - self._original_start_time
+                self._size_history.append((current_runtime, len(new_test_case)))
+                self._last_recorded_size = len(new_test_case)
+                self._last_history_time = current_runtime
+
+            # Write new test case to file (can happen after reducer is set up)
+            await self.state.write_test_case_to_file(self.state.filename, new_test_case)
+
+            # Ready to restart - running will be set to True by the run() loop
+            return Response(
+                id=request_id,
+                result={"status": "restarted", "size": len(new_test_case)},
+            )
+        except Exception:
+            traceback.print_exc()
+            # Reset restart flag - we can't restart, so don't try
+            self._restart_requested = False
+            # Include full traceback in error message in case stderr isn't visible
+            return Response(id=request_id, error=traceback.format_exc())
+
     def _get_test_output_preview(self) -> tuple[str, int | None, int | None]:
         """Get preview of current test output, test ID, and return code.
 
@@ -394,7 +513,12 @@ class ReducerWorker:
             return None
 
         stats = self.problem.stats
-        runtime = time.time() - stats.start_time
+
+        # Use original start time for consistent graphing across restarts.
+        # Capture it on first call.
+        if self._original_start_time is None:
+            self._original_start_time = stats.start_time
+        runtime = time.time() - self._original_start_time
         current_size = stats.current_test_case_size
 
         # Record size history when size changes or periodically
@@ -426,14 +550,22 @@ class ReducerWorker:
             self._parallel_samples += 1
             self._parallel_total += parallel_workers
 
+        # Calculate total stats including accumulated from previous runs (before restarts)
+        total_calls = stats.calls + self._accumulated_calls
+        total_reductions = stats.reductions + self._accumulated_reductions
+        total_interesting_calls = (
+            stats.interesting_calls + self._accumulated_interesting_calls
+        )
+        total_wasted_calls = (
+            stats.wasted_interesting_calls + self._accumulated_wasted_calls
+        )
+
         # Calculate parallelism stats
         average_parallelism = 0.0
         effective_parallelism = 0.0
         if self._parallel_samples > 0:
             average_parallelism = self._parallel_total / self._parallel_samples
-            wasteage = (
-                stats.wasted_interesting_calls / stats.calls if stats.calls > 0 else 0.0
-            )
+            wasteage = total_wasted_calls / total_calls if total_calls > 0 else 0.0
             effective_parallelism = average_parallelism * (1.0 - wasteage)
 
         # Collect pass statistics in run order (only those with test evaluations)
@@ -479,14 +611,21 @@ class ReducerWorker:
         new_entries = self._size_history[self._last_sent_history_index :]
         self._last_sent_history_index = len(self._size_history)
 
+        # Get history directory info for history explorer
+        history_dir: str | None = None
+        target_basename = ""
+        if self.state is not None and self.state.history_manager is not None:
+            history_dir = self.state.history_manager.history_dir
+            target_basename = self.state.history_manager.target_basename
+
         return ProgressUpdate(
             status=self.reducer.status if self.reducer else "",
             size=stats.current_test_case_size,
             original_size=stats.initial_test_case_size,
-            calls=stats.calls,
-            reductions=stats.reductions,
-            interesting_calls=stats.interesting_calls,
-            wasted_calls=stats.wasted_interesting_calls,
+            calls=total_calls,
+            reductions=total_reductions,
+            interesting_calls=total_interesting_calls,
+            wasted_calls=total_wasted_calls,
             runtime=runtime,
             parallel_workers=parallel_workers,
             average_parallelism=average_parallelism,
@@ -501,6 +640,8 @@ class ReducerWorker:
             active_test_id=active_test_id,
             last_test_return_code=last_return_code,
             new_size_history=new_entries,
+            history_dir=history_dir,
+            target_basename=target_basename,
         )
 
     async def emit_progress_updates(self) -> None:
@@ -510,8 +651,14 @@ class ReducerWorker:
         if update is not None:
             await self.emit(update)
 
-        while self.running:
+        while True:
             await trio.sleep(0.1)
+            # Keep running while reducer is active or restart is pending.
+            # During restart, running is temporarily False but we need to
+            # keep emitting updates until the restart completes and running
+            # is set back to True.
+            if not self.running and not self._restart_requested:
+                break
             update = await self._build_progress_update()
             if update is not None:
                 await self.emit(update)
@@ -532,6 +679,7 @@ class ReducerWorker:
                 if trivial_error:
                     await self.emit(Response(id="", error=trivial_error))
         except* InvalidInitialExample as excs:
+            traceback.print_exc()
             assert len(excs.exceptions) == 1
             (e,) = excs.exceptions
             # Build a detailed error message for invalid initial examples
@@ -540,10 +688,10 @@ class ReducerWorker:
             else:
                 error_message = str(e)
             await self.emit(Response(id="", error=error_message))
-        except* Exception as e:
-            # Catch any other exception during reduction and emit as error
+        except* Exception:
             traceback.print_exc()
-            await self.emit(Response(id="", error=str(e.exceptions[0])))
+            # Include full traceback in error message in case stderr isn't visible
+            await self.emit(Response(id="", error=traceback.format_exc()))
         finally:
             self._cancel_scope = None
             self.running = False
@@ -558,9 +706,20 @@ class ReducerWorker:
                 while not self.running:
                     await trio.sleep(0.01)
 
-                # Start progress updates and reducer
+                # Start progress updates
                 nursery.start_soon(self.emit_progress_updates)
-                await self.run_reducer()
+
+                # Run reducer, looping if restart is requested
+                while True:
+                    self._restart_requested = False
+                    await self.run_reducer()
+
+                    # Check if we should restart
+                    if not self._restart_requested:
+                        break
+
+                    # Set running=True here since run_reducer's finally block set it to False
+                    self.running = True
 
                 # Emit final progress update before completion
                 final_update = await self._build_progress_update()
@@ -576,6 +735,12 @@ class ReducerWorker:
                 self.state.output_manager.cleanup_all()
             if self._output_dir is not None and os.path.isdir(self._output_dir):
                 shutil.rmtree(self._output_dir, ignore_errors=True)
+            # Close log file if we opened one
+            if self._log_file is not None:
+                try:
+                    self._log_file.close()
+                except Exception:
+                    pass
 
 
 def main() -> None:

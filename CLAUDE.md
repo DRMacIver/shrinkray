@@ -178,26 +178,517 @@ Main Process (asyncio/textual)     Subprocess (trio)
 3. **View caching**: `problem.view(format)` caches parsed views to avoid redundant parsing
 4. **Speculative parallelism**: Multiple candidates tested concurrently; first success wins, others are "wasted" but harmless
 
-## Testing Best Practices
+## Development Process: Test-Driven Development
 
-### Test-First Development
+This codebase is complex. The TUI runs in asyncio, the reducer runs in trio, they communicate via subprocess with a JSON protocol, and there are multiple layers of abstraction. **This complexity makes bugs easy to introduce and hard to find.** The tooling (tests, coverage, lints) exists to catch these bugs early. Use it properly.
 
-When implementing features, **start with tests, not code**:
+### The Core Principle
 
-1. **UI changes need integration tests first** - Before modifying the TUI, write a fast integration test that validates the expected behavior. This ensures the feature works end-to-end.
+**A feature is NOT complete until it has 100% test coverage.** This is not a suggestion—it is the definition of "done." Attempts to work around this (suppressions, claiming something is "too hard to test") are actively harmful because they leave bugs in the codebase that will cause problems later.
 
-2. **Develop "outside in"** - For features that span TUI and worker subprocess:
-   - First: Write a TUI unit test with a mocked/fake client
-   - Then: Write tests for the worker/protocol layer
-   - Finally: Implement the actual feature
+The following keywords are used per RFC 2119:
+- **MUST** / **MUST NOT** - Absolute requirements
+- **SHOULD** / **SHOULD NOT** - Strong recommendations with exceptions only when fully understood
+- **MAY** - Truly optional
 
-3. **Why?** This approach:
-   - Clarifies the interface/contract before implementation
-   - Catches integration issues early
-   - Results in better test coverage
-   - Forces thinking about testability upfront
+### Why TDD Matters Here
 
-4. **Coverage goal** - The tests you write before implementing should aim to achieve 100% coverage of the new code automatically. If you find yourself needing to add tests after implementation, that's a sign the test-first approach wasn't thorough enough. This won't be perfect, but it's the goal.
+This codebase has repeatedly demonstrated that:
+1. Code written without tests first is usually broken
+2. "It's too hard to test" usually means the code needs refactoring
+3. Coverage gaps always correspond to bugs discovered later
+4. The tests catch bugs that seem obvious in hindsight but weren't caught during implementation
+
+TDD is not bureaucracy—it's the most efficient path to working code in a codebase this complex.
+
+### The Development Workflow
+
+#### Phase 1: Understand the Testing Surface
+
+Before writing any code, you MUST identify which layers need testing:
+
+**Layer 1: Pure Logic (no I/O)**
+- Data transformations, protocol serialization, algorithms
+- Test with: Direct unit tests, Hypothesis property tests
+- Example: `PassStatsData` serialization, history file parsing
+
+**Layer 2: Worker/Reducer (trio async)**
+- The `ReducerWorker` class, reduction passes, problem state
+- Test with: `pytest-trio`, `@pytest.mark.trio`, mock I/O streams
+- Example: `test_subprocess_worker.py` tests worker commands in isolation
+
+**Layer 3: TUI Components (asyncio)**
+- Individual widgets like `StatsDisplay`, `ContentPreview`, modals
+- Test with: `asyncio.run()` wrapper, `FakeReductionClient`
+- Example: Testing that a modal displays correct data without spawning a real worker
+
+**Layer 4: Integration (subprocess communication)**
+- Full TUI ↔ Worker communication
+- Test with: Real subprocess spawning (mark as `@pytest.mark.slow`)
+- Example: `test_tui_history_modal_during_reduction`
+
+You MUST test each layer independently before testing them together. If a bug exists in the worker layer, you SHOULD be able to reproduce it with a worker-only test, not by running the full TUI.
+
+#### Phase 2: Write Tests First
+
+For each feature, you MUST write tests before implementation:
+
+1. **Start with the contract** - What should this feature do? Write a test that asserts the expected behavior.
+
+2. **Write failing tests** - The test MUST fail before you write the implementation. If it passes, either the test is wrong or the feature already exists.
+
+3. **Test error cases first** - Error handling is where most bugs hide. Write tests for:
+   - Missing required parameters
+   - Invalid input
+   - State not initialized
+   - Network/I/O failures
+
+4. **Test the happy path** - Only after error cases are covered.
+
+Example for adding a new worker command:
+
+```python
+# Step 1: Test missing parameter
+@pytest.mark.trio
+async def test_handle_new_command_missing_param():
+    worker = ReducerWorker()
+    response = await worker._handle_new_command("id", {})
+    assert response.error == "param is required"
+
+# Step 2: Test invalid state
+@pytest.mark.trio
+async def test_handle_new_command_no_state():
+    worker = ReducerWorker()
+    response = await worker._handle_new_command("id", {"param": "value"})
+    assert response.error == "State not available"
+
+# Step 3: Test success case
+@pytest.mark.trio
+async def test_handle_new_command_success():
+    worker = ReducerWorker()
+    worker.state = MagicMock()
+    # ... setup ...
+    response = await worker._handle_new_command("id", {"param": "value"})
+    assert response.result == {"status": "success"}
+```
+
+#### Phase 3: Implement Minimal Code
+
+Write the minimum code to make tests pass:
+
+1. You MUST NOT write code that isn't exercised by a test
+2. You SHOULD run tests after each small change
+3. If you find yourself writing complex logic, stop and write more tests first
+
+#### Phase 4: Check Coverage
+
+After implementation, you MUST run coverage:
+
+```bash
+uv run coverage run -m pytest tests/ -m "not slow" --ignore=tests/test_tui_snapshots.py -q
+uv run coverage report --fail-under=100
+```
+
+**If coverage is not 100%, the feature is not complete.**
+
+When coverage shows missing lines:
+1. You MUST NOT add `# pragma: no cover`
+2. You MUST write a test that exercises the missing code
+3. If the code is genuinely unreachable, you MUST delete it
+4. If testing is difficult, you SHOULD refactor the code to be more testable
+
+### Refactoring for Testability
+
+When code is hard to test, the problem is usually the code's structure, not the testing tools. Here are specific refactoring patterns with examples from this codebase:
+
+#### 1. Dependency Injection for External Services
+
+**Problem**: Code creates its own dependencies internally, making them impossible to mock.
+
+```python
+# BAD: Hard to test - creates its own subprocess
+class Worker:
+    def start(self):
+        self.process = subprocess.Popen(["shrinkray-worker"])
+        # ...
+```
+
+```python
+# GOOD: Dependency injection - accepts a client interface
+class ShrinkRayApp:
+    def __init__(self, ..., client: SubprocessClient | None = None):
+        self._client = client or SubprocessClient()
+```
+
+This pattern is used throughout the TUI - `FakeReductionClient` can be injected for testing.
+
+#### 2. Extract Pure Functions from Methods with Side Effects
+
+**Problem**: A method mixes computation with I/O, making the computation untestable.
+
+```python
+# BAD: Logic mixed with I/O
+def process_history_file(self, path: Path) -> None:
+    data = path.read_bytes()
+    parsed = self._parse_format(data)  # Complex logic
+    self._update_state(parsed)
+    self._notify_listeners()
+```
+
+```python
+# GOOD: Pure parsing function extracted
+def parse_history_entry(data: bytes) -> HistoryEntry:
+    """Pure function - easy to test with arbitrary inputs."""
+    # Complex parsing logic here
+    return HistoryEntry(...)
+
+def process_history_file(self, path: Path) -> None:
+    data = path.read_bytes()
+    entry = parse_history_entry(data)  # Tested separately
+    self._update_state(entry)
+    self._notify_listeners()
+```
+
+Now `parse_history_entry` can be tested with Hypothesis to generate edge cases.
+
+#### 3. Inject Time Sources
+
+**Problem**: Code uses `time.time()` directly, making time-dependent behavior untestable.
+
+```python
+# BAD: Untestable timing logic
+def should_refresh(self) -> bool:
+    return time.time() - self._last_refresh > 0.5
+```
+
+```python
+# GOOD: Inject time source or use relative time
+def __init__(self, ..., time_source: Callable[[], float] = time.time):
+    self._time_source = time_source
+
+def should_refresh(self) -> bool:
+    return self._time_source() - self._last_refresh > 0.5
+
+# In tests:
+fake_time = 0.0
+widget = Widget(time_source=lambda: fake_time)
+fake_time = 1.0  # Advance time
+assert widget.should_refresh()
+```
+
+#### 4. Split Methods That Do Multiple Things
+
+**Problem**: A large method has multiple code paths, and testing one path requires setting up unrelated state.
+
+```python
+# BAD: One method, many responsibilities
+def handle_command(self, cmd: str, params: dict) -> Response:
+    if cmd == "start":
+        # 50 lines of start logic
+    elif cmd == "cancel":
+        # 30 lines of cancel logic
+    elif cmd == "restart":
+        # 40 lines of restart logic
+```
+
+```python
+# GOOD: Dispatch to focused handlers
+def handle_command(self, cmd: str, params: dict) -> Response:
+    handlers = {
+        "start": self._handle_start,
+        "cancel": self._handle_cancel,
+        "restart": self._handle_restart,
+    }
+    handler = handlers.get(cmd)
+    if handler is None:
+        return Response(error=f"Unknown command: {cmd}")
+    return handler(params)
+
+async def _handle_restart(self, params: dict) -> Response:
+    """Focused method - test this directly."""
+    # ...
+```
+
+Each handler can be tested in isolation with minimal setup.
+
+#### 5. Use Protocols for Mockable Interfaces
+
+**Problem**: Code depends on a concrete class that's hard to instantiate in tests.
+
+```python
+# BAD: Depends on concrete class
+def update_display(self, state: ShrinkRayStateSingleFile) -> None:
+    size = state.problem.current_size
+    # ...
+```
+
+```python
+# GOOD: Depend on protocol or use duck typing
+from typing import Protocol
+
+class HasCurrentSize(Protocol):
+    @property
+    def current_size(self) -> int: ...
+
+def update_display(self, state: HasCurrentSize) -> None:
+    size = state.current_size
+    # ...
+
+# In tests: just pass any object with current_size
+mock_state = MagicMock()
+mock_state.current_size = 100
+update_display(mock_state)
+```
+
+#### 6. Make Async Boundaries Explicit
+
+**Problem**: Async and sync code are interleaved, making it hard to test the sync parts.
+
+```python
+# BAD: Async operation buried in logic
+async def compute_result(self, data: bytes) -> Result:
+    processed = self._transform(data)  # Sync
+    validated = await self._async_validate(processed)  # Async
+    return self._finalize(validated)  # Sync
+```
+
+```python
+# GOOD: Separate sync logic from async coordination
+def transform(self, data: bytes) -> ProcessedData:
+    """Pure sync function - easy to test."""
+    return ProcessedData(...)
+
+def finalize(self, validated: ValidatedData) -> Result:
+    """Pure sync function - easy to test."""
+    return Result(...)
+
+async def compute_result(self, data: bytes) -> Result:
+    """Thin async coordinator - test with mocked dependencies."""
+    processed = self.transform(data)
+    validated = await self._async_validate(processed)
+    return self.finalize(validated)
+```
+
+#### 7. Parameterize Behavior Instead of Hardcoding
+
+**Problem**: Behavior depends on hardcoded values that can't be changed in tests.
+
+```python
+# BAD: Hardcoded interval
+def on_mount(self) -> None:
+    self.set_interval(0.5, self._refresh)  # Must wait 500ms in tests
+```
+
+```python
+# GOOD: Parameterize the interval
+def __init__(self, ..., refresh_interval: float = 0.5):
+    self._refresh_interval = refresh_interval
+
+def on_mount(self) -> None:
+    self.set_interval(self._refresh_interval, self._refresh)
+
+# In tests: use short interval or mock set_interval
+```
+
+#### 8. Return Values Instead of Mutating State
+
+**Problem**: Method mutates object state, requiring inspection of internals to verify behavior.
+
+```python
+# BAD: Mutates internal state
+def update_stats(self, new_data: Stats) -> None:
+    self._stats = new_data
+    self._last_update = time.time()
+    if self._stats.size < self._threshold:
+        self._trigger_alert()
+```
+
+```python
+# GOOD: Return a result that can be asserted
+@dataclass
+class StatsUpdateResult:
+    new_stats: Stats
+    alert_triggered: bool
+
+def compute_stats_update(self, new_data: Stats) -> StatsUpdateResult:
+    """Pure function - returns what would happen."""
+    alert = new_data.size < self._threshold
+    return StatsUpdateResult(new_stats=new_data, alert_triggered=alert)
+
+def update_stats(self, new_data: Stats) -> None:
+    result = self.compute_stats_update(new_data)
+    self._stats = result.new_stats
+    self._last_update = time.time()
+    if result.alert_triggered:
+        self._trigger_alert()
+```
+
+#### 9. Use Factory Functions for Complex Object Creation
+
+**Problem**: Object creation requires many parameters, making test setup verbose.
+
+```python
+# BAD: Tests need to specify everything
+def test_something():
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=["./test.sh"],
+        timeout=10.0,
+        base="test.c",
+        parallelism=1,
+        filename="test.c",
+        formatter="none",
+        # ... 10 more parameters ...
+    )
+```
+
+```python
+# GOOD: Factory with sensible defaults
+def make_test_state(
+    *,
+    initial: bytes = b"test",
+    filename: str = "test.c",
+    **overrides
+) -> ShrinkRayStateSingleFile:
+    """Factory for tests - only specify what matters."""
+    defaults = {
+        "input_type": InputType.all,
+        "in_place": False,
+        "test": ["true"],
+        "timeout": 10.0,
+        # ... sensible defaults ...
+    }
+    return ShrinkRayStateSingleFile(
+        initial=initial,
+        filename=filename,
+        **(defaults | overrides)
+    )
+
+# In tests:
+state = make_test_state(initial=b"specific content")
+```
+
+#### 10. Avoid Global State
+
+**Problem**: Functions depend on or modify global state, causing test interference.
+
+```python
+# BAD: Global state
+_current_worker = None
+
+def get_worker() -> Worker:
+    global _current_worker
+    if _current_worker is None:
+        _current_worker = Worker()
+    return _current_worker
+```
+
+```python
+# GOOD: Pass dependencies explicitly or use a context
+class WorkerContext:
+    def __init__(self):
+        self.worker = Worker()
+
+# Tests create their own context
+def test_something():
+    ctx = WorkerContext()
+    result = do_thing(ctx.worker)
+```
+
+### Recognizing When to Refactor
+
+You SHOULD refactor when you notice:
+- A test requires more than 10 lines of setup
+- You need to access private attributes (`_foo`) to verify behavior
+- Multiple tests duplicate the same complex setup
+- You're tempted to add `# pragma: no cover` to "unreachable" code
+- A single test covers multiple unrelated behaviors
+- You need to mock more than 3 things to test a single method
+
+#### Phase 5: Run Lints
+
+After coverage passes, you MUST run lints:
+
+```bash
+just lint
+```
+
+Lint errors indicate code quality issues. You MUST NOT suppress them with `# noqa` except for the explicitly allowed cases in the "Avoid Suppressions" section.
+
+#### Phase 6: Self-Review
+
+Before committing, ask yourself:
+- Did I write tests first, or did I retrofit them?
+- Is every code path tested?
+- Would I be embarrassed if someone reviewed this code?
+- Did I take any shortcuts?
+
+### Testing Different Architectural Layers
+
+#### Testing the Worker Without the TUI
+
+Most worker features can be tested without the TUI:
+
+```python
+@pytest.mark.trio
+async def test_worker_feature():
+    # Create worker with fake I/O
+    input_stream = BidirectionalInputStream()
+    output = MemoryOutputStream()
+    worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+    # Send commands directly
+    input_stream.send_command(Request(id="1", command="start", params={...}))
+
+    # Run worker in nursery
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(worker.run)
+        # ... interact with worker ...
+        nursery.cancel_scope.cancel()
+```
+
+This is MUCH faster than spawning a real subprocess and avoids TUI complexity.
+
+#### Testing the TUI Without a Real Worker
+
+Use `FakeReductionClient` to test TUI behavior:
+
+```python
+def test_tui_feature():
+    async def run():
+        updates = [ProgressUpdate(status="Running", size=100, ...)]
+        client = FakeReductionClient(updates=updates)
+
+        app = ShrinkRayApp(file_path="test.txt", test=["true"], client=client)
+        async with app.run_test() as pilot:
+            await pilot.press("x")  # Test keyboard interaction
+            # ... assert widget state ...
+
+    asyncio.run(run())
+```
+
+This tests TUI logic without subprocess overhead.
+
+#### When to Use Integration Tests
+
+Integration tests (real TUI + real worker) SHOULD be used sparingly:
+- Verifying the protocol works end-to-end
+- Testing timing-sensitive behavior
+- Catching bugs that only appear with real async scheduling
+
+Integration tests MUST be marked `@pytest.mark.slow`.
+
+### What "Too Hard to Test" Actually Means
+
+When you think something is too hard to test, it usually means one of:
+
+1. **The code is poorly structured** - Refactor it. Extract testable pieces.
+2. **You don't understand the testing tools** - Read the existing tests for examples.
+3. **The test would be slow** - That's fine, mark it `@pytest.mark.slow`.
+4. **You need to mock something** - Use `unittest.mock.patch` or dependency injection.
+
+"Too hard to test" is almost never a valid reason to skip tests. If you genuinely believe something cannot be tested, explain the specific technical barrier and propose a refactoring that would make it testable.
 
 ### Async Tests
 - **Use pytest-trio for most async tests** - This project uses pytest-trio, so async test functions work directly. Simply define `async def test_something():` and pytest-trio will run it.

@@ -198,6 +198,29 @@ This behaviour can be disabled by passing --trivial-is-not-error.
     help="Pass this if you do not want to use clang delta for C/C++ transformations.",
 )
 @click.option(
+    "--history/--no-history",
+    default=True,
+    help="""
+Record reduction history to a .shrinkray directory. Each run creates a unique
+subdirectory containing the initial test case and all successful reductions.
+This is useful for debugging and analyzing the reduction process.
+Enabled by default; use --no-history to disable.
+""".strip(),
+)
+@click.option(
+    "--also-interesting",
+    type=int,
+    default=101,
+    help="""
+Exit code indicating a test case is interesting enough to record but should not
+be used for reduction. When the test script returns this code, the test case is
+saved to the also-interesting/ directory within the history folder.
+If --no-history is passed, also-interesting recording is disabled unless
+--also-interesting is explicitly specified (in which case only also-interesting
+cases are recorded, not reductions). Set to 0 to disable. Default: 101.
+""".strip(),
+)
+@click.option(
     "--clang-delta",
     default="",
     help="Path to your clang_delta executable.",
@@ -224,6 +247,8 @@ def main(
     exit_on_completion: bool,
     ui_type: UIType,
     theme: str,
+    history: bool,
+    also_interesting: int,
 ) -> None:
     if timeout is not None and timeout <= 0:
         timeout = float("inf")
@@ -291,6 +316,21 @@ def main(
 
     print("\nStarting reduction...", file=sys.stderr, flush=True)
 
+    # Determine if --also-interesting was explicitly passed
+    # If --no-history and --also-interesting not explicit, disable also-interesting
+    ctx = click.get_current_context()
+    also_interesting_explicit = (
+        ctx.get_parameter_source("also_interesting")
+        == click.core.ParameterSource.COMMANDLINE
+    )
+    if also_interesting == 0:
+        also_interesting_code: int | None = None
+    elif not history and not also_interesting_explicit:
+        # --no-history without explicit --also-interesting: disable both
+        also_interesting_code = None
+    else:
+        also_interesting_code = also_interesting
+
     state_kwargs: dict[str, Any] = {
         "input_type": input_type,
         "in_place": in_place,
@@ -304,6 +344,8 @@ def main(
         "seed": seed,
         "volume": volume,
         "clang_delta_executable": clang_delta_executable,
+        "history_enabled": history,
+        "also_interesting_code": also_interesting_code,
     }
 
     state: ShrinkRayState[Any]
@@ -357,6 +399,8 @@ def main(
             trivial_is_error=trivial_is_error,
             exit_on_completion=exit_on_completion,
             theme=theme,  # type: ignore[arg-type]
+            history_enabled=history,
+            also_interesting_code=also_interesting_code,
         )
         return
 
@@ -382,7 +426,10 @@ def main(
 
 def worker_main() -> None:
     """Entry point for the worker subprocess."""
-    from shrinkray.subprocess.worker import main as worker_entry
+    # Lazy import to avoid loading worker module in main process (fast CLI startup)
+    from shrinkray.subprocess.worker import (  # noqa: I001, no-import-in-function
+        main as worker_entry,
+    )
 
     worker_entry()
 

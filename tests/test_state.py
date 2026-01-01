@@ -63,6 +63,7 @@ def simple_state(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
 
@@ -136,6 +137,7 @@ def directory_state(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
 
@@ -265,6 +267,7 @@ async def test_attempt_format_returns_data_when_cannot_format(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # With formatter=none, can_format should be False
@@ -299,6 +302,7 @@ async def test_run_for_exit_code_returns_script_exit_code(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     exit_code = await state.run_for_exit_code(b"hello")
@@ -329,6 +333,7 @@ async def test_run_for_exit_code_with_stdin_input_type(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Should exit 0 because stdin contains 'magic'
@@ -363,6 +368,7 @@ async def test_run_for_exit_code_in_place_mode(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Should exit 0 because file contains 'hello'
@@ -396,12 +402,56 @@ async def test_is_interesting_returns_true_for_exit_zero(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     result = await state.is_interesting(b"hello")
     assert result is True
     # Also verify parallel tasks tracking worked
     assert state.parallel_tasks_running == 0
+
+
+async def test_is_interesting_stores_no_output_when_none_available(tmp_path):
+    """Test is_interesting handles None output when storing successful result.
+
+    This covers the branch where output is None in the base class is_interesting.
+    Uses ShrinkRayDirectoryState to test the base class method, with history
+    disabled so no output manager is created.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test_dir"
+    target.mkdir()
+    (target / "a.txt").write_text("hello")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test_dir",
+        parallelism=1,
+        initial={"a.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,  # No history = no output manager
+    )
+
+    # Verify no output manager
+    assert state.output_manager is None
+
+    # Call is_interesting - should succeed without storing output
+    result = await state.is_interesting({"a.txt": b"hello"})
+    assert result is True
+
+    # Verify no output was stored (since there was none to capture)
+    assert len(state._successful_outputs) == 0
 
 
 async def test_is_interesting_returns_false_for_non_zero_exit(tmp_path):
@@ -427,6 +477,7 @@ async def test_is_interesting_returns_false_for_non_zero_exit(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     result = await state.is_interesting(b"hello")
@@ -460,6 +511,7 @@ async def test_attempt_format_with_working_formatter(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Formatter should work and return data
@@ -491,6 +543,7 @@ async def test_attempt_format_disables_on_failure(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Initially can_format is True
@@ -528,6 +581,7 @@ async def test_is_interesting_tracks_parallel_tasks(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Run two tasks in parallel
@@ -573,6 +627,7 @@ async def test_first_call_flag_is_cleared(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # First call flag should be True initially
@@ -620,6 +675,7 @@ async def test_print_exit_message_already_reduced(tmp_path, capsys):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     problem = state.problem
@@ -652,6 +708,7 @@ async def test_print_exit_message_reduced(tmp_path, capsys):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     problem = state.problem
@@ -688,6 +745,7 @@ async def test_report_error_timeout_exceeded(tmp_path, capsys):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     exc = TimeoutExceededOnInitial(runtime=5.5, timeout=1.0)
@@ -722,6 +780,7 @@ async def test_run_for_exit_code_no_input_type_arg(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Should run without the file argument
@@ -752,6 +811,7 @@ async def test_run_for_exit_code_in_place_not_basename(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Should create a temporary file with unique name
@@ -788,6 +848,7 @@ async def test_report_error_non_timeout_rerun_fails(tmp_path, capsys):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Pass a non-timeout exception to trigger the else branch
@@ -826,6 +887,7 @@ async def test_report_error_cwd_dependent(tmp_path, capsys, monkeypatch):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Mock run_for_exit_code to fail (simulating temp dir failure)
@@ -874,6 +936,7 @@ async def test_print_exit_message_trivial_error(tmp_path, capsys):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Mock a problem with a 1-byte result
@@ -914,6 +977,7 @@ async def test_print_exit_message_no_reduction(tmp_path, capsys):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Mock a problem where the result is DIFFERENT but SAME LENGTH as initial
@@ -956,6 +1020,7 @@ async def test_run_script_on_file_nonexistent(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Try to run on a non-existent file
@@ -998,6 +1063,7 @@ async def test_check_formatter_failure(tmp_path, capsys):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     with pytest.raises(SystemExit):
@@ -1038,6 +1104,7 @@ async def test_check_formatter_makes_uninteresting(tmp_path, capsys):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     with pytest.raises(SystemExit):
@@ -1073,6 +1140,7 @@ async def test_default_formatter_fallback(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # format_data should use default_reformat_data
@@ -1114,6 +1182,7 @@ async def test_attempt_format_with_formatter(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Initially can_format should be True (formatter is set)
@@ -1154,6 +1223,7 @@ async def test_is_interesting_tracks_first_call_time(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # first_call_time should be None initially
@@ -1198,6 +1268,7 @@ async def test_print_exit_message_formatting_increase(tmp_path, capsys):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Mock a problem where the result is smaller than initial but formatting adds bytes
@@ -1245,6 +1316,7 @@ async def test_run_for_exit_code_in_place_basename(tmp_path):
             seed=0,
             volume=Volume.quiet,
             clang_delta_executable=None,
+            history_enabled=False,
         )
 
         # Should write to the original filename and run the script
@@ -1280,6 +1352,7 @@ async def test_check_formatter_none(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # check_formatter should return immediately without doing anything
@@ -1313,6 +1386,7 @@ async def test_is_interesting_multiple_calls(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # First call sets first_call_time
@@ -1375,6 +1449,7 @@ fi
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Set initial_exit_code to 0 (what it would be if initial test passed)
@@ -1416,6 +1491,7 @@ async def test_report_error_nondeterministic(tmp_path, capsys):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Set initial_exit_code to non-zero (as if initial test returned non-zero)
@@ -1462,6 +1538,7 @@ async def test_print_exit_message_reformatted_is_interesting(tmp_path, capsys):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Get the problem and reduce it
@@ -1509,6 +1586,7 @@ async def test_check_formatter_reformatted_is_interesting(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # check_formatter should pass without error (formatter works and result is interesting)
@@ -1542,6 +1620,7 @@ async def test_timeout_on_first_call(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # First call should raise TimeoutExceededOnInitial (wrapped in ExceptionGroup by trio)
@@ -1592,6 +1671,7 @@ async def test_process_killed_on_timeout(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # First call should raise TimeoutExceededOnInitial and also kill the process
@@ -1643,6 +1723,7 @@ async def test_directory_cleanup_in_place_mode(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # This should exercise the directory cleanup code
@@ -1680,6 +1761,7 @@ async def test_run_for_exit_code_debug_mode_timeout_on_first_call(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # First call in debug mode should raise TimeoutExceededOnInitial
@@ -1718,6 +1800,7 @@ async def test_run_for_exit_code_debug_mode_dynamic_timeout(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # First call in debug mode with None timeout should compute dynamic timeout
@@ -1758,6 +1841,7 @@ async def test_run_for_exit_code_dynamic_timeout_non_debug(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # First call in non-debug mode with None timeout should compute dynamic timeout
@@ -1799,6 +1883,7 @@ async def test_run_for_exit_code_debug_mode_captures_stdout(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Run in debug mode
@@ -1835,6 +1920,7 @@ async def test_run_for_exit_code_debug_mode_captures_stderr(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Run in debug mode
@@ -1872,6 +1958,7 @@ async def test_build_error_message_includes_debug_output(tmp_path):
         seed=0,
         volume=Volume.quiet,
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # First, ensure first_call is set so we can trigger the right code path
@@ -1944,6 +2031,7 @@ fi
             seed=0,
             volume=Volume.quiet,
             clang_delta_executable=None,
+            history_enabled=False,
         )
 
         state.first_call = False
@@ -1982,6 +2070,7 @@ async def test_volume_debug_inherits_stderr(tmp_path):
         seed=0,
         volume=Volume.debug,  # Debug mode
         clang_delta_executable=None,
+        history_enabled=False,
     )
 
     # Bypass first_call logic
@@ -2289,3 +2378,1257 @@ def test_output_manager_return_code(tmp_path):
     assert output_path == path2
     assert test_id == test_id2
     assert return_code == 0
+
+
+# === History integration tests ===
+
+
+def test_state_with_history_disabled(tmp_path):
+    """Test that history is not set up when history_enabled=False."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # History manager should not be created
+    assert state.history_manager is None
+    # Output manager should not be created (no TUI, no history)
+    assert state.output_manager is None
+
+
+def test_state_with_history_enabled_creates_output_manager(tmp_path):
+    """Test that history enabled creates an output manager for capturing output."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+    )
+
+    # History manager should be created
+    assert state.history_manager is not None
+    # Output manager should be created for capturing output
+    assert state.output_manager is not None
+
+
+def test_get_last_captured_output_with_no_output_manager(tmp_path):
+    """Test _get_last_captured_output returns None when output_manager is None."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,  # Disable history to not create output_manager
+    )
+
+    assert state._get_last_captured_output() is None
+
+
+def test_get_last_captured_output_with_no_output_available(tmp_path):
+    """Test _get_last_captured_output returns None when no output is available."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+    )
+
+    # Output manager exists but has no output yet
+    assert state.output_manager is not None
+    assert state._get_last_captured_output() is None
+
+
+def test_get_last_captured_output_returns_stored_output(tmp_path):
+    """Test _get_last_captured_output returns the stored _last_test_output."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+    )
+
+    # _get_last_captured_output returns _last_test_output (set during run_script_on_file)
+    assert state._get_last_captured_output() is None
+
+    # Directly set the stored output (simulating what run_script_on_file does)
+    state._last_test_output = b"test output content"
+
+    output = state._get_last_captured_output()
+    assert output == b"test output content"
+
+
+async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
+    """Test run_script_on_file handles OSError when reading output file."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+    )
+
+    assert state.output_manager is not None
+
+    # Mock open to raise OSError when reading the output file back
+    original_open = open
+    output_dir = state.output_manager.output_dir
+
+    def mock_open(path, *args, **kwargs):
+        # Raise OSError when trying to read (rb) an output file
+        path_str = str(path)
+        if path_str.startswith(output_dir) and "rb" in args:
+            raise OSError("Simulated read error")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", mock_open)
+
+    # Run the script - should complete without raising OSError
+    exit_code = await state.run_script_on_file(
+        str(target), debug=False, cwd=str(tmp_path)
+    )
+    assert exit_code == 0
+
+    # The OSError was caught, so _last_test_output should be None
+    assert state._last_test_output is None
+
+
+def test_directory_state_get_test_case_bytes_returns_serialized(tmp_path):
+    """Test that directory state returns serialized bytes for history recording."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    (target_dir / "file.txt").write_text("content")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target_dir),
+        timeout=5.0,
+        base="target",
+        parallelism=1,
+        initial={"file.txt": b"content"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+    )
+
+    # Directory mode should return serialized bytes for test case
+    test_case_bytes = state._get_test_case_bytes({"file.txt": b"content"})
+    assert test_case_bytes is not None
+    assert isinstance(test_case_bytes, bytes)
+
+    # Should also return something for initial bytes
+    initial_bytes = state._get_initial_bytes()
+    assert initial_bytes is not None
+
+    # Both should match for same content
+    assert test_case_bytes == initial_bytes
+
+
+def test_check_trivial_result_returns_error_message(tmp_path):
+    """Test check_trivial_result returns error message for trivial results."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # Create a mock problem with trivial test case
+    mock_problem = MagicMock()
+    mock_problem.current_test_case = b""  # Empty/trivial
+
+    error = state.check_trivial_result(mock_problem)
+    assert error is not None
+    assert "trivial" in error.lower()
+    assert "size 0" in error
+
+
+def test_check_trivial_result_returns_none_for_non_trivial(tmp_path):
+    """Test check_trivial_result returns None for non-trivial results."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # Create a mock problem with non-trivial test case
+    mock_problem = MagicMock()
+    mock_problem.current_test_case = b"some content"
+
+    error = state.check_trivial_result(mock_problem)
+    assert error is None
+
+
+def test_state_with_history_enabled_uses_existing_output_manager(tmp_path):
+    """Test that history enabled uses an existing output_manager instead of creating a new one."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    # Create an existing output manager (simulating TUI mode)
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    existing_manager = OutputCaptureManager(output_dir=str(output_dir))
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+        output_manager=existing_manager,
+    )
+
+    # Should use the provided output_manager, not create a new one
+    assert state.output_manager is existing_manager
+    # History manager should still be created
+    assert state.history_manager is not None
+
+
+@pytest.mark.trio
+async def test_run_script_discards_output_in_quiet_mode_without_history(tmp_path):
+    """Test that output is discarded in quiet mode without history or TUI."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\necho hello\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,  # Not debug mode
+        clang_delta_executable=None,
+        history_enabled=False,  # No history, so no output_manager
+    )
+
+    # Should succeed and discard output
+    exit_code = await state.run_script_on_file(
+        working=str(target),
+        cwd=str(tmp_path),
+        debug=False,
+    )
+    assert exit_code == 0
+
+
+@pytest.mark.trio
+async def test_volume_debug_without_history_or_output_manager(tmp_path):
+    """Test debug mode inherits stderr when no output_manager is present."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\necho 'debug output' >&2\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.debug,  # Debug mode
+        clang_delta_executable=None,
+        history_enabled=False,  # No history, so no output_manager
+    )
+
+    # With history disabled and debug mode, stderr should be inherited
+    # stdout goes to DEVNULL, stderr inherited
+    assert state.output_manager is None
+    exit_code = await state.run_script_on_file(
+        working=str(target),
+        cwd=str(tmp_path),
+        debug=False,
+    )
+    assert exit_code == 0
+
+
+@pytest.mark.trio
+async def test_reducer_property_initializes_history(tmp_path):
+    """Test that accessing reducer property initializes history when enabled."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+    )
+
+    # History manager should exist
+    assert state.history_manager is not None
+    # But not initialized yet (since we haven't accessed reducer)
+    assert not state.history_manager.initialized
+
+    # Access reducer property to trigger initialization
+    reducer = state.reducer
+
+    # History should now be initialized
+    assert state.history_manager.initialized
+    assert reducer is not None
+
+    # Verify history directory was created
+    assert os.path.isdir(state.history_manager.history_dir)
+    initial_dir = os.path.join(state.history_manager.history_dir, "initial")
+    assert os.path.isdir(initial_dir)
+
+
+@pytest.mark.trio
+async def test_reducer_property_without_history(tmp_path):
+    """Test that accessing reducer property works when history is disabled."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # History manager should not exist
+    assert state.history_manager is None
+
+    # Access reducer property should work without history
+    reducer = state.reducer
+
+    # Reducer should be created successfully
+    assert reducer is not None
+
+
+@pytest.mark.trio
+async def test_history_callback_records_reduction(tmp_path):
+    """Test that the history callback records reductions when they happen."""
+    script = tmp_path / "test.sh"
+    # Script that always says "interesting" (exit 0)
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+    )
+
+    # Access reducer to initialize history and register callbacks
+    reducer = state.reducer
+    problem = reducer.target
+
+    assert state.history_manager is not None
+    assert state.history_manager.initialized
+
+    # No reductions yet
+    assert state.history_manager.reduction_counter == 0
+
+    # Setup the problem first (required before calling is_interesting)
+    await problem.setup()
+
+    # Trigger a reduction by calling is_interesting with a smaller test case
+    smaller = b"hello"  # Smaller than "hello world"
+    result = await problem.is_interesting(smaller)
+
+    # The script returns 0, so it should be interesting
+    assert result is True
+
+    # The callback should have recorded the reduction
+    assert state.history_manager.reduction_counter == 1
+
+    # Verify the reduction file exists
+    reductions_dir = os.path.join(state.history_manager.history_dir, "reductions")
+    assert os.path.isdir(reductions_dir)
+    reduction_1 = os.path.join(reductions_dir, "0001")
+    assert os.path.isdir(reduction_1)
+
+    # Verify the content was saved
+    saved_file = os.path.join(reduction_1, "test.txt")
+    assert os.path.isfile(saved_file)
+    with open(saved_file, "rb") as f:
+        assert f.read() == smaller
+
+
+@pytest.mark.trio
+async def test_history_callback_records_directory_mode(tmp_path):
+    """Test that history callback records reductions for directory mode."""
+    script = tmp_path / "test.sh"
+    # Script that always says "interesting" (exit 0)
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    # Create a target directory with a file
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    (target_dir / "file.txt").write_text("hello world")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target_dir),
+        timeout=5.0,
+        base=target_dir.name,
+        parallelism=1,
+        initial={"file.txt": b"hello world"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+    )
+
+    # Access reducer to initialize history and register callbacks
+    reducer = state.reducer
+    problem = reducer.target
+
+    assert state.history_manager is not None
+    assert state.history_manager.initialized
+
+    # No reductions yet
+    assert state.history_manager.reduction_counter == 0
+
+    # Setup the problem first (required before calling is_interesting)
+    await problem.setup()
+
+    # Trigger a reduction by calling is_interesting with a smaller test case
+    smaller = {"file.txt": b"hello"}  # Smaller than "hello world"
+    result = await problem.is_interesting(smaller)
+
+    # The script returns 0, so it should be interesting
+    assert result is True
+
+    # The callback SHOULD have recorded the reduction for directory mode
+    assert state.history_manager.reduction_counter == 1
+
+    # Verify the directory was saved
+    # For directory mode, files are saved inside target_basename subdirectory
+    reductions_dir = os.path.join(
+        state.history_manager.history_dir, "reductions", "0001"
+    )
+    assert os.path.isdir(reductions_dir)
+    target_subdir = os.path.join(reductions_dir, "target")
+    assert os.path.isdir(target_subdir)
+    saved_file = os.path.join(target_subdir, "file.txt")
+    assert os.path.isfile(saved_file)
+    with open(saved_file, "rb") as f:
+        assert f.read() == b"hello"
+
+
+# === also-interesting tests ===
+
+
+@pytest.mark.trio
+async def test_is_interesting_records_also_interesting_exit_code(tmp_path):
+    """Test that is_interesting records test cases with also-interesting exit code."""
+    script = tmp_path / "test.sh"
+    # Script that returns 101 (also-interesting code)
+    script.write_text("#!/bin/bash\nexit 101")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+        also_interesting_code=101,
+    )
+
+    # Initialize the reducer to set up history
+    _ = state.reducer
+
+    assert state.history_manager is not None
+    assert state.history_manager.also_interesting_counter == 0
+
+    # Call is_interesting - should return False but record the case
+    result = await state.is_interesting(b"test content")
+
+    # Exit code 101 is not 0, so not interesting for reduction
+    assert result is False
+
+    # But it should have been recorded as also-interesting
+    assert state.history_manager.also_interesting_counter == 1
+
+    # Verify the file was saved
+    also_interesting_dir = os.path.join(
+        state.history_manager.history_dir, "also-interesting", "0001"
+    )
+    assert os.path.isdir(also_interesting_dir)
+    saved_file = os.path.join(also_interesting_dir, "test.txt")
+    assert os.path.isfile(saved_file)
+    with open(saved_file, "rb") as f:
+        assert f.read() == b"test content"
+
+
+@pytest.mark.trio
+async def test_also_interesting_disabled_by_default(tmp_path):
+    """Test that also-interesting is disabled when code is None."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 101")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+        also_interesting_code=None,  # Disabled
+    )
+
+    # Initialize the reducer to set up history
+    _ = state.reducer
+
+    assert state.history_manager is not None
+    assert state.history_manager.also_interesting_counter == 0
+
+    # Call is_interesting
+    result = await state.is_interesting(b"test content")
+
+    # Still not interesting (exit 101 != 0)
+    assert result is False
+
+    # But nothing should be recorded since also_interesting_code is None
+    assert state.history_manager.also_interesting_counter == 0
+
+
+@pytest.mark.trio
+async def test_also_interesting_works_without_full_history(tmp_path):
+    """Test that also-interesting works even when history_enabled=False."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 101")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,  # History disabled
+        history_base_dir=str(tmp_path),  # But history_manager is still created
+        also_interesting_code=101,  # But also-interesting is set
+    )
+
+    # History manager IS created when also_interesting_code is set
+    assert state.history_manager is not None
+    # But it won't record reductions
+    assert state.history_manager.record_reductions is False
+
+    # Initialize the reducer to set up history
+    _ = state.reducer
+
+    # Call is_interesting
+    result = await state.is_interesting(b"test content")
+    assert result is False
+
+    # Also-interesting should be recorded
+    assert state.history_manager.also_interesting_counter == 1
+
+
+@pytest.mark.trio
+async def test_no_history_manager_when_both_disabled(tmp_path):
+    """Test that no history manager is created when both history and also-interesting are disabled."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 101")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,  # History disabled
+        also_interesting_code=None,  # Also-interesting disabled
+    )
+
+    # No history manager when both are disabled
+    assert state.history_manager is None
+
+    # Should work without error
+    result = await state.is_interesting(b"test content")
+    assert result is False
+
+
+@pytest.mark.trio
+async def test_also_interesting_different_exit_code_not_recorded(tmp_path):
+    """Test that non-matching exit codes are not recorded."""
+    script = tmp_path / "test.sh"
+    # Script returns 1, but also-interesting is 101
+    script.write_text("#!/bin/bash\nexit 1")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+        also_interesting_code=101,  # Different from script's exit code
+    )
+
+    # Initialize the reducer to set up history
+    _ = state.reducer
+
+    assert state.history_manager is not None
+
+    result = await state.is_interesting(b"test content")
+
+    # Not interesting (exit 1 != 0)
+    assert result is False
+
+    # Also not also-interesting (exit 1 != 101)
+    assert state.history_manager.also_interesting_counter == 0
+
+
+@pytest.mark.trio
+async def test_also_interesting_exit_code_zero_is_interesting_not_also(tmp_path):
+    """Test that exit code 0 is interesting, not also-interesting."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+        also_interesting_code=101,
+    )
+
+    # Initialize the reducer to set up history
+    _ = state.reducer
+
+    assert state.history_manager is not None
+
+    result = await state.is_interesting(b"test content")
+
+    # Interesting (exit 0)
+    assert result is True
+
+    # Not also-interesting (0 != 101)
+    assert state.history_manager.also_interesting_counter == 0
+
+
+@pytest.mark.trio
+async def test_also_interesting_records_directory_mode(tmp_path):
+    """Test that also-interesting records for directory mode."""
+    script = tmp_path / "test.sh"
+    # Script that returns 101 (also-interesting code)
+    script.write_text("#!/bin/bash\nexit 101")
+    script.chmod(0o755)
+
+    # Create a target directory with a file
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    (target_dir / "file.txt").write_text("hello")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target_dir),
+        timeout=5.0,
+        base=target_dir.name,
+        parallelism=1,
+        initial={"file.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+        also_interesting_code=101,
+    )
+
+    assert state.history_manager is not None
+
+    # Call is_interesting with a test case that returns 101
+    result = await state.is_interesting({"file.txt": b"test"})
+
+    # Not interesting (exit 101 != 0)
+    assert result is False
+
+    # SHOULD record for directory mode now
+    assert state.history_manager.also_interesting_counter == 1
+
+    # Verify the directory was saved
+    # For directory mode, files are saved inside target_basename subdirectory
+    also_interesting_dir = os.path.join(
+        state.history_manager.history_dir, "also-interesting", "0001"
+    )
+    assert os.path.isdir(also_interesting_dir)
+    target_subdir = os.path.join(also_interesting_dir, "target")
+    assert os.path.isdir(target_subdir)
+    saved_file = os.path.join(target_subdir, "file.txt")
+    assert os.path.isfile(saved_file)
+    with open(saved_file, "rb") as f:
+        assert f.read() == b"test"
+
+
+# === reset_for_restart and excluded_test_cases tests ===
+
+
+@pytest.mark.trio
+async def test_excluded_test_cases_rejects_matching(tmp_path):
+    """Test that excluded_test_cases causes is_interesting to return False."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # Normally the test case would be interesting
+    assert await state.is_interesting(b"hello") is True
+
+    # Add to exclusion set
+    state.excluded_test_cases = {b"excluded_value"}
+
+    # The excluded value should be rejected
+    assert await state.is_interesting(b"excluded_value") is False
+
+    # Other values should still work
+    assert await state.is_interesting(b"hello") is True
+
+
+@pytest.mark.trio
+async def test_reset_for_restart_clears_reducer(tmp_path):
+    """Test that reset_for_restart clears the cached reducer."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # Access the reducer to cache it
+    reducer1 = state.reducer
+
+    # Reset for restart with new initial
+    state.reset_for_restart(b"world", {b"excluded"})
+
+    # Accessing reducer should return a new instance
+    reducer2 = state.reducer
+
+    # Should be different instances
+    assert reducer1 is not reducer2
+
+    # Initial should be updated
+    assert state.initial == b"world"
+
+    # Exclusion set should be set
+    assert state.excluded_test_cases == {b"excluded"}
+
+
+@pytest.mark.trio
+async def test_reset_for_restart_without_existing_reducer(tmp_path):
+    """Test reset_for_restart when reducer hasn't been accessed yet."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # Reset without accessing reducer first (should not raise)
+    state.reset_for_restart(b"world", {b"excluded"})
+
+    # Verify state was updated
+    assert state.initial == b"world"
+    assert state.excluded_test_cases == {b"excluded"}
+
+
+@pytest.mark.trio
+async def test_reset_for_restart_resets_initial_exit_code(tmp_path):
+    """Test that reset_for_restart resets initial_exit_code to 0.
+
+    This is a regression test for a bug where initial_exit_code kept its
+    old value after restart, causing assertion failures in build_error_message
+    when the assertion `assert self.initial_exit_code not in (None, 0)` was hit.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # Set initial_exit_code to a non-zero value (simulating an earlier run
+    # that had a different exit code scenario)
+    state.initial_exit_code = 1
+
+    # Reset for restart with new initial
+    state.reset_for_restart(b"world", {b"excluded"})
+
+    # initial_exit_code should be reset to 0 since the new initial
+    # (from history) is known to be interesting
+    assert state.initial_exit_code == 0
+
+
+def test_directory_state_set_initial_for_restart_works(tmp_path):
+    """Test that directory state can deserialize and set initial for restart."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    (target_dir / "file.txt").write_text("hello")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target_dir),
+        timeout=5.0,
+        base=target_dir.name,
+        parallelism=1,
+        initial={"file.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # Serialize new content
+    new_content = {"file.txt": b"world", "other.txt": b"test"}
+    serialized = state._serialize_directory(new_content)
+
+    # Set initial for restart
+    state._set_initial_for_restart(serialized)
+
+    # Verify initial was updated
+    assert state.initial == new_content
+
+
+@pytest.mark.trio
+async def test_directory_state_excluded_test_cases(tmp_path):
+    """Test that excluded_test_cases works for directory state.
+
+    This tests the base class is_interesting method which uses
+    _get_test_case_bytes for comparison.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    (target_dir / "file.txt").write_text("hello")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target_dir),
+        timeout=5.0,
+        base="target",
+        parallelism=1,
+        initial={"file.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # Normally the test case would be interesting
+    assert await state.is_interesting({"file.txt": b"hello"}) is True
+
+    # Create exclusion set with serialized directory content
+    excluded_content = {"file.txt": b"excluded"}
+    excluded_serialized = state._serialize_directory(excluded_content)
+    state.excluded_test_cases = {excluded_serialized}
+
+    # The excluded value should be rejected
+    assert await state.is_interesting({"file.txt": b"excluded"}) is False
+
+    # Other values should still work
+    assert await state.is_interesting({"file.txt": b"hello"}) is True
+
+
+def test_directory_state_serialize_deserialize_roundtrip():
+    """Test that directory serialization is reversible."""
+    original = {
+        "file.txt": b"hello world",
+        "subdir/nested.py": b"print('test')",
+        "binary.bin": bytes(range(256)),  # Binary content
+    }
+
+    serialized = ShrinkRayDirectoryState._serialize_directory(original)
+    deserialized = ShrinkRayDirectoryState._deserialize_directory(serialized)
+
+    assert deserialized == original

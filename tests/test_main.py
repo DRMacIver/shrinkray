@@ -100,6 +100,7 @@ except AssertionError:
                 str(script),
                 str(target),
                 "--ui=basic",
+                "--no-history",
             ],
         )
     else:
@@ -111,6 +112,7 @@ except AssertionError:
                 str(script),
                 str(target),
                 "--ui=basic",
+                "--no-history",
             ],
         )
 
@@ -124,6 +126,7 @@ except AssertionError:
     assert format(c.read_text()) == "from a import x\n\nassert x"
 
 
+@pytest.mark.slow
 def test_gives_informative_error_when_script_does_not_work_outside_current_directory(
     tmpdir,
 ):
@@ -155,6 +158,7 @@ if sys.argv[1] != {repr(str(target))}:
                 str(script),
                 str(target),
                 "--ui=basic",
+                "--no-history",
             ],
             check=True,
             stderr=subprocess.PIPE,
@@ -192,6 +196,7 @@ sys.exit(1)
                 str(script),
                 str(target),
                 "--ui=basic",
+                "--no-history",
             ],
             check=True,
             stderr=subprocess.PIPE,
@@ -278,6 +283,7 @@ grep hello {str(target)}
             "--in-place",
             "--input-type=basename",
             "--parallelism=2",
+            "--no-history",
         ],
     )
     assert result.exit_code != 0
@@ -306,6 +312,7 @@ exit 1
             str(script),
             str(target),
             "--ui=basic",
+            "--no-history",
         ],
     )
     assert result.exit_code != 0
@@ -339,6 +346,7 @@ def test_timeout_zero_sets_infinite(basic_shrink_target):
             basic_shrink_target.test_case,
             "--ui=basic",
             "--timeout=0",
+            "--no-history",
         ],
     )
     # Should complete successfully with infinite timeout
@@ -560,6 +568,7 @@ def test_default_backup_filename(basic_shrink_target):
             basic_shrink_target.interestingness_test,
             basic_shrink_target.test_case,
             "--ui=basic",
+            "--no-history",
         ],
     )
     assert result.exit_code == 0
@@ -653,6 +662,7 @@ def test_textual_ui_path(basic_shrink_target, monkeypatch):
             basic_shrink_target.interestingness_test,
             basic_shrink_target.test_case,
             "--ui=textual",
+            "--no-history",
         ],
     )
 
@@ -940,6 +950,7 @@ exit 0
             str(target),
             "--ui=basic",
             "--timeout=0.01",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -984,6 +995,7 @@ exit 0
             str(target),
             "--ui=textual",
             "--timeout=0.01",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -1020,6 +1032,7 @@ def test_invalid_initial_shows_error_message_basic(tmp_path):
             str(script),
             str(target),
             "--ui=basic",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -1050,6 +1063,7 @@ def test_invalid_initial_shows_error_message_tui(tmp_path):
             str(script),
             str(target),
             "--ui=textual",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -1095,6 +1109,7 @@ sys.exit(0)
             str(script),
             str(target),
             "--ui=textual",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -1133,6 +1148,7 @@ sys.exit(1)
             str(script),
             str(target),
             "--ui=textual",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -1210,6 +1226,7 @@ def test_happy_path_basic_ui_single_file(simple_file_target):
             simple_file_target.test_case,
             "--ui=basic",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1234,6 +1251,7 @@ def test_happy_path_basic_ui_directory(simple_directory_target):
             "--ui=basic",
             "--input-type=arg",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1259,6 +1277,7 @@ def test_happy_path_tui_single_file(simple_file_target):
             simple_file_target.test_case,
             "--ui=textual",
             "--parallelism=1",
+            "--no-history",
         ],
         capture_output=True,
         text=True,
@@ -1321,6 +1340,7 @@ def test_trivial_is_not_error_basic_ui(tmp_path):
             "--ui=basic",
             "--trivial-is-not-error",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1347,6 +1367,7 @@ def test_trivial_is_error_basic_ui(tmp_path):
             str(target),
             "--ui=basic",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1379,6 +1400,7 @@ def test_trivial_is_not_error_tui(tmp_path, monkeypatch):
             "--ui=textual",
             "--trivial-is-not-error",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1397,6 +1419,7 @@ def test_happy_path_with_parallelism(simple_file_target):
             simple_file_target.test_case,
             "--ui=basic",
             "--parallelism=2",
+            "--no-history",
         ],
     )
 
@@ -1433,6 +1456,7 @@ def test_happy_path_in_place_single_file(tmp_path, monkeypatch):
             "--ui=basic",
             "--in-place",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1455,6 +1479,7 @@ def test_happy_path_formatter_none(simple_file_target):
             "--ui=basic",
             "--formatter=none",
             "--parallelism=1",
+            "--no-history",
         ],
     )
 
@@ -1463,6 +1488,65 @@ def test_happy_path_formatter_none(simple_file_target):
     with open(simple_file_target.test_case) as f:
         content = f.read()
     assert len(content) > 1
+
+
+# === also-interesting CLI option tests ===
+
+
+def test_also_interesting_zero_disables_feature(tmp_path):
+    """Test that --also-interesting=0 disables the feature."""
+    # Create a simple test script that always exits 0 (interesting)
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    runner = CliRunner(catch_exceptions=False)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(
+            main,
+            [
+                str(script),
+                str(target),
+                "--ui=basic",
+                "--also-interesting=0",  # Explicit disable
+                "--parallelism=1",
+                "--trivial-is-not-error",  # Allow reducing to empty
+            ],
+        )
+
+    assert result.exit_code == 0, f"Output: {result.output}"
+
+
+def test_no_history_without_explicit_also_interesting_disables_both(tmp_path):
+    """Test that --no-history without explicit --also-interesting disables both."""
+    # Create a test script that exits 0 (interesting)
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    runner = CliRunner(catch_exceptions=False)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(
+            main,
+            [
+                str(script),
+                str(target),
+                "--ui=basic",
+                "--no-history",  # Disable history without explicit --also-interesting
+                "--parallelism=1",
+                "--trivial-is-not-error",  # Allow reducing to empty
+            ],
+        )
+
+    assert result.exit_code == 0, f"Output: {result.output}"
+    # No .shrinkray directory should be created
+    assert not os.path.exists(os.path.join(tmp_path, ".shrinkray"))
 
 
 # === TUI terminal interaction test ===
@@ -1598,5 +1682,198 @@ sys.exit(0)
 
     finally:
         # Clean up if still running
+        if child.isalive():
+            child.terminate(force=True)
+
+
+@pytest.mark.slow
+def test_tui_history_modal_during_reduction(tmp_path: pathlib.Path):
+    """Test that opening history modal during reduction doesn't crash with duplicate IDs.
+
+    This is a regression test for a bug where the history modal's refresh timer
+    would try to add ListItems with the same IDs as existing items, causing
+    a DuplicateIds exception.
+    """
+    # Create a Python target file similar to enterprise-hello that will
+    # take a while to reduce
+    target = tmp_path / "hello.py"
+    target.write_text(
+        """\
+import sys
+import time
+import os
+import random
+
+def func1():
+    return 1
+
+def func2():
+    return 2
+
+def func3():
+    return 3
+
+def func4():
+    return 4
+
+def func5():
+    return 5
+
+class A:
+    def method1(self):
+        pass
+    def method2(self):
+        pass
+
+class B:
+    def method1(self):
+        pass
+    def method2(self):
+        pass
+
+# The key line that must be preserved
+print("hello")
+
+# More filler code
+def more_stuff():
+    x = 1
+    y = 2
+    z = 3
+    return x + y + z
+
+if __name__ == "__main__":
+    more_stuff()
+"""
+    )
+
+    # Create a test script that runs Python and checks for "hello" in output
+    script = tmp_path / "ishello.sh"
+    log_file = tmp_path / "hello.log"
+    script.write_text(
+        f"""\
+#!/bin/bash
+set -eux
+python "$1" > "{log_file}"
+grep "hello" "{log_file}"
+"""
+    )
+    script.chmod(0o755)
+
+    # Set up pyte screen to parse terminal output
+    screen = pyte.Screen(100, 30)
+    stream = pyte.Stream(screen)
+
+    # Spawn the TUI process
+    child = pexpect.spawn(
+        sys.executable,
+        [
+            "-m",
+            "shrinkray",
+            str(script),
+            str(target),
+            "--ui=textual",
+            "--parallelism=1",
+            "--no-exit-on-completion",
+            "--no-history",
+        ],
+        encoding="utf-8",
+        timeout=30,
+        dimensions=(30, 100),
+    )
+
+    try:
+        # Wait for TUI to start
+        child.expect("Validating interestingness test", timeout=10)
+
+        # Wait for the reducer to be running (showing some stats)
+        start_time = time.time()
+        timeout = 15.0
+
+        while time.time() - start_time < timeout:
+            try:
+                data = child.read_nonblocking(size=4096, timeout=0.1)
+                stream.feed(data)
+            except pexpect.TIMEOUT:
+                pass
+            except pexpect.EOF:
+                break
+
+            screen_text = "\n".join(screen.display)
+            # Check for any reduction activity or that reducer is running
+            # (not yet completed)
+            if "Reduction completed" not in screen_text:
+                if (
+                    "Calls to interestingness test" in screen_text
+                    or "reduction" in screen_text.lower()
+                ):
+                    break
+
+        # If reduction already completed, test can still exercise the modal
+        # since the bug can occur whenever the modal is open with existing entries
+
+        # Open the history modal with 'x'
+        child.send("x")
+
+        # Wait for modal to open and for the refresh timer to fire multiple times
+        # The bug occurs when the refresh timer fires (every 1 second) while
+        # new reductions are happening
+        error_seen = False
+        process_crashed = False
+        start_time = time.time()
+        timeout = 10.0  # Wait 10 seconds - should see many refresh cycles
+
+        while time.time() - start_time < timeout:
+            try:
+                data = child.read_nonblocking(size=4096, timeout=0.2)
+                stream.feed(data)
+            except pexpect.TIMEOUT:
+                pass
+            except pexpect.EOF:
+                # Process crashed - likely due to the bug
+                process_crashed = True
+                break
+
+            screen_text = "\n".join(screen.display)
+            # Check for DuplicateIds error specifically
+            # Note: don't check for generic "Traceback" since normal test output
+            # can contain Python tracebacks from failed test cases
+            if "DuplicateIds" in screen_text:
+                error_seen = True
+                break
+
+        # Get final screen content before closing
+        final_screen = "\n".join(screen.display)
+
+        if not process_crashed:
+            # Close the modal with Escape
+            child.send("\x1b")  # Escape key
+            time.sleep(0.3)
+
+            # Quit the TUI
+            child.send("q")
+
+            # Wait for process to exit
+            try:
+                child.expect(pexpect.EOF, timeout=5)
+            except pexpect.TIMEOUT:
+                pass
+
+        child.close()
+
+        # Check that no error occurred
+        assert not error_seen, (
+            f"DuplicateIds error in screen output. Screen:\n{final_screen}"
+        )
+        assert not process_crashed, (
+            f"Process crashed (likely DuplicateIds error). Screen:\n{final_screen}"
+        )
+
+        # The process should have exited cleanly
+        if child.exitstatus is not None:
+            assert child.exitstatus == 0, (
+                f"Exit status was {child.exitstatus}. Screen:\n{final_screen}"
+            )
+
+    finally:
         if child.isalive():
             child.terminate(force=True)

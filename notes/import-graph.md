@@ -8,8 +8,8 @@ External dependencies (trio, attrs, etc.) are not shown.
 flowchart TD
     n0[shrinkray]
     n1[cli]
-    n2[display]
-    n3[formatting]
+    n2[formatting]
+    n3[history]
     n4[passes]
     n5[passes.bytes]
     n6[passes.clangdelta]
@@ -30,25 +30,26 @@ flowchart TD
     n21[subprocess.worker]
     n22[tui]
     n23[ui]
-    n24[work]
+    n24[validation]
+    n25[work]
 
-    n5 --> n7
     n5 --> n10
+    n5 --> n14
     n6 --> n7
     n6 --> n14
-    n6 --> n24
+    n6 --> n25
     n7 --> n14
     n8 --> n5
     n8 --> n7
     n8 --> n10
     n8 --> n14
-    n8 --> n24
+    n8 --> n25
     n9 --> n7
     n9 --> n10
     n9 --> n14
     n10 --> n14
     n11 --> n14
-    n11 --> n24
+    n11 --> n25
     n12 --> n7
     n12 --> n10
     n12 --> n13
@@ -56,8 +57,8 @@ flowchart TD
     n13 --> n7
     n13 --> n10
     n13 --> n14
-    n14 --> n3
-    n14 --> n24
+    n14 --> n2
+    n14 --> n25
     n16 --> n5
     n16 --> n6
     n16 --> n7
@@ -69,12 +70,13 @@ flowchart TD
     n16 --> n13
     n16 --> n14
     n17 --> n1
+    n17 --> n2
     n17 --> n3
     n17 --> n6
     n17 --> n14
     n17 --> n15
     n17 --> n16
-    n17 --> n24
+    n17 --> n25
     n18 --> n19
     n18 --> n20
     n19 --> n20
@@ -83,11 +85,13 @@ flowchart TD
     n21 --> n14
     n21 --> n17
     n21 --> n20
-    n21 --> n24
+    n21 --> n25
+    n22 --> n2
     n22 --> n19
     n22 --> n20
     n23 --> n14
     n23 --> n17
+    n24 --> n1
 ```
 
 ---

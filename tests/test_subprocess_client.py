@@ -262,6 +262,7 @@ def test_subprocess_client_start_reduction():
                 volume="quiet",
                 no_clang_delta=True,
                 clang_delta="",
+                history_enabled=False,
             )
             # Should get a response (even if it fails)
             assert response is not None
@@ -682,6 +683,7 @@ def test_subprocess_client_start_reduction_without_parallelism():
             response = await client.start_reduction(
                 file_path="/tmp/test.txt",
                 test=["test.sh"],
+                history_enabled=False,
             )
             # Should get a response (even if it fails to start)
             assert response is not None
@@ -830,6 +832,7 @@ def test_subprocess_client_handle_error_response_integration(tmp_path):
                 formatter="none",
                 volume="quiet",
                 no_clang_delta=True,
+                history_enabled=False,
             )
 
             # The start command should return an error immediately
@@ -1065,5 +1068,55 @@ def test_subprocess_client_skip_current_pass_exception():
 
         response = await client.skip_current_pass()
         assert response.error == "Failed to skip pass"
+
+    asyncio.run(run())
+
+
+# === restart_from tests ===
+
+
+def test_subprocess_client_restart_from_when_completed():
+    """Test restart_from returns error when reduction already completed."""
+
+    async def run():
+        client = SubprocessClient()
+        client._completed = True
+
+        response = await client.restart_from(3)
+        assert response.error == "Reduction already completed"
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_restart_from_exception():
+    """Test restart_from handles send_command exception."""
+
+    async def run():
+        client = SubprocessClient()
+        client._completed = False
+        client.send_command = AsyncMock(side_effect=Exception("Connection failed"))
+
+        response = await client.restart_from(3)
+        assert response.error == "Failed to send restart command"
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_close_handles_stderr_log_file_exception():
+    """Test close handles exception when closing stderr log file."""
+
+    async def run():
+        client = SubprocessClient()
+
+        # Create a mock file that raises on close
+        mock_file = MagicMock()
+        mock_file.close.side_effect = Exception("Cannot close file")
+        client._stderr_log_file = mock_file
+
+        # Should not raise even if file.close() fails
+        await client.close()
+
+        # File close should have been attempted
+        mock_file.close.assert_called_once()
 
     asyncio.run(run())

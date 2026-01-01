@@ -19,3 +19,4 @@ scratch
 snapshot_report.html
 .DS_Store
 *.bak
+.shrinkray/

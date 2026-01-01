@@ -335,9 +335,7 @@ class ReducerWorker:
             return Response(id=request_id, result={"status": "skipped"})
         return Response(id=request_id, error="Reducer does not support pass control")
 
-    async def _handle_restart_from(
-        self, request_id: str, params: dict
-    ) -> Response:
+    async def _handle_restart_from(self, request_id: str, params: dict) -> Response:
         """Restart reduction from a specific history point.
 
         This moves all reductions after the specified point to also-interesting,
@@ -416,9 +414,7 @@ class ReducerWorker:
                 self._last_history_time = current_runtime
 
             # Write new test case to file (can happen after reducer is set up)
-            await self.state.write_test_case_to_file(
-                self.state.filename, new_test_case
-            )
+            await self.state.write_test_case_to_file(self.state.filename, new_test_case)
 
             # Ready to restart - running will be set to True by the run() loop
             return Response(
@@ -557,17 +553,19 @@ class ReducerWorker:
         # Calculate total stats including accumulated from previous runs (before restarts)
         total_calls = stats.calls + self._accumulated_calls
         total_reductions = stats.reductions + self._accumulated_reductions
-        total_interesting_calls = stats.interesting_calls + self._accumulated_interesting_calls
-        total_wasted_calls = stats.wasted_interesting_calls + self._accumulated_wasted_calls
+        total_interesting_calls = (
+            stats.interesting_calls + self._accumulated_interesting_calls
+        )
+        total_wasted_calls = (
+            stats.wasted_interesting_calls + self._accumulated_wasted_calls
+        )
 
         # Calculate parallelism stats
         average_parallelism = 0.0
         effective_parallelism = 0.0
         if self._parallel_samples > 0:
             average_parallelism = self._parallel_total / self._parallel_samples
-            wasteage = (
-                total_wasted_calls / total_calls if total_calls > 0 else 0.0
-            )
+            wasteage = total_wasted_calls / total_calls if total_calls > 0 else 0.0
             effective_parallelism = average_parallelism * (1.0 - wasteage)
 
         # Collect pass statistics in run order (only those with test evaluations)

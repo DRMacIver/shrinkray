@@ -1945,9 +1945,7 @@ class ShrinkRayApp(App[None]):
         if self._history_dir is None:
             self.notify("History not available", severity="warning")
             return
-        self.push_screen(
-            HistoryExplorerModal(self._history_dir, self._target_basename)
-        )
+        self.push_screen(HistoryExplorerModal(self._history_dir, self._target_basename))
 
     def action_skip_current_pass(self) -> None:
         """Skip the currently running pass."""
@@ -1974,7 +1972,8 @@ class ShrinkRayApp(App[None]):
             self.notify(f"Restart failed: {response.error}", severity="error")
         else:
             self.notify(
-                f"Restarted from reduction {reduction_number:04d}", severity="information"
+                f"Restarted from reduction {reduction_number:04d}",
+                severity="information",
             )
 
     @property

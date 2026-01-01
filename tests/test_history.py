@@ -337,9 +337,7 @@ def test_record_also_interesting_creates_numbered_directories() -> None:
             manager.record_also_interesting(b"case 2")
             manager.record_also_interesting(b"case 3")
 
-            also_interesting_dir = os.path.join(
-                manager.history_dir, "also-interesting"
-            )
+            also_interesting_dir = os.path.join(manager.history_dir, "also-interesting")
             assert os.path.isdir(os.path.join(also_interesting_dir, "0001"))
             assert os.path.isdir(os.path.join(also_interesting_dir, "0002"))
             assert os.path.isdir(os.path.join(also_interesting_dir, "0003"))
@@ -439,9 +437,7 @@ def test_record_also_interesting_and_reduction_independent_counters() -> None:
 
             # Both directories should have their respective subdirectories
             reductions_dir = os.path.join(manager.history_dir, "reductions")
-            also_interesting_dir = os.path.join(
-                manager.history_dir, "also-interesting"
-            )
+            also_interesting_dir = os.path.join(manager.history_dir, "also-interesting")
             assert os.path.isdir(os.path.join(reductions_dir, "0001"))
             assert os.path.isdir(os.path.join(reductions_dir, "0002"))
             assert os.path.isdir(os.path.join(also_interesting_dir, "0001"))
@@ -455,9 +451,7 @@ def test_record_also_interesting_and_reduction_independent_counters() -> None:
 
 def test_create_with_record_reductions_false() -> None:
     """Test that create() accepts record_reductions parameter."""
-    manager = HistoryManager.create(
-        ["./test.sh"], "buggy.c", record_reductions=False
-    )
+    manager = HistoryManager.create(["./test.sh"], "buggy.c", record_reductions=False)
     assert manager.record_reductions is False
 
 
@@ -632,13 +626,9 @@ def test_restart_from_reduction_moves_entries_to_also_interesting() -> None:
             assert os.path.isdir(os.path.join(also_interesting_dir, "0002"))
 
             # Verify content is correct
-            with open(
-                os.path.join(also_interesting_dir, "0001", "buggy.c"), "rb"
-            ) as f:
+            with open(os.path.join(also_interesting_dir, "0001", "buggy.c"), "rb") as f:
                 assert f.read() == b"r3"
-            with open(
-                os.path.join(also_interesting_dir, "0002", "buggy.c"), "rb"
-            ) as f:
+            with open(os.path.join(also_interesting_dir, "0002", "buggy.c"), "rb") as f:
                 assert f.read() == b"r4"
         finally:
             os.chdir(original_cwd)
@@ -1064,9 +1054,7 @@ def test_initialize_directory_without_record_reductions() -> None:
 
             assert manager.initialized
             # reductions directory should NOT be created
-            assert not os.path.exists(
-                os.path.join(manager.history_dir, "reductions")
-            )
+            assert not os.path.exists(os.path.join(manager.history_dir, "reductions"))
             # But initial directory should still exist
             assert os.path.isdir(os.path.join(manager.history_dir, "initial"))
         finally:

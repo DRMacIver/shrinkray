@@ -108,9 +108,7 @@ class FakeReductionClient:
         return Response(id="skip", result={"status": "skipped"})
 
     async def restart_from(self, reduction_number: int) -> Response:
-        return Response(
-            id="restart", result={"status": "restarted", "size": 100}
-        )
+        return Response(id="restart", result={"status": "restarted", "size": 100})
 
     async def close(self) -> None:
         self._closed = True
@@ -6307,10 +6305,10 @@ def test_history_modal_populates_entries(tmp_path):
 
         # Create reductions
         for i in range(3):
-            entry_dir = history_dir / "reductions" / f"000{i+1}"
+            entry_dir = history_dir / "reductions" / f"000{i + 1}"
             entry_dir.mkdir(parents=True)
-            (entry_dir / "test.txt").write_text(f"reduction {i+1}")
-            (entry_dir / "test.txt.out").write_text(f"output {i+1}")
+            (entry_dir / "test.txt").write_text(f"reduction {i + 1}")
+            (entry_dir / "test.txt.out").write_text(f"output {i + 1}")
 
         # Create also-interesting
         entry_dir = history_dir / "also-interesting" / "0001"
@@ -6472,7 +6470,9 @@ def test_history_modal_restart_action_not_in_reductions_tab_unit(tmp_path):
     modal.query_one = MagicMock(return_value=mock_tabs)
 
     # Patch the app property
-    with patch.object(type(modal), "app", new_callable=PropertyMock, return_value=mock_app):
+    with patch.object(
+        type(modal), "app", new_callable=PropertyMock, return_value=mock_app
+    ):
         # Call the action
         modal.action_restart_from_here()
 

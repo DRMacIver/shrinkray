@@ -2046,7 +2046,9 @@ async def test_handle_restart_from_directory_reduction():
     worker.state.history_manager = MagicMock()
 
     response = await worker._handle_restart_from("test-id", {"reduction_number": 1})
-    assert response.error == "Restart from history not supported for directory reductions"
+    assert (
+        response.error == "Restart from history not supported for directory reductions"
+    )
 
 
 @pytest.mark.trio
@@ -2055,7 +2057,9 @@ async def test_handle_restart_from_nonexistent_reduction():
     worker = ReducerWorker()
     worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
     worker.state.history_manager = MagicMock()
-    worker.state.history_manager.restart_from_reduction.side_effect = FileNotFoundError()
+    worker.state.history_manager.restart_from_reduction.side_effect = (
+        FileNotFoundError()
+    )
     worker.state.output_manager = None
 
     response = await worker._handle_restart_from("test-id", {"reduction_number": 999})
@@ -2086,7 +2090,10 @@ async def test_handle_restart_from_success():
 
     response = await worker._handle_restart_from("test-id", {"reduction_number": 3})
 
-    assert response.result == {"status": "restarted", "size": 15}  # len(b"restart content")
+    assert response.result == {
+        "status": "restarted",
+        "size": 15,
+    }  # len(b"restart content")
     worker.state.history_manager.restart_from_reduction.assert_called_once_with(3)
     worker.state.reset_for_restart.assert_called_once_with(
         b"restart content", {b"excluded1", b"excluded2"}
@@ -2162,7 +2169,9 @@ async def test_handle_command_restart_from():
     worker = ReducerWorker()
     worker.state = None  # Will cause "History not available" error
 
-    request = Request(id="test-id", command="restart_from", params={"reduction_number": 1})
+    request = Request(
+        id="test-id", command="restart_from", params={"reduction_number": 1}
+    )
     response = await worker.handle_command(request)
 
     assert response.error == "History not available"
@@ -2377,8 +2386,12 @@ async def test_emit_progress_updates_continues_during_restart():
     # 3. After restart (running=True again)
 
     # Find updates from each phase
-    initial_updates = [u for u in updates_emitted if u["running"] and not u["restart_requested"]]
-    restart_updates = [u for u in updates_emitted if not u["running"] and u["restart_requested"]]
+    initial_updates = [
+        u for u in updates_emitted if u["running"] and not u["restart_requested"]
+    ]
+    restart_updates = [
+        u for u in updates_emitted if not u["running"] and u["restart_requested"]
+    ]
 
     # Should have updates from all phases
     assert len(initial_updates) >= 1, "Should have updates during initial running phase"
@@ -2591,7 +2604,9 @@ async def test_worker_no_stderr_redirect_without_history(tmp_path):
             await worker.run()
 
         # Worker should NOT have a log file since history is disabled
-        assert worker._log_file is None, "Log file should be None when history is disabled"
+        assert worker._log_file is None, (
+            "Log file should be None when history is disabled"
+        )
 
         # No .shrinkray directory should exist (or if it does, no run directories)
         shrinkray_dir = tmp_path / ".shrinkray"

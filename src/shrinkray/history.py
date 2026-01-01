@@ -165,7 +165,7 @@ class HistoryManager:
         else:
             command = test_ref
 
-        script_content = f'''#!/bin/bash
+        script_content = f"""#!/bin/bash
 # Shrink Ray interestingness test wrapper
 # Run with: ./run.sh [target_file]
 # If no target_file specified, uses the original
@@ -174,14 +174,12 @@ DIR="$(dirname "$0")"
 TARGET="${{1:-"$DIR/{self.target_basename}"}}"
 
 {command} "$TARGET"
-'''
+"""
         with open(script_path, "w") as f:
             f.write(script_content)
         os.chmod(script_path, 0o755)
 
-    def record_reduction(
-        self, test_case: bytes, output: bytes | None = None
-    ) -> None:
+    def record_reduction(self, test_case: bytes, output: bytes | None = None) -> None:
         """Record a successful reduction.
 
         Args:
@@ -277,9 +275,7 @@ TARGET="${{1:-"$DIR/{self.target_basename}"}}"
             with open(target_path, "rb") as f:
                 return f.read()
 
-    def restart_from_reduction(
-        self, reduction_number: int
-    ) -> tuple[bytes, set[bytes]]:
+    def restart_from_reduction(self, reduction_number: int) -> tuple[bytes, set[bytes]]:
         """Move reductions after reduction_number to also-interesting.
 
         This is used for the "restart from this point" feature. All reductions
@@ -433,9 +429,7 @@ def serialize_directory(content: dict[str, bytes]) -> bytes:
     Returns:
         JSON-encoded directory content with base64 file contents
     """
-    serialized = {
-        k: base64.b64encode(v).decode() for k, v in sorted(content.items())
-    }
+    serialized = {k: base64.b64encode(v).decode() for k, v in sorted(content.items())}
     return json.dumps(serialized, sort_keys=True).encode()
 
 

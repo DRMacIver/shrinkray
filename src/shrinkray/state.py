@@ -835,7 +835,10 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
 
     async def is_interesting(self, test_case: bytes) -> bool:
         # Check exclusion set first (for restart-from-point feature)
-        if self.excluded_test_cases is not None and test_case in self.excluded_test_cases:
+        if (
+            self.excluded_test_cases is not None
+            and test_case in self.excluded_test_cases
+        ):
             return False
 
         async with self.is_interesting_limiter:

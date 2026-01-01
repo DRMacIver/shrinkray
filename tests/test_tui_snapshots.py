@@ -80,9 +80,7 @@ class FakeReductionClientForSnapshots:
         return Response(id="skip", result={"status": "skipped"})
 
     async def restart_from(self, reduction_number: int) -> Response:
-        return Response(
-            id="restart", result={"status": "restarted", "size": 100}
-        )
+        return Response(id="restart", result={"status": "restarted", "size": 100})
 
     async def close(self) -> None:
         pass
@@ -448,20 +446,22 @@ def history_dir_with_entries(tmp_path):
 
     # Create some reductions
     for i in range(5):
-        entry_dir = history_dir / "reductions" / f"000{i+1}"
+        entry_dir = history_dir / "reductions" / f"000{i + 1}"
         entry_dir.mkdir(parents=True)
         # Each reduction gets progressively smaller
-        content = f"// Reduction {i+1}\nint main() {{\n    return {5-i};\n}}"
+        content = f"// Reduction {i + 1}\nint main() {{\n    return {5 - i};\n}}"
         (entry_dir / "test.c").write_text(content)
         (entry_dir / "test.c.out").write_text("Exit code: 0\nCompiled successfully")
 
     # Create some also-interesting entries
     for i in range(2):
-        entry_dir = history_dir / "also-interesting" / f"000{i+1}"
+        entry_dir = history_dir / "also-interesting" / f"000{i + 1}"
         entry_dir.mkdir(parents=True)
-        content = f"// Also interesting {i+1}\nint main() {{ return {10+i}; }}"
+        content = f"// Also interesting {i + 1}\nint main() {{ return {10 + i}; }}"
         (entry_dir / "test.c").write_text(content)
-        (entry_dir / "test.c.out").write_text(f"Exit code: {10+i}\nInteresting behavior")
+        (entry_dir / "test.c.out").write_text(
+            f"Exit code: {10 + i}\nInteresting behavior"
+        )
 
     return str(history_dir)
 
@@ -519,4 +519,6 @@ def test_history_modal_also_interesting_tab(snap_compare, update_with_history):
         await pilot.pause()
 
     app = make_app_with_updates([update_with_history])
-    assert snap_compare(app, terminal_size=(120, 40), run_before=open_history_and_switch_tab)
+    assert snap_compare(
+        app, terminal_size=(120, 40), run_before=open_history_and_switch_tab
+    )

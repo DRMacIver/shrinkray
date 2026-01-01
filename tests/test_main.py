@@ -312,7 +312,7 @@ exit 1
             str(script),
             str(target),
             "--ui=basic",
-                "--no-history",
+            "--no-history",
         ],
     )
     assert result.exit_code != 0
@@ -568,7 +568,7 @@ def test_default_backup_filename(basic_shrink_target):
             basic_shrink_target.interestingness_test,
             basic_shrink_target.test_case,
             "--ui=basic",
-                "--no-history",
+            "--no-history",
         ],
     )
     assert result.exit_code == 0
@@ -1032,7 +1032,7 @@ def test_invalid_initial_shows_error_message_basic(tmp_path):
             str(script),
             str(target),
             "--ui=basic",
-                "--no-history",
+            "--no-history",
         ],
         check=False,
         capture_output=True,
@@ -1802,7 +1802,10 @@ grep "hello" "{log_file}"
             # Check for any reduction activity or that reducer is running
             # (not yet completed)
             if "Reduction completed" not in screen_text:
-                if "Calls to interestingness test" in screen_text or "reduction" in screen_text.lower():
+                if (
+                    "Calls to interestingness test" in screen_text
+                    or "reduction" in screen_text.lower()
+                ):
                     break
 
         # If reduction already completed, test can still exercise the modal

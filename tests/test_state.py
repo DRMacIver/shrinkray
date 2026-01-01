@@ -268,7 +268,7 @@ async def test_attempt_format_returns_data_when_cannot_format(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # With formatter=none, can_format should be False
     assert state.can_format is False
@@ -303,7 +303,7 @@ async def test_run_for_exit_code_returns_script_exit_code(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     exit_code = await state.run_for_exit_code(b"hello")
     assert exit_code == 42
@@ -334,7 +334,7 @@ async def test_run_for_exit_code_with_stdin_input_type(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Should exit 0 because stdin contains 'magic'
     exit_code = await state.run_for_exit_code(b"magic word")
@@ -369,7 +369,7 @@ async def test_run_for_exit_code_in_place_mode(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Should exit 0 because file contains 'hello'
     exit_code = await state.run_for_exit_code(b"hello there")
@@ -403,7 +403,7 @@ async def test_is_interesting_returns_true_for_exit_zero(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     result = await state.is_interesting(b"hello")
     assert result is True
@@ -478,7 +478,7 @@ async def test_is_interesting_returns_false_for_non_zero_exit(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     result = await state.is_interesting(b"hello")
     assert result is False
@@ -512,7 +512,7 @@ async def test_attempt_format_with_working_formatter(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Formatter should work and return data
     result = await state.attempt_format(b"hello")
@@ -544,7 +544,7 @@ async def test_attempt_format_disables_on_failure(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Initially can_format is True
     assert state.can_format is True
@@ -582,7 +582,7 @@ async def test_is_interesting_tracks_parallel_tasks(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Run two tasks in parallel
     results = []
@@ -628,7 +628,7 @@ async def test_first_call_flag_is_cleared(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # First call flag should be True initially
     assert state.first_call is True
@@ -676,7 +676,7 @@ async def test_print_exit_message_already_reduced(tmp_path, capsys):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     problem = state.problem
     await state.print_exit_message(problem)
@@ -709,7 +709,7 @@ async def test_print_exit_message_reduced(tmp_path, capsys):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     problem = state.problem
     # Reduce the test case
@@ -746,7 +746,7 @@ async def test_report_error_timeout_exceeded(tmp_path, capsys):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     exc = TimeoutExceededOnInitial(runtime=5.5, timeout=1.0)
     with pytest.raises(SystemExit):
@@ -781,7 +781,7 @@ async def test_run_for_exit_code_no_input_type_arg(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Should run without the file argument
     exit_code = await state.run_for_exit_code(b"hello")
@@ -812,7 +812,7 @@ async def test_run_for_exit_code_in_place_not_basename(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Should create a temporary file with unique name
     exit_code = await state.run_for_exit_code(b"hello world")
@@ -849,7 +849,7 @@ async def test_report_error_non_timeout_rerun_fails(tmp_path, capsys):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Pass a non-timeout exception to trigger the else branch
     with pytest.raises(SystemExit):
@@ -888,7 +888,7 @@ async def test_report_error_cwd_dependent(tmp_path, capsys, monkeypatch):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Mock run_for_exit_code to fail (simulating temp dir failure)
     original_run_for_exit_code = state.run_for_exit_code
@@ -937,7 +937,7 @@ async def test_print_exit_message_trivial_error(tmp_path, capsys):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Mock a problem with a 1-byte result
     problem = MagicMock()
@@ -978,7 +978,7 @@ async def test_print_exit_message_no_reduction(tmp_path, capsys):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Mock a problem where the result is DIFFERENT but SAME LENGTH as initial
     # This triggers the "Some changes were made but no bytes were deleted" branch
@@ -1021,7 +1021,7 @@ async def test_run_script_on_file_nonexistent(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Try to run on a non-existent file
     with pytest.raises(ValueError, match="No such file"):
@@ -1064,7 +1064,7 @@ async def test_check_formatter_failure(tmp_path, capsys):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     with pytest.raises(SystemExit):
         await state.check_formatter()
@@ -1105,7 +1105,7 @@ async def test_check_formatter_makes_uninteresting(tmp_path, capsys):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     with pytest.raises(SystemExit):
         await state.check_formatter()
@@ -1141,7 +1141,7 @@ async def test_default_formatter_fallback(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # format_data should use default_reformat_data
     result = await state.format_data(b"  hello  world  ")
@@ -1183,7 +1183,7 @@ async def test_attempt_format_with_formatter(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Initially can_format should be True (formatter is set)
     assert state.can_format is True
@@ -1224,7 +1224,7 @@ async def test_is_interesting_tracks_first_call_time(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # first_call_time should be None initially
     assert state.first_call_time is None
@@ -1269,7 +1269,7 @@ async def test_print_exit_message_formatting_increase(tmp_path, capsys):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Mock a problem where the result is smaller than initial but formatting adds bytes
     problem = MagicMock()
@@ -1317,7 +1317,7 @@ async def test_run_for_exit_code_in_place_basename(tmp_path):
             volume=Volume.quiet,
             clang_delta_executable=None,
             history_enabled=False,
-            )
+        )
 
         # Should write to the original filename and run the script
         exit_code = await state.run_for_exit_code(b"hello world")
@@ -1353,7 +1353,7 @@ async def test_check_formatter_none(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # check_formatter should return immediately without doing anything
     # (no exception, no side effects)
@@ -1387,7 +1387,7 @@ async def test_is_interesting_multiple_calls(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # First call sets first_call_time
     await state.is_interesting({"a.txt": b"hello"})
@@ -1450,7 +1450,7 @@ fi
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Set initial_exit_code to 0 (what it would be if initial test passed)
     # Also set first_call = False to prevent run_for_exit_code from overwriting it
@@ -1492,7 +1492,7 @@ async def test_report_error_nondeterministic(tmp_path, capsys):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Set initial_exit_code to non-zero (as if initial test returned non-zero)
     # Also set first_call = False to prevent run_for_exit_code from overwriting it
@@ -1539,7 +1539,7 @@ async def test_print_exit_message_reformatted_is_interesting(tmp_path, capsys):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Get the problem and reduce it
     problem = state.problem
@@ -1587,7 +1587,7 @@ async def test_check_formatter_reformatted_is_interesting(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # check_formatter should pass without error (formatter works and result is interesting)
     await state.check_formatter()
@@ -1621,7 +1621,7 @@ async def test_timeout_on_first_call(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # First call should raise TimeoutExceededOnInitial (wrapped in ExceptionGroup by trio)
     with pytest.raises(ExceptionGroup) as exc_info:
@@ -1672,7 +1672,7 @@ async def test_process_killed_on_timeout(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # First call should raise TimeoutExceededOnInitial and also kill the process
     with pytest.raises(ExceptionGroup) as exc_info:
@@ -1724,7 +1724,7 @@ async def test_directory_cleanup_in_place_mode(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # This should exercise the directory cleanup code
     exit_code = await state.run_for_exit_code({"a.txt": b"modified"})
@@ -1762,7 +1762,7 @@ async def test_run_for_exit_code_debug_mode_timeout_on_first_call(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # First call in debug mode should raise TimeoutExceededOnInitial
     with pytest.raises(TimeoutExceededOnInitial) as exc_info:
@@ -1801,7 +1801,7 @@ async def test_run_for_exit_code_debug_mode_dynamic_timeout(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # First call in debug mode with None timeout should compute dynamic timeout
     assert state.timeout is None
@@ -1842,7 +1842,7 @@ async def test_run_for_exit_code_dynamic_timeout_non_debug(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # First call in non-debug mode with None timeout should compute dynamic timeout
     assert state.timeout is None
@@ -1884,7 +1884,7 @@ async def test_run_for_exit_code_debug_mode_captures_stdout(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Run in debug mode
     exit_code = await state.run_for_exit_code(b"hello", debug=True)
@@ -1921,7 +1921,7 @@ async def test_run_for_exit_code_debug_mode_captures_stderr(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Run in debug mode
     exit_code = await state.run_for_exit_code(b"hello", debug=True)
@@ -1959,7 +1959,7 @@ async def test_build_error_message_includes_debug_output(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # First, ensure first_call is set so we can trigger the right code path
     state.first_call = False
@@ -2032,7 +2032,7 @@ fi
             volume=Volume.quiet,
             clang_delta_executable=None,
             history_enabled=False,
-            )
+        )
 
         state.first_call = False
         state.initial_exit_code = 1
@@ -2071,7 +2071,7 @@ async def test_volume_debug_inherits_stderr(tmp_path):
         volume=Volume.debug,  # Debug mode
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Bypass first_call logic
     state.first_call = False
@@ -2533,7 +2533,8 @@ def test_get_last_captured_output_returns_stored_output(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=True,
-        history_base_dir=str(tmp_path),    )
+        history_base_dir=str(tmp_path),
+    )
 
     # _get_last_captured_output returns _last_test_output (set during run_script_on_file)
     assert state._get_last_captured_output() is None
@@ -2569,7 +2570,8 @@ async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=True,
-        history_base_dir=str(tmp_path),    )
+        history_base_dir=str(tmp_path),
+    )
 
     assert state.output_manager is not None
 
@@ -2587,7 +2589,9 @@ async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.open", mock_open)
 
     # Run the script - should complete without raising OSError
-    exit_code = await state.run_script_on_file(str(target), debug=False, cwd=str(tmp_path))
+    exit_code = await state.run_script_on_file(
+        str(target), debug=False, cwd=str(tmp_path)
+    )
     assert exit_code == 0
 
     # The OSError was caught, so _last_test_output should be None
@@ -2619,7 +2623,8 @@ def test_directory_state_get_test_case_bytes_returns_serialized(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=True,
-        history_base_dir=str(tmp_path),    )
+        history_base_dir=str(tmp_path),
+    )
 
     # Directory mode should return serialized bytes for test case
     test_case_bytes = state._get_test_case_bytes({"file.txt": b"content"})
@@ -2733,7 +2738,8 @@ def test_state_with_history_enabled_uses_existing_output_manager(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=True,
-        history_base_dir=str(tmp_path),        output_manager=existing_manager,
+        history_base_dir=str(tmp_path),
+        output_manager=existing_manager,
     )
 
     # Should use the provided output_manager, not create a new one
@@ -2841,7 +2847,8 @@ async def test_reducer_property_initializes_history(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=True,
-        history_base_dir=str(tmp_path),    )
+        history_base_dir=str(tmp_path),
+    )
 
     # History manager should exist
     assert state.history_manager is not None
@@ -2924,7 +2931,8 @@ async def test_history_callback_records_reduction(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=True,
-        history_base_dir=str(tmp_path),    )
+        history_base_dir=str(tmp_path),
+    )
 
     # Access reducer to initialize history and register callbacks
     reducer = state.reducer
@@ -2990,7 +2998,8 @@ async def test_history_callback_records_directory_mode(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=True,
-        history_base_dir=str(tmp_path),    )
+        history_base_dir=str(tmp_path),
+    )
 
     # Access reducer to initialize history and register callbacks
     reducer = state.reducer
@@ -3386,7 +3395,7 @@ async def test_excluded_test_cases_rejects_matching(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Normally the test case would be interesting
     assert await state.is_interesting(b"hello") is True
@@ -3426,7 +3435,7 @@ async def test_reset_for_restart_clears_reducer(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Access the reducer to cache it
     reducer1 = state.reducer
@@ -3472,7 +3481,7 @@ async def test_reset_for_restart_without_existing_reducer(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Reset without accessing reducer first (should not raise)
     state.reset_for_restart(b"world", {b"excluded"})
@@ -3512,7 +3521,7 @@ async def test_reset_for_restart_resets_initial_exit_code(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Set initial_exit_code to a non-zero value (simulating an earlier run
     # that had a different exit code scenario)
@@ -3551,7 +3560,7 @@ def test_directory_state_set_initial_for_restart_works(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Serialize new content
     new_content = {"file.txt": b"world", "other.txt": b"test"}
@@ -3594,7 +3603,7 @@ async def test_directory_state_excluded_test_cases(tmp_path):
         volume=Volume.quiet,
         clang_delta_executable=None,
         history_enabled=False,
-        )
+    )
 
     # Normally the test case would be interesting
     assert await state.is_interesting({"file.txt": b"hello"}) is True

@@ -1308,6 +1308,20 @@ def test_expanded_modal_read_file_success(tmp_path):
     assert content == "Hello World"
 
 
+def test_expanded_modal_read_file_escapes_markup(tmp_path):
+    """Test _read_file escapes Rich markup characters like [."""
+    test_file = tmp_path / "test.txt"
+    # Content with brackets that could be interpreted as Rich markup
+    test_file.write_text("expected [bold] and [red]text[/red]")
+
+    modal = ExpandedBoxModal("Test", "content-container")
+    content = modal._read_file(str(test_file))
+    # Opening brackets should be escaped to prevent Rich interpretation
+    # Rich's escape() converts [ to \[ when followed by tag-like content
+    assert "[bold]" not in content or "\\[bold]" in content
+    assert "[red]" not in content or "\\[red]" in content
+
+
 def test_expanded_modal_read_file_binary(tmp_path):
     """Test _read_file falls back to hex for binary content."""
     test_file = tmp_path / "test.bin"
@@ -6114,6 +6128,22 @@ def test_history_modal_read_file_success(tmp_path):
     content = modal._read_file(str(test_file))
 
     assert content == "Hello World\nLine 2"
+
+
+def test_history_modal_read_file_escapes_markup(tmp_path):
+    """Test _read_file escapes Rich markup characters like [."""
+    test_file = tmp_path / "test.txt"
+    # Content with brackets that look like Rich markup tags
+    test_file.write_text("error: [bold]text[/bold] failed")
+
+    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
+    content = modal._read_file(str(test_file))
+
+    # Opening brackets should be escaped to prevent Rich interpretation
+    assert "[bold]" not in content or "\\[bold]" in content
+    # The original text should not be corrupted
+    assert "error:" in content
+    assert "failed" in content
 
 
 def test_history_modal_read_file_binary(tmp_path):

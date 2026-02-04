@@ -27,6 +27,7 @@ class SubprocessClient:
         self._progress_queue: asyncio.Queue[ProgressUpdate] = asyncio.Queue()
         self._reader_task: asyncio.Task | None = None
         self._completed = False
+        self._closed = False
         self._error_message: str | None = None
         self._debug_mode = debug_mode
         self._stderr_log_file: IO[str] | None = None
@@ -261,6 +262,17 @@ class SubprocessClient:
 
     async def close(self) -> None:
         """Close the subprocess."""
+        if self._closed:
+            return
+        self._closed = True
+
+        # Cancel all pending futures first so any code awaiting send_command
+        # responses (e.g. cancel() in action_quit) is unblocked immediately.
+        for future in self._pending_responses.values():
+            if not future.done():
+                future.cancel()
+        self._pending_responses.clear()
+
         if self._reader_task is not None:
             self._reader_task.cancel()
             try:
@@ -278,12 +290,20 @@ class SubprocessClient:
             if self._process.returncode is None:
                 try:
                     self._process.terminate()
-                    await asyncio.wait_for(self._process.wait(), timeout=5.0)
+                    await asyncio.wait_for(self._process.wait(), timeout=2.0)
                 except TimeoutError:
                     self._process.kill()
                     await self._process.wait()
                 except ProcessLookupError:
                     pass  # Process already exited
+
+            # Always await wait() to ensure the asyncio transport is fully
+            # finalized before the event loop closes. This prevents the
+            # "Event loop is closed" RuntimeError from BaseSubprocessTransport.__del__.
+            if self._process.returncode is not None:
+                await self._process.wait()
+                # Flush pending event loop callbacks (transport cleanup)
+                await asyncio.sleep(0)
 
         # Close and remove the stderr log file
         if self._stderr_log_file is not None:

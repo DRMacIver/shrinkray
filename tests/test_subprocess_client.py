@@ -1120,3 +1120,123 @@ def test_subprocess_client_close_handles_stderr_log_file_exception():
         mock_file.close.assert_called_once()
 
     asyncio.run(run())
+
+
+def test_subprocess_client_close_cancels_pending_futures():
+    """Test close() cancels all pending futures so awaiting code is unblocked."""
+
+    async def run():
+        client = SubprocessClient()
+
+        # Create pending futures
+        loop = asyncio.get_event_loop()
+        future1: asyncio.Future[Response] = loop.create_future()
+        future2: asyncio.Future[Response] = loop.create_future()
+        client._pending_responses["req-1"] = future1
+        client._pending_responses["req-2"] = future2
+
+        await client.close()
+
+        # Both futures should be cancelled
+        assert future1.cancelled()
+        assert future2.cancelled()
+        # Pending responses should be cleared
+        assert len(client._pending_responses) == 0
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_close_is_idempotent():
+    """Test close() is a no-op on second call due to _closed flag."""
+
+    async def run():
+        client = SubprocessClient()
+
+        # Create a pending future
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[Response] = loop.create_future()
+        client._pending_responses["req-1"] = future
+
+        await client.close()
+        assert future.cancelled()
+        assert client._closed
+
+        # Add another future after close (simulating a race)
+        future2: asyncio.Future[Response] = loop.create_future()
+        client._pending_responses["req-2"] = future2
+
+        # Second close should be a no-op
+        await client.close()
+
+        # The second future should NOT be cancelled (close was a no-op)
+        assert not future2.cancelled()
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_close_awaits_wait_after_process_exit():
+    """Test close() always awaits process.wait() after process exits."""
+
+    async def run():
+        client = SubprocessClient()
+
+        # Create a mock process that has already exited
+        mock_process = MagicMock()
+        mock_process.returncode = 0  # Already exited
+        mock_process.stdin = MagicMock()
+        mock_process.stdin.close = MagicMock()
+
+        wait_called = [False]
+
+        async def mock_wait():
+            wait_called[0] = True
+
+        mock_process.wait = mock_wait
+        client._process = mock_process
+        client._reader_task = None
+
+        await client.close()
+
+        # wait() should have been called even though process already exited
+        assert wait_called[0]
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_close_skips_done_futures():
+    """Test close() skips already-done futures when cancelling."""
+
+    async def run():
+        client = SubprocessClient()
+
+        # Create one done and one pending future
+        loop = asyncio.get_event_loop()
+        done_future: asyncio.Future[Response] = loop.create_future()
+        done_future.set_result(Response(id="done", result={"status": "ok"}))
+        pending_future: asyncio.Future[Response] = loop.create_future()
+
+        client._pending_responses["done"] = done_future
+        client._pending_responses["pending"] = pending_future
+
+        await client.close()
+
+        # Done future should still have its result (not cancelled)
+        assert not done_future.cancelled()
+        assert done_future.result().result == {"status": "ok"}
+        # Pending future should be cancelled
+        assert pending_future.cancelled()
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_close_handles_stderr_log_unlink_exception():
+    """Test close() handles exception when unlinking stderr log file."""
+
+    async def run():
+        client = SubprocessClient()
+        client._stderr_log_path = "/nonexistent/path/that/will/fail"
+
+        # Should not raise even if unlink fails
+        await client.close()
+
+    asyncio.run(run())

@@ -1938,11 +1938,14 @@ class ShrinkRayApp(App[None]):
 
     async def action_quit(self) -> None:
         """Quit the application with graceful cancellation."""
+        self.update_status("Shutting down...")
         if self._client and not self._completed:
             try:
-                await self._client.cancel()
+                await self._client.close()
             except Exception:
                 pass  # Process may have already exited
+            # Prevent double-close in run_reduction's finally block
+            self._client = None
         self.exit()
 
     def action_show_pass_stats(self) -> None:

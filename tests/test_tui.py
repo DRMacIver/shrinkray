@@ -113,6 +113,7 @@ class FakeReductionClient:
 
     async def close(self) -> None:
         self._closed = True
+        self._cancelled = True
 
     async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
         for update in self._updates:
@@ -5459,7 +5460,7 @@ def test_expanded_modal_output_content_without_test_id():
 
 
 def test_action_quit_with_client():
-    """Test action_quit cancels client before exiting."""
+    """Test action_quit closes client directly before exiting."""
 
     async def run():
         fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
@@ -5483,8 +5484,10 @@ def test_action_quit_with_client():
                 await pilot.press("q")
                 await pilot.pause()
 
-                # Client should have been cancelled
-                assert fake_client._cancelled
+                # Client should have been closed directly (not just cancelled)
+                assert fake_client._closed
+                # Client reference should be cleared to prevent double-close
+                assert app._client is None
         finally:
             if os.path.exists(temp_file):
                 os.unlink(temp_file)
@@ -5493,16 +5496,16 @@ def test_action_quit_with_client():
 
 
 def test_action_quit_handles_exception():
-    """Test action_quit handles exception from cancel gracefully."""
+    """Test action_quit handles exception from close gracefully."""
 
     async def run():
         fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
 
-        # Make cancel raise an exception
+        # Make close raise an exception
         async def raise_exception():
             raise RuntimeError("Process already exited")
 
-        fake_client.cancel = raise_exception
+        fake_client.close = raise_exception
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("test")

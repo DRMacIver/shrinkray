@@ -9,6 +9,7 @@ from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
 import pytest
+from rich.text import Text
 from textual.app import App
 from textual.widgets import DataTable, Label, ListView, Static, TabbedContent
 
@@ -715,6 +716,40 @@ def test_output_preview_get_available_lines_app_zero_height():
         assert lines == 30
 
 
+def test_output_preview_render_returns_text():
+    """Test that OutputPreview.render() returns a Text object, not a markup string.
+
+    Returning a Text object ensures Textual never parses user content as markup.
+    Previously, render() returned a markup string and used Rich's escape() which
+    failed on patterns like [key=; causing MarkupError.
+
+    This fixes the crash from: shrinkray --parallelism 60 interest2.sh bf_simple_yk.c
+    """
+    widget = OutputPreview()
+    # Content that would crash if parsed as markup
+    widget.output_content = "some output\n[key=;value"
+    widget.active_test_id = 1
+
+    rendered = widget.render()
+    assert isinstance(rendered, Text)
+    assert "[key=;value" in rendered
+
+
+def test_content_preview_render_returns_text():
+    """Test that ContentPreview.render() returns a Text object, not a markup string.
+
+    Returning a Text object ensures Textual never parses user content as markup.
+    Previously, render() returned raw strings that would crash on patterns like
+    [Key=; when Textual parsed them as markup.
+    """
+    widget = ContentPreview()
+    widget.update_content("[Key=;value", False)
+
+    rendered = widget.render()
+    assert isinstance(rendered, Text)
+    assert "[Key=;value" in rendered
+
+
 # === ShrinkRayApp with fake client tests ===
 
 
@@ -1303,21 +1338,22 @@ def test_expanded_modal_read_file_success(tmp_path):
 
     modal = ExpandedBoxModal("Test", "content-container")
     content = modal._read_file(str(test_file))
-    assert content == "Hello World"
+    assert isinstance(content, Text)
+    assert content.plain == "Hello World"
 
 
-def test_expanded_modal_read_file_escapes_markup(tmp_path):
-    """Test _read_file escapes Rich markup characters like [."""
+def test_expanded_modal_read_file_preserves_brackets(tmp_path):
+    """Test _read_file preserves bracket characters in file content."""
     test_file = tmp_path / "test.txt"
     # Content with brackets that could be interpreted as Rich markup
     test_file.write_text("expected [bold] and [red]text[/red]")
 
     modal = ExpandedBoxModal("Test", "content-container")
     content = modal._read_file(str(test_file))
-    # Opening brackets should be escaped to prevent Rich interpretation
-    # Rich's escape() converts [ to \[ when followed by tag-like content
-    assert "[bold]" not in content or "\\[bold]" in content
-    assert "[red]" not in content or "\\[red]" in content
+    # Returns a Text object so brackets are preserved literally
+    assert isinstance(content, Text)
+    assert "[bold]" in content.plain
+    assert "[red]text[/red]" in content.plain
 
 
 def test_expanded_modal_read_file_binary(tmp_path):
@@ -1328,26 +1364,29 @@ def test_expanded_modal_read_file_binary(tmp_path):
 
     modal = ExpandedBoxModal("Test", "content-container")
     content = modal._read_file(str(test_file))
+    assert isinstance(content, Text)
     assert "Binary content" in content
     assert "80818283" in content
 
 
 def test_expanded_modal_read_file_missing(tmp_path):
-    """Test _read_file returns error message for missing file."""
+    """Test _read_file returns styled message for missing file."""
     modal = ExpandedBoxModal("Test", "content-container")
     result = modal._read_file(str(tmp_path / "nonexistent.txt"))
-    assert "[dim]File not found[/dim]" in result
+    assert isinstance(result, Text)
+    assert "File not found" in result
 
 
 def test_expanded_modal_read_file_oserror(tmp_path):
-    """Test _read_file returns error message on OSError."""
+    """Test _read_file returns styled message on OSError."""
     modal = ExpandedBoxModal("Test", "content-container")
     # Create a file that exists but can't be read
     test_file = tmp_path / "unreadable.txt"
     test_file.write_text("content")
     with patch("builtins.open", side_effect=OSError("Permission denied")):
         result = modal._read_file(str(test_file))
-    assert "[red]Error reading file[/red]" in result
+    assert isinstance(result, Text)
+    assert "Error reading file" in result
 
 
 # === ExpandedBoxModal integration tests ===
@@ -5367,6 +5406,55 @@ def test_expanded_modal_output_with_empty_content_and_header():
     asyncio.run(run())
 
 
+def test_expanded_modal_output_content_without_test_id():
+    """Test output modal with content but no test ID (no header)."""
+
+    async def run():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("test")
+            temp_file = f.name
+
+        try:
+            app = ShrinkRayApp(
+                file_path=temp_file,
+                test=["true"],
+                exit_on_completion=False,
+                client=fake_client,
+            )
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+
+                # Set output preview with content but no test ID
+                output_preview = app.query_one("#output-preview", OutputPreview)
+                output_preview.active_test_id = None
+                output_preview._has_seen_output = True
+                output_preview.output_content = "some raw output"
+                output_preview._pending_content = "some raw output"
+                output_preview._pending_test_id = None
+
+                # Create modal for output-container
+                modal = ExpandedBoxModal("Output", "output-container", None)
+                await app.push_screen(modal)
+                await pilot.pause()
+
+                # Should show content without header
+                content = modal.query_one("#expanded-content", Static)
+                content_str = get_static_content(content)
+                assert "some raw output" in content_str
+                assert "Test #" not in content_str
+
+                await pilot.press("escape")
+                await pilot.press("q")
+        finally:
+            if os.path.exists(temp_file):
+                os.unlink(temp_file)
+
+    asyncio.run(run())
+
+
 # === Action method tests ===
 
 
@@ -6125,11 +6213,12 @@ def test_history_modal_read_file_success(tmp_path):
     modal = HistoryExplorerModal(str(tmp_path), "test.txt")
     content = modal._read_file(str(test_file))
 
-    assert content == "Hello World\nLine 2"
+    assert isinstance(content, Text)
+    assert content.plain == "Hello World\nLine 2"
 
 
-def test_history_modal_read_file_escapes_markup(tmp_path):
-    """Test _read_file escapes Rich markup characters like [."""
+def test_history_modal_read_file_preserves_brackets(tmp_path):
+    """Test _read_file preserves bracket characters in file content."""
     test_file = tmp_path / "test.txt"
     # Content with brackets that look like Rich markup tags
     test_file.write_text("error: [bold]text[/bold] failed")
@@ -6137,9 +6226,9 @@ def test_history_modal_read_file_escapes_markup(tmp_path):
     modal = HistoryExplorerModal(str(tmp_path), "test.txt")
     content = modal._read_file(str(test_file))
 
-    # Opening brackets should be escaped to prevent Rich interpretation
-    assert "[bold]" not in content or "\\[bold]" in content
-    # The original text should not be corrupted
+    # Returns a Text object so brackets are preserved literally
+    assert isinstance(content, Text)
+    assert "[bold]" in content.plain
     assert "error:" in content
     assert "failed" in content
 
@@ -6153,15 +6242,17 @@ def test_history_modal_read_file_binary(tmp_path):
     content = modal._read_file(str(test_file))
 
     # Should fall back to hex display
+    assert isinstance(content, Text)
     assert "Binary content" in content
 
 
 def test_history_modal_read_file_missing(tmp_path):
-    """Test _read_file returns error message for missing file."""
+    """Test _read_file returns styled message for missing file."""
     modal = HistoryExplorerModal(str(tmp_path), "test.txt")
     content = modal._read_file(str(tmp_path / "nonexistent.txt"))
 
-    assert "[dim]File not found[/dim]" in content
+    assert isinstance(content, Text)
+    assert "File not found" in content
 
 
 def test_history_modal_read_file_truncated_text(tmp_path):
@@ -6174,9 +6265,10 @@ def test_history_modal_read_file_truncated_text(tmp_path):
     content = modal._read_file(str(test_file))
 
     # Should be truncated
-    assert "[dim]... (truncated)[/dim]" in content
-    # Content should be limited
-    assert len(content) < 60000
+    assert isinstance(content, Text)
+    assert "truncated" in content
+    # Content should be limited (50000 chars + truncation message)
+    assert len(content.plain) < 60000
 
 
 def test_history_modal_read_file_truncated_binary(tmp_path):
@@ -6189,8 +6281,9 @@ def test_history_modal_read_file_truncated_binary(tmp_path):
     content = modal._read_file(str(test_file))
 
     # Should be truncated and shown as binary
-    assert "[Binary content" in content
-    assert "[dim]... (truncated)[/dim]" in content
+    assert isinstance(content, Text)
+    assert "Binary content" in content
+    assert "truncated" in content
 
 
 def test_history_modal_read_file_oserror(tmp_path):
@@ -6204,7 +6297,8 @@ def test_history_modal_read_file_oserror(tmp_path):
     with patch("builtins.open", side_effect=OSError("Permission denied")):
         content = modal._read_file(str(test_file))
 
-    assert "[red]Error reading file[/red]" in content
+    assert isinstance(content, Text)
+    assert "Error reading file" in content
 
 
 def test_history_modal_on_list_view_highlighted_no_entries(tmp_path):

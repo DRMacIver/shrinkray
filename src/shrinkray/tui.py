@@ -13,7 +13,6 @@ from difflib import unified_diff
 from typing import Literal, Protocol, cast
 
 import humanize
-from rich.markup import escape as escape_markup
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
@@ -45,6 +44,7 @@ from shrinkray.subprocess.protocol import (
 
 
 ThemeMode = Literal["auto", "dark", "light"]
+
 
 # Custom themes with true white/black backgrounds
 SHRINKRAY_LIGHT_THEME = Theme(
@@ -505,20 +505,20 @@ class ContentPreview(Static):
         # Fallback based on common terminal height
         return 30
 
-    def render(self) -> str:
+    def render(self) -> Text:
         if not self.preview_content:
-            return "Loading..."
+            return Text("Loading...")
 
         available_lines = self._get_available_lines()
 
         if self.hex_mode:
-            return f"[Hex mode]\n{self.preview_content}"
+            return Text(f"[Hex mode]\n{self.preview_content}")
 
         lines = self.preview_content.split("\n")
 
         # For small files that fit, show full content
         if len(lines) <= available_lines:
-            return self.preview_content
+            return Text(self.preview_content)
 
         # For larger files, show diff if we have previous displayed content
         if (
@@ -530,10 +530,10 @@ class ContentPreview(Static):
             diff = list(unified_diff(prev_lines, curr_lines, lineterm=""))
             if diff:
                 # Show as much diff as fits
-                return "\n".join(diff[:available_lines])
+                return Text("\n".join(diff[:available_lines]))
 
         # No diff available, show truncated content
-        return (
+        return Text(
             "\n".join(lines[:available_lines])
             + f"\n\n... ({len(lines) - available_lines} more lines)"
         )
@@ -591,39 +591,47 @@ class OutputPreview(Static):
             pass
         return 30
 
-    def render(self) -> str:
+    def render(self) -> Text:
         # Header line - use return_code to determine if test is running
         # (return_code is None means still running, has value means completed)
         if self.active_test_id is not None and self.last_return_code is None:
-            header = f"[green]Test #{self.active_test_id} running...[/green]"
+            header_text = f"Test #{self.active_test_id} running..."
+            header_style = "green"
         elif self.active_test_id is not None:
-            header = f"[dim]Test #{self.active_test_id} exited with code {self.last_return_code}[/dim]"
+            header_text = (
+                f"Test #{self.active_test_id} exited with code "
+                f"{self.last_return_code}"
+            )
+            header_style = "dim"
         elif self._has_seen_output or self.output_content:
             # Have seen output before - show without header
-            header = ""
+            header_text = ""
+            header_style = ""
         else:
-            header = "[dim]No test output yet...[/dim]"
+            header_text = "No test output yet..."
+            header_style = "dim"
 
         if not self.output_content:
-            return header
+            return Text(header_text, style=header_style)
 
         available_lines = self._get_available_lines()
-        # Escape the output content to prevent Rich markup interpretation
-        # (test output may contain characters like ^ that have special meaning)
-        escaped_content = escape_markup(self.output_content)
-        lines = escaped_content.split("\n")
-
-        # Build prefix (header + newline, or empty if no header)
-        prefix = f"{header}\n" if header else ""
+        lines = self.output_content.split("\n")
 
         # Show tail of output (most recent lines)
-        if len(lines) <= available_lines:
-            return f"{prefix}{escaped_content}"
+        if len(lines) > available_lines:
+            truncated_lines = lines[-(available_lines):]
+            skipped = len(lines) - available_lines
+            content = f"... ({skipped} earlier lines)\n" + "\n".join(truncated_lines)
+        else:
+            content = self.output_content
 
-        # Truncate from the beginning
-        truncated_lines = lines[-(available_lines):]
-        skipped = len(lines) - available_lines
-        return f"{prefix}... ({skipped} earlier lines)\n" + "\n".join(truncated_lines)
+        # Build result with styled header and unstyled content
+        result = Text()
+        if header_text:
+            result.append(header_text, style=header_style)
+            result.append("\n")
+        result.append(content)
+        return result
 
 
 class HelpScreen(ModalScreen[None]):
@@ -734,21 +742,20 @@ class ExpandedBoxModal(ModalScreen[None]):
         self._content_widget_id = content_widget_id
         self._file_path = file_path
 
-    def _read_file(self, file_path: str) -> str:
+    def _read_file(self, file_path: str) -> Text:
         """Read file content, decoding as text if possible."""
         if not os.path.isfile(file_path):
-            return "[dim]File not found[/dim]"
+            return Text("File not found", style="dim")
         try:
             with open(file_path, "rb") as f:
                 raw_content = f.read()
             # Try to decode as text, fall back to hex display if binary
             encoding, text = try_decode(raw_content)
             if encoding is not None:
-                # Escape Rich markup to prevent interpretation of [ ] etc
-                return escape_markup(text)
-            return "[Binary content - hex display]\n\n" + raw_content.hex()
+                return Text(text)
+            return Text("Binary content - hex display\n\n" + raw_content.hex())
         except OSError:
-            return "[red]Error reading file[/red]"
+            return Text("Error reading file", style="red")
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -781,16 +788,16 @@ class ExpandedBoxModal(ModalScreen[None]):
             return "Statistics not available"
         return stats_displays[0].render()
 
-    def _get_file_content(self, app: "ShrinkRayApp") -> str:
+    def _get_file_content(self, app: "ShrinkRayApp") -> str | Text:
         """Get content from file or preview widget."""
         if self._file_path:
             return self._read_file(self._file_path)
         content_previews = list(app.query("#content-preview").results(ContentPreview))
         if not content_previews:
             return "Content preview not available"
-        return content_previews[0].preview_content
+        return Text(content_previews[0].preview_content)
 
-    def _get_output_content(self, app: "ShrinkRayApp") -> str:
+    def _get_output_content(self, app: "ShrinkRayApp") -> str | Text:
         """Get output content from the output preview widget."""
         output_previews = list(app.query("#output-preview").results(OutputPreview))
         if not output_previews:
@@ -811,21 +818,29 @@ class ExpandedBoxModal(ModalScreen[None]):
         )
         has_seen_output = output_preview._has_seen_output
 
-        # Build header - return_code is None means test is still running
+        # Build header with styling
         if test_id is not None and return_code is None:
-            header = f"[green]Test #{test_id} running...[/green]\n\n"
+            header_text = f"Test #{test_id} running..."
+            header_style = "green"
         elif test_id is not None:
-            header = f"[dim]Test #{test_id} exited with code {return_code}[/dim]\n\n"
+            header_text = f"Test #{test_id} exited with code {return_code}"
+            header_style = "dim"
         else:
-            header = ""
+            header_text = ""
+            header_style = ""
 
         if raw_content:
-            return header + raw_content
+            result = Text()
+            if header_text:
+                result.append(header_text, style=header_style)
+                result.append("\n\n")
+            result.append(raw_content)
+            return result
         elif has_seen_output or test_id is not None:
             # We've seen output before - show header only (no "No test output" message)
-            return header.rstrip("\n") if header else ""
+            return Text(header_text, style=header_style)
         else:
-            return "[dim]No test output yet...[/dim]"
+            return Text("No test output yet...", style="dim")
 
     def on_mount(self) -> None:
         """Populate content from the source widget."""
@@ -1447,13 +1462,13 @@ class HistoryExplorerModal(ModalScreen[None]):
         if os.path.isfile(output_path):
             output_content = self._read_file(output_path)
         else:
-            output_content = "[dim]No output captured[/dim]"
+            output_content = Text("No output captured", style="dim")
         self.query_one(f"#{output_preview_id}", Static).update(output_content)
 
-    def _read_file(self, file_path: str) -> str:
+    def _read_file(self, file_path: str) -> Text:
         """Read file content, decoding as text if possible."""
         if not os.path.isfile(file_path):
-            return "[dim]File not found[/dim]"
+            return Text("File not found", style="dim")
         try:
             with open(file_path, "rb") as f:
                 raw_content = f.read()
@@ -1465,18 +1480,17 @@ class HistoryExplorerModal(ModalScreen[None]):
             # Try to decode as text
             encoding, text = try_decode(raw_content)
             if encoding is not None:
-                # Escape Rich markup to prevent interpretation of [ ] etc
-                text = escape_markup(text)
+                result = Text(text)
                 if truncated:
-                    text += "\n\n[dim]... (truncated)[/dim]"
-                return text
+                    result.append("\n\n... (truncated)", style="dim")
+                return result
             # Binary content - hex display
-            hex_display = "[Binary content - hex display]\n\n" + raw_content.hex()
+            result = Text("Binary content - hex display\n\n" + raw_content.hex())
             if truncated:
-                hex_display += "\n\n[dim]... (truncated)[/dim]"
-            return hex_display
+                result.append("\n\n... (truncated)", style="dim")
+            return result
         except OSError:
-            return "[red]Error reading file[/red]"
+            return Text("Error reading file", style="red")
 
     def action_restart_from_here(self) -> None:
         """Restart reduction from the currently selected history point."""

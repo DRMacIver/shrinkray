@@ -599,8 +599,7 @@ class OutputPreview(Static):
             header_style = "green"
         elif self.active_test_id is not None:
             header_text = (
-                f"Test #{self.active_test_id} exited with code "
-                f"{self.last_return_code}"
+                f"Test #{self.active_test_id} exited with code {self.last_return_code}"
             )
             header_style = "dim"
         elif self._has_seen_output or self.output_content:

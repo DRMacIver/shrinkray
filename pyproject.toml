@@ -1,6 +1,6 @@
 [project]
 name = "shrinkray"
-version = "26.2.4.0"
+version = "26.2.4.1"
 description = "Shrink Ray"
 authors = [
     {name = "David R. MacIver", email = "david@drmaciver.com"}

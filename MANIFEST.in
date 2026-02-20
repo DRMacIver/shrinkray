@@ -1,0 +1,5 @@
+include pytest.ini
+include justfile
+
+recursive-include tests *.py *.svg *.jinja2
+recursive-include scripts *.py

@@ -1,0 +1,3 @@
+git_repo: true
+require_push: true
+auto_work_on_tasks: true

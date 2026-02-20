@@ -7255,11 +7255,6 @@ def test_history_modal_refresh_with_new_entries_no_duplicate_ids(tmp_path):
     before append() is called.
     """
 
-    # Create a simple app to host the modal
-    class TestApp(App):
-        def compose(self):
-            yield HistoryExplorerModal(str(history_dir), "test.txt")
-
     # Create history directory with initial entries
     history_dir = tmp_path / ".shrinkray" / "run-123"
     reductions_dir = history_dir / "reductions"
@@ -7271,15 +7266,15 @@ def test_history_modal_refresh_with_new_entries_no_duplicate_ids(tmp_path):
         (entry_dir / "test.txt").write_text(f"content {i}")
 
     async def run():
-        app = TestApp()
+        app = App()
         async with app.run_test() as pilot:
+            # Push modal onto screen stack (not compose) so dismiss works
+            modal = HistoryExplorerModal(str(history_dir), "test.txt")
+            app.push_screen(modal)
             # Let the modal mount and populate
             await pilot.pause()
             await asyncio.sleep(0.2)
             await pilot.pause()
-
-            # Get the modal
-            modal = app.query_one(HistoryExplorerModal)
             assert len(modal._reductions_entries) == 3
 
             # Add new entries while modal is open

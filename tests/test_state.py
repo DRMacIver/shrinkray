@@ -3,7 +3,7 @@
 import os
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import trio
@@ -174,9 +174,11 @@ def test_directory_state_sort_key_from_initial(directory_state):
 
 def test_sort_key_for_initial_binary_data():
     """sort_key_for_initial returns shortlex for binary (non-text) data."""
-    # Binary data that's not valid text
+    # Mock try_decode to simulate truly undecodable binary data,
+    # since chardet may decode arbitrary bytes in single-byte encodings
     binary_data = bytes([0x80, 0x81, 0x82])
-    sort_key_fn = sort_key_for_initial(binary_data)
+    with patch("shrinkray.problem.try_decode", return_value=(None, "")):
+        sort_key_fn = sort_key_for_initial(binary_data)
 
     # Should be shortlex for binary data
     assert sort_key_fn is shortlex

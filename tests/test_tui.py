@@ -1360,11 +1360,13 @@ def test_expanded_modal_read_file_preserves_brackets(tmp_path):
 def test_expanded_modal_read_file_binary(tmp_path):
     """Test _read_file falls back to hex for binary content."""
     test_file = tmp_path / "test.bin"
-    # Use bytes that are invalid UTF-8 to trigger the hex fallback
     test_file.write_bytes(b"\x80\x81\x82\x83")
 
     modal = ExpandedBoxModal("Test", "content-container")
-    content = modal._read_file(str(test_file))
+    # Mock try_decode to simulate undecodable binary data,
+    # since chardet may decode arbitrary bytes in single-byte encodings
+    with patch("shrinkray.tui.try_decode", return_value=(None, "")):
+        content = modal._read_file(str(test_file))
     assert isinstance(content, Text)
     assert "Binary content" in content
     assert "80818283" in content
@@ -6242,7 +6244,10 @@ def test_history_modal_read_file_binary(tmp_path):
     test_file.write_bytes(b"\x80\x81\x82\x83")
 
     modal = HistoryExplorerModal(str(tmp_path), "test.bin")
-    content = modal._read_file(str(test_file))
+    # Mock try_decode to simulate undecodable binary data,
+    # since chardet may decode arbitrary bytes in single-byte encodings
+    with patch("shrinkray.tui.try_decode", return_value=(None, "")):
+        content = modal._read_file(str(test_file))
 
     # Should fall back to hex display
     assert isinstance(content, Text)
@@ -6277,11 +6282,14 @@ def test_history_modal_read_file_truncated_text(tmp_path):
 def test_history_modal_read_file_truncated_binary(tmp_path):
     """Test _read_file truncates large binary files."""
     test_file = tmp_path / "large.bin"
-    # Create a binary file > 50000 bytes with non-decodable content
+    # Create a binary file > 50000 bytes
     test_file.write_bytes(b"\x80\x81\x82" * 20000)
 
     modal = HistoryExplorerModal(str(tmp_path), "test.bin")
-    content = modal._read_file(str(test_file))
+    # Mock try_decode to simulate undecodable binary data,
+    # since chardet may decode arbitrary bytes in single-byte encodings
+    with patch("shrinkray.tui.try_decode", return_value=(None, "")):
+        content = modal._read_file(str(test_file))
 
     # Should be truncated and shown as binary
     assert isinstance(content, Text)

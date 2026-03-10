@@ -400,17 +400,19 @@ def test_key_problem_sort_key_for_binary():
     async def is_interesting(x):
         return True
 
-    # Use binary data that can't be decoded as any text encoding
-    # (invalid UTF-8: continuation bytes without start byte, then invalid sequences)
+    # Mock try_decode to simulate truly undecodable binary data,
+    # since chardet may decode arbitrary bytes in single-byte encodings.
+    # The mock must cover both BasicReductionProblem and KeyProblem construction
+    # since KeyProblem calls sort_key_for_initial independently.
     binary_data = bytes([0x80, 0x81, 0x82, 0xC0, 0xC1, 0xFE, 0xFF])
-    base = BasicReductionProblem(
-        initial={"file1": binary_data},
-        is_interesting=is_interesting,
-        work=WorkContext(parallelism=1),
-    )
-
-    applier = PatchApplier(patches=UpdateKeys(), problem=base)
-    kp = KeyProblem(base_problem=base, applier=applier, key="file1")
+    with patch("shrinkray.problem.try_decode", return_value=(None, "")):
+        base = BasicReductionProblem(
+            initial={"file1": binary_data},
+            is_interesting=is_interesting,
+            work=WorkContext(parallelism=1),
+        )
+        applier = PatchApplier(patches=UpdateKeys(), problem=base)
+        kp = KeyProblem(base_problem=base, applier=applier, key="file1")
 
     # Binary content uses shortlex ordering
     assert kp.sort_key(binary_data) == shortlex(binary_data)

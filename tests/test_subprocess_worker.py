@@ -790,28 +790,21 @@ def test_worker_get_content_preview_decode_exception():
     """Test _get_content_preview handles decode exceptions gracefully."""
     worker = ReducerWorker()
 
-    # Create a mock problem with real bytes but mock is_binary_string to return False
-    # and mock the decode to fail
-    mock_problem = MagicMock()
-    mock_problem.current_test_case = b"hello world text content"
-    worker.problem = mock_problem
-
-    # Patch is_binary_string to return False (treat as text)
-    # and patch bytes.decode via the test_case object
-
-    # We need a more creative approach - patch the decode call site
-
     class FailingDecodeBytes(bytes):
         """Bytes subclass that fails on decode."""
 
         def decode(self, *args, **kwargs):
             raise RuntimeError("Simulated decode failure")
 
-    # Create instance by copying the data
+    mock_problem = MagicMock()
     failing_bytes = FailingDecodeBytes(b"hello world text content")
     mock_problem.current_test_case = failing_bytes
+    worker.problem = mock_problem
 
-    preview, hex_mode = worker._get_content_preview()
+    # Mock is_binary_string to return False (treat as text), so the code
+    # path reaches the decode call which will raise RuntimeError
+    with patch("shrinkray.subprocess.worker.is_binary_string", return_value=False):
+        preview, hex_mode = worker._get_content_preview()
 
     # Should return empty string and hex_mode=True on exception
     assert preview == ""

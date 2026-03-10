@@ -803,9 +803,7 @@ def test_worker_get_content_preview_decode_exception():
 
     # Mock is_binary_string to return False (treat as text), so the code
     # path reaches the decode call which will raise RuntimeError
-    with patch(
-        "shrinkray.subprocess.worker.is_binary_string", return_value=False
-    ):
+    with patch("shrinkray.subprocess.worker.is_binary_string", return_value=False):
         preview, hex_mode = worker._get_content_preview()
 
     # Should return empty string and hex_mode=True on exception

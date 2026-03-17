@@ -14,6 +14,41 @@ def signal_group(sp: "trio.Process", sig: int) -> None:
     os.killpg(gid, sig)
 
 
+def _close_pipes_sync(sp: "trio.Process") -> None:
+    """Close all pipes on a process synchronously.
+
+    Trio process pipes are FdStream instances which have a fileno() method,
+    but the type annotations declare them as abstract SendStream/ReceiveStream.
+    We use getattr to access fileno() without upsetting the type checker.
+    """
+    for pipe in [sp.stdout, sp.stderr, sp.stdin]:
+        if pipe is None:
+            continue
+        fileno_fn = getattr(pipe, "fileno", None)
+        if fileno_fn is not None:
+            try:
+                os.close(fileno_fn())
+            except OSError:
+                pass
+
+
+def kill_process_group(sp: "trio.Process") -> None:
+    """Synchronously kill a process group.
+
+    Sends SIGKILL to the entire process group to clean up child processes.
+    This is needed because Trio only kills the direct child on cancellation,
+    but shell scripts often fork children that continue running.
+
+    Always attempts to kill the group even if the group leader (sp) has
+    already exited, because child processes in the group may still be alive.
+    """
+    _close_pipes_sync(sp)
+    try:
+        os.killpg(sp.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
 async def interrupt_wait_and_kill(sp: "trio.Process", delay: float = 0.1) -> None:
     """Interrupt a process, wait for it to exit, and kill it if necessary."""
     await trio.lowlevel.checkpoint()

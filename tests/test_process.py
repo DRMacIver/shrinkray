@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import trio
 
-from shrinkray.process import interrupt_wait_and_kill, signal_group
+from shrinkray.process import (
+    _close_pipes_sync,
+    interrupt_wait_and_kill,
+    kill_process_group,
+    signal_group,
+)
 
 
 # === signal_group tests ===
@@ -240,3 +245,147 @@ async def test_interrupt_wait_and_kill_skips_sigkill_if_process_exits_after_poll
     # SIGKILL should not have been sent since returncode became non-None
     # after the poll loop, skipping the SIGKILL branch
     assert not sigkill_sent[0]
+
+
+# === _close_pipes_sync tests ===
+
+
+def test_close_pipes_sync_closes_all_pipes():
+    mock_sp = MagicMock()
+    mock_sp.stdout = MagicMock()
+    mock_sp.stdout.fileno.return_value = 10
+    mock_sp.stderr = MagicMock()
+    mock_sp.stderr.fileno.return_value = 11
+    mock_sp.stdin = MagicMock()
+    mock_sp.stdin.fileno.return_value = 12
+
+    with patch("shrinkray.process.os.close") as mock_close:
+        _close_pipes_sync(mock_sp)
+
+    assert mock_close.call_count == 3
+    mock_close.assert_any_call(10)
+    mock_close.assert_any_call(11)
+    mock_close.assert_any_call(12)
+
+
+def test_close_pipes_sync_skips_none_pipes():
+    mock_sp = MagicMock()
+    mock_sp.stdout = None
+    mock_sp.stderr = None
+    mock_sp.stdin = None
+
+    # Should not raise
+    _close_pipes_sync(mock_sp)
+
+
+def test_close_pipes_sync_skips_pipes_without_fileno():
+    """Test that pipes without a fileno() method are silently skipped."""
+    mock_sp = MagicMock()
+    pipe_without_fileno = object()  # Has no fileno attribute
+    mock_sp.stdout = pipe_without_fileno
+    mock_sp.stderr = None
+    mock_sp.stdin = None
+
+    # Should not raise
+    _close_pipes_sync(mock_sp)
+
+
+def test_close_pipes_sync_handles_oserror():
+    mock_sp = MagicMock()
+    mock_sp.stdout = MagicMock()
+    mock_sp.stdout.fileno.return_value = 10
+    mock_sp.stderr = None
+    mock_sp.stdin = None
+
+    with patch("shrinkray.process.os.close", side_effect=OSError):
+        # Should not raise even if os.close fails
+        _close_pipes_sync(mock_sp)
+
+
+# === kill_process_group tests ===
+
+
+def test_kill_process_group_sends_sigkill_to_group():
+    """Test that kill_process_group sends SIGKILL to the process group."""
+    mock_sp = MagicMock()
+    mock_sp.pid = 12345
+    mock_sp.stdout = None
+    mock_sp.stderr = None
+    mock_sp.stdin = None
+
+    with patch("shrinkray.process.os.killpg") as mock_killpg:
+        kill_process_group(mock_sp)
+
+    mock_killpg.assert_called_once_with(12345, signal.SIGKILL)
+
+
+def test_kill_process_group_closes_pipes_before_killing():
+    """Test that pipes are closed before sending SIGKILL."""
+    mock_sp = MagicMock()
+    mock_sp.pid = 12345
+    mock_sp.stdout.fileno.return_value = 10
+    mock_sp.stderr.fileno.return_value = 11
+    mock_sp.stdin.fileno.return_value = 12
+
+    call_order = []
+
+    def tracking_close(fd):
+        call_order.append(f"close_{fd}")
+
+    def tracking_killpg(pid, sig):
+        call_order.append("killpg")
+
+    with (
+        patch("shrinkray.process.os.close", side_effect=tracking_close),
+        patch("shrinkray.process.os.killpg", side_effect=tracking_killpg),
+    ):
+        kill_process_group(mock_sp)
+
+    assert call_order.index("killpg") > call_order.index("close_10")
+
+
+def test_kill_process_group_handles_process_lookup_error():
+    """Test that ProcessLookupError from killpg is handled gracefully."""
+    mock_sp = MagicMock()
+    mock_sp.pid = 12345
+    mock_sp.stdout = None
+    mock_sp.stderr = None
+    mock_sp.stdin = None
+
+    with patch("shrinkray.process.os.killpg", side_effect=ProcessLookupError):
+        # Should not raise
+        kill_process_group(mock_sp)
+
+
+def test_kill_process_group_handles_permission_error():
+    """Test that PermissionError from killpg is handled gracefully."""
+    mock_sp = MagicMock()
+    mock_sp.pid = 12345
+    mock_sp.stdout = None
+    mock_sp.stderr = None
+    mock_sp.stdin = None
+
+    with patch("shrinkray.process.os.killpg", side_effect=PermissionError):
+        # Should not raise
+        kill_process_group(mock_sp)
+
+
+async def test_kill_process_group_with_real_process():
+    """Integration test: kill_process_group kills a real subprocess."""
+    sp = await trio.lowlevel.open_process(
+        [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(100)",
+        ],
+        preexec_fn=os.setsid,
+    )
+
+    assert sp.poll() is None
+
+    kill_process_group(sp)
+
+    # Process should be dead
+    with trio.move_on_after(1):
+        await sp.wait()
+    assert sp.returncode is not None

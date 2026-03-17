@@ -6,11 +6,11 @@ import random
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from collections import deque
 from datetime import timedelta
-from tempfile import TemporaryDirectory
 from typing import Any
 
 import humanize
@@ -31,7 +31,7 @@ from shrinkray.problem import (
     ReductionProblem,
     sort_key_for_initial,
 )
-from shrinkray.process import interrupt_wait_and_kill
+from shrinkray.process import interrupt_wait_and_kill, kill_process_group
 from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
 
@@ -224,7 +224,7 @@ class ShrinkRayState[TestCase](ABC):
     excluded_test_cases: set[bytes] | None = None
 
     # Temp directory for output capture (when not using TUI's output manager)
-    _output_tempdir: TemporaryDirectory | None = None
+    _output_tempdir: tempfile.TemporaryDirectory | None = None
 
     # Stores output from successful tests, keyed by test case bytes
     # This avoids race conditions when multiple tests run in parallel
@@ -263,7 +263,7 @@ class ShrinkRayState[TestCase](ABC):
 
         # Ensure we have an output manager for capturing test output
         if self.output_manager is None:
-            self._output_tempdir = TemporaryDirectory()
+            self._output_tempdir = tempfile.TemporaryDirectory()
             self.output_manager = OutputCaptureManager(
                 output_dir=self._output_tempdir.name
             )
@@ -389,6 +389,7 @@ class ShrinkRayState[TestCase](ABC):
             kwargs["stdout"] = subprocess.DEVNULL
             kwargs["stderr"] = subprocess.DEVNULL
 
+        sp = None
         try:
             async with trio.open_nursery() as nursery:
 
@@ -445,6 +446,16 @@ class ShrinkRayState[TestCase](ABC):
 
                 return result
         finally:
+            # Kill entire process group to clean up child processes.
+            # The subprocess uses setsid (preexec_fn=os.setsid), so child
+            # processes spawned by the interestingness test form a process
+            # group. Trio only kills the direct child on cancellation, but
+            # shell scripts often fork children that continue running and
+            # may write to the temp directory, causing cleanup failures.
+            # Always attempt this even if the direct child has exited,
+            # because group children may still be alive.
+            if sp is not None:
+                kill_process_group(sp)
             # Clean up output file handle and capture output immediately
             if output_file_handle is not None:
                 output_file_handle.close()
@@ -487,11 +498,15 @@ class ShrinkRayState[TestCase](ABC):
                 finally:
                     if os.path.exists(working):
                         if os.path.isdir(working):
-                            shutil.rmtree(working)
+                            shutil.rmtree(working, ignore_errors=True)
                         else:
-                            os.unlink(working)
+                            try:
+                                os.unlink(working)
+                            except OSError:
+                                pass
         else:
-            with TemporaryDirectory() as d:
+            d = tempfile.mkdtemp()
+            try:
                 working = os.path.join(d, self.base)
                 await self.write_test_case_to_file(working, test_case)
 
@@ -500,6 +515,8 @@ class ShrinkRayState[TestCase](ABC):
                     debug=debug,
                     cwd=d,
                 )
+            finally:
+                shutil.rmtree(d, ignore_errors=True)
 
     @abstractmethod
     async def format_data(self, test_case: TestCase) -> TestCase | None: ...

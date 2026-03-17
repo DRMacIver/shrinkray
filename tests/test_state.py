@@ -821,6 +821,93 @@ async def test_run_for_exit_code_in_place_not_basename(tmp_path):
     assert exit_code == 0
 
 
+async def test_run_for_exit_code_in_place_cleanup_handles_unlink_error(
+    tmp_path, monkeypatch
+):
+    """Test that in-place cleanup handles OSError from os.unlink gracefully."""
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=True,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    import shrinkray.state as state_mod
+
+    original_unlink = os.unlink
+
+    def failing_unlink(path):
+        # Only fail on the temp working files, not other unlinks
+        if "test-" in str(path):
+            raise OSError("permission denied")
+        return original_unlink(path)
+
+    monkeypatch.setattr(state_mod.os, "unlink", failing_unlink)
+    # Should not raise despite unlink failure
+    exit_code = await state.run_for_exit_code(b"hello world")
+    assert exit_code == 0
+
+
+async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
+    """Test that the process group is killed when the task is cancelled."""
+    script = tmp_path / "test.sh"
+    # Script that sleeps forever
+    script.write_text("#!/bin/bash\nsleep 1000")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=100.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    import shrinkray.state as state_mod
+    from shrinkray.process import kill_process_group as original_kill
+
+    kill_called = [False]
+
+    def tracking_kill(sp):
+        kill_called[0] = True
+        original_kill(sp)
+
+    monkeypatch.setattr(state_mod, "kill_process_group", tracking_kill)
+    with trio.move_on_after(0.5):
+        await state.run_for_exit_code(b"hello")
+
+    assert kill_called[0]
+
+
 # === Additional error path tests ===
 
 

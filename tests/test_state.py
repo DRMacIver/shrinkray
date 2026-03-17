@@ -942,9 +942,7 @@ async def test_cleanup_when_process_never_started(tmp_path):
     # cancelled during write_test_case_to_file before reaching this code.
     with trio.CancelScope() as scope:
         scope.cancel()
-        await state.run_script_on_file(
-            working=str(target), cwd=str(tmp_path)
-        )
+        await state.run_script_on_file(working=str(target), cwd=str(tmp_path))
 
 
 # === Additional error path tests ===

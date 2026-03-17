@@ -352,9 +352,7 @@ def test_kill_process_group_handles_process_lookup_error():
     mock_sp.stderr = None
     mock_sp.stdin = None
 
-    with patch(
-        "shrinkray.process.os.killpg", side_effect=ProcessLookupError
-    ):
+    with patch("shrinkray.process.os.killpg", side_effect=ProcessLookupError):
         # Should not raise
         kill_process_group(mock_sp)
 
@@ -367,9 +365,7 @@ def test_kill_process_group_handles_permission_error():
     mock_sp.stderr = None
     mock_sp.stdin = None
 
-    with patch(
-        "shrinkray.process.os.killpg", side_effect=PermissionError
-    ):
+    with patch("shrinkray.process.os.killpg", side_effect=PermissionError):
         # Should not raise
         kill_process_group(mock_sp)
 

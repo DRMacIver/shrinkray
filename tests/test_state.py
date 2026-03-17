@@ -826,7 +826,7 @@ async def test_run_for_exit_code_in_place_cleanup_handles_unlink_error(
 ):
     """Test that in-place cleanup handles OSError from os.unlink gracefully."""
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\nexit 0')
+    script.write_text("#!/bin/bash\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -869,7 +869,7 @@ async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
     """Test that the process group is killed when the task is cancelled."""
     script = tmp_path / "test.sh"
     # Script that sleeps forever
-    script.write_text('#!/bin/bash\nsleep 1000')
+    script.write_text("#!/bin/bash\nsleep 1000")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"

@@ -274,15 +274,22 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: [action-lint, format, gallery, lint, test, coverage, slow-tests]
     runs-on: ubuntu-22.04
+    environment: release
     permissions:
-      contents: write  # Needed to push commits and tags
       id-token: write  # Needed for trusted publishing to PyPI
     steps:
+      - name: Generate release token
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0  # Need full history to compare with tags
           fetch-tags: true  # Explicitly fetch all tags
-          persist-credentials: true  # Need to push
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2

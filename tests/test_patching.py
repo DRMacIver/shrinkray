@@ -894,7 +894,7 @@ async def test_issue_63_hypothesis_nondeterministic(data):
     await apply_patches(problem, Cuts(), patches)
 
 
-@pytest.mark.parametrize('seed', range(50))
+@pytest.mark.parametrize("seed", range(50))
 async def test_issue_63_concrete_k_le_2_to_merge(autojump_clock, seed):
     rng = Random(seed)
     initial = bytes(rng.getrandbits(8) for _ in range(18))

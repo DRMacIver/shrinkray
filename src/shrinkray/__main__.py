@@ -28,6 +28,7 @@ from shrinkray.state import (
     ShrinkRayState,
     ShrinkRayStateSingleFile,
 )
+from shrinkray.tui import run_textual_ui
 from shrinkray.ui import BasicUI, ShrinkRayUI
 from shrinkray.validation import run_validation
 from shrinkray.work import Volume
@@ -382,8 +383,6 @@ def main(
         state = ShrinkRayStateSingleFile(initial=initial, **state_kwargs)
 
     if ui_type == UIType.textual:
-        from shrinkray.tui import run_textual_ui
-
         run_textual_ui(
             file_path=filename,
             test=test,

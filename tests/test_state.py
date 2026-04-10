@@ -905,6 +905,43 @@ async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
     assert kill_called[0]
 
 
+async def test_cleanup_when_process_never_started(tmp_path):
+    """Test that cleanup works when cancelled before the process starts.
+
+    Covers the sp=None branch in the finally block of run_script_on_file.
+    """
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+
+    # Cancel immediately so nursery.start never completes and sp stays None.
+    # Call run_script_on_file directly because run_for_exit_code would be
+    # cancelled during write_test_case_to_file before reaching this code.
+    with trio.CancelScope() as scope:
+        scope.cancel()
+        await state.run_script_on_file(working=str(target), cwd=str(tmp_path))
+
+
 # === Additional error path tests ===
 
 

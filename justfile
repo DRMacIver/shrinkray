@@ -23,6 +23,7 @@ lint: install
 
 # Format code with ruff
 format: install
+    uv run python scripts/fix_function_imports.py
     uv run ruff format src tests
     uv run ruff check --fix src tests
 

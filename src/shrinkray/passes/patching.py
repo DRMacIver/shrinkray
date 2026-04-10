@@ -93,7 +93,7 @@ class PatchApplier[PatchType, TargetType]:
                     with_patch_applied = self.__patches.apply(
                         attempted_patch, self.__initial_test_case
                     )
-                    if await self.__problem.is_interesting(with_patch_applied):
+                    if await self.__problem.is_reduction(with_patch_applied):
                         self.__current_patch = attempted_patch
                         return True
                     else:

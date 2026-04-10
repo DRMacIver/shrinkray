@@ -77,10 +77,12 @@ class PatchApplier[PatchType, TargetType]:
                 to_merge = len(self.__merge_queue)
 
                 async def can_merge(k):
-                    # find_large_integer doubles each time, and
-                    # if we call it then we know that can_merge(to_merge)
-                    # is False, so we should never hit this.
-                    assert k <= 2 * to_merge
+                    # More patches can come in while we're merging and it
+                    # ends up fiddly and unreliable if we try to merge
+                    # those as part of this pass, so we just skip them
+                    # and will handle them on the next pass.
+                    if k > to_merge:
+                        return False
                     try:
                         attempted_patch = self.__patches.combine(
                             base_patch,
@@ -91,7 +93,7 @@ class PatchApplier[PatchType, TargetType]:
                     with_patch_applied = self.__patches.apply(
                         attempted_patch, self.__initial_test_case
                     )
-                    if await self.__problem.is_reduction(with_patch_applied):
+                    if await self.__problem.is_interesting(with_patch_applied):
                         self.__current_patch = attempted_patch
                         return True
                     else:
@@ -101,6 +103,8 @@ class PatchApplier[PatchType, TargetType]:
                     merged = to_merge
                 else:
                     merged = await self.__problem.work.find_large_integer(can_merge)
+
+                assert merged <= to_merge
 
                 for _, _, send_result in self.__merge_queue[:merged]:
                     send_result.send_nowait(True)

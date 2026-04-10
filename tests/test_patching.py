@@ -894,46 +894,18 @@ async def test_issue_63_hypothesis_nondeterministic(data):
     await apply_patches(problem, Cuts(), patches)
 
 
-async def test_issue_63_concrete_k_le_2_to_merge(autojump_clock):
-    """Concrete reproduction of issue #63: assert k <= 2 * to_merge.
+@pytest.mark.parametrize('seed', range(50))
+async def test_issue_63_concrete_k_le_2_to_merge(autojump_clock, seed):
+    rng = Random(seed)
+    initial = bytes(rng.getrandbits(8) for _ in range(18))
 
-    With a non-deterministic interestingness test, the merge master's
-    can_merge function can return True during find_large_integer for the
-    same input that previously returned False (after cache clearing from
-    intermediate successful merges). This causes find_large_integer to
-    probe k values beyond 2 * to_merge, hitting the assertion.
+    positions = sorted(rng.sample(range(18), 10))
+    patches = [[(p, p + 1)] for p in positions]
 
-    We try multiple seeds because the bug depends on trio's task scheduling
-    within each time tick, which is not fully deterministic. With enough
-    attempts, at least one will trigger the assertion.
-    """
-    triggered = False
-    for seed in range(50):
-        rng = Random(seed)
-        initial = bytes(rng.getrandbits(8) for _ in range(18))
+    problem = BasicReductionProblem(
+        initial=initial,
+        is_interesting=_make_flaky_is_interesting(initial),
+        work=WorkContext(parallelism=3, random=Random(seed)),
+    )
 
-        positions = sorted(rng.sample(range(18), 10))
-        patches = [[(p, p + 1)] for p in positions]
-
-        problem = BasicReductionProblem(
-            initial=initial,
-            is_interesting=_make_flaky_is_interesting(initial),
-            work=WorkContext(parallelism=3, random=Random(seed)),
-        )
-
-        try:
-            await apply_patches(problem, Cuts(), patches)
-        except BaseExceptionGroup as exc:
-            # Check that it's the expected assertion error from issue #63
-            for e in exc.exceptions:
-                if isinstance(e, BaseExceptionGroup):
-                    for inner in e.exceptions:
-                        if isinstance(inner, AssertionError):
-                            triggered = True
-                elif isinstance(e, AssertionError):
-                    triggered = True
-            if triggered:
-                break
-            raise
-
-    assert triggered, "Expected AssertionError from issue #63 was not triggered"
+    await apply_patches(problem, Cuts(), patches)

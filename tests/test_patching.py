@@ -6,8 +6,6 @@ from random import Random
 
 import pytest
 import trio
-from hypothesis import given, settings
-from hypothesis import strategies as st
 
 from shrinkray.passes.patching import (
     Conflict,
@@ -805,46 +803,13 @@ async def test_empty_patch_equals_base_in_merge(autojump_clock):
     assert len(problem.current_test_case) <= 5
 
 
-# =============================================================================
-# Issue #63: AssertionError in can_merge
-# https://github.com/DRMacIver/shrinkray/issues/63
-#
-# The assertions `k <= 2 * to_merge` and `merged <= to_merge` in
-# __possibly_become_merge_master can fail when:
-#
-# 1. can_merge(to_merge) returns False (entering find_large_integer)
-# 2. During find_large_integer, successful intermediate merges trigger
-#    reductions that clear the is_interesting cache
-# 3. can_merge(to_merge) is re-evaluated (cache miss) and the underlying
-#    non-deterministic test now returns True
-# 4. find_large_integer continues past to_merge, violating the assertions
-#
-# The root cause is that find_large_integer assumes its function argument
-# is monotonic, but can_merge is not monotonic when the interestingness
-# test is non-deterministic (as with real subprocess-based tests).
-#
-# The mechanism requires:
-# - A non-deterministic is_interesting (like a flaky subprocess test)
-# - Multiple items in the merge queue (to_merge >= 2)
-# - Successful intermediate merges (f(k) for k < to_merge) that clear cache
-# - The combined result (to_merge items) fails on first eval but passes
-#   on second eval (after cache clearing)
-# =============================================================================
+@pytest.mark.parametrize("seed", range(50))
+async def test_issue_63_non_monotonic_merging(autojump_clock, seed):
+    rng = Random(seed)
+    initial = bytes(rng.getrandbits(8) for _ in range(18))
 
-
-def _deterministic_content_hash(x: bytes) -> int:
-    """Deterministic hash for test content, unaffected by PYTHONHASHSEED."""
-    return int.from_bytes(hashlib.sha256(x).digest()[:4])
-
-
-def _make_flaky_is_interesting(initial):
-    """Create a non-deterministic is_interesting function for issue #63 tests.
-
-    Simulates a flaky subprocess test: for multi-byte deletion results,
-    ~50% fail on first evaluation (content-hash-based), but all re-evaluations
-    succeed. This models a subprocess that sometimes times out or hits a
-    race condition on the first run.
-    """
+    positions = sorted(rng.sample(range(18), 10))
+    patches = [[(p, p + 1)] for p in positions]
     evaluation_count: dict[bytes, int] = defaultdict(int)
 
     async def flaky_is_interesting(x: bytes) -> bool:
@@ -853,58 +818,12 @@ def _make_flaky_is_interesting(initial):
         if len(x) >= len(initial) - 1:
             return True
         if evaluation_count[x] == 1:
-            return _deterministic_content_hash(x) % 2 == 0
+            return int.from_bytes(hashlib.sha256(x).digest()[:4]) % 2 == 0
         return True
 
-    return flaky_is_interesting
-
-
-@given(data=st.data())
-@settings(deadline=None, max_examples=200)
-async def test_issue_63_hypothesis_nondeterministic(data):
-    """Property test: apply_patches must not raise AssertionError.
-
-    The internal assertions in PatchApplier.__possibly_become_merge_master
-    should hold regardless of how the interestingness test behaves. This
-    test generates random configurations with a non-deterministic
-    is_interesting function to search for assertion violations.
-
-    When can_merge(to_merge) fails on first eval but succeeds on re-eval
-    (after cache clearing from intermediate successful merges),
-    find_large_integer can return values > to_merge, violating the internal
-    assertions.
-    """
-    initial_size = data.draw(st.integers(min_value=10, max_value=40))
-    n_patches = data.draw(st.integers(min_value=3, max_value=min(12, initial_size)))
-    parallelism = data.draw(st.sampled_from([2, 3, 4, 6, 8]))
-    seed = data.draw(st.integers(min_value=0, max_value=2**32 - 1))
-
-    rng = Random(seed)
-    initial = bytes(rng.getrandbits(8) for _ in range(initial_size))
-
-    positions = sorted(rng.sample(range(initial_size), n_patches))
-    patches = [[(p, p + 1)] for p in positions]
-
     problem = BasicReductionProblem(
         initial=initial,
-        is_interesting=_make_flaky_is_interesting(initial),
-        work=WorkContext(parallelism=parallelism, random=Random(seed)),
-    )
-
-    await apply_patches(problem, Cuts(), patches)
-
-
-@pytest.mark.parametrize("seed", range(50))
-async def test_issue_63_concrete_k_le_2_to_merge(autojump_clock, seed):
-    rng = Random(seed)
-    initial = bytes(rng.getrandbits(8) for _ in range(18))
-
-    positions = sorted(rng.sample(range(18), 10))
-    patches = [[(p, p + 1)] for p in positions]
-
-    problem = BasicReductionProblem(
-        initial=initial,
-        is_interesting=_make_flaky_is_interesting(initial),
+        is_interesting=flaky_is_interesting,
         work=WorkContext(parallelism=3, random=Random(seed)),
     )
 

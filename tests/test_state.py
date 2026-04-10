@@ -8,8 +8,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 import trio
 
+import shrinkray.state as state_mod
 from shrinkray.cli import InputType
 from shrinkray.problem import InvalidInitialExample, shortlex
+from shrinkray.process import kill_process_group as original_kill
 from shrinkray.state import (
     DYNAMIC_TIMEOUT_MIN,
     OutputCaptureManager,
@@ -849,8 +851,6 @@ async def test_run_for_exit_code_in_place_cleanup_handles_unlink_error(
         history_enabled=False,
     )
 
-    import shrinkray.state as state_mod
-
     original_unlink = os.unlink
 
     def failing_unlink(path):
@@ -891,9 +891,6 @@ async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
         clang_delta_executable=None,
         history_enabled=False,
     )
-
-    import shrinkray.state as state_mod
-    from shrinkray.process import kill_process_group as original_kill
 
     kill_called = [False]
 

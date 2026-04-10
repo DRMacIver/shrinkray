@@ -653,7 +653,7 @@ def test_textual_ui_path(basic_shrink_target, monkeypatch):
 
     # Mock run_textual_ui to avoid actually launching the TUI
     mock_run_textual_ui = MagicMock()
-    monkeypatch.setattr("shrinkray.tui.run_textual_ui", mock_run_textual_ui)
+    monkeypatch.setattr("shrinkray.__main__.run_textual_ui", mock_run_textual_ui)
 
     runner = CliRunner(catch_exceptions=False)
     result = runner.invoke(
@@ -1389,7 +1389,7 @@ def test_trivial_is_not_error_tui(tmp_path, monkeypatch):
     script.chmod(0o755)
 
     mock_run_textual_ui = MagicMock()
-    monkeypatch.setattr("shrinkray.tui.run_textual_ui", mock_run_textual_ui)
+    monkeypatch.setattr("shrinkray.__main__.run_textual_ui", mock_run_textual_ui)
 
     runner = CliRunner(catch_exceptions=False)
     result = runner.invoke(

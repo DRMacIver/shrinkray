@@ -550,17 +550,15 @@ class ShrinkRayState[TestCase](ABC):
             **self.extra_problem_kwargs,
         )
 
-        # Writing the file back can't be guaranteed atomic, so we put a lock around
-        # writing successful reductions back to the original file so we don't
-        # write some confused combination of reductions.
-        write_lock = trio.Lock()
-
-        @problem.on_reduce
-        async def _(test_case: TestCase):
-            async with write_lock:
-                await self.write_test_case_to_file(self.filename, test_case)
-
-        # Initialize history and register callback if enabled
+        # Initialize history and register callback if enabled.
+        # The history callback must be registered FIRST so it runs before any
+        # other on_reduce callback has a chance to yield to the scheduler.
+        # record_reduction is fully synchronous: by running it before the
+        # file-write callback (which awaits on a lock and file I/O), we ensure
+        # the history directory is always consistent with stats.reductions at
+        # every scheduling point. Otherwise emit_progress_updates can wake up
+        # between the two callbacks and report a reduction that the history
+        # manager hasn't written yet, which breaks restart_from_reduction.
         if self.history_manager is not None:
             self._initialize_history_manager()
 
@@ -571,6 +569,16 @@ class ShrinkRayState[TestCase](ABC):
                 output = self._successful_outputs.pop(test_case_bytes, None)
                 assert self.history_manager is not None
                 self.history_manager.record_reduction(test_case_bytes, output)
+
+        # Writing the file back can't be guaranteed atomic, so we put a lock around
+        # writing successful reductions back to the original file so we don't
+        # write some confused combination of reductions.
+        write_lock = trio.Lock()
+
+        @problem.on_reduce
+        async def _(test_case: TestCase):
+            async with write_lock:
+                await self.write_test_case_to_file(self.filename, test_case)
 
         self._cached_reducer = self.new_reducer(problem)
         return self._cached_reducer

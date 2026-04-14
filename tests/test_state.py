@@ -3490,6 +3490,80 @@ async def test_also_interesting_records_directory_mode(tmp_path):
         assert f.read() == b"test"
 
 
+@pytest.mark.trio
+async def test_history_counter_never_lags_stats_reductions(tmp_path):
+    """Regression: history_manager.reduction_counter must be at least as large
+    as problem.stats.reductions at every scheduling point.
+
+    The progress update loop emits reductions=stats.reductions while
+    record_reduction() populates the history directory. If the callback that
+    writes to the history runs after a yielding callback (like the one that
+    writes the test case to disk), the emit loop can observe reductions=N
+    while the Nth reduction directory doesn't exist yet. A concurrent
+    restart_from(N) request then fails with "Reduction N not found".
+    """
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/bash\ngrep -q KEEP "$1"')
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("KEEP\nremove\n")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"KEEP\nremove\n",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+    )
+
+    problem = state.reducer.target
+    assert state.history_manager is not None
+    history_manager = state.history_manager
+
+    # Slow down the file-write callback so any scheduler task has a clear
+    # opportunity to observe intermediate state.
+    original_write_impl = state.write_test_case_to_file_impl
+
+    async def slow_write(working, test_case):
+        await trio.sleep(0.05)
+        await original_write_impl(working, test_case)
+
+    state.write_test_case_to_file_impl = slow_write  # type: ignore[method-assign]
+
+    violations: list[tuple[int, int]] = []
+
+    async def observer():
+        while True:
+            r = problem.stats.reductions
+            c = history_manager.reduction_counter
+            if r > c:
+                violations.append((r, c))
+            await trio.sleep(0)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(observer)
+        # A smaller interesting test case triggers a reduction.
+        assert await problem.is_interesting(b"KEEP\n") is True
+        # Give the observer one more tick to confirm post-reduction state.
+        await trio.sleep(0)
+        nursery.cancel_scope.cancel()
+
+    assert not violations, (
+        f"stats.reductions ran ahead of history.reduction_counter: {violations}"
+    )
+
+
 # === reset_for_restart and excluded_test_cases tests ===
 
 

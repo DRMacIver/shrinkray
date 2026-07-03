@@ -2544,10 +2544,12 @@ async def test_worker_log_file_close_exception(tmp_path):
         "history_enabled": True,
     }
     start_request = Request(id="start-1", command="start", params=start_params)
-    input_data = serialize(start_request) + "\n"
 
     output = MemoryOutputStream()
-    input_stream = MemoryInputStream(input_data.encode("utf-8"))
+    # The input stream must not hit EOF, since that shuts the worker down
+    # before the mocked reducer gets to sabotage the log file's close().
+    input_stream = BidirectionalInputStream()
+    input_stream.send_command(start_request)
 
     # Change to tmp_path so the history directory is created there
     old_cwd = os.getcwd()

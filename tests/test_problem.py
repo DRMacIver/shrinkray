@@ -111,6 +111,9 @@ def test_default_size_no_len():
 def test_default_cache_key_bytes():
     key = default_cache_key(b"hello")
     assert key.startswith("5:")  # length prefix
+    # 64 bits of hash after the length prefix, to keep birthday
+    # collisions unlikely across the lifetime of a big reduction.
+    assert len(key.split(":")[1]) == 16
 
 
 def test_default_cache_key_string():

@@ -421,10 +421,15 @@ class ShrinkRay(Reducer[bytes]):
 
     async def __minimize_single_byte(self, c: int) -> None:
         """Try to replace the current single-byte test case with a smaller
-        interesting byte, scanning upwards from zero. Smaller interesting
-        bytes are adopted by is_interesting as a side effect."""
+        interesting byte, scanning upwards from zero. Interesting bytes are
+        adopted by is_interesting as a side effect only if they sort below
+        the current test case, so the scan only stops once one is adopted."""
         for i in range(c):
-            if await self.target.is_interesting(bytes([i])):
+            candidate = bytes([i])
+            if (
+                await self.target.is_interesting(candidate)
+                and self.target.current_test_case == candidate
+            ):
                 return
 
     async def run(self) -> None:

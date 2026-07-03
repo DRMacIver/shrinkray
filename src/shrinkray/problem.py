@@ -555,7 +555,10 @@ def default_cache_key(value: Any) -> str:
             value = repr(value)
         value = value.encode("utf-8")
 
-    hex = hashlib.sha1(value).hexdigest()[:8]
+    # 16 hex digits = 64 bits. A big reduction can test hundreds of
+    # thousands of candidates of the same length; at 32 bits a birthday
+    # collision (silently serving the wrong cached result) becomes likely.
+    hex = hashlib.sha1(value).hexdigest()[:16]
     return f"{len(value)}:{hex}"
 
 

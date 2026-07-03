@@ -902,6 +902,34 @@ async def test_shrinkray_run_single_byte_finds_smaller():
     assert problem.current_test_case == bytes([5])
 
 
+async def test_shrinkray_run_single_byte_skips_non_adopted_bytes():
+    """Regression test: the single-byte scan stopped at the first
+    *interesting* byte even when it wasn't adopted (i.e. it sorted above
+    the current test case), so smaller adoptable bytes were never tried.
+
+    The custom sort key swaps case, so b"A" (interesting, but sorting
+    above b"z") must not end the scan before b"a" (which is adopted)."""
+
+    async def is_interesting(x):
+        if x == b"":
+            return False
+        if len(x) == 1:
+            return x in (b"A", b"a", b"z")
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        sort_key=lambda x: shortlex(x.swapcase()),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    assert problem.current_test_case == b"a"
+
+
 async def test_shrinkray_run_single_byte_no_smaller():
     """Test ShrinkRay.run when c=0 is interesting (branch 474->477).
 

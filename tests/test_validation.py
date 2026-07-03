@@ -4,12 +4,12 @@ import io
 import os
 import shlex
 import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
 import threading
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -764,8 +764,11 @@ async def test_failure_with_no_temp_dirs():
 def test_validation_output_streams_immediately():
     """Test that validation output appears immediately, not buffered until completion.
 
-    This is an integration test that runs the actual shrinkray CLI and verifies
-    that output appears before the test script finishes sleeping.
+    This is an integration test that runs the actual shrinkray CLI. The test
+    script prints a marker and then blocks indefinitely, so if we observe the
+    marker while the process is still running, the output must have been
+    streamed rather than buffered until the test completed. This avoids any
+    wall-clock threshold, which proved flaky under parallel test load.
     """
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Create test file
@@ -773,72 +776,67 @@ def test_validation_output_streams_immediately():
         with open(test_file, "wb") as f:
             f.write(b"test content")
 
-        # Create test script that prints immediately, then sleeps
+        # Create test script that prints immediately, then blocks until we
+        # kill it.
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\necho 'MARKER_OUTPUT_APPEARED' >&2\nsleep 2\nexit 0\n")
+            f.write(
+                "#!/bin/bash\necho 'MARKER_OUTPUT_APPEARED' >&2\nsleep 1000\nexit 0\n"
+            )
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
-        # Run the actual shrinkray command
+        # Run the actual shrinkray command in its own process group, so we
+        # can kill the blocked test script (which shares our stderr pipe
+        # and shrinkray's process group) along with it.
         proc = subprocess.Popen(
             [sys.executable, "-m", "shrinkray", script, test_file],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            start_new_session=True,
         )
 
-        # Track when we see output vs when the process completes
-        output_appeared_time: float | None = None
+        marker_seen = threading.Event()
         output_lines: list[bytes] = []
 
         def read_stderr():
-            nonlocal output_appeared_time
             assert proc.stderr is not None
             while True:
                 line = proc.stderr.readline()
                 if not line:
                     break
                 output_lines.append(line)
-                if b"MARKER_OUTPUT_APPEARED" in line and output_appeared_time is None:
-                    output_appeared_time = time.time()
+                if b"MARKER_OUTPUT_APPEARED" in line:
+                    marker_seen.set()
 
-        start_time = time.time()
-
-        # Start reading in a thread
-        reader_thread = threading.Thread(target=read_stderr)
+        # Start reading in a daemon thread: it exits once the pipe closes,
+        # but under heavy load that can take a moment and pytest must not
+        # wait on it.
+        reader_thread = threading.Thread(target=read_stderr, daemon=True)
         reader_thread.start()
 
-        # Wait for validation to complete or timeout
-        # We only care about the validation phase, so kill after seeing the marker + some buffer
         try:
-            # Wait up to 10 seconds for the marker to appear
-            deadline = start_time + 10
-            while output_appeared_time is None and time.time() < deadline:
-                time.sleep(0.05)
-
-            # Give it a moment more to see if output is streaming
-            time.sleep(0.2)
-
+            appeared = marker_seen.wait(timeout=60)
+            still_running = proc.poll() is None
         finally:
-            # Kill the process - we don't need the full reduction
-            proc.terminate()
+            # Kill the whole process group - we don't need the full
+            # reduction, and the test script must die too or the reader
+            # thread would block on the shared pipe until it exits.
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             proc.wait(timeout=5)
             reader_thread.join(timeout=5)
 
-        process_end_time = time.time()
-
-        # The marker should have appeared
-        assert output_appeared_time is not None, (
-            f"Never saw MARKER_OUTPUT_APPEARED in output after {process_end_time - start_time:.2f}s. "
-            f"Got lines: {[line.decode('utf-8', errors='replace') for line in output_lines]}"
+        assert appeared, (
+            "Never saw MARKER_OUTPUT_APPEARED in output. Got lines: "
+            f"{[line.decode('utf-8', errors='replace') for line in output_lines]}"
         )
-
-        time_until_output = output_appeared_time - start_time
-
-        # The output should appear quickly - within 1 second of startup
-        # (the test sleeps for 2 seconds AFTER printing, so if we see it in <1s, it's streaming)
-        assert time_until_output < 1.0, (
-            f"Output took {time_until_output:.2f}s to appear. "
-            f"Output should stream immediately, not be buffered until process completion."
+        # The test script never exits on its own, so seeing the marker while
+        # the process is alive proves the output was streamed.
+        assert still_running, (
+            "Marker only appeared after the process exited, so validation "
+            "output was buffered rather than streamed."
         )
 
 

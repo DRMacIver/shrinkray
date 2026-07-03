@@ -116,6 +116,13 @@ class PatchApplier[PatchType, TargetType]:
                 else:
                     del self.__merge_queue[:to_merge]
         finally:
+            # If we were cancelled mid-merge, tasks already queued would
+            # otherwise wait forever for a result that no one is going to
+            # send. Report their patches as not applied; a later pass can
+            # still retry them.
+            for _, _, send_result in self.__merge_queue:
+                send_result.send_nowait(False)
+            del self.__merge_queue[:]
             self.__merge_lock.release()
 
         return True

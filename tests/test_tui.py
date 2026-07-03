@@ -6266,8 +6266,10 @@ def test_history_modal_scan_entries_ignores_files(tmp_path):
     reductions_dir = history_dir / "reductions"
     reductions_dir.mkdir(parents=True)
 
-    # Create a regular file in reductions (not a directory)
-    (reductions_dir / "stray_file.txt").write_text("should be ignored")
+    # Create a regular file in reductions (not a directory). It has a
+    # numeric name so this exercises the directory check, not the
+    # numbered-entry check.
+    (reductions_dir / "0002").write_text("should be ignored")
 
     # Create a valid entry directory
     entry_dir = reductions_dir / "0001"

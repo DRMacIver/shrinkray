@@ -184,7 +184,6 @@ def test_sigterm_kills_running_interestingness_tests(tmp_path):
             "in_place": False,
             "formatter": "none",
             "volume": "quiet",
-            "no_clang_delta": True,
             "history_enabled": False,
         },
     }

@@ -105,7 +105,7 @@ ShrinkRay organizes byte passes into tiers:
 A pump is like a pass but can **temporarily increase** test case size:
 `(ReductionProblem[T]) -> Awaitable[T]`
 
-Example: `clang_delta` can inline a function (making code larger) which then allows other passes to delete more code.
+Example: `inline_function_calls` in `passes/cpp.py` can inline a function call (making code larger) which then allows other passes to delete more code.
 
 The pump returns a (possibly larger) test case. The `Reducer` class has a `backtrack()` context manager that temporarily switches to reducing from this larger test case:
 

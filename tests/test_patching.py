@@ -12,6 +12,7 @@ from shrinkray.passes.patching import (
     Cuts,
     PatchApplier,
     Patches,
+    Replacements,
     SetPatches,
     apply_patches,
 )
@@ -966,3 +967,50 @@ async def test_issue_63_non_monotonic_merging(autojump_clock, seed):
     )
 
     await apply_patches(problem, Cuts(), patches)
+
+
+# =============================================================================
+# Replacements class tests
+# =============================================================================
+
+
+def test_replacements_empty():
+    assert Replacements().empty == ()
+
+
+def test_replacements_apply():
+    patch = ((0, 3, b"x"), (4, 7, b"yz"))
+    assert Replacements().apply(patch, b"abc def") == b"x yz"
+
+
+def test_replacements_apply_with_insertion_of_longer_content():
+    assert Replacements().apply(((1, 2, b"long"),), b"abc") == b"alongc"
+
+
+def test_replacements_combine_sorts_and_deduplicates():
+    replacements = Replacements()
+    assert replacements.combine(((4, 5, b"y"),), ((0, 1, b"x"),), ((4, 5, b"y"),)) == (
+        (0, 1, b"x"),
+        (4, 5, b"y"),
+    )
+
+
+def test_replacements_combine_rejects_overlap():
+    with pytest.raises(Conflict):
+        Replacements().combine(((0, 5, b"x"),), ((3, 8, b"y"),))
+
+
+def test_replacements_combine_rejects_same_span_different_replacement():
+    with pytest.raises(Conflict):
+        Replacements().combine(((0, 5, b"x"),), ((0, 5, b"y"),))
+
+
+def test_replacements_combine_allows_touching_spans():
+    assert Replacements().combine(((0, 5, b"x"),), ((5, 8, b"y"),)) == (
+        (0, 5, b"x"),
+        (5, 8, b"y"),
+    )
+
+
+def test_replacements_size_is_net_bytes_removed():
+    assert Replacements().size(((0, 5, b"x"), (10, 12, b""))) == 6

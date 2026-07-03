@@ -1,13 +1,10 @@
 import random
-import subprocess
 from collections.abc import Callable, Iterable
-from functools import lru_cache
 from typing import TypeVar
 
 import trio
 from attrs import define
 
-from shrinkray.passes.clangdelta import find_clang_delta
 from shrinkray.passes.definitions import ReductionPass, ReductionPump
 from shrinkray.passes.python import is_python
 from shrinkray.problem import BasicReductionProblem
@@ -56,29 +53,6 @@ class BasicReducer[T](Reducer[T]):
                             await self.run_pass(rp)
             if prev == self.target.current_test_case:
                 return
-
-
-@lru_cache(maxsize=1)
-def clang_delta_works() -> bool:
-    """Check if clang_delta can actually execute.
-
-    This verifies not just that the binary exists, but that it can run.
-    On some systems (e.g., Ubuntu 24.04), creduce is installed but
-    clang_delta fails at runtime due to shared library issues.
-    """
-    clang_delta = find_clang_delta()
-    if not clang_delta:
-        return False
-    try:
-        # Run a simple test to verify clang_delta works
-        result = subprocess.run(
-            [clang_delta, "--help"],
-            capture_output=True,
-            timeout=5,
-        )
-        return result.returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
 
 
 T = TypeVar("T")

@@ -28,9 +28,9 @@ JSON-specific passes. Provides `DeleteIdentifiers` for recursively removing keys
 
 Passes for DIMACS CNF files (SAT solver input format). Includes clause deletion, literal deletion, unit propagation, and literal sign flipping. The `DimacsCNF` format parses bytes into a list of clauses (each clause being a list of integers).
 
-### clangdelta.py
+### cpp.py
 
-C/C++ support via creduce's `clang_delta` tool. Unlike other passes, these are **pumps** - they may temporarily increase code size. For example, inlining a function makes code larger but may enable further reductions. Wraps clang_delta transformations like `simple-inliner`, `remove-unused-function`, and `rename-var`.
+C/C++ passes built on a sloppy lexer plus bracket matching (a pure Python replacement for creduce's `clang_delta`, which shrink ray previously shelled out to). Rather than parsing properly, these find things that look like functions, namespaces, class heads, templates, call expressions and typedefs, then overgenerate candidate edits and let the interestingness test reject the wrong ones. Includes `replace_function_bodies` (function def -> declaration), `delete_function_definitions`, `remove_namespaces` (including `extern "C"`), `remove_base_classes`, `remove_constructor_initializers`, `remove_template_parts`, and `simplify_call_expressions`, plus two **pumps** (which may temporarily increase code size): `inline_typedefs` and `inline_function_calls`.
 
 ## Pass Ordering in ShrinkRay
 

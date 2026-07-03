@@ -111,7 +111,7 @@ It has a generic reduction algorithm that should work pretty well with any textu
 
 Additionally, Shrink Ray has special support for the following formats:
 
-* C and C++ (via `clang_delta`, which you will have if creduce is installed)
+* C and C++
 * Python
 * JSON
 * Dimacs CNF format for SAT problems

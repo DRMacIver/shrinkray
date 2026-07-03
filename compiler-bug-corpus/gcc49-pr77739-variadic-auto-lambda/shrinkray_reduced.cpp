@@ -1,0 +1,1 @@
+struct args{args();args(const args&);};class a{a();template<class...a>auto A(a&&...args){return[=]{write(args...);};}a write(args,const auto*);};a::a(){A(args(),"");}

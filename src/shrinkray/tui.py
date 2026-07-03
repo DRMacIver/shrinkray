@@ -125,8 +125,6 @@ class ReductionClientProtocol(Protocol):
         in_place: bool = False,
         formatter: str = "default",
         volume: str = "normal",
-        no_clang_delta: bool = False,
-        clang_delta: str = "",
         trivial_is_error: bool = True,
         skip_validation: bool = False,
         history_enabled: bool = True,
@@ -1646,8 +1644,6 @@ class ShrinkRayApp(App[None]):
         in_place: bool = False,
         formatter: str = "default",
         volume: str = "normal",
-        no_clang_delta: bool = False,
-        clang_delta: str = "",
         trivial_is_error: bool = True,
         exit_on_completion: bool = True,
         client: ReductionClientProtocol | None = None,
@@ -1665,8 +1661,6 @@ class ShrinkRayApp(App[None]):
         self._in_place = in_place
         self._formatter = formatter
         self._volume = volume
-        self._no_clang_delta = no_clang_delta
-        self._clang_delta = clang_delta
         self._trivial_is_error = trivial_is_error
         self._exit_on_completion = exit_on_completion
         self._client: ReductionClientProtocol | None = client
@@ -1832,8 +1826,6 @@ class ShrinkRayApp(App[None]):
                     in_place=self._in_place,
                     formatter=self._formatter,
                     volume=self._volume,
-                    no_clang_delta=self._no_clang_delta,
-                    clang_delta=self._clang_delta,
                     trivial_is_error=self._trivial_is_error,
                     skip_validation=True,
                     history_enabled=self._history_enabled,
@@ -2034,8 +2026,6 @@ def run_textual_ui(
     in_place: bool = False,
     formatter: str = "default",
     volume: str = "normal",
-    no_clang_delta: bool = False,
-    clang_delta: str = "",
     trivial_is_error: bool = True,
     exit_on_completion: bool = True,
     theme: ThemeMode = "auto",
@@ -2058,8 +2048,6 @@ def run_textual_ui(
         in_place=in_place,
         formatter=formatter,
         volume=volume,
-        no_clang_delta=no_clang_delta,
-        clang_delta=clang_delta,
         trivial_is_error=trivial_is_error,
         exit_on_completion=exit_on_completion,
         theme=theme,

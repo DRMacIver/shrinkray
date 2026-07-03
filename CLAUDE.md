@@ -133,7 +133,7 @@ Shrink Ray is a multiformat test-case reducer built on Trio for async/parallelis
 - `python.py` - libcst-based AST reductions (lift blocks, strip annotations)
 - `json.py` - JSON-specific passes (delete keys recursively)
 - `sat.py` - DIMACS CNF format with unit propagation
-- `clangdelta.py` - C/C++ support via creduce's clang_delta tool (pumps)
+- `cpp.py` - C/C++ passes using a sloppy lexer plus bracket matching (function-def-to-decl, namespace removal, template stripping, typedef/function inlining pumps)
 
 ### Data Flow
 

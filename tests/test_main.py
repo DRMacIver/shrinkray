@@ -320,6 +320,25 @@ exit 1
     assert "should return 0 for interesting test cases" in result.stderr
 
 
+def test_reducing_c_file_to_trivial_is_an_error(tmp_path):
+    """Reducing a C file with an always-passing test runs the C/C++
+    passes and reduces to nothing, which is reported as an error."""
+    target = tmp_path / "test.c"
+    target.write_text("int main() { return 0; }")
+
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [str(script), str(target), "--ui=basic", "--no-history"],
+    )
+    assert result.exit_code != 0
+    assert "--trivial-is-not-error" in str(result.output)
+
+
 def test_error_when_test_not_executable(tmpdir):
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")
@@ -492,59 +511,6 @@ def test_directory_mode_stdin_error(tmp_path):
     )
     assert result.exit_code != 0
     assert "Cannot pass a directory input on stdin" in str(result.output)
-
-
-def test_clang_delta_not_found_error(tmp_path, monkeypatch):
-    """Test error when clang_delta is needed but not found."""
-    target = tmp_path / "test.c"
-    target.write_text("int main() { return 0; }")
-
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
-    script.chmod(0o755)
-
-    # Make find_clang_delta return empty string
-    def mock_find_clang_delta():
-        return ""
-
-    monkeypatch.setattr("shrinkray.__main__.find_clang_delta", mock_find_clang_delta)
-
-    runner = CliRunner(catch_exceptions=False)
-    result = runner.invoke(
-        main,
-        [str(script), str(target), "--ui=basic"],
-    )
-    assert result.exit_code != 0
-    assert "clang_delta" in str(result.output).lower()
-
-
-def test_clang_delta_explicit_path(tmp_path, monkeypatch):
-    """Test passing explicit clang_delta path."""
-    target = tmp_path / "test.c"
-    target.write_text("int main() { return 0; }")
-
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
-    script.chmod(0o755)
-
-    # Create a fake clang_delta executable
-    fake_clang_delta = tmp_path / "fake_clang_delta"
-    fake_clang_delta.write_text("#!/bin/bash\nexit 0")
-    fake_clang_delta.chmod(0o755)
-
-    runner = CliRunner(catch_exceptions=False)
-    result = runner.invoke(
-        main,
-        [
-            str(script),
-            str(target),
-            "--ui=basic",
-            f"--clang-delta={fake_clang_delta}",
-        ],
-    )
-    # Will fail at the setup stage, but should get past the clang_delta check
-    # The important thing is it doesn't fail with "clang_delta not installed"
-    assert "clang_delta is not installed" not in str(result.output)
 
 
 @pytest.mark.slow

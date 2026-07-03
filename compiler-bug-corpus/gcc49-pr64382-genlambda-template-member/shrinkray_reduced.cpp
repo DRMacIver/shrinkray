@@ -1,0 +1,1 @@
+template<typename b>struct d{d a(b){auto d=[=](auto c){a(c);};a(d);}template<typename c>d a(c&d){d(0);}};template struct d<int>;

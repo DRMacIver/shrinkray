@@ -1,1 +1,1 @@
-namespace a{template<typename A>struct f{f a(A){auto f=[=](auto v){a(v);};a(f);}template<typename v>f a(v&f){f(0);}};}template struct a::f<int>;
+template<typename b>struct d{d a(b){auto d=[=](auto c){a(c);};a(d);}template<typename c>d a(c&d){d(0);}};template struct d<int>;

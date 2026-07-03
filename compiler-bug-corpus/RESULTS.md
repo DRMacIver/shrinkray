@@ -17,10 +17,13 @@ reasons unrelated to how much structure each removed.
 | Entry | original | shrink ray | c-reduce | shrink `nows` | c-reduce `nows` |
 |-------|---------:|-----------:|---------:|--------------:|----------------:|
 | gcc49-pr61636-genlambda-member          | 1395 |  79 | 109 |  72 |  79 |
-| gcc49-pr64382-genlambda-template-member |  879 | 144 | 208 | 134 | 157 |
+| gcc49-pr64382-genlambda-template-member |  879 | 128 | 208 | 119 | 157 |
 | gcc49-pr77739-variadic-auto-lambda      | 1004 | 166 | 258 | 160 | 206 |
 | gcc49-udlit-char-pack-template          |  834 | 126 | 118 | 122 |  80 |
 | clang35-variadic-callback-blockdecl     | 1005 | 201 | 336 | 188 | 267 |
+
+The `pr64382` shrink-ray figure (144 → 128) is after adding the two
+passes below; it now removes the namespace c-reduce also removed.
 
 **Important caveat on the numbers.** Under amd64 emulation c-reduce's
 long tail is prohibitively slow, so c-reduce was given a 15-minute
@@ -33,11 +36,14 @@ size ranking ("shrink ray wins 4/5") is **not** a fair capability
 comparison — the useful signal is *structural*: what constructs each
 tool could and couldn't remove.
 
-## What c-reduce removed that shrink ray couldn't
+## What c-reduce removed that shrink ray couldn't (now addressed)
 
-Two of the fully-converged comparisons expose concrete missing
+Two of the fully-converged comparisons exposed concrete missing
 capabilities in `src/shrinkray/passes/cpp.py`. Both are cases where
 c-reduce's `clang_delta` **rewrites** code rather than only deleting it.
+Both have since been implemented as new passes (`replace_type_with_int`
+and namespace-qualifier stripping in `remove_namespaces`); the
+observations that motivated them are recorded below.
 
 ### 1. Type replacement / simplification (the biggest gap)
 
@@ -61,9 +67,20 @@ template's type parameter `T` with `int` throughout (`push(int)`,
 
 clang_delta analogues: `empty-struct-to-int`, `template-arg-to-int`,
 `replace-class-with-base-template-spec`, `union-to-struct`,
-`reduce-pointer-level`. A "replace a user type with a builtin / with a
-template argument" pass, tried speculatively like the other passes,
-would close most of this gap.
+`reduce-pointer-level`.
+
+**Implemented** as `replace_type_with_int`: it deletes a
+class/struct/union definition (or forward declaration, including
+template ones) and rewrites its uses — with any trailing `<…>` — to
+`int`. On distinct-named input it collapses the type away (mid-reduction
+on `udlit` it turns `String_template<C>`/`hex`'s return into `int`). The
+`udlit` *final* size did not shrink, though: by the time reduction gets
+there, `normalize_identifiers` has renamed both the class template and
+an unrelated template *parameter* to the same letter `a`, so replacing
+`a`→`int` would corrupt the parameter and the candidate is rejected. On
+un-normalized code (i.e. real bug reports, and this pass run earlier in
+the pipeline) the collapse succeeds; fully closing `udlit` would need
+this pass to run before identifier normalization creates the collision.
 
 ### 2. Namespace-qualifier rewriting
 
@@ -74,13 +91,16 @@ to compile, and the namespace is kept. c-reduce's `remove-namespace`
 also strips the `X::` qualifier from references. Clear on `pr64382`:
 
 ```
-shrink ray:  namespace a{template<typename A>struct f{…};}template struct a::f<int>;
-c-reduce:    template<typename>struct Queue{…};template struct Queue<int>;
+before:  namespace a{template<typename A>struct f{…};}template struct a::f<int>;
+after:   template<typename b>struct d{…};template struct d<int>;
 ```
 
-The same limitation kept the `namespace a{…}` (and `a::n`) in the clang
-reduction. Fix: when removing a namespace, also delete `X::` prefixes on
-references to names that were declared in it.
+**Implemented**: `remove_namespaces` now also offers a splice candidate
+that deletes the namespace's own `X::` qualifier from references, so a
+namespace with surviving qualified uses can be removed rather than kept.
+With it, `pr64382` reduces to `128` bytes (`119` `nows`) with the
+namespace gone — below c-reduce's `157` `nows` — where it previously
+kept `namespace a{…}` at `144`.
 
 ### 3. Base-class collapse (minor)
 

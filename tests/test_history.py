@@ -210,9 +210,7 @@ def test_initialize_wrapper_script_content_without_local_test() -> None:
             os.chdir(original_cwd)
 
 
-def _initialize_run_script(
-    tmpdir: str, script_body: str, input_type: InputType
-) -> str:
+def _initialize_run_script(tmpdir: str, script_body: str, input_type: InputType) -> str:
     """Create a history manager for a test script and return the path of
     the generated run.sh."""
     test_script = os.path.join(tmpdir, "check.sh")

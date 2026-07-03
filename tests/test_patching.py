@@ -337,9 +337,7 @@ async def test_cancelled_merge_master_does_not_orphan_queued_waiters():
             # behind it and waits for a merge result.
             @nursery.start_soon
             async def task_c():
-                results["c"] = await applier.try_apply_patch(
-                    frozenset({(0, ord("c"))})
-                )
+                results["c"] = await applier.try_apply_patch(frozenset({(0, ord("c"))}))
 
             await trio.testing.wait_all_tasks_blocked()
             a_scope.cancel()

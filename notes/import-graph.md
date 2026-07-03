@@ -12,7 +12,7 @@ flowchart TD
     n3[history]
     n4[passes]
     n5[passes.bytes]
-    n6[passes.clangdelta]
+    n6[passes.cpp]
     n7[passes.definitions]
     n8[passes.genericlanguages]
     n9[passes.json]
@@ -33,11 +33,12 @@ flowchart TD
     n24[validation]
     n25[work]
 
+    n3 --> n1
     n5 --> n10
     n5 --> n14
     n6 --> n7
+    n6 --> n10
     n6 --> n14
-    n6 --> n25
     n7 --> n14
     n8 --> n5
     n8 --> n7
@@ -81,7 +82,6 @@ flowchart TD
     n18 --> n20
     n19 --> n20
     n21 --> n1
-    n21 --> n6
     n21 --> n14
     n21 --> n17
     n21 --> n20

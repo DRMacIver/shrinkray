@@ -18,11 +18,6 @@ from shrinkray.cli import (
     validate_ui,
 )
 from shrinkray.formatting import determine_formatter_command
-from shrinkray.passes.clangdelta import (
-    C_FILE_EXTENSIONS,
-    ClangDelta,
-    find_clang_delta,
-)
 from shrinkray.state import (
     ShrinkRayDirectoryState,
     ShrinkRayState,
@@ -193,12 +188,6 @@ This behaviour can be disabled by passing --trivial-is-not-error.
     help="Exit automatically when reduction completes (TUI only). Default: exit on completion.",
 )
 @click.option(
-    "--no-clang-delta",
-    is_flag=True,
-    default=False,
-    help="Pass this if you do not want to use clang delta for C/C++ transformations.",
-)
-@click.option(
     "--history/--no-history",
     default=True,
     help="""
@@ -221,11 +210,6 @@ If --no-history is passed, also-interesting recording is disabled unless
 cases are recorded, not reductions). Set to 0 to disable. Default: 101.
 """.strip(),
 )
-@click.option(
-    "--clang-delta",
-    default="",
-    help="Path to your clang_delta executable.",
-)
 @click.argument("test", callback=validate_command)
 @click.argument(
     "filename",
@@ -242,8 +226,6 @@ def main(
     seed: int,
     volume: Volume,
     formatter: str,
-    no_clang_delta: bool,
-    clang_delta: str,
     trivial_is_error: bool,
     exit_on_completion: bool,
     ui_type: UIType,
@@ -271,20 +253,6 @@ def main(
             parallelism = 1
         else:
             parallelism = os.cpu_count() or 1
-
-    clang_delta_executable: ClangDelta | None = None
-    if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:
-        if not clang_delta:
-            clang_delta = find_clang_delta()
-        if not clang_delta:
-            raise click.UsageError(
-                "Attempting to reduce a C or C++ file, but clang_delta is not installed. "
-                "Please run with --no-clang-delta, or install creduce on your system. "
-                "If creduce is already installed and you wish to use clang_delta, please "
-                "pass its path with the --clang-delta argument."
-            )
-
-        clang_delta_executable = ClangDelta(clang_delta)
 
     # This is a debugging option so that when the reducer seems to be taking
     # a long time you can Ctrl-\ to find out what it's up to. I have no idea
@@ -344,7 +312,6 @@ def main(
         "trivial_is_error": trivial_is_error,
         "seed": seed,
         "volume": volume,
-        "clang_delta_executable": clang_delta_executable,
         "history_enabled": history,
         "also_interesting_code": also_interesting_code,
     }
@@ -393,8 +360,6 @@ def main(
             in_place=in_place,
             formatter=formatter,
             volume=volume.name,
-            no_clang_delta=no_clang_delta,
-            clang_delta=clang_delta,
             trivial_is_error=trivial_is_error,
             exit_on_completion=exit_on_completion,
             theme=theme,  # type: ignore[arg-type]

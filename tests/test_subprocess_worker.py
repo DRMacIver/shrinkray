@@ -14,7 +14,6 @@ import trio
 import trio.testing
 
 import shrinkray.subprocess.worker
-from shrinkray.passes.clangdelta import find_clang_delta
 from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import ShrinkRayDirectoryState, ShrinkRayStateSingleFile
 from shrinkray.subprocess.protocol import (
@@ -518,7 +517,6 @@ async def test_worker_start_reduction_single_file(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": False,
     }
 
@@ -555,7 +553,6 @@ async def test_worker_start_reduction_skip_validation(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "skip_validation": True,  # Skip validation - setup() won't run the test
     }
 
@@ -594,7 +591,6 @@ async def test_worker_start_reduction_directory(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": False,
     }
 
@@ -625,7 +621,6 @@ async def test_worker_handle_start_success(tmp_path):
     params = {
         "file_path": str(target),
         "test": [str(script)],
-        "no_clang_delta": True,
         "formatter": "none",
         "volume": "quiet",
     }
@@ -814,13 +809,9 @@ def test_worker_get_content_preview_decode_exception():
 
 
 @pytest.mark.serial
-async def test_worker_start_reduction_with_clang_delta(tmp_path):
-    """Test _start_reduction with a C file and clang_delta enabled."""
-
-    clang_delta_path = find_clang_delta()
-    if not clang_delta_path:
-        # Skip if clang_delta not available
-        return
+async def test_worker_start_reduction_with_c_file(tmp_path):
+    """Test _start_reduction with a C file (which enables the C/C++
+    reduction passes downstream)."""
 
     # Create a C file
     target = tmp_path / "test.c"
@@ -844,8 +835,6 @@ async def test_worker_start_reduction_with_clang_delta(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": False,
-        # Don't specify clang_delta path - let it find it automatically
     }
 
     await worker._start_reduction(params)
@@ -876,7 +865,6 @@ async def test_worker_full_run_with_mock(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": False,
     }
     start_request = Request(id="start-1", command="start", params=start_params)
@@ -939,7 +927,6 @@ async def test_worker_run_waits_for_start(tmp_path):
         "test": [str(script)],
         "parallelism": 1,
         "timeout": 1.0,
-        "no_clang_delta": True,
         "formatter": "none",
         "volume": "quiet",
     }
@@ -984,110 +971,6 @@ async def test_worker_run_waits_for_start(tmp_path):
 
     # Should have received the start response
     assert b"started" in output.data
-
-
-@pytest.mark.serial
-async def test_worker_start_reduction_clang_delta_not_found(tmp_path):
-    """Test _start_reduction when find_clang_delta returns empty string."""
-    # Create a C file
-    target = tmp_path / "test.c"
-    target.write_text("int main() { return 0; }")
-
-    # Create a test script
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
-    script.chmod(0o755)
-
-    output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
-
-    params = {
-        "file_path": str(target),
-        "test": [str(script)],
-        "parallelism": 1,
-        "timeout": 1.0,
-        "no_clang_delta": False,
-        # No clang_delta path specified, will call find_clang_delta()
-    }
-
-    # Mock find_clang_delta to return empty string
-    # Patch where it's imported (worker module), not where it's defined
-    with patch("shrinkray.subprocess.worker.find_clang_delta", return_value=""):
-        await worker._start_reduction(params)
-
-    assert worker.running is True
-    # No clang_delta should be set
-    # The test passes because we successfully started reduction
-
-
-@pytest.mark.serial
-async def test_worker_start_reduction_clang_delta_found(tmp_path):
-    """Test _start_reduction when find_clang_delta returns a path."""
-    # Create a C file
-    target = tmp_path / "test.c"
-    target.write_text("int main() { return 0; }")
-
-    # Create a test script
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
-    script.chmod(0o755)
-
-    output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
-
-    params = {
-        "file_path": str(target),
-        "test": [str(script)],
-        "parallelism": 1,
-        "timeout": 1.0,
-        "no_clang_delta": False,
-        # No clang_delta path specified, will call find_clang_delta()
-    }
-
-    # Mock find_clang_delta to return a fake path and ClangDelta
-    # Patch where they're imported (worker module), not where they're defined
-    with patch(
-        "shrinkray.subprocess.worker.find_clang_delta", return_value="/fake/clang_delta"
-    ):
-        with patch("shrinkray.subprocess.worker.ClangDelta") as mock_clang_delta:
-            await worker._start_reduction(params)
-
-    assert worker.running is True
-    mock_clang_delta.assert_called_once_with("/fake/clang_delta")
-
-
-@pytest.mark.serial
-async def test_worker_start_reduction_clang_delta_path_provided(tmp_path):
-    """Test _start_reduction when clang_delta path is provided directly."""
-    # Create a C file
-    target = tmp_path / "test.c"
-    target.write_text("int main() { return 0; }")
-
-    # Create a test script
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
-    script.chmod(0o755)
-
-    output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
-
-    params = {
-        "file_path": str(target),
-        "test": [str(script)],
-        "parallelism": 1,
-        "timeout": 1.0,
-        "no_clang_delta": False,
-        "clang_delta": "/provided/clang_delta",  # Provided directly
-    }
-
-    # Mock ClangDelta since the path doesn't exist
-    # Patch where it's imported (worker module), not where it's defined
-    with patch("shrinkray.subprocess.worker.ClangDelta") as mock_clang_delta:
-        await worker._start_reduction(params)
-
-    assert worker.running is True
-    # Should use provided path, skipping find_clang_delta call
-    mock_clang_delta.assert_called_once_with("/provided/clang_delta")
 
 
 def test_worker_main_runs_trio():
@@ -1184,7 +1067,6 @@ async def test_worker_start_with_failing_interestingness_test(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": False,
     }
 
@@ -1220,7 +1102,6 @@ async def test_worker_start_validates_initial_example(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": False,
     }
 
@@ -1249,7 +1130,6 @@ async def test_worker_full_run_with_failing_test(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": False,
     }
     start_request = Request(id="start-fail", command="start", params=start_params)
@@ -1303,7 +1183,6 @@ async def test_worker_timeout_on_initial_test(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": False,
     }
 
@@ -1341,7 +1220,6 @@ async def test_worker_error_message_is_detailed(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": False,
     }
 
@@ -1383,7 +1261,6 @@ async def test_worker_trivial_result_error(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "trivial_is_error": True,
     }
 
@@ -1434,7 +1311,6 @@ async def test_worker_trivial_result_no_error_when_disabled(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "trivial_is_error": False,
     }
 
@@ -2450,7 +2326,6 @@ async def test_worker_logs_to_history_directory(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": True,
     }
     start_request = Request(id="start-1", command="start", params=start_params)
@@ -2540,7 +2415,6 @@ async def test_worker_log_file_close_exception(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": True,
     }
     start_request = Request(id="start-1", command="start", params=start_params)
@@ -2606,7 +2480,6 @@ async def test_worker_no_stderr_redirect_without_history(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": False,
     }
     start_request = Request(id="start-1", command="start", params=start_params)
@@ -2800,7 +2673,6 @@ async def test_restart_integration_stats_continue(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": True,
     }
     start_request = Request(id="start-1", command="start", params=start_params)
@@ -2871,7 +2743,6 @@ async def test_restart_integration_from_history_point(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": True,
     }
     start_request = Request(id="start-1", command="start", params=start_params)
@@ -2990,7 +2861,6 @@ async def test_restart_integration_stats_not_reset(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": True,
     }
     start_request = Request(id="start-1", command="start", params=start_params)
@@ -3093,7 +2963,6 @@ async def test_restart_integration_status_updates(tmp_path):
         "in_place": False,
         "formatter": "none",
         "volume": "quiet",
-        "no_clang_delta": True,
         "history_enabled": True,
     }
     start_request = Request(id="start-1", command="start", params=start_params)

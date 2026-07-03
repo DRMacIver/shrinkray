@@ -1,11 +1,11 @@
 """Unit tests for reducer module."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import trio
 
-from shrinkray.passes.clangdelta import ClangDelta, find_clang_delta
+from shrinkray.passes.cpp import CPP_PASSES, CPP_PUMPS
 from shrinkray.passes.patching import PatchApplier
 from shrinkray.problem import BasicReductionProblem, Format, ParseError, shortlex
 from shrinkray.reducer import (
@@ -562,8 +562,8 @@ def test_shrinkray_status_no_pump_no_pass():
     assert status == "Selecting reduction pass"
 
 
-def test_shrinkray_pumps_without_clang_delta():
-    """Test ShrinkRay.pumps returns empty when no clang_delta."""
+def test_shrinkray_pumps_without_cpp_passes():
+    """Test ShrinkRay.pumps returns empty for non-C test cases."""
 
     async def is_interesting(x):
         return True
@@ -574,7 +574,7 @@ def test_shrinkray_pumps_without_clang_delta():
         work=WorkContext(parallelism=1),
     )
 
-    reducer = ShrinkRay(target=problem, clang_delta=None)
+    reducer = ShrinkRay(target=problem)
     assert list(reducer.pumps) == []
 
 
@@ -665,16 +665,12 @@ async def test_directory_shrinkray_run_reduces_directory():
 
 
 # =============================================================================
-# ShrinkRay clang_delta and pump tests
+# ShrinkRay C/C++ pass and pump tests
 # =============================================================================
 
 
-def test_shrinkray_pumps_with_clang_delta():
-    """Test ShrinkRay.pumps returns clang_delta_pumps when clang_delta is set."""
-
-    clang_delta_exec = find_clang_delta()
-    if not clang_delta_exec:
-        pytest.skip("clang_delta not available")
+def test_shrinkray_pumps_with_cpp_passes():
+    """Test ShrinkRay.pumps returns the C/C++ pumps when enabled."""
 
     async def is_interesting(x):
         return True
@@ -685,13 +681,12 @@ def test_shrinkray_pumps_with_clang_delta():
         work=WorkContext(parallelism=1),
     )
 
-    cd = ClangDelta(clang_delta_exec)
-    reducer = ShrinkRay(target=problem, clang_delta=cd)
-    pumps = list(reducer.pumps)
-    assert len(pumps) > 0
-    # Each pump should be a callable
-    for pump in pumps:
-        assert callable(pump)
+    reducer = ShrinkRay(target=problem, enable_cpp_passes=True)
+    assert list(reducer.pumps) == CPP_PUMPS
+    # The C/C++ passes are included in the pass lists.
+    for cpp_pass in CPP_PASSES:
+        assert cpp_pass in reducer.great_passes
+        assert cpp_pass in reducer.initial_cuts
 
 
 def test_shrinkray_status_with_pass_no_pump():
@@ -1291,15 +1286,12 @@ async def test_shrinkray_main_loop_with_pumps():
     assert loop_iterations[0] >= 2
 
 
-async def test_directory_shrinkray_shrink_values_uses_clang_delta():
-    """Test shrink_values passes clang_delta to ShrinkRay for C files.
+async def test_directory_shrinkray_enables_cpp_passes_for_c_files():
+    """Test shrink_values enables the C/C++ passes only for C files.
 
-    This is a fast unit test that verifies the clang_delta assignment logic
+    This is a fast unit test that verifies the flag assignment logic
     without running a full reduction.
     """
-
-    # Create a mock clang_delta
-    mock_cd = MagicMock()
 
     async def is_interesting(x):
         return True
@@ -1313,14 +1305,14 @@ async def test_directory_shrinkray_shrink_values_uses_clang_delta():
         work=WorkContext(parallelism=1),
     )
 
-    reducer = DirectoryShrinkRay(target=problem, clang_delta=mock_cd)
+    reducer = DirectoryShrinkRay(target=problem)
 
-    # Track what clang_delta values are passed to ShrinkRay
+    # Track what flags are passed to ShrinkRay
     created_shrinkrays = []
     original_init = ShrinkRay.__init__
 
     def tracking_init(self, *args, **kwargs):
-        created_shrinkrays.append(kwargs.get("clang_delta"))
+        created_shrinkrays.append(kwargs.get("enable_cpp_passes"))
         original_init(self, *args, **kwargs)
 
     # Mock ShrinkRay.run to return immediately
@@ -1328,21 +1320,13 @@ async def test_directory_shrinkray_shrink_values_uses_clang_delta():
         with patch.object(ShrinkRay, "run", AsyncMock()):
             await reducer.shrink_values()
 
-    # Should have created two ShrinkRays: one with clang_delta (for .c), one without
-    assert len(created_shrinkrays) == 2
-    # One should be the mock clang_delta (for test.c)
-    assert mock_cd in created_shrinkrays
-    # One should be None (for other.txt)
-    assert None in created_shrinkrays
+    # Should have created two ShrinkRays: C passes on for test.c, off
+    # for other.txt.
+    assert sorted(created_shrinkrays) == [False, True]
 
 
-@pytest.mark.slow
 async def test_directory_shrinkray_with_c_files():
-    """Test DirectoryShrinkRay uses clang_delta for C files."""
-
-    clang_delta_exec = find_clang_delta()
-    if not clang_delta_exec:
-        pytest.skip("clang_delta not available")
+    """Test DirectoryShrinkRay reduces C files with the C/C++ passes."""
 
     async def is_interesting(x):
         # Just needs to contain main
@@ -1357,8 +1341,7 @@ async def test_directory_shrinkray_with_c_files():
         work=WorkContext(parallelism=1),
     )
 
-    cd = ClangDelta(clang_delta_exec)
-    reducer = DirectoryShrinkRay(target=problem, clang_delta=cd)
+    reducer = DirectoryShrinkRay(target=problem)
     await reducer.run()
 
     # Should have reduced the directory
@@ -1688,7 +1671,7 @@ async def test_disabled_pass_is_skipped():
     reducer.ok_passes = []
     reducer.last_ditch_passes = []
     reducer.initial_cuts = []
-    # Note: pumps is a property that defaults to empty when clang_delta is None
+    # Note: pumps is a property that is empty unless C/C++ passes are enabled
 
     # Disable the pass
     reducer.disable_pass("tracking_pass")
@@ -1738,7 +1721,7 @@ async def test_disable_pass_while_running_skips_it():
     reducer.ok_passes = []
     reducer.last_ditch_passes = []
     reducer.initial_cuts = []
-    # Note: pumps is a property that defaults to empty when clang_delta is None
+    # Note: pumps is a property that is empty unless C/C++ passes are enabled
 
     async with trio.open_nursery() as nursery:
 
@@ -1782,7 +1765,7 @@ async def test_reducer_continues_when_passes_skipped():
     reducer.ok_passes = []
     reducer.last_ditch_passes = []
     reducer.initial_cuts = []
-    # Note: pumps is a property that defaults to empty when clang_delta is None
+    # Note: pumps is a property that is empty unless C/C++ passes are enabled
 
     async with trio.open_nursery() as nursery:
 

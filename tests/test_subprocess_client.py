@@ -260,8 +260,6 @@ def test_subprocess_client_start_reduction():
                 in_place=False,
                 formatter="none",
                 volume="quiet",
-                no_clang_delta=True,
-                clang_delta="",
                 history_enabled=False,
             )
             # Should get a response (even if it fails)
@@ -831,7 +829,6 @@ def test_subprocess_client_handle_error_response_integration(tmp_path):
                 in_place=False,
                 formatter="none",
                 volume="quiet",
-                no_clang_delta=True,
                 history_enabled=False,
             )
 

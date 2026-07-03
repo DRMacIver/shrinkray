@@ -91,8 +91,6 @@ class FakeReductionClient:
         in_place: bool = False,
         formatter: str = "default",
         volume: str = "normal",
-        no_clang_delta: bool = False,
-        clang_delta: str = "",
         trivial_is_error: bool = True,
         skip_validation: bool = False,
         history_enabled: bool = True,
@@ -1111,8 +1109,6 @@ def test_app_with_various_parameters():
             in_place=True,
             formatter="clang-format",
             volume="quiet",
-            no_clang_delta=True,
-            clang_delta="/usr/bin/clang_delta",
             client=fake_client,
         )
 
@@ -2561,8 +2557,6 @@ def test_run_textual_ui_signature():
     assert "in_place" in params
     assert "formatter" in params
     assert "volume" in params
-    assert "no_clang_delta" in params
-    assert "clang_delta" in params
     assert "theme" in params
 
 
@@ -2996,8 +2990,6 @@ def test_run_textual_ui_creates_and_runs_app():
             in_place=True,
             formatter="clang-format",
             volume="quiet",
-            no_clang_delta=True,
-            clang_delta="/usr/bin/clang_delta",
             trivial_is_error=True,
             exit_on_completion=True,
             theme="dark",
@@ -3016,8 +3008,6 @@ def test_run_textual_ui_creates_and_runs_app():
             in_place=True,
             formatter="clang-format",
             volume="quiet",
-            no_clang_delta=True,
-            clang_delta="/usr/bin/clang_delta",
             trivial_is_error=True,
             exit_on_completion=True,
             theme="dark",

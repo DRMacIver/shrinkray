@@ -25,7 +25,7 @@ from shrinkray.history import (
     deserialize_directory,
     serialize_directory,
 )
-from shrinkray.passes.clangdelta import ClangDelta
+from shrinkray.passes.cpp import C_FILE_EXTENSIONS
 from shrinkray.problem import (
     BasicReductionProblem,
     InvalidInitialExample,
@@ -191,7 +191,6 @@ class ShrinkRayState[TestCase](ABC):
     trivial_is_error: bool
     seed: int
     volume: Volume
-    clang_delta_executable: ClangDelta | None
 
     first_call: bool = True
     initial_exit_code: int | None = None
@@ -808,7 +807,11 @@ class ShrinkRayState[TestCase](ABC):
 @define(slots=False)
 class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
     def new_reducer(self, problem: ReductionProblem[bytes]) -> Reducer[bytes]:
-        return ShrinkRay(problem, clang_delta=self.clang_delta_executable)
+        return ShrinkRay(
+            problem,
+            enable_cpp_passes=os.path.splitext(self.filename)[1]
+            in C_FILE_EXTENSIONS,
+        )
 
     def _get_initial_bytes(self) -> bytes:
         return self.initial
@@ -949,9 +952,7 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     def new_reducer(
         self, problem: ReductionProblem[dict[str, bytes]]
     ) -> Reducer[dict[str, bytes]]:
-        return DirectoryShrinkRay(
-            target=problem, clang_delta=self.clang_delta_executable
-        )
+        return DirectoryShrinkRay(target=problem)
 
     def _get_initial_bytes(self) -> bytes:
         # Serialize directory content for history recording

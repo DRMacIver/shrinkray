@@ -64,7 +64,6 @@ def simple_state(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -138,7 +137,6 @@ def directory_state(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -270,7 +268,6 @@ async def test_attempt_format_returns_data_when_cannot_format(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -305,7 +302,6 @@ async def test_run_for_exit_code_returns_script_exit_code(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -336,7 +332,6 @@ async def test_run_for_exit_code_with_stdin_input_type(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -371,7 +366,6 @@ async def test_run_for_exit_code_in_place_mode(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -405,7 +399,6 @@ async def test_is_interesting_returns_true_for_exit_zero(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -443,7 +436,6 @@ async def test_is_interesting_stores_no_output_when_none_available(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,  # No history = no output manager
     )
 
@@ -480,7 +472,6 @@ async def test_is_interesting_returns_false_for_non_zero_exit(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -514,7 +505,6 @@ async def test_attempt_format_with_working_formatter(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -546,7 +536,6 @@ async def test_attempt_format_disables_on_failure(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -584,7 +573,6 @@ async def test_is_interesting_tracks_parallel_tasks(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -630,7 +618,6 @@ async def test_first_call_flag_is_cleared(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -678,7 +665,6 @@ async def test_print_exit_message_already_reduced(tmp_path, capsys):
         trivial_is_error=False,  # Don't error on trivial
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -711,7 +697,6 @@ async def test_print_exit_message_reduced(tmp_path, capsys):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -748,7 +733,6 @@ async def test_report_error_timeout_exceeded(tmp_path, capsys):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -783,7 +767,6 @@ async def test_run_for_exit_code_no_input_type_arg(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -814,7 +797,6 @@ async def test_run_for_exit_code_in_place_not_basename(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -847,7 +829,6 @@ async def test_run_for_exit_code_in_place_cleanup_handles_unlink_error(
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -888,7 +869,6 @@ async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -930,7 +910,6 @@ async def test_cancelled_test_is_not_recorded_as_exiting_with_code_zero(tmp_path
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
     state.output_manager = OutputCaptureManager(output_dir=str(tmp_path))
@@ -968,7 +947,6 @@ async def test_cleanup_when_process_never_started(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1008,7 +986,6 @@ async def test_report_error_non_timeout_rerun_fails(tmp_path, capsys):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1047,7 +1024,6 @@ async def test_report_error_cwd_dependent(tmp_path, capsys, monkeypatch):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1096,7 +1072,6 @@ async def test_print_exit_message_trivial_error(tmp_path, capsys):
         trivial_is_error=True,  # This is key
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1137,7 +1112,6 @@ async def test_print_exit_message_no_reduction(tmp_path, capsys):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1180,7 +1154,6 @@ async def test_run_script_on_file_nonexistent(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1223,7 +1196,6 @@ async def test_check_formatter_failure(tmp_path, capsys):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1264,7 +1236,6 @@ async def test_check_formatter_makes_uninteresting(tmp_path, capsys):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1300,7 +1271,6 @@ async def test_default_formatter_fallback(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1342,7 +1312,6 @@ async def test_attempt_format_with_formatter(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1383,7 +1352,6 @@ async def test_is_interesting_tracks_first_call_time(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1428,7 +1396,6 @@ async def test_print_exit_message_formatting_increase(tmp_path, capsys):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1476,8 +1443,7 @@ async def test_run_for_exit_code_in_place_basename(tmp_path):
             trivial_is_error=True,
             seed=0,
             volume=Volume.quiet,
-            clang_delta_executable=None,
-            history_enabled=False,
+                history_enabled=False,
         )
 
         # Should write to the original filename and run the script
@@ -1512,7 +1478,6 @@ async def test_check_formatter_none(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1546,7 +1511,6 @@ async def test_is_interesting_multiple_calls(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1609,7 +1573,6 @@ fi
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1651,7 +1614,6 @@ async def test_report_error_nondeterministic(tmp_path, capsys):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1698,7 +1660,6 @@ async def test_print_exit_message_reformatted_is_interesting(tmp_path, capsys):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1746,7 +1707,6 @@ async def test_check_formatter_reformatted_is_interesting(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1780,7 +1740,6 @@ async def test_timeout_on_first_call(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1831,7 +1790,6 @@ async def test_process_killed_on_timeout(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1883,7 +1841,6 @@ async def test_directory_cleanup_in_place_mode(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1921,7 +1878,6 @@ async def test_run_for_exit_code_debug_mode_timeout_on_first_call(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -1960,7 +1916,6 @@ async def test_run_for_exit_code_debug_mode_dynamic_timeout(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -2001,7 +1956,6 @@ async def test_run_for_exit_code_dynamic_timeout_non_debug(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -2043,7 +1997,6 @@ async def test_run_for_exit_code_debug_mode_captures_stdout(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -2080,7 +2033,6 @@ async def test_run_for_exit_code_debug_mode_captures_stderr(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -2118,7 +2070,6 @@ async def test_build_error_message_includes_debug_output(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -2191,8 +2142,7 @@ fi
             trivial_is_error=True,
             seed=0,
             volume=Volume.quiet,
-            clang_delta_executable=None,
-            history_enabled=False,
+                history_enabled=False,
         )
 
         state.first_call = False
@@ -2230,7 +2180,6 @@ async def test_volume_debug_inherits_stderr(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.debug,  # Debug mode
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -2566,7 +2515,6 @@ def test_state_with_history_disabled(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -2598,7 +2546,6 @@ def test_state_with_history_enabled_creates_output_manager(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
     )
@@ -2631,7 +2578,6 @@ def test_get_last_captured_output_with_no_output_manager(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,  # Disable history to not create output_manager
     )
 
@@ -2660,7 +2606,6 @@ def test_get_last_captured_output_with_no_output_available(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
     )
@@ -2692,7 +2637,6 @@ def test_get_last_captured_output_returns_stored_output(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
     )
@@ -2729,7 +2673,6 @@ async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
     )
@@ -2782,7 +2725,6 @@ def test_directory_state_get_test_case_bytes_returns_serialized(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
     )
@@ -2822,7 +2764,6 @@ def test_check_trivial_result_returns_error_message(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -2858,7 +2799,6 @@ def test_check_trivial_result_returns_none_for_non_trivial(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -2897,7 +2837,6 @@ def test_state_with_history_enabled_uses_existing_output_manager(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
         output_manager=existing_manager,
@@ -2932,7 +2871,6 @@ async def test_run_script_discards_output_in_quiet_mode_without_history(tmp_path
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,  # Not debug mode
-        clang_delta_executable=None,
         history_enabled=False,  # No history, so no output_manager
     )
 
@@ -2968,7 +2906,6 @@ async def test_volume_debug_without_history_or_output_manager(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.debug,  # Debug mode
-        clang_delta_executable=None,
         history_enabled=False,  # No history, so no output_manager
     )
 
@@ -3006,7 +2943,6 @@ async def test_reducer_property_initializes_history(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
     )
@@ -3052,7 +2988,6 @@ async def test_reducer_property_without_history(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -3090,7 +3025,6 @@ async def test_history_callback_records_reduction(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
     )
@@ -3157,7 +3091,6 @@ async def test_history_callback_records_directory_mode(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
     )
@@ -3226,7 +3159,6 @@ async def test_is_interesting_records_also_interesting_exit_code(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
         also_interesting_code=101,
@@ -3281,7 +3213,6 @@ async def test_also_interesting_disabled_by_default(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
         also_interesting_code=None,  # Disabled
@@ -3326,7 +3257,6 @@ async def test_also_interesting_works_without_full_history(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,  # History disabled
         history_base_dir=str(tmp_path),  # But history_manager is still created
         also_interesting_code=101,  # But also-interesting is set
@@ -3371,7 +3301,6 @@ async def test_no_history_manager_when_both_disabled(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,  # History disabled
         also_interesting_code=None,  # Also-interesting disabled
     )
@@ -3408,7 +3337,6 @@ async def test_also_interesting_different_exit_code_not_recorded(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
         also_interesting_code=101,  # Different from script's exit code
@@ -3451,7 +3379,6 @@ async def test_also_interesting_exit_code_zero_is_interesting_not_also(tmp_path)
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
         also_interesting_code=101,
@@ -3497,7 +3424,6 @@ async def test_also_interesting_records_directory_mode(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
         also_interesting_code=101,
@@ -3560,7 +3486,6 @@ async def test_history_counter_never_lags_stats_reductions(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=True,
         history_base_dir=str(tmp_path),
     )
@@ -3628,7 +3553,6 @@ async def test_excluded_test_cases_rejects_matching(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -3668,7 +3592,6 @@ async def test_reset_for_restart_clears_reducer(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -3714,7 +3637,6 @@ async def test_reset_for_restart_without_existing_reducer(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -3754,7 +3676,6 @@ async def test_reset_for_restart_resets_initial_exit_code(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -3793,7 +3714,6 @@ def test_directory_state_set_initial_for_restart_works(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 
@@ -3836,7 +3756,6 @@ async def test_directory_state_excluded_test_cases(tmp_path):
         trivial_is_error=True,
         seed=0,
         volume=Volume.quiet,
-        clang_delta_executable=None,
         history_enabled=False,
     )
 

@@ -14,7 +14,6 @@ import trio
 from binaryornot.helpers import is_binary_string
 
 from shrinkray.cli import InputType
-from shrinkray.passes.clangdelta import C_FILE_EXTENSIONS, ClangDelta, find_clang_delta
 from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import (
     OutputCaptureManager,
@@ -198,19 +197,10 @@ class ReducerWorker:
         in_place = params.get("in_place", False)
         formatter = params.get("formatter", "default")
         volume = Volume[params.get("volume", "normal")]
-        no_clang_delta = params.get("no_clang_delta", False)
-        clang_delta_path = params.get("clang_delta", "")
         trivial_is_error = params.get("trivial_is_error", True)
         skip_validation = params.get("skip_validation", False)
         history_enabled = params.get("history_enabled", True)
         also_interesting_code = params.get("also_interesting_code")
-
-        clang_delta_executable = None
-        if os.path.splitext(filename)[1] in C_FILE_EXTENSIONS and not no_clang_delta:
-            if not clang_delta_path:
-                clang_delta_path = find_clang_delta()
-            if clang_delta_path:
-                clang_delta_executable = ClangDelta(clang_delta_path)
 
         state_kwargs: dict[str, Any] = {
             "input_type": input_type,
@@ -224,7 +214,6 @@ class ReducerWorker:
             "trivial_is_error": trivial_is_error,
             "seed": seed,
             "volume": volume,
-            "clang_delta_executable": clang_delta_executable,
             "history_enabled": history_enabled,
             "also_interesting_code": also_interesting_code,
         }

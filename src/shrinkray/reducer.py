@@ -24,10 +24,10 @@ from shrinkray.passes.bytes import (
     short_deletions,
     standard_substitutions,
 )
-from shrinkray.passes.clangdelta import (
+from shrinkray.passes.cpp import (
     C_FILE_EXTENSIONS,
-    ClangDelta,
-    clang_delta_pumps,
+    CPP_PASSES,
+    CPP_PUMPS,
 )
 from shrinkray.passes.definitions import (
     Format,
@@ -139,7 +139,9 @@ class PassStatsTracker:
 
 @define
 class ShrinkRay(Reducer[bytes]):
-    clang_delta: ClangDelta | None = None
+    # Enables the C/C++ specific passes and pumps. Set when the test
+    # case's file name suggests it's C or C++.
+    enable_cpp_passes: bool = False
 
     current_pump: ReductionPump[bytes] | None = None
 
@@ -239,6 +241,9 @@ class ShrinkRay(Reducer[bytes]):
         if is_python(self.target.current_test_case):
             self.great_passes.extend(PYTHON_PASSES)
             self.initial_cuts.extend(PYTHON_PASSES)
+        if self.enable_cpp_passes:
+            self.great_passes.extend(CPP_PASSES)
+            self.initial_cuts.extend(CPP_PASSES)
         self.register_format_specific_pass(JSON, JSON_PASSES)
         self.register_format_specific_pass(
             DimacsCNF,
@@ -255,10 +260,10 @@ class ShrinkRay(Reducer[bytes]):
 
     @property
     def pumps(self) -> Iterable[ReductionPump[bytes]]:
-        if self.clang_delta is None:
-            return ()
+        if self.enable_cpp_passes:
+            return CPP_PUMPS
         else:
-            return clang_delta_pumps(self.clang_delta)
+            return ()
 
     @property
     def status(self) -> str:
@@ -523,8 +528,6 @@ class KeyProblem(ReductionProblem[bytes]):
 
 @define
 class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
-    clang_delta: ClangDelta | None = None
-
     async def run(self):
         prev = None
         while prev != self.target.current_test_case:
@@ -550,15 +553,10 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
                     applier=applier,
                     key=k,
                 )
-                if self.clang_delta is not None and any(
-                    k.endswith(s) for s in C_FILE_EXTENSIONS
-                ):
-                    clang_delta = self.clang_delta
-                else:
-                    clang_delta = None
-
                 key_shrinkray = ShrinkRay(
-                    clang_delta=clang_delta,
+                    enable_cpp_passes=any(
+                        k.endswith(s) for s in C_FILE_EXTENSIONS
+                    ),
                     target=key_problem,
                 )
                 nursery.start_soon(key_shrinkray.run)

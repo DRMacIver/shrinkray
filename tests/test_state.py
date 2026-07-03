@@ -1,6 +1,7 @@
 """Tests for state management."""
 
 import os
+import re
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -3786,3 +3787,111 @@ def test_directory_state_serialize_deserialize_roundtrip():
     deserialized = ShrinkRayDirectoryState._deserialize_directory(serialized)
 
     assert deserialized == original
+
+
+# === Working-file cleanup tests ===
+
+
+def make_in_place_state(tmp_path, filename="reduced.cpp", initial=b"aaaa"):
+    """Factory for an in-place single-file state whose interestingness
+    test always succeeds, for exercising temp-file handling."""
+    script = tmp_path / "t.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+    target = tmp_path / filename
+    target.write_bytes(initial)
+    return ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=True,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base=filename,
+        parallelism=1,
+        initial=initial,
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+    )
+
+
+def working_file_leftovers(directory, filename="reduced.cpp"):
+    stem, ext = os.path.splitext(filename)
+    pattern = re.compile(re.escape(stem) + r"-[0-9a-f]{32}" + re.escape(ext) + r"\Z")
+    return [n for n in os.listdir(directory) if pattern.match(n)]
+
+
+def test_in_place_run_cleans_up_its_working_file(tmp_path):
+    state = make_in_place_state(tmp_path)
+    trio.run(state.run_for_exit_code, b"aaa")
+    assert working_file_leftovers(tmp_path) == []
+
+
+def test_in_place_working_file_cleanup_survives_cwd_change(tmp_path, monkeypatch):
+    # The temp path must be absolute so cleanup is not defeated by the
+    # process's working directory changing during the test call.
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    state = make_in_place_state(tmp_path)
+
+    original_run = state.run_script_on_file
+
+    async def run_then_chdir(*args, **kwargs):
+        result = await original_run(*args, **kwargs)
+        os.chdir(other)  # simulate something moving cwd mid-flight
+        return result
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(state, "run_script_on_file", run_then_chdir)
+    trio.run(state.run_for_exit_code, b"aaa")
+    assert working_file_leftovers(tmp_path) == []
+
+
+def test_stale_working_files_swept_on_construction(tmp_path):
+    # A leftover from a previous killed run, matching the temp pattern.
+    stale = tmp_path / ("reduced-" + "a" * 32 + ".cpp")
+    stale.write_bytes(b"junk")
+    # An unrelated file that merely starts the same way must be kept.
+    keep = tmp_path / "reduced-notahash.cpp"
+    keep.write_bytes(b"keep me")
+
+    make_in_place_state(tmp_path)
+
+    assert not stale.exists()
+    assert keep.exists()
+
+
+def test_sweep_pattern_none_for_non_in_place(tmp_path):
+    state = make_in_place_state(tmp_path)
+    object.__setattr__(state, "in_place", False)
+    assert state.stale_working_file_pattern() is None
+
+
+def test_sweep_pattern_none_for_basename_mode(tmp_path):
+    state = make_in_place_state(tmp_path)
+    object.__setattr__(state, "input_type", InputType.basename)
+    assert state.stale_working_file_pattern() is None
+
+
+def test_sweep_tolerates_missing_directory(tmp_path):
+    state = make_in_place_state(tmp_path)
+    # Point at a directory that does not exist; sweep must not raise.
+    object.__setattr__(state, "filename", str(tmp_path / "gone" / "reduced.cpp"))
+    state.sweep_stale_working_files()
+
+
+def test_sweep_tolerates_unlink_failure(tmp_path, monkeypatch):
+    state = make_in_place_state(tmp_path)
+    # Create the stale file after construction so the constructor's own
+    # sweep doesn't remove it before we exercise the failure path.
+    stale = tmp_path / ("reduced-" + "b" * 32 + ".cpp")
+    stale.write_bytes(b"junk")
+
+    def boom(path):
+        raise OSError("nope")
+
+    monkeypatch.setattr(os, "unlink", boom)
+    # Must swallow the error rather than propagating it.
+    state.sweep_stale_working_files()

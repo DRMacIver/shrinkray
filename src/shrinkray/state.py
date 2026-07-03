@@ -3,6 +3,7 @@
 import math
 import os
 import random
+import re
 import shutil
 import signal
 import subprocess
@@ -233,11 +234,51 @@ class ShrinkRayState[TestCase](ABC):
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
         self._successful_outputs = {}  # Initialize mutable default
+        self.sweep_stale_working_files()
         self.setup_formatter()
         self._setup_history()
 
     @abstractmethod
     def setup_formatter(self): ...
+
+    def stale_working_file_pattern(self) -> "tuple[str, re.Pattern[str]] | None":
+        """Directory and filename regex for the temporary candidate
+        files this state writes next to the target during in-place
+        reduction, or None when no such files are created.
+
+        During in-place reduction (except in ``basename`` mode, which
+        writes the target itself) each test call writes a candidate to a
+        sibling file named ``<stem>-<32 hex digits><ext>`` so the test
+        can still see the target's neighbours. These are removed as soon
+        as the test finishes, but a hard kill (SIGKILL) can leave some
+        behind; this pattern lets us recognise and sweep those."""
+        if not self.in_place or self.input_type == InputType.basename:
+            return None
+        abspath = os.path.abspath(self.filename)
+        stem, ext = os.path.splitext(os.path.basename(abspath))
+        pattern = re.compile(re.escape(stem) + r"-[0-9a-f]{32}" + re.escape(ext) + r"\Z")
+        return os.path.dirname(abspath), pattern
+
+    def sweep_stale_working_files(self) -> None:
+        """Remove any leftover temporary candidate files from a previous
+        run that was killed before it could clean up after itself. Only
+        files matching this run's own ``<stem>-<hex><ext>`` pattern are
+        removed, so unrelated files are never touched."""
+        info = self.stale_working_file_pattern()
+        if info is None:
+            return
+        directory, pattern = info
+        try:
+            names = os.listdir(directory)
+        except OSError:
+            return
+        for name in names:
+            if pattern.match(name):
+                path = os.path.join(directory, name)
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
 
     @property
     def is_directory_mode(self) -> bool:
@@ -494,7 +535,12 @@ class ShrinkRayState[TestCase](ABC):
                     cwd=os.getcwd(),
                 )
             else:
-                base, ext = os.path.splitext(self.filename)
+                # Absolute so that cleanup in the finally below can't be
+                # defeated by the working directory changing between here
+                # and there: a relative path would make os.path.exists
+                # resolve against a different directory and silently leak
+                # the file into the user's tree.
+                base, ext = os.path.splitext(os.path.abspath(self.filename))
                 working = base + "-" + os.urandom(16).hex() + ext
                 assert not os.path.exists(working)
                 try:

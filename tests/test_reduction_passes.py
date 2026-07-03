@@ -26,6 +26,7 @@ from shrinkray.passes.bytes import (
     replace_space_with_newlines,
     short_deletions,
     standard_substitutions,
+    tokenize,
 )
 from shrinkray.passes.definitions import compose
 from shrinkray.passes.genericlanguages import (
@@ -449,6 +450,24 @@ def test_tokenize_with_numbers(parallelism):
         parallelism=parallelism,
     )
     assert b"x" in result
+
+
+def test_tokenize_basic_example():
+    assert tokenize(b"foo = 123") == [b"foo", b" ", b"=", b" ", b"123"]
+
+
+def test_tokenize_punctuation_is_not_part_of_identifiers():
+    """Regression test: the identifier check used the byte range A..z,
+    which includes the punctuation characters [ \\ ] ^ ` between "Z" and
+    "a", so e.g. an array index was glued to its identifier."""
+    assert tokenize(b"a[0] = b") == [b"a", b"[", b"0", b"]", b" ", b"=", b" ", b"b"]
+    assert tokenize(b"x^y") == [b"x", b"^", b"y"]
+    assert tokenize(b"p`q") == [b"p", b"`", b"q"]
+    assert tokenize(b"c\\d") == [b"c", b"\\", b"d"]
+
+
+def test_tokenize_underscore_is_an_identifier_character():
+    assert tokenize(b"my_var _leading") == [b"my_var", b" ", b"_leading"]
 
 
 def test_tokenize_with_underscores(parallelism):

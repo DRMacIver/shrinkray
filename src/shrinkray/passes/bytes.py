@@ -104,11 +104,20 @@ def find_ngram_endpoints(value: bytes) -> list[tuple[int, list[int]]]:
     return results
 
 
+def _is_identifier_char(c: int) -> bool:
+    return (
+        b"A"[0] <= c <= b"Z"[0]
+        or b"a"[0] <= c <= b"z"[0]
+        or b"0"[0] <= c <= b"9"[0]
+        or c == b"_"[0]
+    )
+
+
 def tokenize(text: bytes) -> list[bytes]:
     """Split bytes into tokens: identifiers, numbers, and other characters.
 
     This is a simple tokenizer that groups:
-    - Identifiers: [A-Za-z][A-Za-z0-9_]*
+    - Identifiers: [A-Za-z_][A-Za-z0-9_]*
     - Numbers: [0-9]+ (with optional decimal point)
     - Spaces: runs of spaces
     - Everything else: individual characters
@@ -121,13 +130,9 @@ def tokenize(text: bytes) -> list[bytes]:
     while i < len(text):
         c = bytes([text[i]])
         j = i + 1
-        if b"A" <= c <= b"z":
+        if c.isalpha() or c == b"_":
             # Identifier: consume alphanumeric and underscore
-            while j < len(text) and (
-                b"A"[0] <= text[j] <= b"z"[0]
-                or text[j] == b"_"[0]
-                or b"0"[0] <= text[j] <= b"9"[0]
-            ):
+            while j < len(text) and _is_identifier_char(text[j]):
                 j += 1
         elif b"0" <= c <= b"9":
             # Number: consume digits and decimal point

@@ -12,7 +12,12 @@ import click
 
 def validate_command(ctx: Any, param: Any, value: str) -> list[str]:
     """Validate and resolve a command string."""
-    parts = shlex.split(value)
+    try:
+        parts = shlex.split(value)
+    except ValueError as e:
+        raise click.BadParameter(f"Could not parse command: {e}")
+    if not parts:
+        raise click.BadParameter("Command cannot be empty.")
     command = parts[0]
 
     if os.path.exists(command):
@@ -35,7 +40,8 @@ class EnumChoice[EnumType: Enum](click.Choice):
         super().__init__(choices)
 
     def convert(self, value: str, param: Any, ctx: Any) -> EnumType:
-        return self.__values[value]
+        # Let click.Choice reject invalid values with a proper usage error.
+        return self.__values[super().convert(value, param, ctx)]
 
 
 class InputType(IntEnum):

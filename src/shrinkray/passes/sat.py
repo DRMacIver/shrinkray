@@ -22,22 +22,34 @@ class _DimacsCNF(Format[bytes, SAT]):
         except UnicodeDecodeError as e:
             raise ParseError(*e.args)
         clauses: SAT = []
+        # Clauses are sequences of non-zero literals terminated by 0. The
+        # line structure is irrelevant (except for comment and problem
+        # lines): a line may contain several clauses, and a clause may
+        # span several lines.
+        current: Clause = []
         for line in contents.splitlines():
             line = line.strip()
             if line.startswith("c"):
                 continue
             if line.startswith("p"):
                 continue
-            if not line.strip():
-                continue
             try:
-                clause: Clause = list(map(int, line.strip().split()))
+                literals = list(map(int, line.split()))
             except ValueError as e:
                 raise ParseError(*e.args)
-            if clause[-1] != 0:
-                raise ParseError(f"{line} did not end with 0")
-            clause.pop()
-            clauses.append(clause)
+            for literal in literals:
+                if literal == 0:
+                    if not current:
+                        # A lone 0 is a legal DIMACS empty clause, but it
+                        # makes the formula trivially unsatisfiable and
+                        # no SAT pass can do anything useful with it.
+                        raise ParseError("File contains an empty clause")
+                    clauses.append(current)
+                    current = []
+                else:
+                    current.append(literal)
+        if current:
+            raise ParseError(f"Last clause {current} did not end with 0")
         if not clauses:
             raise ParseError("No clauses found")
         return clauses

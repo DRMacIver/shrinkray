@@ -4,6 +4,7 @@ import math
 import os
 import random
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -259,6 +260,7 @@ class ShrinkRayState[TestCase](ABC):
             record_reductions=self.history_enabled,
             is_directory=self.is_directory_mode,
             base_dir=self.history_base_dir,
+            input_type=self.input_type,
         )
 
         # Ensure we have an output manager for capturing test output
@@ -470,7 +472,16 @@ class ShrinkRayState[TestCase](ABC):
                 except OSError:
                     self._last_test_output = None
             if test_id is not None and self.output_manager is not None:
-                self.output_manager.mark_completed(test_id, exit_code or 0)
+                if exit_code is not None:
+                    recorded_code = exit_code
+                else:
+                    # The test never produced an exit code (it was cancelled
+                    # or timed out) and its process group was just killed.
+                    returncode = sp.returncode if sp is not None else None
+                    recorded_code = (
+                        returncode if returncode is not None else -int(signal.SIGKILL)
+                    )
+                self.output_manager.mark_completed(test_id, recorded_code)
 
     async def run_for_exit_code(self, test_case: TestCase, debug: bool = False) -> int:
         if self.in_place:

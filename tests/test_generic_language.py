@@ -44,6 +44,32 @@ def test_does_not_error_on_bad_expression() -> None:
     assert reduce_with([combine_expressions], b"1 / 0", lambda x: True) == b"1 / 0"
 
 
+def test_does_not_treat_dot_or_comma_as_an_operator() -> None:
+    # Regression test: the operator character class [*+-/] contained the
+    # range +-/ which includes "." and ",". "1 . 2" then hit eval() and
+    # raised SyntaxError, crashing the whole reduction.
+    assert reduce_with([combine_expressions], b"1 . 2", lambda x: True) == b"1 . 2"
+    assert reduce_with([combine_expressions], b"1 , 2", lambda x: True) == b"1 , 2"
+
+
+def test_combines_expressions_with_leading_zeros() -> None:
+    # Regression test: "09 + 1" is a SyntaxError under eval() (Python
+    # rejects leading zeros), which escaped and crashed the reduction.
+    assert reduce_with([combine_expressions], b"09 + 1", lambda x: True) == b"10"
+
+
+def test_combines_all_supported_operators() -> None:
+    assert reduce_with([combine_expressions], b"3 * 4", lambda x: True) == b"12"
+    assert reduce_with([combine_expressions], b"3 - 4", lambda x: True) == b"-1"
+    assert reduce_with([combine_expressions], b"9 / 3", lambda x: True) == b"3"
+
+
+def test_does_not_combine_inexact_division() -> None:
+    # Replacing an integer division with a float would usually change
+    # program semantics, so inexact divisions are left alone.
+    assert reduce_with([combine_expressions], b"1 / 3", lambda x: True) == b"1 / 3"
+
+
 def test_can_combine_expressions_with_no_expressions() -> None:
     assert (
         reduce_with([combine_expressions], b"hello world", lambda x: True)

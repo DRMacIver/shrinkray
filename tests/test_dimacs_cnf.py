@@ -47,6 +47,31 @@ def test_dimacs_parse_raises_on_missing_zero():
         DimacsCNF.parse(cnf)
 
 
+def test_dimacs_parse_multiple_clauses_on_one_line():
+    """Regression test: DIMACS clauses are terminated by 0, not newlines.
+
+    The old line-based parser read "1 0 2 0" as the single clause
+    [1, 0, 2], whose bogus literal 0 crashed merge_literals."""
+    cnf = b"p cnf 2 2\n1 0 2 0\n"
+    assert DimacsCNF.parse(cnf) == [[1], [2]]
+
+
+def test_dimacs_parse_clause_spanning_lines():
+    """A single clause may span multiple lines."""
+    cnf = b"p cnf 3 1\n1 2\n3 0\n"
+    assert DimacsCNF.parse(cnf) == [[1, 2, 3]]
+
+
+def test_dimacs_parse_rejects_empty_clause():
+    """Regression test: an empty clause (a lone 0) is legal DIMACS but
+    makes the formula trivially unsatisfiable, no SAT pass handles it
+    (pass_to_component crashed with IndexError), and dumps refuses to
+    serialize it. Such files are not treated as CNF at all."""
+    cnf = b"p cnf 1 2\n1 0\n0\n"
+    with pytest.raises(ParseError, match="empty clause"):
+        DimacsCNF.parse(cnf)
+
+
 def test_dimacs_parse_raises_on_empty_clauses():
     """Test that ParseError is raised when no clauses are found."""
     cnf = b"c just a comment\n"

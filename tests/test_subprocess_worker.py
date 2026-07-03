@@ -4,12 +4,14 @@ import io
 import json
 import os
 import runpy
+import signal
 import sys
 import time
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 import trio
+import trio.testing
 
 import shrinkray.subprocess.worker
 from shrinkray.passes.clangdelta import find_clang_delta
@@ -2098,6 +2100,39 @@ async def test_handle_restart_from_success():
 
 
 @pytest.mark.trio
+async def test_handle_restart_from_write_failure_still_reports_restart():
+    """Regression test: a failure writing the new test case to the target
+    file happens after the restart has irrevocably taken effect (the old
+    reduction is cancelled and the new reducer installed, so the run()
+    loop may already be executing it). Reporting it as a failed restart
+    told the client the opposite of what happened. The file is rewritten
+    on the next successful reduction anyway."""
+    worker = ReducerWorker()
+    worker._cancel_scope = None
+    worker.running = True
+
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.history_manager = MagicMock()
+    worker.state.history_manager.restart_from_reduction.return_value = (
+        b"restart content",
+        set(),
+    )
+    worker.state.filename = "/tmp/test.c"
+    worker.state.output_manager = None
+    worker.state.write_test_case_to_file.side_effect = OSError("disk full")
+
+    mock_reducer = MagicMock()
+    mock_reducer.target = MagicMock()
+    worker.state.reducer = mock_reducer
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 3})
+
+    assert response.error is None
+    assert response.result == {"status": "restarted", "size": 15}
+    assert worker._restart_requested is True
+
+
+@pytest.mark.trio
 async def test_handle_restart_from_preserves_size_history():
     """Test that restart_from appends to size history instead of resetting it.
 
@@ -2509,10 +2544,12 @@ async def test_worker_log_file_close_exception(tmp_path):
         "history_enabled": True,
     }
     start_request = Request(id="start-1", command="start", params=start_params)
-    input_data = serialize(start_request) + "\n"
 
     output = MemoryOutputStream()
-    input_stream = MemoryInputStream(input_data.encode("utf-8"))
+    # The input stream must not hit EOF, since that shuts the worker down
+    # before the mocked reducer gets to sabotage the log file's close().
+    input_stream = BidirectionalInputStream()
+    input_stream.send_command(start_request)
 
     # Change to tmp_path so the history directory is created there
     old_cwd = os.getcwd()
@@ -2648,6 +2685,64 @@ class BidirectionalInputStream:
     async def aclose(self) -> None:
         self.closed = True
         self._event.set()
+
+
+@pytest.mark.trio
+async def test_worker_shuts_down_on_stdin_eof():
+    """Regression test: when the parent process disappeared (stdin EOF),
+    the worker kept running forever, reducing for nobody."""
+    input_stream = BidirectionalInputStream()
+    output = MemoryOutputStream()
+    worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+    completed = False
+    with trio.fail_after(5):
+        async with trio.open_nursery() as nursery:
+
+            @nursery.start_soon
+            async def run_worker() -> None:
+                nonlocal completed
+                await worker.run()
+                completed = True
+
+            await trio.testing.wait_all_tasks_blocked()
+            await input_stream.aclose()
+
+    assert completed
+
+
+@pytest.mark.trio
+async def test_worker_shuts_down_gracefully_on_sigterm():
+    """Regression test: the worker had no SIGTERM handler, so the SIGTERM
+    sent by SubprocessClient.close() (e.g. when quitting the TUI) killed
+    it without unwinding, orphaning the process groups of any running
+    interestingness tests. It must instead cancel its main scope.
+
+    A no-op python-level handler is installed first so that, should the
+    worker's handler be missing, the test fails instead of SIGTERM
+    killing the test runner."""
+    old_handler = signal.signal(signal.SIGTERM, lambda *args: None)
+    try:
+        input_stream = BidirectionalInputStream()
+        output = MemoryOutputStream()
+        worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+        completed = False
+        with trio.fail_after(5):
+            async with trio.open_nursery() as nursery:
+
+                @nursery.start_soon
+                async def run_worker() -> None:
+                    nonlocal completed
+                    await worker.run()
+                    completed = True
+
+                await trio.testing.wait_all_tasks_blocked()
+                os.kill(os.getpid(), signal.SIGTERM)
+
+        assert completed
+    finally:
+        signal.signal(signal.SIGTERM, old_handler)
 
 
 def parse_worker_output(output_data: bytes) -> list[Response | ProgressUpdate]:

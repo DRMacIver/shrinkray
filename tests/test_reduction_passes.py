@@ -26,6 +26,7 @@ from shrinkray.passes.bytes import (
     replace_space_with_newlines,
     short_deletions,
     standard_substitutions,
+    tokenize,
 )
 from shrinkray.passes.definitions import compose
 from shrinkray.passes.genericlanguages import (
@@ -323,6 +324,27 @@ def test_standard_substitutions_no_progress(parallelism):
     assert result == b"\x00\x00"
 
 
+def test_standard_substitutions_interesting_but_not_adopted(parallelism):
+    """Regression test: an interesting substitution is not necessarily
+    adopted as the current test case. The sort key ranks test cases
+    containing b"\\xff" in a higher tier (as the default sort key for a
+    text initial test case does, since b"\\xff" is not valid UTF-8), so
+    b"\\xff" is rejected despite being interesting and shorter.
+    This used to fire an assertion and crash the pass."""
+
+    def sort_key(b: bytes):
+        return (b"\xff" in b, shortlex(b))
+
+    result = reduce_with(
+        [standard_substitutions],
+        b"\x00\x00",
+        lambda x: x in (b"\x00\x00", b"\xff"),
+        parallelism=parallelism,
+        sort_key=sort_key,
+    )
+    assert result == b"\x00\x00"
+
+
 def test_line_sorter(parallelism):
     result = reduce_with(
         [line_sorter],
@@ -434,6 +456,24 @@ def test_tokenize_with_numbers(parallelism):
         parallelism=parallelism,
     )
     assert b"x" in result
+
+
+def test_tokenize_basic_example():
+    assert tokenize(b"foo = 123") == [b"foo", b" ", b"=", b" ", b"123"]
+
+
+def test_tokenize_punctuation_is_not_part_of_identifiers():
+    """Regression test: the identifier check used the byte range A..z,
+    which includes the punctuation characters [ \\ ] ^ ` between "Z" and
+    "a", so e.g. an array index was glued to its identifier."""
+    assert tokenize(b"a[0] = b") == [b"a", b"[", b"0", b"]", b" ", b"=", b" ", b"b"]
+    assert tokenize(b"x^y") == [b"x", b"^", b"y"]
+    assert tokenize(b"p`q") == [b"p", b"`", b"q"]
+    assert tokenize(b"c\\d") == [b"c", b"\\", b"d"]
+
+
+def test_tokenize_underscore_is_an_identifier_character():
+    assert tokenize(b"my_var _leading") == [b"my_var", b" ", b"_leading"]
 
 
 def test_tokenize_with_underscores(parallelism):

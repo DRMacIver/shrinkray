@@ -6,10 +6,12 @@ import base64
 import json
 import os
 import stat
+import subprocess
 import tempfile
 
 import pytest
 
+from shrinkray.cli import InputType
 from shrinkray.history import HistoryManager, sanitize_for_filename
 
 
@@ -177,12 +179,12 @@ def test_initialize_wrapper_script_content_with_local_test() -> None:
             with open(wrapper) as f:
                 content = f.read()
 
-            # Should reference the copied test via $(dirname "$0")
-            assert '"$(dirname "$0")/check.sh"' in content
+            # Should reference the copied test via the (absolute) $DIR
+            assert '"$DIR"/check.sh' in content
             # Should include the flag argument
             assert "--flag" in content
             # Should have proper default for TARGET
-            assert 'TARGET="${1:-"$DIR/buggy.c"}"' in content
+            assert 'TARGET="$DIR"/buggy.c' in content
         finally:
             os.chdir(original_cwd)
 
@@ -206,6 +208,95 @@ def test_initialize_wrapper_script_content_without_local_test() -> None:
             assert "$(dirname" not in content or "check.sh" not in content
         finally:
             os.chdir(original_cwd)
+
+
+def _initialize_run_script(tmpdir: str, script_body: str, input_type: InputType) -> str:
+    """Create a history manager for a test script and return the path of
+    the generated run.sh."""
+    test_script = os.path.join(tmpdir, "check.sh")
+    with open(test_script, "w") as f:
+        f.write(script_body)
+    os.chmod(test_script, 0o755)
+
+    manager = HistoryManager.create(
+        [test_script], "buggy.c", base_dir=tmpdir, input_type=input_type
+    )
+    manager.initialize(b"hello", [test_script], "buggy.c")
+    return os.path.join(manager.history_dir, "initial", "run.sh")
+
+
+def test_wrapper_script_reproduces_stdin_input_type(tmp_path) -> None:
+    """Regression test: run.sh always passed the test case as an argument
+    and never on stdin, so for --input-type=stdin the recorded script did
+    not reproduce the run."""
+    wrapper = _initialize_run_script(
+        str(tmp_path),
+        '#!/bin/bash\ncontent="$(cat)"\n[ "$content" = "hello" ]\n',
+        InputType.stdin,
+    )
+    result = subprocess.run(
+        [wrapper], stdin=subprocess.DEVNULL, capture_output=True, cwd=str(tmp_path)
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_wrapper_script_reproduces_arg_input_type(tmp_path) -> None:
+    wrapper = _initialize_run_script(
+        str(tmp_path),
+        '#!/bin/bash\ngrep -q hello "$1"\n',
+        InputType.arg,
+    )
+    result = subprocess.run(
+        [wrapper], stdin=subprocess.DEVNULL, capture_output=True, cwd=str(tmp_path)
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_wrapper_script_reproduces_basename_input_type(tmp_path) -> None:
+    """Regression test: for --input-type=basename the test expects to find
+    the test case under its original name in the working directory, which
+    run.sh did not arrange."""
+    wrapper = _initialize_run_script(
+        str(tmp_path),
+        "#!/bin/bash\ngrep -q hello ./buggy.c\n",
+        InputType.basename,
+    )
+    result = subprocess.run(
+        [wrapper], stdin=subprocess.DEVNULL, capture_output=True, cwd=str(tmp_path)
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_wrapper_script_reproduces_all_input_type(tmp_path) -> None:
+    """The default input type passes the test case every way at once."""
+    wrapper = _initialize_run_script(
+        str(tmp_path),
+        '#!/bin/bash\n[ "$(cat)" = "hello" ] && grep -q hello "$1" '
+        "&& grep -q hello ./buggy.c\n",
+        InputType.all,
+    )
+    result = subprocess.run(
+        [wrapper], stdin=subprocess.DEVNULL, capture_output=True, cwd=str(tmp_path)
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_wrapper_script_accepts_explicit_target(tmp_path) -> None:
+    """run.sh runs the test against an explicitly passed file."""
+    wrapper = _initialize_run_script(
+        str(tmp_path),
+        '#!/bin/bash\ngrep -q goodbye "$1"\n',
+        InputType.arg,
+    )
+    other = tmp_path / "other.c"
+    other.write_bytes(b"goodbye")
+    result = subprocess.run(
+        [wrapper, str(other)],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        cwd=str(tmp_path),
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_initialize_is_idempotent() -> None:

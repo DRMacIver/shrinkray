@@ -138,8 +138,12 @@ class ClangDelta:
                 os.unlink(tmp.name)
 
             prefix = b"Available transformation instances:"
-            assert results.startswith(prefix)
-            return int(results[len(prefix) :].strip().decode("ascii"))
+            if not results.startswith(prefix):
+                raise ClangDeltaError(results)
+            try:
+                return int(results[len(prefix) :].strip().decode("ascii"))
+            except (ValueError, UnicodeDecodeError):
+                raise ClangDeltaError(results)
 
     async def apply_transformation(
         self, transformation: str, counter: int, data: bytes
@@ -219,9 +223,16 @@ def clang_delta_pump(
             if clang_delta_failed:
                 return target
 
-            target = await clang_delta.apply_transformation(transformation, i, target)
-            assert target is not None
-            n = await clang_delta.query_instances(transformation, target)
+            try:
+                target = await clang_delta.apply_transformation(
+                    transformation, i, target
+                )
+                assert target is not None
+                n = await clang_delta.query_instances(transformation, target)
+            except ClangDeltaError:
+                # As above: tolerate clang_delta falling over and keep
+                # whatever progress we've made so far.
+                return target
         return target
 
     apply.__name__ = f"clang_delta({transformation})"

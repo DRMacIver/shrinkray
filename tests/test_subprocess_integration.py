@@ -1,12 +1,25 @@
 """Integration tests for subprocess communication."""
 
+import json
+import os
 import select
+import shlex
+import signal
 import subprocess
 import sys
+import time
 
 import pytest
 
 from shrinkray.subprocess import SubprocessClient, client, worker
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 # === Worker module tests ===
@@ -139,3 +152,80 @@ def test_worker_handles_malformed_json():
     # Clean up
     proc.terminate()
     proc.wait(timeout=5)
+
+
+@pytest.mark.slow
+def test_sigterm_kills_running_interestingness_tests(tmp_path):
+    """Regression test: quitting the TUI sends SIGTERM to the worker
+    (SubprocessClient.close). The worker used to die without unwinding,
+    orphaning the process groups of in-flight interestingness tests,
+    which kept running indefinitely."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    # The interestingness test records its PID and then hangs.
+    pid_file = tmp_path / "test_pids"
+    script = tmp_path / "test.sh"
+    script.write_text(
+        f"#!/bin/bash\necho $$ >> {shlex.quote(str(pid_file))}\nsleep 1000\n"
+    )
+    script.chmod(0o755)
+
+    start_command = {
+        "id": "start-1",
+        "command": "start",
+        "params": {
+            "file_path": str(target),
+            "test": [str(script)],
+            "parallelism": 1,
+            "timeout": 100.0,
+            "seed": 0,
+            "input_type": "all",
+            "in_place": False,
+            "formatter": "none",
+            "volume": "quiet",
+            "no_clang_delta": True,
+            "history_enabled": False,
+        },
+    }
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "shrinkray.subprocess.worker"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=tmp_path,
+    )
+    try:
+        assert proc.stdin is not None
+        proc.stdin.write((json.dumps(start_command) + "\n").encode("utf-8"))
+        proc.stdin.flush()
+
+        # Wait for the interestingness test to be running.
+        deadline = time.time() + 30
+        while time.time() < deadline and not pid_file.exists():
+            time.sleep(0.05)
+        assert pid_file.exists(), "Interestingness test never started"
+        test_pid = int(pid_file.read_text().split()[0])
+        assert _pid_alive(test_pid)
+
+        # Quit the way SubprocessClient.close() does.
+        proc.terminate()
+        proc.wait(timeout=10)
+
+        # The hanging test process must be killed by the worker's cleanup.
+        deadline = time.time() + 10
+        while time.time() < deadline and _pid_alive(test_pid):
+            time.sleep(0.05)
+        assert not _pid_alive(test_pid), (
+            f"Interestingness test (pid {test_pid}) was orphaned"
+        )
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+        # Best effort: never leak the sleeping test process even on failure.
+        try:
+            os.killpg(os.getpgid(int(pid_file.read_text().split()[0])), signal.SIGKILL)
+        except (OSError, ValueError, FileNotFoundError, ProcessLookupError):
+            pass

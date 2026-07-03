@@ -44,6 +44,22 @@ async def test_signal_group_sends_signal_to_process_group():
             await sp.wait()
 
 
+async def test_signal_group_refuses_own_process_group():
+    # Start a process WITHOUT setsid, so it shares our process group.
+    # signal_group must refuse to signal it, as that would signal
+    # shrink-ray itself (SIGCONT is used as it is harmless if sent).
+    sp = await trio.lowlevel.open_process(
+        [sys.executable, "-c", "import time; time.sleep(100)"],
+    )
+    try:
+        assert os.getpgid(sp.pid) == os.getpgrp()
+        with pytest.raises(AssertionError):
+            signal_group(sp, signal.SIGCONT)
+    finally:
+        sp.kill()
+        await sp.wait()
+
+
 # === interrupt_wait_and_kill tests ===
 
 
@@ -83,21 +99,26 @@ async def test_interrupt_wait_and_kill_kills_process_ignoring_sigint():
     assert sp.returncode is not None
 
 
-async def test_interrupt_wait_and_kill_handles_fast_exit_after_sigint():
-    # Start a process that exits quickly after SIGINT
+async def test_interrupt_wait_and_kill_handles_fast_exit_after_sigint(tmp_path):
+    # Start a process that exits quickly after SIGINT. It touches a file
+    # once its signal handler is installed so we don't race the setup.
+    ready_marker = tmp_path / "ready"
     sp = await trio.lowlevel.open_process(
         [
             sys.executable,
             "-c",
-            "import signal, time; signal.signal(signal.SIGINT, lambda *a: exit(0)); time.sleep(100)",
+            "import pathlib, signal, time; "
+            "signal.signal(signal.SIGINT, lambda *a: exit(0)); "
+            f"pathlib.Path({str(ready_marker)!r}).touch(); "
+            "time.sleep(100)",
         ],
         preexec_fn=os.setsid,
     )
 
-    await trio.sleep(0.05)
+    while not ready_marker.exists():
+        await trio.sleep(0.01)
     await interrupt_wait_and_kill(sp, delay=0.05)
 
-    assert sp.returncode is not None
     assert sp.returncode == 0
 
 

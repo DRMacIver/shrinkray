@@ -16,6 +16,8 @@ from datetime import datetime
 
 from attrs import define
 
+from shrinkray.cli import InputType
+
 
 def sanitize_for_filename(s: str) -> str:
     """Replace unsafe characters with underscores, limit length.
@@ -57,6 +59,7 @@ class HistoryManager:
     initialized: bool = False
     record_reductions: bool = True  # If False, only record also-interesting
     is_directory: bool = False  # True if target is a directory
+    input_type: InputType = InputType.all  # How the test receives the test case
 
     @classmethod
     def create(
@@ -67,6 +70,7 @@ class HistoryManager:
         record_reductions: bool = True,
         is_directory: bool = False,
         base_dir: str | None = None,
+        input_type: InputType = InputType.all,
     ) -> HistoryManager:
         """Create a new HistoryManager with a unique run ID.
 
@@ -79,6 +83,8 @@ class HistoryManager:
             is_directory: If True, the target is a directory and test cases
                 are dict[str, bytes] instead of bytes.
             base_dir: Base directory for .shrinkray folder. Defaults to cwd.
+            input_type: How the test receives the test case; the generated
+                run.sh mirrors it.
         """
         # Generate run ID: (test-basename)-(filename)-(datetime)-(random hex)
         test_name = sanitize_for_filename(os.path.basename(test[0]))
@@ -99,6 +105,7 @@ class HistoryManager:
             target_basename=target_basename,
             record_reductions=record_reductions,
             is_directory=is_directory,
+            input_type=input_type,
         )
 
     def initialize(
@@ -151,29 +158,43 @@ class HistoryManager:
             initial_dir: Path to the initial directory
         """
         script_path = os.path.join(initial_dir, "run.sh")
+        quoted_base = shlex.quote(self.target_basename)
 
-        # Build command, referencing test file via $(dirname "$0") if it was copied
+        # Build command, referencing the test file via $DIR if it was copied
+        # ($DIR is absolute, so this survives the cd below).
         if copied_test_basename is not None:
-            test_ref = f'"$(dirname "$0")/{copied_test_basename}"'
+            test_ref = f'"$DIR"/{shlex.quote(copied_test_basename)}'
         else:
             test_ref = shlex.quote(test[0])
 
-        # Quote remaining arguments
-        args = " ".join(shlex.quote(arg) for arg in test[1:])
-        if args:
-            command = f"{test_ref} {args}"
-        else:
-            command = test_ref
+        # Invoke the test the same way shrink-ray does for this input type.
+        command_parts = [test_ref] + [shlex.quote(arg) for arg in test[1:]]
+        if self.input_type.enabled(InputType.arg):
+            command_parts.append(f'"$WORK"/{quoted_base}')
+        command = " ".join(command_parts)
+        if self.input_type.enabled(InputType.stdin) and not self.is_directory:
+            command += f' < "$WORK"/{quoted_base}'
 
         script_content = f"""#!/bin/bash
 # Shrink Ray interestingness test wrapper
 # Run with: ./run.sh [target_file]
 # If no target_file specified, uses the original
 
-DIR="$(dirname "$0")"
-TARGET="${{1:-"$DIR/{self.target_basename}"}}"
+DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ $# -ge 1 ]; then
+    TARGET="$1"
+else
+    TARGET="$DIR"/{quoted_base}
+fi
 
-{command} "$TARGET"
+# Mirror how shrink-ray invokes the test: copy the test case into a
+# fresh working directory under its original name and run from there.
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+cp -R "$TARGET" "$WORK"/{quoted_base}
+cd "$WORK"
+
+{command}
 """
         with open(script_path, "w") as f:
             f.write(script_content)

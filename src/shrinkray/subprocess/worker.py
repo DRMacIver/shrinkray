@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import signal
 import sys
 import tempfile
 import time
@@ -58,6 +59,10 @@ class ReducerWorker:
         self.problem = None
         self.state = None
         self._cancel_scope: trio.CancelScope | None = None
+        # Cancel scope for the whole worker; cancelling it shuts the worker
+        # down gracefully, running cleanup (including killing the process
+        # groups of any in-flight interestingness tests).
+        self._main_cancel_scope: trio.CancelScope | None = None
         self._restart_requested = False
         # Parallelism tracking
         self._parallel_samples = 0
@@ -117,6 +122,11 @@ class ReducerWorker:
                     line, buffer = buffer.split(b"\n", 1)
                     if line:
                         await self.handle_line(line.decode("utf-8"))
+
+        # End of input means the parent process is gone (it closed our stdin
+        # or died); shut down rather than reduce for nobody.
+        if self._main_cancel_scope is not None:
+            self._main_cancel_scope.cancel()
 
     async def handle_line(self, line: str) -> None:
         """Handle a single command line."""
@@ -413,20 +423,29 @@ class ReducerWorker:
                 self._last_recorded_size = len(new_test_case)
                 self._last_history_time = current_runtime
 
-            # Write new test case to file (can happen after reducer is set up)
-            await self.state.write_test_case_to_file(self.state.filename, new_test_case)
-
-            # Ready to restart - running will be set to True by the run() loop
-            return Response(
-                id=request_id,
-                result={"status": "restarted", "size": len(new_test_case)},
-            )
         except Exception:
             traceback.print_exc()
-            # Reset restart flag - we can't restart, so don't try
+            # Nothing above awaits, so the run() loop cannot have seen the
+            # restart flag yet and it is safe to withdraw the restart.
             self._restart_requested = False
             # Include full traceback in error message in case stderr isn't visible
             return Response(id=request_id, error=traceback.format_exc())
+
+        # Write new test case to file. This runs outside the try block: it
+        # is the first await since the cancellation, so by the time it fails
+        # the run() loop may already be executing the new reducer, and the
+        # restart cannot be reported as failed. The file gets rewritten on
+        # the next successful reduction anyway.
+        try:
+            await self.state.write_test_case_to_file(self.state.filename, new_test_case)
+        except Exception:
+            traceback.print_exc()
+
+        # Ready to restart - running will be set to True by the run() loop
+        return Response(
+            id=request_id,
+            result={"status": "restarted", "size": len(new_test_case)},
+        )
 
     def _get_test_output_preview(self) -> tuple[str, int | None, int | None]:
         """Get preview of current test output, test ID, and return code.
@@ -696,10 +715,24 @@ class ReducerWorker:
             self._cancel_scope = None
             self.running = False
 
+    async def _cancel_on_sigterm(self) -> None:
+        """Shut down gracefully on SIGTERM.
+
+        Trio's default SIGTERM behaviour is immediate death, which would
+        orphan the process groups of any running interestingness tests.
+        Cancelling the main scope instead unwinds the reduction, whose
+        cleanup kills those process groups."""
+        with trio.open_signal_receiver(signal.SIGTERM) as signals:
+            await anext(signals)
+            assert self._main_cancel_scope is not None
+            self._main_cancel_scope.cancel()
+
     async def run(self) -> None:
         """Main entry point for the worker."""
         try:
             async with trio.open_nursery() as nursery:
+                self._main_cancel_scope = nursery.cancel_scope
+                nursery.start_soon(self._cancel_on_sigterm)
                 await nursery.start(self.read_commands)
 
                 # Wait for start command

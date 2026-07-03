@@ -79,6 +79,11 @@ async def _run_validation_test(
     or success=False with error details if it failed.
     """
     temp_dirs: list[str] = []
+    # If we write candidate content over the user's original file, remember
+    # what it held so we can put it back. No backup exists yet at
+    # validation time, so failing to restore would lose the original.
+    restore_content: bytes | None = None
+    restore_path: str | None = None
 
     try:
         # Determine working directory and file path
@@ -87,6 +92,11 @@ async def _run_validation_test(
                 working = filename
                 cwd = os.getcwd()
                 # Write directly to original file
+                with open(working, "rb") as reader:
+                    existing_content = reader.read()
+                if existing_content != initial_content:
+                    restore_path = working
+                    restore_content = existing_content
                 async with await trio.open_file(working, "wb") as f:
                     await f.write(initial_content)
             else:
@@ -200,6 +210,11 @@ async def _run_validation_test(
             error_message=f"Error running interestingness test: {e}",
             temp_dirs=temp_dirs,
         )
+    finally:
+        if restore_path is not None:
+            assert restore_content is not None
+            with open(restore_path, "wb") as writer:
+                writer.write(restore_content)
 
 
 async def _run_formatter(

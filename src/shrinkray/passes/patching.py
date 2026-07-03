@@ -88,11 +88,11 @@ class PatchApplier[PatchType, TargetType]:
                             base_patch,
                             *[p for _, p, _ in self.__merge_queue[:k]],
                         )
+                        with_patch_applied = self.__patches.apply(
+                            attempted_patch, self.__initial_test_case
+                        )
                     except Conflict:
                         return False
-                    with_patch_applied = self.__patches.apply(
-                        attempted_patch, self.__initial_test_case
-                    )
                     if await self.__problem.is_reduction(with_patch_applied):
                         self.__current_patch = attempted_patch
                         return True
@@ -116,6 +116,13 @@ class PatchApplier[PatchType, TargetType]:
                 else:
                     del self.__merge_queue[:to_merge]
         finally:
+            # If we were cancelled mid-merge, tasks already queued would
+            # otherwise wait forever for a result that no one is going to
+            # send. Report their patches as not applied; a later pass can
+            # still retry them.
+            for _, _, send_result in self.__merge_queue:
+                send_result.send_nowait(False)
+            del self.__merge_queue[:]
             self.__merge_lock.release()
 
         return True
@@ -128,9 +135,12 @@ class PatchApplier[PatchType, TargetType]:
             return False
         if combined_patch == self.__current_patch:
             return True
-        with_patch_applied = self.__patches.apply(
-            combined_patch, self.__initial_test_case
-        )
+        try:
+            with_patch_applied = self.__patches.apply(
+                combined_patch, self.__initial_test_case
+            )
+        except Conflict:
+            return False
         if with_patch_applied == self.__problem.current_test_case:
             return True
         if not await self.__problem.is_interesting(with_patch_applied):

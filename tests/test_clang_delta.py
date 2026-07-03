@@ -214,6 +214,97 @@ async def test_pump_handles_apply_error():
     assert result == source
 
 
+async def test_pump_handles_error_reapplying_successful_transformation():
+    """Regression test: a ClangDeltaError from the apply_transformation
+    call that re-applies a transformation found by find_first_value
+    escaped the pump and crashed the reduction, while the identical
+    failure inside find_first_value was deliberately tolerated."""
+    cd = ClangDelta(find_clang_delta())
+    pump = clang_delta_pump(cd, "rename-fun")
+    source = b"int f() { return 0; }"
+    reduced = b"int g() { return 0; }"
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        source, is_interesting, work=WorkContext(parallelism=1)
+    )
+
+    calls = [0]
+
+    async def fake_apply(transformation, counter, data):
+        calls[0] += 1
+        if calls[0] == 1:
+            return reduced
+        raise ClangDeltaError(b"clang_delta fell over")
+
+    with patch.object(cd, "query_instances", return_value=1):
+        with patch.object(cd, "apply_transformation", side_effect=fake_apply):
+            result = await pump(problem)
+
+    assert result == source
+
+
+async def test_pump_keeps_progress_when_requery_fails():
+    """Regression test: a ClangDeltaError from re-querying the instance
+    count after a successful transformation escaped the pump. The pump
+    now keeps the successful transformation."""
+    cd = ClangDelta(find_clang_delta())
+    pump = clang_delta_pump(cd, "rename-fun")
+    source = b"int f() { return 0; }"
+    reduced = b"int g() { return 0; }"
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        source, is_interesting, work=WorkContext(parallelism=1)
+    )
+
+    async def fake_query(transformation, data):
+        if data == source:
+            return 1
+        raise ClangDeltaError(b"clang_delta fell over")
+
+    with patch.object(cd, "query_instances", side_effect=fake_query):
+        with patch.object(cd, "apply_transformation", return_value=reduced):
+            result = await pump(problem)
+
+    assert result == reduced
+
+
+async def test_query_instances_rejects_unexpected_output():
+    """Regression test: unexpected stdout from clang_delta (e.g. warnings)
+    failed an assert instead of raising ClangDeltaError, which the pumps
+    know how to tolerate."""
+    cd = ClangDelta(find_clang_delta())
+
+    completed = subprocess.CompletedProcess(
+        "clang_delta", 0, stdout=b"warning: something unexpected", stderr=b""
+    )
+
+    with patch("trio.run_process", return_value=completed):
+        with pytest.raises(ClangDeltaError):
+            await cd.query_instances("rename-fun", b"int main() { return 0; }")
+
+
+async def test_query_instances_rejects_malformed_count():
+    """A non-numeric instance count raises ClangDeltaError, not ValueError."""
+    cd = ClangDelta(find_clang_delta())
+
+    completed = subprocess.CompletedProcess(
+        "clang_delta",
+        0,
+        stdout=b"Available transformation instances: lots",
+        stderr=b"",
+    )
+
+    with patch("trio.run_process", return_value=completed):
+        with pytest.raises(ClangDeltaError):
+            await cd.query_instances("rename-fun", b"int main() { return 0; }")
+
+
 # =============================================================================
 # Additional edge case tests for complete coverage
 # =============================================================================

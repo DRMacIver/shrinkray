@@ -200,7 +200,10 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --extra dev --resolution ${{ matrix.resolution }}
       - name: Run fast tests
-        run: uv run pytest tests/ -m "not slow" -q
+        # --no-sync stops uv run from re-resolving with the default
+        # (highest) resolution and silently replacing the runtime
+        # dependencies we just synced at the matrix resolution.
+        run: uv run --no-sync pytest tests/ -m "not slow" -q
 
   coverage:
     permissions:

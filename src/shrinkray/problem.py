@@ -494,7 +494,12 @@ class ReductionProblem[T](ABC):
         """
         if test_case == self.current_test_case:
             return True
-        if self.sort_key(test_case) > self.sort_key(self.current_test_case):
+        try:
+            if self.sort_key(test_case) > self.sort_key(self.current_test_case):
+                return False
+        except DumpError:
+            # Views compute sort keys by dumping the candidate. A candidate
+            # that can't be dumped can't be tested, so it's not a reduction.
             return False
         return await self.is_interesting(test_case)
 
@@ -550,7 +555,10 @@ def default_cache_key(value: Any) -> str:
             value = repr(value)
         value = value.encode("utf-8")
 
-    hex = hashlib.sha1(value).hexdigest()[:8]
+    # 16 hex digits = 64 bits. A big reduction can test hundreds of
+    # thousands of candidates of the same length; at 32 bits a birthday
+    # collision (silently serving the wrong cached result) becomes likely.
+    hex = hashlib.sha1(value).hexdigest()[:16]
     return f"{len(value)}:{hex}"
 
 

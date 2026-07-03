@@ -111,6 +111,9 @@ def test_default_size_no_len():
 def test_default_cache_key_bytes():
     key = default_cache_key(b"hello")
     assert key.startswith("5:")  # length prefix
+    # 64 bits of hash after the length prefix, to keep birthday
+    # collisions unlikely across the lifetime of a big reduction.
+    assert len(key.split(":")[1]) == 16
 
 
 def test_default_cache_key_string():
@@ -499,6 +502,35 @@ async def test_view_is_interesting_handles_dump_error():
 
     assert await view.is_interesting("hello") is True
     assert await view.is_interesting("bad") is False
+
+
+async def test_view_is_reduction_handles_dump_error():
+    """Regression test: is_reduction computes the candidate's sort key
+    before testing interestingness. For a View the sort key dumps the
+    candidate, so an undumpable candidate raised DumpError out of
+    is_reduction (crashing patch merging) instead of being rejected."""
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    def dump(s):
+        if s == "bad":
+            raise DumpError("Cannot dump 'bad'")
+        return s.encode("utf-8")
+
+    view = View(
+        problem=problem,
+        parse=lambda b: b.decode("utf-8"),
+        dump=dump,
+    )
+
+    assert await view.is_reduction("bad") is False
 
 
 def test_view_stats_delegates():

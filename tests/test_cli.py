@@ -49,6 +49,19 @@ def test_validate_command_raises_for_nonexistent():
         validate_command(None, None, "nonexistent_command_xyz123")
 
 
+def test_validate_command_raises_for_empty_command():
+    # Regression test: an empty command produced an IndexError traceback
+    # instead of a clean usage error.
+    with pytest.raises(click.BadParameter, match="empty"):
+        validate_command(None, None, "")
+
+
+def test_validate_command_raises_for_unparseable_command():
+    # Regression test: an unclosed quote raised ValueError from shlex.
+    with pytest.raises(click.BadParameter):
+        validate_command(None, None, "'unclosed quote")
+
+
 # === EnumChoice tests ===
 
 
@@ -70,6 +83,23 @@ def test_enum_choice_converts_all_values():
     choice = EnumChoice(UIType)
     assert choice.convert("basic", None, None) == UIType.basic
     assert choice.convert("textual", None, None) == UIType.textual
+
+
+def test_enum_choice_accepts_already_converted_value():
+    # Regression test: click may call convert() with an already-converted
+    # value (it does this for option defaults in some versions), which
+    # produced a bad-parameter error instead of passing the enum through.
+    choice = EnumChoice(InputType)
+    result = choice.convert(InputType.stdin, None, None)
+    assert result is InputType.stdin
+
+
+def test_enum_choice_rejects_invalid_value():
+    # Regression test: an invalid choice produced a raw KeyError traceback
+    # instead of click's "invalid choice" usage error.
+    choice = EnumChoice(InputType)
+    with pytest.raises(click.UsageError):
+        choice.convert("bogus", None, None)
 
 
 # === InputType tests ===

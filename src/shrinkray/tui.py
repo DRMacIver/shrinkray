@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 import traceback
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import aclosing
 from datetime import timedelta
 from difflib import unified_diff
@@ -466,13 +466,24 @@ class ContentPreview(Static):
     _pending_content: str = ""
     _pending_hex_mode: bool = False
 
+    def __init__(
+        self,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
+        disabled: bool = False,
+        time_source: Callable[[], float] = time.time,
+    ) -> None:
+        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
+        self._time_source = time_source
+
     def update_content(self, content: str, hex_mode: bool) -> None:
         # Store the pending content
         self._pending_content = content
         self._pending_hex_mode = hex_mode
 
         # Throttle updates to once per second
-        now = time.time()
+        now = self._time_source()
         if now - self._last_display_time < 1.0:
             return
 
@@ -553,6 +564,17 @@ class OutputPreview(Static):
     # Track if we've ever seen any output (once true, never show "No test output yet...")
     _has_seen_output: bool = False
 
+    def __init__(
+        self,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
+        disabled: bool = False,
+        time_source: Callable[[], float] = time.time,
+    ) -> None:
+        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
+        self._time_source = time_source
+
     def update_output(
         self, content: str, test_id: int | None, return_code: int | None = None
     ) -> None:
@@ -565,7 +587,7 @@ class OutputPreview(Static):
         self._pending_return_code = return_code
 
         # Throttle display updates to every 200ms
-        now = time.time()
+        now = self._time_source()
         if now - self._last_update_time < 0.2:
             return
 
@@ -1342,6 +1364,9 @@ class HistoryExplorerModal(ModalScreen[None]):
             return entries
 
         for entry_name in os.listdir(dir_path):
+            # History entries are numbered directories; ignore anything else.
+            if not entry_name.isdigit():
+                continue
             entry_path = os.path.join(dir_path, entry_name)
             if os.path.isdir(entry_path):
                 # Get file size
@@ -1350,8 +1375,9 @@ class HistoryExplorerModal(ModalScreen[None]):
                     size = os.path.getsize(file_path)
                     entries.append((entry_name, entry_path, size))
 
-        # Sort by entry number
-        entries.sort(key=lambda x: x[0])
+        # Sort by entry number. Entry names are zero-padded numbers, but the
+        # padding overflows past 9999, so sort numerically.
+        entries.sort(key=lambda x: int(x[0]))
         return entries
 
     def _populate_list(self, subdir: str, list_id: str) -> None:

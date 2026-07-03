@@ -166,22 +166,28 @@ async def reduce_integer_literals(problem: ReductionProblem[bytes]) -> None:
     await reduce_integer(problem.view(IntegerFormat()))
 
 
-@regex_pass(rb"[0-9]+ [*+-/] [0-9]+")
+@regex_pass(rb"[0-9]+ [*+/-] [0-9]+")
 async def combine_expressions(problem: ReductionProblem[bytes]) -> None:
     """Evaluate and simplify simple arithmetic expressions.
 
     Finds expressions like "2 + 3" and replaces them with their result "5".
-    Only handles basic integer arithmetic to avoid changing program semantics.
+    Only handles basic integer arithmetic to avoid changing program semantics,
+    so inexact divisions (which would produce a float) are left alone.
     """
-    try:
-        # NB: Use of eval is safe, as everything passed to this is a simple
-        # arithmetic expression. Would ideally replace with a guaranteed
-        # safe version though.
-        await problem.is_interesting(
-            str(eval(problem.current_test_case)).encode("ascii")
-        )
-    except ArithmeticError:
-        pass
+    lhs_text, op, rhs_text = problem.current_test_case.split()
+    lhs, rhs = int(lhs_text), int(rhs_text)
+    if op == b"*":
+        value = lhs * rhs
+    elif op == b"+":
+        value = lhs + rhs
+    elif op == b"-":
+        value = lhs - rhs
+    else:
+        assert op == b"/"
+        if rhs == 0 or lhs % rhs != 0:
+            return
+        value = lhs // rhs
+    await problem.is_interesting(str(value).encode("ascii"))
 
 
 @regex_pass(rb'([\'"])\s*\1')

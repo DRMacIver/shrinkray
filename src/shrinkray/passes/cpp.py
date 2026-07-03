@@ -640,6 +640,106 @@ async def remove_base_classes(problem: ReductionProblem[bytes]) -> None:
     await apply_patches(problem, Cuts(), cuts)
 
 
+def _template_prefixes(view: TokenView) -> dict[int, int]:
+    """Map the token index that ends a `template < ... >` prefix (its
+    closing `>`) to the index of the `template` keyword that starts it.
+    Used to include a class template's `template<...>` prefix when
+    deleting the class."""
+    tokens = view.tokens
+    result: dict[int, int] = {}
+    for idx, tok in enumerate(tokens):
+        if (
+            tok.kind == NAME
+            and tok.text == b"template"
+            and idx + 1 < len(tokens)
+            and tokens[idx + 1].text == b"<"
+        ):
+            close = _find_angle_close(view, idx + 1)
+            if close is not None:
+                result[close] = idx
+    return result
+
+
+def _declaration_end(view: TokenView, start: int) -> int | None:
+    """From token index start, walk forward over any bracketed groups
+    and template argument lists to the terminating top-level `;`,
+    returning its index (or None if there isn't one)."""
+    tokens = view.tokens
+    j = start
+    while j < len(tokens):
+        t = tokens[j]
+        if t.kind == PUNCT:
+            if t.text in OPEN_TO_CLOSE:
+                m = view.brackets.get(j)
+                if m is None:
+                    return None
+                j = m
+            elif t.text == b"<":
+                m = _find_angle_close(view, j)
+                if m is not None:
+                    j = m
+            elif t.text == b";":
+                return j
+        j += 1
+    return None
+
+
+async def replace_type_with_int(problem: ReductionProblem[bytes]) -> None:
+    """Replace a class/struct/union type with the builtin `int`, in the
+    style of clang_delta's empty-struct-to-int.
+
+    For each class/struct/union definition or forward declaration
+    (including template ones), delete it and rewrite every other use of
+    its name — consuming any trailing `<...>` template arguments — to
+    `int`. When the type only carried structure irrelevant to the bug
+    this collapses it away entirely, which the deletion-only passes
+    cannot do on their own."""
+    source = problem.current_test_case
+    view = token_view(source)
+    tokens = view.tokens
+    template_prefixes = _template_prefixes(view)
+    patches: list[ReplacementPatch] = []
+    for k, t in enumerate(tokens):
+        if t.kind != NAME or t.text not in (b"struct", b"class", b"union"):
+            continue
+        if k + 1 >= len(tokens) or tokens[k + 1].kind != NAME:
+            continue
+        name = tokens[k + 1].text
+        # Only a real definition/forward-declaration, not an elaborated
+        # type used in a variable declaration (`struct S s;`): the token
+        # after the name must open a body, a base list, or end the
+        # declaration.
+        after = tokens[k + 2] if k + 2 < len(tokens) else None
+        if after is None or after.kind != PUNCT or after.text not in (b";", b"{", b":"):
+            continue
+        end = _declaration_end(view, k + 1)
+        if end is None:
+            continue
+        decl_start = template_prefixes.get(k - 1, k)
+        edits: list[tuple[int, int, bytes]] = [
+            (tokens[decl_start].start, tokens[end].end, b"")
+        ]
+        p = 0
+        while p < len(tokens):
+            if decl_start <= p <= end:
+                p += 1
+                continue
+            if tokens[p].kind == NAME and tokens[p].text == name:
+                start_byte = tokens[p].start
+                span_end = tokens[p].end
+                if p + 1 < len(tokens) and tokens[p + 1].text == b"<":
+                    m = _find_angle_close(view, p + 1)
+                    if m is not None:
+                        span_end = tokens[m].end
+                        p = m
+                edits.append((start_byte, span_end, b"int"))
+            p += 1
+        # By construction these edits never overlap: the definition span
+        # is excluded from the use scan, and uses are distinct tokens.
+        patches.append(tuple(sorted(edits)))
+    await apply_patches(problem, Replacements(), patches)
+
+
 async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
     """Remove namespaces, in the style of clang_delta's
     remove-namespace: either delete the whole namespace or splice its
@@ -651,6 +751,7 @@ async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
     for i, t in enumerate(tokens):
         if t.kind != NAME:
             continue
+        name_path: tuple[int, int] | None = None
         if t.text == b"namespace":
             j = i + 1
             while j < len(tokens) and (
@@ -658,6 +759,8 @@ async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
                 or (tokens[j].kind == PUNCT and tokens[j].text == b"::")
             ):
                 j += 1
+            if j > i + 1:
+                name_path = (i + 1, j)
         elif (
             t.text == b"extern"
             and i + 1 < len(tokens)
@@ -670,13 +773,52 @@ async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
             continue
         close = view.brackets[j]
         cuts.append([(t.start, tokens[close].end)])
-        cuts.append(
-            [
-                (t.start, tokens[j].end),
-                (tokens[close].start, tokens[close].end),
-            ]
-        )
+        splice = [
+            (t.start, tokens[j].end),
+            (tokens[close].start, tokens[close].end),
+        ]
+        cuts.append(splice)
+        # Splicing a named namespace leaves any `ns::name` reference
+        # dangling, which fails to compile and gets the whole candidate
+        # rejected. Offer a second splice that also strips the
+        # namespace's qualifier from references, which is what actually
+        # lets the namespace go.
+        if name_path is not None:
+            qualifier_cuts = _namespace_qualifier_cuts(view, name_path, i, close)
+            if qualifier_cuts:
+                cuts.append(splice + qualifier_cuts)
     await apply_patches(problem, Cuts(), cuts)
+
+
+def _namespace_qualifier_cuts(
+    view: TokenView, name_path: tuple[int, int], decl_start: int, decl_end: int
+) -> list[tuple[int, int]]:
+    """Find every `<path>::` qualifier that names the namespace declared
+    by the tokens in [name_path[0], name_path[1]), outside the
+    declaration itself, and return cuts that delete each one (the path
+    tokens plus the trailing `::`). Deleting these turns `ns::name` into
+    `name` so the namespace can be spliced away."""
+    tokens = view.tokens
+    lo, hi = name_path
+    path_texts = [tokens[k].text for k in range(lo, hi)]
+    n = len(path_texts)
+    cuts: list[tuple[int, int]] = []
+    p = 0
+    limit = len(tokens) - n
+    while p <= limit:
+        if decl_start <= p <= decl_end:
+            p += 1
+            continue
+        if (
+            all(tokens[p + k].text == path_texts[k] for k in range(n))
+            and p + n < len(tokens)
+            and tokens[p + n].text == b"::"
+        ):
+            cuts.append((tokens[p].start, tokens[p + n].end))
+            p += n + 1
+        else:
+            p += 1
+    return cuts
 
 
 async def remove_template_parts(problem: ReductionProblem[bytes]) -> None:
@@ -1016,6 +1158,7 @@ CPP_PASSES: list[ReductionPass[bytes]] = [
     remove_constructor_initializers,
     remove_template_parts,
     simplify_call_expressions,
+    replace_type_with_int,
 ]
 
 CPP_PUMPS: list[ReductionPump[bytes]] = [

@@ -31,6 +31,7 @@ from shrinkray.passes.cpp import (
     remove_namespaces,
     remove_template_parts,
     replace_function_bodies,
+    replace_type_with_int,
     simplify_call_expressions,
     token_view,
     typedef_inlining_candidates,
@@ -436,6 +437,32 @@ def test_namespace_alias_is_left_alone():
     assert reduce_with([remove_namespaces], source, lambda x: True) == source
 
 
+def test_removes_namespace_and_strips_qualified_references():
+    # Splicing the namespace away must also drop the `ns::` qualifier
+    # from references, or the reference dangles and won't compile. This
+    # is the case shrink ray previously couldn't handle (kept the
+    # namespace because `graph::Queue` blocked its removal).
+    result = reduce_with(
+        [remove_namespaces],
+        b"namespace graph {\nstruct Queue {};\n}\ntemplate struct graph::Queue;\n",
+        lambda x: b"struct Queue {};" in x and b"template struct" in x,
+    )
+    assert b"namespace" not in result
+    assert b"graph::" not in result
+    assert b"template struct Queue;" in result.replace(b"\n", b"")
+
+
+def test_strips_nested_namespace_path_qualifier():
+    result = reduce_with(
+        [remove_namespaces],
+        b"namespace a::b {\nint v = 1;\n}\nint w = a::b::v;\n",
+        lambda x: b"int v = 1;" in x and b"int w =" in x,
+    )
+    assert b"namespace" not in result
+    assert b"a::b::" not in result
+    assert b"int w = v;" in result.replace(b"\n", b"")
+
+
 # === remove_base_classes ===
 
 
@@ -485,6 +512,134 @@ def test_removes_enum_underlying_type():
 def test_template_parameter_list_is_not_a_base_class():
     source = b"template <class T, class U> struct S { };"
     assert reduce_with([remove_base_classes], source, lambda x: True) == source
+
+
+# === replace_type_with_int ===
+
+
+def test_replaces_struct_type_with_int():
+    # Delete the struct definition and turn its uses into int, in the
+    # style of clang_delta's empty-struct-to-int.
+    result = reduce_with(
+        [replace_type_with_int],
+        b"struct S { int a; int b; };\nS make();\n",
+        lambda x: b"make()" in x,
+    )
+    assert b"struct S" not in result
+    assert result.replace(b"\n", b"").strip() == b"int make();"
+
+
+def test_replaces_forward_declared_class_template_with_int():
+    # The udlit-style case: a class template used only as a return type.
+    result = reduce_with(
+        [replace_type_with_int],
+        b"template <class T> class Box;\nBox<int> unwrap();\n",
+        lambda x: b"unwrap()" in x,
+    )
+    assert b"Box" not in result
+    assert result.replace(b"\n", b"").strip() == b"int unwrap();"
+
+
+def test_replaces_type_use_consuming_template_arguments():
+    result = reduce_with(
+        [replace_type_with_int],
+        b"struct S {};\nS<A, B<C>> f();\n",
+        lambda x: b"f()" in x,
+    )
+    assert b"S<" not in result
+    assert b"int f();" in result.replace(b"\n", b"")
+
+
+def test_replace_type_leaves_unrelated_code_alone():
+    source = b"int main() { return 0; }"
+    assert reduce_with([replace_type_with_int], source, lambda x: True) == source
+
+
+def test_replace_type_ignores_anonymous_struct():
+    # No name after the keyword: nothing to replace.
+    source = b"struct { int x; } v;"
+    assert reduce_with([replace_type_with_int], source, lambda x: True) == source
+
+
+def test_replace_type_ignores_elaborated_type_use():
+    # `struct S s;` names an existing type; the token after the name is
+    # not `;`, `{`, or `:`, so it is not treated as a definition.
+    source = b"struct S s;"
+    assert reduce_with([replace_type_with_int], source, lambda x: True) == source
+
+
+def test_replace_type_ignores_class_at_end_of_input():
+    source = b"int x; class"
+    assert reduce_with([replace_type_with_int], source, lambda x: True) == source
+
+
+def test_replace_type_ignores_unterminated_definition():
+    # No terminating semicolon, so _declaration_end finds nothing.
+    source = b"struct S { int a;"
+    assert reduce_with([replace_type_with_int], source, lambda x: True) == source
+
+
+def test_replace_type_struct_without_semicolon_is_ignored():
+    # Balanced braces but no terminating semicolon: _declaration_end
+    # runs off the end without finding one.
+    source = b"struct S {} S make()"
+    assert reduce_with([replace_type_with_int], source, lambda x: True) == source
+
+
+def test_replace_type_tolerates_unclosed_angle_in_base_clause():
+    # A `<` in the base clause that never closes is stepped over rather
+    # than derailing the scan for the terminating `;`.
+    source = b"struct S : B< { int a; }; S x;"
+    reduce_with([replace_type_with_int], source, lambda x: True)
+
+
+def test_replace_type_tolerates_unclosed_angle_after_use():
+    # A use of the type name followed by an unterminated `<` keeps just
+    # the name in the replaced span.
+    source = b"struct S {}; S<"
+    reduce_with([replace_type_with_int], source, lambda x: True)
+
+
+def test_replace_type_tolerates_unclosed_template_prefix():
+    # An unterminated `template <` must not crash the prefix scan.
+    source = b"template < struct S; S x;"
+    reduce_with([replace_type_with_int], source, lambda x: True)
+
+
+def test_replace_type_keeps_template_prefix_of_class_template():
+    # Deleting a class template must take its `template<...>` prefix too,
+    # or a dangling prefix is left behind.
+    result = reduce_with(
+        [replace_type_with_int],
+        b"template <class T>\nstruct Wrapper { T value; };\nWrapper<int> w();\n",
+        lambda x: b"w()" in x,
+    )
+    assert b"template" not in result
+    assert b"Wrapper" not in result
+    assert b"int w();" in result.replace(b"\n", b"")
+
+
+def test_replace_type_handles_bases_and_nested_templates():
+    # Exercises _declaration_end walking over a template argument list in
+    # the base clause and a braced body.
+    result = reduce_with(
+        [replace_type_with_int],
+        b"struct D : B<int, C> { int m; };\nD make();\n",
+        lambda x: b"make()" in x,
+    )
+    assert b"struct D" not in result
+    assert b"int make();" in result.replace(b"\n", b"")
+
+
+def test_replace_type_does_not_touch_value_uses_that_break():
+    # When the interestingness test needs the type to stay (here it
+    # requires the `S s` declaration verbatim), the replace candidate is
+    # rejected and the source is left unchanged.
+    source = b"struct S { int f(); };\nint g() { S s; return s.f(); }\n"
+    result = reduce_with(
+        [replace_type_with_int], source, lambda x: b"S s" in x
+    )
+    assert b"struct S" in result
 
 
 # === remove_constructor_initializers ===

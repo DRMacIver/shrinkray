@@ -826,7 +826,7 @@ requires-dist = [
     { name = "binaryornot", specifier = ">=0.4.4" },
     { name = "black", specifier = ">=24.1.0" },
     { name = "chardet", specifier = ">=5.2.0" },
-    { name = "click", specifier = ">=8.0.1" },
+    { name = "click", specifier = ">=8.2.1" },
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.4.0" },
     { name = "coverage", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=7.4.0" },
     { name = "exceptiongroup", specifier = ">=1.2.0" },
@@ -846,7 +846,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "syrupy", marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "textual", specifier = ">=8.0.0" },
-    { name = "textual-plotext", specifier = ">=0.2.0" },
+    { name = "textual-plotext", specifier = ">=1.0.1" },
     { name = "trio", specifier = ">=0.28.0" },
 ]
 provides-extras = ["dev"]

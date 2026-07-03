@@ -494,7 +494,12 @@ class ReductionProblem[T](ABC):
         """
         if test_case == self.current_test_case:
             return True
-        if self.sort_key(test_case) > self.sort_key(self.current_test_case):
+        try:
+            if self.sort_key(test_case) > self.sort_key(self.current_test_case):
+                return False
+        except DumpError:
+            # Views compute sort keys by dumping the candidate. A candidate
+            # that can't be dumped can't be tested, so it's not a reduction.
             return False
         return await self.is_interesting(test_case)
 

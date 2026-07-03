@@ -207,6 +207,81 @@ async def test_apply_patches_some_not_applicable():
     assert problem.current_test_case[0:1] == b"a"
 
 
+def apply_byte_assignments(patch, target):
+    """Apply a set of (position, byte) assignments to target.
+
+    Raises Conflict if the patch assigns two different bytes to the same
+    position, mirroring how merge_literals' apply can raise Conflict for
+    patches that are individually fine but contradictory together."""
+    assigned = {}
+    result = bytearray(target)
+    for pos, byte in patch:
+        if assigned.setdefault(pos, byte) != byte:
+            raise Conflict(f"Position {pos} assigned twice")
+        result[pos] = byte
+    return bytes(result)
+
+
+async def test_apply_patches_conflict_raised_by_apply():
+    """Regression test: Conflict raised from Patches.apply (rather than
+    combine) escaped try_apply_patch and crashed the reduction."""
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"xy",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    patches = SetPatches(apply_byte_assignments)
+    await apply_patches(
+        problem,
+        patches,
+        [frozenset({(0, ord("a"))}), frozenset({(0, ord("b"))})],
+    )
+
+    # One of the two conflicting patches wins; with parallelism 1 the
+    # first successful patch is adopted and the second conflicts with it.
+    assert problem.current_test_case == b"ay"
+
+
+async def test_apply_patches_conflict_raised_by_apply_during_merge():
+    """Regression test: Conflict raised from Patches.apply while the merge
+    master validated a combination of queued patches escaped and crashed
+    the reduction.
+
+    is_interesting blocks until both candidate patches have been tested,
+    so both are in the merge queue before either can become merge master,
+    forcing the master to combine them."""
+    seen = set()
+    both_seen = trio.Event()
+
+    async def is_interesting(x):
+        if x in (b"ay", b"by"):
+            seen.add(x)
+            if len(seen) == 2:
+                both_seen.set()
+            await both_seen.wait()
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"xy",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=2),
+    )
+
+    patches = SetPatches(apply_byte_assignments)
+    await apply_patches(
+        problem,
+        patches,
+        [frozenset({(0, ord("a"))}), frozenset({(0, ord("b"))})],
+    )
+
+    assert problem.current_test_case == b"ay"
+
+
 async def test_apply_patches_empty():
     """Test apply_patches with no patches."""
 

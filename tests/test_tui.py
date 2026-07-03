@@ -4,7 +4,6 @@ import asyncio
 import inspect
 import os
 import tempfile
-import time
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
@@ -32,6 +31,19 @@ from shrinkray.tui import (
     detect_terminal_theme,
     run_textual_ui,
 )
+
+
+class FakeClock:
+    """Controllable time source for testing throttled widgets."""
+
+    def __init__(self, now: float = 1000.0) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
 
 
 # Helper to access Static widget's internal content (uses name-mangled attribute)
@@ -260,16 +272,16 @@ def test_large_content_truncated():
 def test_content_diff_shown_for_large_files():
     """Test that diff is shown when content changes in large files."""
 
-    widget = ContentPreview()
+    clock = FakeClock()
+    widget = ContentPreview(time_source=clock)
 
     # Set up initial large content
     initial_lines = [f"Line {i}" for i in range(100)]
     initial_content = "\n".join(initial_lines)
-    widget._last_display_time = 0  # Reset throttle
     widget.update_content(initial_content, False)
 
-    # Force the time to allow update
-    widget._last_display_time = time.time() - 2
+    # Advance past the throttle window to allow the next update
+    clock.advance(2)
 
     # Change content
     new_lines = [f"Line {i}" for i in range(90)]  # Fewer lines
@@ -282,19 +294,26 @@ def test_content_diff_shown_for_large_files():
 
 def test_content_update_throttled():
     """Test that content updates are throttled."""
-    widget = ContentPreview()
+    clock = FakeClock()
+    widget = ContentPreview(time_source=clock)
 
     # First update should go through
     widget.update_content("First", False)
     assert widget.preview_content == "First"
 
-    # Immediate second update should be throttled
+    # Second update within the throttle window should be throttled
+    clock.advance(0.5)
     widget.update_content("Second", False)
     # Content should still be "First" due to throttling
     assert widget.preview_content == "First"
 
     # But pending content should be stored
     assert widget._pending_content == "Second"
+
+    # Once the throttle window has passed, updates go through again
+    clock.advance(1)
+    widget.update_content("Third", False)
+    assert widget.preview_content == "Third"
 
 
 def test_render_diff_for_changed_large_content():
@@ -588,12 +607,30 @@ def test_output_preview_render_has_seen_output_no_header():
 
 def test_output_preview_update_output_with_return_code():
     """Test that update_output stores return code."""
-    widget = OutputPreview()
-    widget._last_update_time = 0  # Ensure throttle doesn't block
+    widget = OutputPreview(time_source=FakeClock())
 
     widget.update_output("output", 1, return_code=42)
     assert widget._pending_return_code == 42
     assert widget.last_return_code == 42
+
+
+def test_output_preview_update_output_throttled():
+    """Updates within the throttle window are stored but not displayed."""
+    clock = FakeClock()
+    widget = OutputPreview(time_source=clock)
+
+    widget.update_output("first", 1, return_code=0)
+    assert widget.output_content == "first"
+
+    clock.advance(0.1)
+    widget.update_output("second", 2, return_code=1)
+    # Still showing the first update, but the second is pending
+    assert widget.output_content == "first"
+    assert widget._pending_content == "second"
+
+    clock.advance(0.2)
+    widget.update_output("third", 3, return_code=2)
+    assert widget.output_content == "third"
 
 
 def test_output_preview_render_truncates_long_output():

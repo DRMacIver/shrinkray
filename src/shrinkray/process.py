@@ -10,7 +10,8 @@ import trio
 def signal_group(sp: "trio.Process", sig: int) -> None:
     """Send a signal to a process group."""
     gid = os.getpgid(sp.pid)
-    assert gid != os.getgid()
+    # Never signal our own process group - that would signal shrink-ray itself.
+    assert gid != os.getpgrp()
     os.killpg(gid, sig)
 
 

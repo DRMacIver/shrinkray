@@ -1043,3 +1043,26 @@ def test_candidate_pump_skips_already_seen_candidates():
 
     assert trio.run(run) == b"startx"
     assert len(calls) == 2
+
+
+# === Robustness ===
+#
+# The C/C++ passes run on whatever bytes the user gives shrink ray, so
+# they must never crash, no matter how mangled the input.
+
+CPPISH_SOUP = st.text(
+    alphabet="ab<>(){}[],;:*&=#\"'\\/\n .0t~$",
+    max_size=60,
+).map(str.encode) | st.binary(max_size=60)
+
+
+@given(CPPISH_SOUP)
+def test_cpp_passes_never_crash_on_arbitrary_input(source: bytes):
+    for reduction_pass in CPP_PASSES:
+        reduce_with([reduction_pass], source, lambda x: x == source)
+
+
+@given(CPPISH_SOUP)
+def test_cpp_candidate_generators_never_crash_on_arbitrary_input(source: bytes):
+    typedef_inlining_candidates(source)
+    function_inlining_candidates(source)

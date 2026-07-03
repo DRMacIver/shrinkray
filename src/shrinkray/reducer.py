@@ -554,9 +554,7 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
                     key=k,
                 )
                 key_shrinkray = ShrinkRay(
-                    enable_cpp_passes=any(
-                        k.endswith(s) for s in C_FILE_EXTENSIONS
-                    ),
+                    enable_cpp_passes=any(k.endswith(s) for s in C_FILE_EXTENSIONS),
                     target=key_problem,
                 )
                 nursery.start_soon(key_shrinkray.run)

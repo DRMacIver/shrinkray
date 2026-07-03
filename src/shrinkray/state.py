@@ -256,7 +256,9 @@ class ShrinkRayState[TestCase](ABC):
             return None
         abspath = os.path.abspath(self.filename)
         stem, ext = os.path.splitext(os.path.basename(abspath))
-        pattern = re.compile(re.escape(stem) + r"-[0-9a-f]{32}" + re.escape(ext) + r"\Z")
+        pattern = re.compile(
+            re.escape(stem) + r"-[0-9a-f]{32}" + re.escape(ext) + r"\Z"
+        )
         return os.path.dirname(abspath), pattern
 
     def sweep_stale_working_files(self) -> None:
@@ -855,8 +857,7 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
     def new_reducer(self, problem: ReductionProblem[bytes]) -> Reducer[bytes]:
         return ShrinkRay(
             problem,
-            enable_cpp_passes=os.path.splitext(self.filename)[1]
-            in C_FILE_EXTENSIONS,
+            enable_cpp_passes=os.path.splitext(self.filename)[1] in C_FILE_EXTENSIONS,
         )
 
     def _get_initial_bytes(self) -> bytes:

@@ -135,11 +135,16 @@ def _scan_number(source: bytes, i: int) -> int:
     j = i + 1
     while j < n:
         c = source[j]
-        if bytes([c]) in b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_.":
+        if (
+            bytes([c])
+            in b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_."
+        ):
             j += 1
         elif c in b"+-" and source[j - 1] in b"eEpP":
             j += 1
-        elif c == ord("'") and j + 1 < n and IDENTIFIER_CONT.match(source, j + 1, j + 2):
+        elif (
+            c == ord("'") and j + 1 < n and IDENTIFIER_CONT.match(source, j + 1, j + 2)
+        ):
             j += 2
         else:
             break
@@ -473,9 +478,7 @@ def _analyze_function(view: TokenView, start: int, body: int) -> FunctionInfo | 
         # candidate list, and a function match always has its parameter
         # list strictly after the region start.
         decl_starts = tuple(
-            idx
-            for idx in _statement_start_candidates(view, body)
-            if idx < open_idx
+            idx for idx in _statement_start_candidates(view, body) if idx < open_idx
         )
         return FunctionInfo(
             decl_starts=decl_starts,
@@ -762,9 +765,7 @@ async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
             if j > i + 1:
                 name_path = (i + 1, j)
         elif (
-            t.text == b"extern"
-            and i + 1 < len(tokens)
-            and tokens[i + 1].kind == STRING
+            t.text == b"extern" and i + 1 < len(tokens) and tokens[i + 1].kind == STRING
         ):
             j = i + 2
         else:
@@ -879,8 +880,10 @@ async def simplify_call_expressions(problem: ReductionProblem[bytes]) -> None:
         # Extend backwards over member access and scope resolution so
         # we replace the whole postfix chain: a.b->c(x), ns::f(x).
         k = i
-        while k >= 2 and tokens[k - 1].text in (b"::", b".", b"->") and (
-            tokens[k - 2].kind == NAME
+        while (
+            k >= 2
+            and tokens[k - 1].text in (b"::", b".", b"->")
+            and (tokens[k - 2].kind == NAME)
         ):
             k -= 2
         if k >= 1 and tokens[k - 1].text == b"~":
@@ -938,11 +941,7 @@ def find_typedefs(view: TokenView) -> list[TypedefInfo]:
             continue
         if t.text == b"using":
             # using name = definition;
-            if (
-                i + 2 >= j
-                or tokens[i + 1].kind != NAME
-                or tokens[i + 2].text != b"="
-            ):
+            if i + 2 >= j or tokens[i + 1].kind != NAME or tokens[i + 2].text != b"=":
                 continue
             name_idx = i + 1
             definition = source[tokens[i + 3].start : tokens[j - 1].end]
@@ -989,9 +988,7 @@ def typedef_inlining_candidates(source: bytes) -> list[bytes]:
     return results
 
 
-def _single_statement_body(
-    view: TokenView, f: FunctionInfo
-) -> tuple[int, int] | None:
+def _single_statement_body(view: TokenView, f: FunctionInfo) -> tuple[int, int] | None:
     """If the function's body consists of a single statement (with or
     without a leading return), return the token range of the expression
     in it."""

@@ -236,7 +236,9 @@ class Replacements(Patches[ReplacementPatch, bytes]):
         return b"".join(parts)
 
     def size(self, patch: ReplacementPatch) -> int:
-        return sum((end - start) - len(replacement) for start, end, replacement in patch)
+        return sum(
+            (end - start) - len(replacement) for start, end, replacement in patch
+        )
 
 
 CutPatch = list[tuple[int, int]]

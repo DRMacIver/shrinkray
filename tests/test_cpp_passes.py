@@ -232,7 +232,14 @@ def test_matches_nested_brackets():
     tokens = lex(b"f(a[0], {1});")
     matches = match_brackets(tokens)
     texts = {tokens[i].text: tokens[j].text for i, j in matches.items()}
-    assert texts == {b"(": b")", b")": b"(", b"[": b"]", b"]": b"[", b"{": b"}", b"}": b"{"}
+    assert texts == {
+        b"(": b")",
+        b")": b"(",
+        b"[": b"]",
+        b"]": b"[",
+        b"{": b"}",
+        b"}": b"{",
+    }
     # The mapping is an involution.
     for i, j in matches.items():
         assert matches[j] == i
@@ -298,9 +305,7 @@ def test_finds_operator_overload():
 
 
 def test_control_flow_is_not_a_function():
-    assert function_names(b"void f() { if (x) { g(); } while (y) { h(); } }") == [
-        b"f"
-    ]
+    assert function_names(b"void f() { if (x) { g(); } while (y) { h(); } }") == [b"f"]
 
 
 def test_lambda_is_not_a_function():
@@ -636,9 +641,7 @@ def test_replace_type_does_not_touch_value_uses_that_break():
     # requires the `S s` declaration verbatim), the replace candidate is
     # rejected and the source is left unchanged.
     source = b"struct S { int f(); };\nint g() { S s; return s.f(); }\n"
-    result = reduce_with(
-        [replace_type_with_int], source, lambda x: b"S s" in x
-    )
+    result = reduce_with([replace_type_with_int], source, lambda x: b"S s" in x)
     assert b"struct S" in result
 
 
@@ -741,9 +744,7 @@ def test_deletes_statement_call_entirely():
 
 def test_control_flow_calls_are_left_alone():
     source = b"void f() { while (g()) { } }"
-    result = reduce_with(
-        [simplify_call_expressions], source, lambda x: b"while" in x
-    )
+    result = reduce_with([simplify_call_expressions], source, lambda x: b"while" in x)
     assert b"while (" in result
 
 
@@ -803,15 +804,14 @@ def test_inline_typedefs_pump():
 
     async def run() -> bytes:
         problem = BasicReductionProblem(
-            initial=initial, is_interesting=is_interesting, work=WorkContext(parallelism=1)
+            initial=initial,
+            is_interesting=is_interesting,
+            work=WorkContext(parallelism=1),
         )
         await problem.setup()
         return await inline_typedefs(problem)
 
-    assert (
-        trio.run(run)
-        == b"\nunsigned long f(unsigned long x) { return x; }\n"
-    )
+    assert trio.run(run) == b"\nunsigned long f(unsigned long x) { return x; }\n"
 
 
 # === Function inlining ===
@@ -846,15 +846,11 @@ def test_function_inlining_handles_void_parameter_list():
     candidates = function_inlining_candidates(
         b"int five(void) { return 5; }\nint main() { return five(); }\n"
     )
-    assert candidates == [
-        b"int five(void) { return 5; }\nint main() { return (5); }\n"
-    ]
+    assert candidates == [b"int five(void) { return 5; }\nint main() { return (5); }\n"]
 
 
 def test_function_inlining_skips_recursive_calls():
-    assert (
-        function_inlining_candidates(b"int f(int x) { return f(x - 1); }\n") == []
-    )
+    assert function_inlining_candidates(b"int f(int x) { return f(x - 1); }\n") == []
 
 
 def test_function_inlining_skips_multi_statement_bodies():
@@ -875,7 +871,9 @@ def test_inline_function_calls_pump():
 
     async def run() -> bytes:
         problem = BasicReductionProblem(
-            initial=initial, is_interesting=is_interesting, work=WorkContext(parallelism=1)
+            initial=initial,
+            is_interesting=is_interesting,
+            work=WorkContext(parallelism=1),
         )
         await problem.setup()
         return await inline_function_calls(problem)
@@ -975,7 +973,9 @@ def test_corpus_interpreter_typedef_inlining():
 
     async def run() -> bytes:
         problem = BasicReductionProblem(
-            initial=source, is_interesting=is_interesting, work=WorkContext(parallelism=1)
+            initial=source,
+            is_interesting=is_interesting,
+            work=WorkContext(parallelism=1),
         )
         await problem.setup()
         return await inline_typedefs(problem)
@@ -984,7 +984,10 @@ def test_corpus_interpreter_typedef_inlining():
     # reg_t -> word_t -> unsigned long, all the way down.
     assert b"reg_t" not in result
     assert b"word_t" not in result
-    assert b"static unsigned long overflow_site(unsigned long a, unsigned long b)" in result
+    assert (
+        b"static unsigned long overflow_site(unsigned long a, unsigned long b)"
+        in result
+    )
 
 
 # === Edge cases in sloppy structure discovery ===

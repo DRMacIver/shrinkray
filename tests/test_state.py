@@ -1444,7 +1444,7 @@ async def test_run_for_exit_code_in_place_basename(tmp_path):
             trivial_is_error=True,
             seed=0,
             volume=Volume.quiet,
-                history_enabled=False,
+            history_enabled=False,
         )
 
         # Should write to the original filename and run the script
@@ -2143,7 +2143,7 @@ fi
             trivial_is_error=True,
             seed=0,
             volume=Volume.quiet,
-                history_enabled=False,
+            history_enabled=False,
         )
 
         state.first_call = False

@@ -202,6 +202,43 @@ async def apply_patches[PatchType, TargetType](
                     await applier.try_apply_patch(patch)
 
 
+ReplacementPatch = tuple[tuple[int, int, bytes], ...]
+
+
+class Replacements(Patches[ReplacementPatch, bytes]):
+    """Patches that replace byte ranges with new contents.
+
+    A patch is a sorted tuple of (start, end, replacement) triples.
+    Unlike Cuts, overlapping edits cannot be merged meaningfully, so
+    combining patches with overlapping ranges raises Conflict (exact
+    duplicates are fine and are deduplicated).
+    """
+
+    @property
+    def empty(self) -> ReplacementPatch:
+        return ()
+
+    def combine(self, *patches: ReplacementPatch) -> ReplacementPatch:
+        merged = sorted(set().union(*patches))
+        for (u1, v1, _), (u2, _, _) in zip(merged, merged[1:], strict=False):
+            if u2 < v1 or u1 == u2:
+                raise Conflict()
+        return tuple(merged)
+
+    def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
+        parts = []
+        prev = 0
+        for start, end, replacement in patch:
+            parts.append(target[prev:start])
+            parts.append(replacement)
+            prev = end
+        parts.append(target[prev:])
+        return b"".join(parts)
+
+    def size(self, patch: ReplacementPatch) -> int:
+        return sum((end - start) - len(replacement) for start, end, replacement in patch)
+
+
 CutPatch = list[tuple[int, int]]
 
 

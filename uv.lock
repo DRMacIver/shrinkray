@@ -834,7 +834,7 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.92.1" },
     { name = "hypothesmith", marker = "extra == 'dev'", specifier = ">=0.3.1" },
     { name = "jinja2", marker = "extra == 'dev'", specifier = ">=3.0.0" },
-    { name = "libcst", specifier = ">=1.1.0" },
+    { name = "libcst", specifier = ">=1.8.4" },
     { name = "pexpect", marker = "extra == 'dev'", specifier = ">=4.9.0" },
     { name = "pygments", marker = "extra == 'dev'", specifier = ">=2.17.0" },
     { name = "pyte", marker = "extra == 'dev'", specifier = ">=0.8.2" },

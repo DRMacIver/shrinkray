@@ -22,7 +22,9 @@ dependencies = [
     # textual-plotext < 1.0.1 is incompatible with textual >= 8.0.0
     "textual-plotext>=1.0.1",
     "humanize>=4.9.0",
-    "libcst>=1.1.0",
+    # libcst 1.8.4 is the first release with Python 3.14 wheels; older
+    # versions build from sdist on 3.14 and segfault in the native parser
+    "libcst>=1.8.4",
     "exceptiongroup>=1.2.0",
     "binaryornot>=0.4.4",
     "black>=24.1.0",

@@ -1,0 +1,1 @@
+namespace a{template<typename A>struct f{f a(A){auto f=[=](auto v){a(v);};a(f);}template<typename v>f a(v&f){f(0);}};}template struct a::f<int>;

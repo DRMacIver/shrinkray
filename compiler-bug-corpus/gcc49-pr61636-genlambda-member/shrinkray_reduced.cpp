@@ -1,0 +1,1 @@
+struct c{c b(int);};class a:c{c c();};c a::c(){auto a=[&](auto a){b(a);};a(0);}

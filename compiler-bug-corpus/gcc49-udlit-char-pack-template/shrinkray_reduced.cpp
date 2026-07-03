@@ -1,0 +1,1 @@
+template<class>class a;template<class A,A...>a<A>operator""_template();template<class=decltype(0_template),class a>a A(a){A(0)

@@ -1,0 +1,2 @@
+#include<string>
+namespace a{using b=void(int);void l(b);template<class a>auto a(a l){static auto a=l;return[](auto){a;};}class n{public:n(std::string);void b(){l(a([]{}));}};}int n(){a::n b(0);b.b();}

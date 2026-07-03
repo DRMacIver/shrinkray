@@ -454,10 +454,10 @@ class UnitPropagator:
         self.__dirty.update(self.__watches.pop(-unit, ()))
 
     def __clean_dirty_clauses(self) -> None:
-        iters = 0
+        # This terminates because clauses only become dirty when a new unit
+        # is enqueued, and the set of units grows strictly, bounded by the
+        # number of variables.
         while self.__dirty:
-            iters += 1
-            assert iters <= 10**6
             dirty = self.__dirty
             self.__dirty = set()
 

@@ -2098,6 +2098,39 @@ async def test_handle_restart_from_success():
 
 
 @pytest.mark.trio
+async def test_handle_restart_from_write_failure_still_reports_restart():
+    """Regression test: a failure writing the new test case to the target
+    file happens after the restart has irrevocably taken effect (the old
+    reduction is cancelled and the new reducer installed, so the run()
+    loop may already be executing it). Reporting it as a failed restart
+    told the client the opposite of what happened. The file is rewritten
+    on the next successful reduction anyway."""
+    worker = ReducerWorker()
+    worker._cancel_scope = None
+    worker.running = True
+
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.history_manager = MagicMock()
+    worker.state.history_manager.restart_from_reduction.return_value = (
+        b"restart content",
+        set(),
+    )
+    worker.state.filename = "/tmp/test.c"
+    worker.state.output_manager = None
+    worker.state.write_test_case_to_file.side_effect = OSError("disk full")
+
+    mock_reducer = MagicMock()
+    mock_reducer.target = MagicMock()
+    worker.state.reducer = mock_reducer
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 3})
+
+    assert response.error is None
+    assert response.result == {"status": "restarted", "size": 15}
+    assert worker._restart_requested is True
+
+
+@pytest.mark.trio
 async def test_handle_restart_from_preserves_size_history():
     """Test that restart_from appends to size history instead of resetting it.
 

@@ -413,20 +413,29 @@ class ReducerWorker:
                 self._last_recorded_size = len(new_test_case)
                 self._last_history_time = current_runtime
 
-            # Write new test case to file (can happen after reducer is set up)
-            await self.state.write_test_case_to_file(self.state.filename, new_test_case)
-
-            # Ready to restart - running will be set to True by the run() loop
-            return Response(
-                id=request_id,
-                result={"status": "restarted", "size": len(new_test_case)},
-            )
         except Exception:
             traceback.print_exc()
-            # Reset restart flag - we can't restart, so don't try
+            # Nothing above awaits, so the run() loop cannot have seen the
+            # restart flag yet and it is safe to withdraw the restart.
             self._restart_requested = False
             # Include full traceback in error message in case stderr isn't visible
             return Response(id=request_id, error=traceback.format_exc())
+
+        # Write new test case to file. This runs outside the try block: it
+        # is the first await since the cancellation, so by the time it fails
+        # the run() loop may already be executing the new reducer, and the
+        # restart cannot be reported as failed. The file gets rewritten on
+        # the next successful reduction anyway.
+        try:
+            await self.state.write_test_case_to_file(self.state.filename, new_test_case)
+        except Exception:
+            traceback.print_exc()
+
+        # Ready to restart - running will be set to True by the run() loop
+        return Response(
+            id=request_id,
+            result={"status": "restarted", "size": len(new_test_case)},
+        )
 
     def _get_test_output_preview(self) -> tuple[str, int | None, int | None]:
         """Get preview of current test output, test ID, and return code.

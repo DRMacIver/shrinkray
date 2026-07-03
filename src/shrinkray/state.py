@@ -260,6 +260,7 @@ class ShrinkRayState[TestCase](ABC):
             record_reductions=self.history_enabled,
             is_directory=self.is_directory_mode,
             base_dir=self.history_base_dir,
+            input_type=self.input_type,
         )
 
         # Ensure we have an output manager for capturing test output

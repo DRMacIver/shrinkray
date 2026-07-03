@@ -2,11 +2,20 @@ from contextlib import aclosing
 from random import Random
 
 import pytest
+import trio
 
 from shrinkray.work import NotFound, Volume, WorkContext, parallel_map
 
 
 async def identity(x: int) -> int:
+    return x
+
+
+async def checkpointing_identity(x: int) -> int:
+    # A checkpoint before returning, like any function that does real
+    # async work (e.g. is_interesting). This allows workers to be
+    # suspended while their item is in flight.
+    await trio.lowlevel.checkpoint()
     return x
 
 
@@ -18,6 +27,47 @@ async def test_parallel_map(p: int) -> None:
             values = [x async for x in aiter]
             print(values)
     assert values == input
+
+
+@pytest.mark.parametrize("p", [2, 3, 4])
+async def test_parallel_map_does_not_drop_in_flight_results(p: int) -> None:
+    """Regression test: items being processed by a suspended worker were
+    invisible to the consolidator, which could exit early and drop them.
+
+    The failure is a race, so we run many trials to make it reliable."""
+    input = list(range(20))
+    for _ in range(50):
+        async with parallel_map(input, checkpointing_identity, parallelism=p) as mapped:
+            async with aclosing(mapped) as aiter:
+                values = [x async for x in aiter]
+        assert values == input
+
+
+@pytest.mark.parametrize("p", [2, 4])
+async def test_worker_map_with_suspending_function(p: int) -> None:
+    """Regression test for results dropped by map when f has a checkpoint."""
+    work = WorkContext(parallelism=p)
+
+    input = list(range(50))
+    for _ in range(20):
+        async with work.map(input, checkpointing_identity) as mapped:
+            async with aclosing(mapped) as aiter:
+                values = [x async for x in aiter]
+        assert values == input
+
+
+@pytest.mark.parametrize("p", [2, 4])
+async def test_find_first_value_with_suspending_predicate(p: int) -> None:
+    """Regression test: find_first_value returned the wrong element or
+    raised NotFound when the predicate suspended at a checkpoint."""
+    work = WorkContext(parallelism=p)
+
+    async def is_big(n: int) -> bool:
+        await trio.lowlevel.checkpoint()
+        return n >= 7
+
+    for _ in range(50):
+        assert await work.find_first_value(list(range(10)), is_big) == 7
 
 
 @pytest.mark.parametrize("p", [1, 2, 3, 4])

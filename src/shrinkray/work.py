@@ -212,36 +212,28 @@ async def parallel_map(
     work = list(enumerate(ls))
     work.reverse()
 
-    result_heap = []
+    # Workers send (index, result) pairs here. The channel is big enough to
+    # hold every result, so workers never block on it.
+    send_results, receive_results = trio.open_memory_channel(len(ls))
 
     async with trio.open_nursery() as nursery:
-        results_ready = trio.Event()
-
         for _ in range(parallelism):
 
             @nursery.start_soon
             async def do_work():
                 while work:
                     i, x = work.pop()
-                    result = await f(x)
-                    heapq.heappush(result_heap, (i, result))
-                    results_ready.set()
+                    await send_results.send((i, await f(x)))
 
         @nursery.start_soon
         async def consolidate() -> None:
-            i = 0
-
-            while work or result_heap:
-                while not result_heap:
-                    await results_ready.wait()
-                assert result_heap
-                j, x = result_heap[0]
-                if j == i:
-                    await send_out_values.send(x)
-                    i = j + 1
-                    heapq.heappop(result_heap)
-                else:
-                    await results_ready.wait()
+            # Results arrive out of order; hold early arrivals on a heap and
+            # emit exactly one result per input, in input order.
+            result_heap: list[tuple[int, S]] = []
+            for i in range(len(ls)):
+                while not result_heap or result_heap[0][0] != i:
+                    heapq.heappush(result_heap, await receive_results.receive())
+                await send_out_values.send(heapq.heappop(result_heap)[1])
             send_out_values.close()
 
         yield receive_out_values

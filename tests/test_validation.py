@@ -2,6 +2,7 @@
 
 import io
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -300,6 +301,69 @@ async def test_validate_initial_example_in_place_basename():
 
         # Verify the file was written to directly (no temp dirs)
         assert result.temp_dirs is None or len(result.temp_dirs) == 0
+
+
+async def test_formatter_failure_does_not_clobber_original_file_in_place_basename():
+    """Regression test: with --in-place --input-type=basename, checking
+    whether the formatted version is still interesting wrote the
+    formatter's output directly over the user's original file and never
+    restored it. No backup exists yet at validation time, so the user's
+    original content was silently lost."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_file = os.path.join(tmp_dir, "test.txt")
+        original_content = b"test content"
+        with open(test_file, "wb") as f:
+            f.write(original_content)
+
+        # Test passes only for the exact original content.
+        script = os.path.join(tmp_dir, "test.sh")
+        with open(script, "w") as f:
+            f.write(f'#!/bin/bash\ngrep -qx "test content" {shlex.quote(test_file)}\n')
+        os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
+
+        result = await validate_initial_example(
+            file_path=test_file,
+            test=[script],
+            input_type=InputType.basename,
+            in_place=True,
+            # Uppercases the content, making it uninteresting.
+            formatter_command=["tr", "a-z", "A-Z"],
+        )
+
+        assert not result.success
+        assert result.error_message is not None
+        assert "uninteresting" in result.error_message
+        with open(test_file, "rb") as f:
+            assert f.read() == original_content
+
+
+async def test_formatter_success_restores_original_file_in_place_basename():
+    """Validating the formatted version must leave the user's file as it
+    was even when the formatted version is still interesting: reduction
+    starts from the file's content, and the .bak backup has not been
+    created yet."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_file = os.path.join(tmp_dir, "test.txt")
+        original_content = b"test content"
+        with open(test_file, "wb") as f:
+            f.write(original_content)
+
+        script = os.path.join(tmp_dir, "test.sh")
+        with open(script, "w") as f:
+            f.write("#!/bin/bash\nexit 0\n")
+        os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
+
+        result = await validate_initial_example(
+            file_path=test_file,
+            test=[script],
+            input_type=InputType.basename,
+            in_place=True,
+            formatter_command=["tr", "a-z", "A-Z"],
+        )
+
+        assert result.success
+        with open(test_file, "rb") as f:
+            assert f.read() == original_content
 
 
 async def test_validate_initial_example_in_place_cleans_temp_file():

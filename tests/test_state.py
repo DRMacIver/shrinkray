@@ -905,6 +905,44 @@ async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
     assert kill_called[0]
 
 
+async def test_cancelled_test_is_not_recorded_as_exiting_with_code_zero(tmp_path):
+    """Regression test: when a test was cancelled (or timed out) before
+    producing an exit code, mark_completed recorded exit code 0, so the
+    TUI showed "exited with code 0" for a test that was actually killed."""
+    script = tmp_path / "test.sh"
+    # Script that sleeps forever
+    script.write_text("#!/bin/bash\nsleep 1000")
+    script.chmod(0o755)
+
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=100.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        clang_delta_executable=None,
+        history_enabled=False,
+    )
+    state.output_manager = OutputCaptureManager(output_dir=str(tmp_path))
+
+    with trio.move_on_after(0.5):
+        await state.run_for_exit_code(b"hello")
+
+    _, _, return_code = state.output_manager.get_current_output()
+    assert return_code is not None
+    assert return_code != 0
+
+
 async def test_cleanup_when_process_never_started(tmp_path):
     """Test that cleanup works when cancelled before the process starts.
 

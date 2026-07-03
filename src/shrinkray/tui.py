@@ -1364,6 +1364,9 @@ class HistoryExplorerModal(ModalScreen[None]):
             return entries
 
         for entry_name in os.listdir(dir_path):
+            # History entries are numbered directories; ignore anything else.
+            if not entry_name.isdigit():
+                continue
             entry_path = os.path.join(dir_path, entry_name)
             if os.path.isdir(entry_path):
                 # Get file size
@@ -1372,8 +1375,9 @@ class HistoryExplorerModal(ModalScreen[None]):
                     size = os.path.getsize(file_path)
                     entries.append((entry_name, entry_path, size))
 
-        # Sort by entry number
-        entries.sort(key=lambda x: x[0])
+        # Sort by entry number. Entry names are zero-padded numbers, but the
+        # padding overflows past 9999, so sort numerically.
+        entries.sort(key=lambda x: int(x[0]))
         return entries
 
     def _populate_list(self, subdir: str, list_id: str) -> None:

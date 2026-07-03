@@ -6192,6 +6192,41 @@ def test_history_modal_scan_entries(tmp_path):
     assert entries[2][2] == 300
 
 
+def test_history_modal_scan_entries_sorts_numerically_past_9999(tmp_path):
+    """Regression test: entries were sorted as strings, so once the
+    :04d zero-padding overflowed, "10000" sorted before "9999"."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    for entry_num in ["10000", "9999", "0001"]:
+        entry_dir = reductions_dir / entry_num
+        entry_dir.mkdir()
+        (entry_dir / "test.txt").write_text("x")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    entries = modal._scan_entries("reductions")
+
+    assert [e[0] for e in entries] == ["0001", "9999", "10000"]
+
+
+def test_history_modal_scan_entries_ignores_non_numeric_directories(tmp_path):
+    """Directories that aren't numbered history entries are skipped."""
+    history_dir = tmp_path / ".shrinkray" / "run-123"
+    reductions_dir = history_dir / "reductions"
+    reductions_dir.mkdir(parents=True)
+
+    for entry_num in ["0001", "not-an-entry"]:
+        entry_dir = reductions_dir / entry_num
+        entry_dir.mkdir()
+        (entry_dir / "test.txt").write_text("x")
+
+    modal = HistoryExplorerModal(str(history_dir), "test.txt")
+    entries = modal._scan_entries("reductions")
+
+    assert [e[0] for e in entries] == ["0001"]
+
+
 def test_history_modal_scan_entries_missing_file(tmp_path):
     """Test that _scan_entries skips directories without the target file."""
     history_dir = tmp_path / ".shrinkray" / "run-123"

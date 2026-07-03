@@ -39,7 +39,12 @@ class EnumChoice[EnumType: Enum](click.Choice):
         self.__values = {e.name: e for e in enum}
         super().__init__(choices)
 
-    def convert(self, value: str, param: Any, ctx: Any) -> EnumType:
+    def convert(self, value: str | EnumType, param: Any, ctx: Any) -> EnumType:
+        # click may call convert() with an already-converted value (e.g.
+        # when processing a default a second time), so enum members must
+        # pass through unchanged.
+        if isinstance(value, self.enum):
+            return value
         # Let click.Choice reject invalid values with a proper usage error.
         return self.__values[super().convert(value, param, ctx)]
 

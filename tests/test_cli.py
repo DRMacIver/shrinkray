@@ -85,6 +85,15 @@ def test_enum_choice_converts_all_values():
     assert choice.convert("textual", None, None) == UIType.textual
 
 
+def test_enum_choice_accepts_already_converted_value():
+    # Regression test: click may call convert() with an already-converted
+    # value (it does this for option defaults in some versions), which
+    # produced a bad-parameter error instead of passing the enum through.
+    choice = EnumChoice(InputType)
+    result = choice.convert(InputType.stdin, None, None)
+    assert result is InputType.stdin
+
+
 def test_enum_choice_rejects_invalid_value():
     # Regression test: an invalid choice produced a raw KeyError traceback
     # instead of click's "invalid choice" usage error.

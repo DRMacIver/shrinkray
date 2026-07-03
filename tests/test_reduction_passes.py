@@ -323,6 +323,21 @@ def test_standard_substitutions_no_progress(parallelism):
     assert result == b"\x00\x00"
 
 
+def test_standard_substitutions_interesting_but_not_adopted(parallelism):
+    """Regression test: an interesting substitution is not necessarily
+    adopted as the current test case. b"\\xff" is not valid UTF-8, so with
+    the default sort key for a text initial test case it sorts in a higher
+    tier than b"\\x00\\x00" and is rejected despite being interesting.
+    This used to fire an assertion and crash the pass."""
+    result = reduce_with(
+        [standard_substitutions],
+        b"\x00\x00",
+        lambda x: x in (b"\x00\x00", b"\xff"),
+        parallelism=parallelism,
+    )
+    assert result == b"\x00\x00"
+
+
 def test_line_sorter(parallelism):
     result = reduce_with(
         [line_sorter],

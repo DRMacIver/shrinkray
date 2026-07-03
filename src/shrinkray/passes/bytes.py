@@ -595,8 +595,13 @@ async def standard_substitutions(problem: ReductionProblem[bytes]):
             x = problem.current_test_case
             if i + len(k) <= len(x) and x[i : i + len(k)] == k:
                 attempt = x[:i] + v + x[i + len(k) :]
-                if await problem.is_interesting(attempt):
-                    assert problem.current_test_case == attempt
+                # An interesting attempt is only adopted if it sorts below
+                # the current test case; a non-adopted attempt must not
+                # stop the scan or we'd retry it forever.
+                if (
+                    await problem.is_interesting(attempt)
+                    and problem.current_test_case == attempt
+                ):
                     break
         else:
             i += 1

@@ -4,12 +4,14 @@ import io
 import json
 import os
 import runpy
+import signal
 import sys
 import time
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 import trio
+import trio.testing
 
 import shrinkray.subprocess.worker
 from shrinkray.passes.clangdelta import find_clang_delta
@@ -2681,6 +2683,64 @@ class BidirectionalInputStream:
     async def aclose(self) -> None:
         self.closed = True
         self._event.set()
+
+
+@pytest.mark.trio
+async def test_worker_shuts_down_on_stdin_eof():
+    """Regression test: when the parent process disappeared (stdin EOF),
+    the worker kept running forever, reducing for nobody."""
+    input_stream = BidirectionalInputStream()
+    output = MemoryOutputStream()
+    worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+    completed = False
+    with trio.fail_after(5):
+        async with trio.open_nursery() as nursery:
+
+            @nursery.start_soon
+            async def run_worker() -> None:
+                nonlocal completed
+                await worker.run()
+                completed = True
+
+            await trio.testing.wait_all_tasks_blocked()
+            await input_stream.aclose()
+
+    assert completed
+
+
+@pytest.mark.trio
+async def test_worker_shuts_down_gracefully_on_sigterm():
+    """Regression test: the worker had no SIGTERM handler, so the SIGTERM
+    sent by SubprocessClient.close() (e.g. when quitting the TUI) killed
+    it without unwinding, orphaning the process groups of any running
+    interestingness tests. It must instead cancel its main scope.
+
+    A no-op python-level handler is installed first so that, should the
+    worker's handler be missing, the test fails instead of SIGTERM
+    killing the test runner."""
+    old_handler = signal.signal(signal.SIGTERM, lambda *args: None)
+    try:
+        input_stream = BidirectionalInputStream()
+        output = MemoryOutputStream()
+        worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+        completed = False
+        with trio.fail_after(5):
+            async with trio.open_nursery() as nursery:
+
+                @nursery.start_soon
+                async def run_worker() -> None:
+                    nonlocal completed
+                    await worker.run()
+                    completed = True
+
+                await trio.testing.wait_all_tasks_blocked()
+                os.kill(os.getpid(), signal.SIGTERM)
+
+        assert completed
+    finally:
+        signal.signal(signal.SIGTERM, old_handler)
 
 
 def parse_worker_output(output_data: bytes) -> list[Response | ProgressUpdate]:

@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import signal
 import sys
 import tempfile
 import time
@@ -58,6 +59,10 @@ class ReducerWorker:
         self.problem = None
         self.state = None
         self._cancel_scope: trio.CancelScope | None = None
+        # Cancel scope for the whole worker; cancelling it shuts the worker
+        # down gracefully, running cleanup (including killing the process
+        # groups of any in-flight interestingness tests).
+        self._main_cancel_scope: trio.CancelScope | None = None
         self._restart_requested = False
         # Parallelism tracking
         self._parallel_samples = 0
@@ -117,6 +122,11 @@ class ReducerWorker:
                     line, buffer = buffer.split(b"\n", 1)
                     if line:
                         await self.handle_line(line.decode("utf-8"))
+
+        # End of input means the parent process is gone (it closed our stdin
+        # or died); shut down rather than reduce for nobody.
+        if self._main_cancel_scope is not None:
+            self._main_cancel_scope.cancel()
 
     async def handle_line(self, line: str) -> None:
         """Handle a single command line."""
@@ -705,10 +715,24 @@ class ReducerWorker:
             self._cancel_scope = None
             self.running = False
 
+    async def _cancel_on_sigterm(self) -> None:
+        """Shut down gracefully on SIGTERM.
+
+        Trio's default SIGTERM behaviour is immediate death, which would
+        orphan the process groups of any running interestingness tests.
+        Cancelling the main scope instead unwinds the reduction, whose
+        cleanup kills those process groups."""
+        with trio.open_signal_receiver(signal.SIGTERM) as signals:
+            await anext(signals)
+            assert self._main_cancel_scope is not None
+            self._main_cancel_scope.cancel()
+
     async def run(self) -> None:
         """Main entry point for the worker."""
         try:
             async with trio.open_nursery() as nursery:
+                self._main_cancel_scope = nursery.cancel_scope
+                nursery.start_soon(self._cancel_on_sigterm)
                 await nursery.start(self.read_commands)
 
                 # Wait for start command

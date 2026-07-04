@@ -55,7 +55,9 @@ def basic_format(s: str, indent: str = "  ") -> str:
                     break
                 i += 1
             continue
-        if (c == "/" and i + 1 < n and s[i + 1] == "/") or c == "#":  # line comment
+        if c == "/" and i + 1 < n and s[i + 1] == "/":  # line comment
+            # NB: '#' is NOT treated as a comment -- in C it is a preprocessor
+            # directive (#include<x> vs #include <x> must canonicalise equal).
             while i < n and s[i] != "\n":
                 out.append(s[i])
                 i += 1

@@ -42,7 +42,14 @@ def lev(a: str, b: str) -> int:
 
 def reflow_tie(x: str):
     c = basic_format(x)
-    return (nk(c), lev(x, c), nk(x))
+    # (canonical content+structure, closeness, structural closeness in line count
+    #  toward the readable canonical, deterministic tail).
+    return (
+        nk(c),
+        lev(x, c),
+        abs(len(x.splitlines()) - len(c.splitlines())),
+        nk(x),
+    )
 
 
 def reflow_notie(x: str):

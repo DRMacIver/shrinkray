@@ -20,6 +20,13 @@ from __future__ import annotations
 
 WORD = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
 
+# Binary operators to canonicalise as " op " (collapsing any surrounding
+# whitespace, so operands stay on one line). Kept deliberately small and
+# unambiguous: bare < > - * / are left alone (tags, templates, pointers, unary,
+# comments), but their two-char comparison/assignment forms are safe. Longest
+# match first.
+OPS = ["==", "!=", "<=", ">=", "+=", "-=", "&&", "||", "+", "="]
+
 
 def basic_format(s: str, indent: str = "  ") -> str:
     out: list[str] = []
@@ -104,6 +111,16 @@ def basic_format(s: str, indent: str = "  ") -> str:
         if c == ",":
             out.append(", ")
             i += 1
+            continue
+        op = next((o for o in OPS if s.startswith(o, i)), None)
+        if op is not None:
+            while out and out[-1] == " ":
+                out.pop()
+            if out and out[-1] != "\n":
+                out.append(" ")
+            out.append(op)
+            out.append(" ")
+            i += len(op)
             continue
         out.append(c)
         i += 1

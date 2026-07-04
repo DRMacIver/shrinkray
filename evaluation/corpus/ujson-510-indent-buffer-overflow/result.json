@@ -1,0 +1,10 @@
+{
+  "id": "ujson-510-indent-buffer-overflow",
+  "status": "ok",
+  "original_bytes": 826,
+  "reduced_bytes": 110,
+  "original_nows_bytes": 767,
+  "reduced_nows_bytes": 92,
+  "seconds": 102.1,
+  "ratio": 86.7
+}

@@ -19,5 +19,7 @@
   "interesting": {
     "exit_code": 0
   },
+  "comment": "shrink ray's default formatter (black) errors on deeply nested parentheses, so disable it for this deep-nesting entry.",
+  "shrinkray_args": ["--formatter=none"],
   "timeout": 10
 }

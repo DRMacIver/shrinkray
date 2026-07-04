@@ -9,7 +9,36 @@ from shrinkray.problem import ReductionProblem
 from shrinkray.work import NotFound
 
 
+# libcst's native parser recurses once per nesting level, so deeply
+# bracket-nested input overflows the C stack and takes the whole process
+# down with a SIGSEGV — which, unlike a Python exception, the try/except
+# below cannot catch. Real Python source never nests brackets anywhere
+# near this deep; input that does is invariably data (e.g. deeply nested
+# JSON), so we refuse to hand it to libcst and report it as not-Python.
+# The bound sits far below libcst's crash depth (~1500) and far above any
+# plausible real source.
+MAX_PYTHON_BRACKET_DEPTH = 200
+
+_OPENING_BRACKETS = frozenset(b"([{")
+_CLOSING_BRACKETS = frozenset(b")]}")
+
+
+def _exceeds_bracket_depth[AnyStr: (str, bytes)](source: AnyStr, limit: int) -> bool:
+    depth = 0
+    for char in source:
+        code = ord(char) if isinstance(char, str) else char
+        if code in _OPENING_BRACKETS:
+            depth += 1
+            if depth > limit:
+                return True
+        elif code in _CLOSING_BRACKETS and depth > 0:
+            depth -= 1
+    return False
+
+
 def is_python[AnyStr: (str, bytes)](source: AnyStr) -> bool:
+    if _exceeds_bracket_depth(source, MAX_PYTHON_BRACKET_DEPTH):
+        return False
     try:
         libcst.parse_module(source)
         return True

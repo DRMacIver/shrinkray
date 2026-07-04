@@ -336,6 +336,97 @@ HAND_PAIRS: list[dict] = [
         "rationale": "same code+comment; the inline form has one fewer line, but "
         "this is marginal",
     },
+    # avg_sq_line ablation: same program, EQUAL byte length, so avg_sq_line is the
+    # deciding criterion. It always prefers the version with more (shorter) lines.
+    # "helps" = the extra line-break is at a statement/element boundary (good, so
+    # avg_sq is right); "hurts" = it splits mid-construct or adds a blank line
+    # (bad, so avg_sq is wrong). A good order should get BOTH right; the current
+    # key gets helps right and hurts wrong. See avg_sq_reversals.py.
+    {
+        "id": "avgsq-helps-python-two-statements",
+        "lang": "python",
+        "kind": "formatting",
+        "a": "x = 1;y = 2\n",
+        "b": "x = 1\ny = 2\n",
+        "simpler": "b",
+        "confidence": "medium",
+        "rationale": "one statement per line reads better than joining with ';' "
+        "(avg_sq_line correctly prefers the split)",
+    },
+    {
+        "id": "avgsq-helps-c-two-decls",
+        "lang": "c",
+        "kind": "formatting",
+        "a": "int a; int b;\n",
+        "b": "int a;\nint b;\n",
+        "simpler": "b",
+        "confidence": "medium",
+        "rationale": "two declarations on their own lines (avg_sq_line right)",
+    },
+    {
+        "id": "avgsq-helps-sql-two-statements",
+        "lang": "sql",
+        "kind": "formatting",
+        "a": "SELECT 1; SELECT 2;\n",
+        "b": "SELECT 1;\nSELECT 2;\n",
+        "simpler": "b",
+        "confidence": "medium",
+        "rationale": "one statement per line (avg_sq_line right)",
+    },
+    {
+        "id": "avgsq-helps-html-two-elements",
+        "lang": "html",
+        "kind": "formatting",
+        "a": "<p>a</p> <p>b</p>\n",
+        "b": "<p>a</p>\n<p>b</p>\n",
+        "simpler": "b",
+        "confidence": "medium",
+        "rationale": "sibling elements on their own lines (avg_sq_line right)",
+    },
+    {
+        "id": "avgsq-hurts-c-blank-in-body",
+        "lang": "c",
+        "kind": "formatting",
+        "a": "void f() {}\n",
+        "b": "void f()\n\n{}",
+        "simpler": "a",
+        "confidence": "high",
+        "rationale": "b puts a blank line inside an empty body; avg_sq_line wrongly "
+        "prefers it because more lines lowers the average",
+    },
+    {
+        "id": "avgsq-hurts-python-mid-expression",
+        "lang": "python",
+        "kind": "formatting",
+        "a": "z = a + b\n",
+        "b": "z = a +\nb\n",
+        "simpler": "a",
+        "confidence": "high",
+        "rationale": "b splits the expression after '+'; avg_sq_line wrongly prefers "
+        "the split",
+    },
+    {
+        "id": "avgsq-hurts-c-split-assignment",
+        "lang": "c",
+        "kind": "formatting",
+        "a": "int xy = 0;\n",
+        "b": "int xy =\n0;\n",
+        "simpler": "a",
+        "confidence": "high",
+        "rationale": "b breaks the assignment across two lines; avg_sq_line wrongly "
+        "prefers it",
+    },
+    {
+        "id": "avgsq-hurts-html-split-content",
+        "lang": "html",
+        "kind": "formatting",
+        "a": "<p>hello</p>\n",
+        "b": "<p>\nhello</p>",
+        "simpler": "a",
+        "confidence": "high",
+        "rationale": "b splits short inline content onto its own line; avg_sq_line "
+        "wrongly prefers it",
+    },
 ]
 
 

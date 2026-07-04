@@ -75,16 +75,25 @@ strictly smaller). It is the target a sort key should match, and the concrete
 testbed for tuning one. Pairs are tagged by `kind` (`formatting`, `content`,
 `cosmetic`, `quirk`) and `confidence`, and include both cases the current key
 gets right and wrong — the real cramped-vs-readable C/C++ examples, the
-magic-trailing-comma content cases, natural-order cosmetics, and formatter/parser
-corruptions (as guards). Built by `build_ordering_pairs.py` (which pulls the real
-C/C++ pairs from `evaluation/corpus/*/shrinkray_reduced.{c,cpp}`).
+magic-trailing-comma content cases, natural-order cosmetics, formatter/parser
+corruptions (as guards), and an `avg_sq_line` helps/hurts set (see below). Built
+by `build_ordering_pairs.py` (which pulls the real C/C++ pairs from
+`evaluation/corpus/*/shrinkray_reduced.{c,cpp}`).
+
+The `avgsq-helps-*` / `avgsq-hurts-*` pairs are same-program, **equal byte
+length** pairs, so `avg_sq_line` is the deciding criterion. They capture where
+that criterion (which always prefers more, shorter lines) is *right* — a
+line-break at a statement/element boundary — and where it is *wrong* — a break
+mid-construct or a blank line inside a body. A good order should get both; the
+current key gets the four helps right and the four hurts wrong.
 
 `ordering_eval.py` scores a sort order against it — by default shrink ray's
 current key, or any `str -> comparable` function via `evaluate(key)`. The current
-key scores **16/25**: `cosmetic` 5/5, `quirk` 4/4, `content` 5/7 (misses the
-magic-comma cases), `formatting` 2/9 (misses every readable-code case). Every
-miss decides on the `length` criterion — the lever future work should target
-without regressing the cases already handled.
+key scores **20/33**: `cosmetic` 5/5, `quirk` 4/4, `content` 5/7 (misses the
+magic-comma cases), `formatting` 6/17 (misses every readable-code case and the
+four `avg_sq` hurts). The `length`-decided misses want a cheaper-whitespace
+primary length; the `avg_sq`-decided misses want a structure signal that is not
+fooled by blank lines / mid-construct splits.
 
 ## Running
 

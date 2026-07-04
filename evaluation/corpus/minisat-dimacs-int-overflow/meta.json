@@ -20,5 +20,7 @@
     ],
     "exit_code": 134
   },
+  "comment": "AddressSanitizer reserves ~20TB of virtual address space, which RLIMIT_AS would reject, so disable shrink ray's oracle memory limit for this entry.",
+  "shrinkray_args": ["--memory-limit=0"],
   "timeout": 10
 }

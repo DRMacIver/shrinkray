@@ -17,7 +17,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sized
 from datetime import timedelta
-from functools import total_ordering
+from functools import lru_cache, total_ordering
 from typing import (
     Any,
     Protocol,
@@ -31,6 +31,7 @@ from attrs import define
 from humanize import naturalsize, precisedelta
 
 from shrinkray.formatting import try_decode
+from shrinkray.reformat import basic_format, canonical_distance
 from shrinkray.work import WorkContext
 
 
@@ -171,6 +172,32 @@ def natural_key(s: str) -> LazyChainedSortKey:
     return LazyChainedSortKey(functions=NATURAL_ORDERING_FUNCTIONS, value=s)
 
 
+@lru_cache(maxsize=1024)
+def reflow_sort_key(s: str) -> Any:
+    """Canonicalisation-based ordering key for a text test case.
+
+    Orders primarily by the natural key of the *reflowed* (whitespace-
+    canonicalised) form, so ordering is immune to layout differences (a cramped
+    one-liner and its readable form compare equal on this term). Ties are broken
+    toward the raw form that is CLOSEST to its canonical -- i.e. the cleanest,
+    least-reformatted valid form -- then by line-count closeness to the (readable)
+    canonical, then by the raw natural key as a deterministic total-order tail.
+
+    This makes reduction prefer readable, well-structured test cases while still
+    minimising content, and is immune to the raw-whitespace pathologies (cramped
+    output, blank lines, over/under-splitting) that a length-first key rewards.
+    Memoised: the reflow is O(n) and this key is recomputed for the current test
+    case on every candidate comparison.
+    """
+    canonical = basic_format(s)
+    return (
+        natural_key(canonical),
+        canonical_distance(s, canonical),
+        abs(len(s.splitlines()) - len(canonical.splitlines())),
+        natural_key(s),
+    )
+
+
 def sort_key_for_initial(initial: Any) -> Callable[[Any], Any]:
     """Create a sort key function appropriate for the given initial value.
 
@@ -199,7 +226,7 @@ def sort_key_for_initial(initial: Any) -> Callable[[Any], Any]:
             def natural_for_encoding(b: bytes) -> Any:
                 try:
                     s = b.decode(encoding)
-                    return (0, natural_key(s))
+                    return (0, reflow_sort_key(s))
                 except UnicodeDecodeError:
                     return (1, shortlex(b))
 
@@ -259,7 +286,7 @@ def default_sort_key(value: Any) -> Any:
     if isinstance(value, bytes):
         return shortlex(value)
     elif isinstance(value, str):
-        return natural_key(value)
+        return reflow_sort_key(value)
     else:
         return shortlex(repr(value))
 

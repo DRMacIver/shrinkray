@@ -208,6 +208,54 @@ async def test_apply_patches_some_not_applicable():
     assert problem.current_test_case[0:1] == b"a"
 
 
+async def test_apply_patches_early_abort_gives_up(monkeypatch):
+    """With early_abort, a pass that makes no progress at all gives up after
+    a bounded number of attempts instead of trying every candidate."""
+    monkeypatch.setattr("shrinkray.passes.patching.MIN_PATCH_ATTEMPTS", 5)
+    monkeypatch.setattr("shrinkray.passes.patching.EARLY_ABORT_SIZE_FACTOR", 0)
+
+    initial = bytes(range(50))  # distinct bytes so each deletion differs
+
+    async def is_interesting(x):
+        return x == initial  # nothing smaller is ever interesting
+
+    problem = BasicReductionProblem(
+        initial=initial,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    cuts = Cuts()
+    patches = [[(i, i + 1)] for i in range(50)]
+
+    await apply_patches(problem, cuts, patches, early_abort=True)
+
+    # give_up_after == 5, so it must stop well before trying all 50 patches.
+    assert problem.stats.calls < 50
+    assert problem.current_test_case == initial
+
+
+async def test_apply_patches_no_early_abort_by_default():
+    """Without early_abort a hopeless pass still tries every candidate."""
+    monkeypatch_free_initial = bytes(range(30))
+
+    async def is_interesting(x):
+        return x == monkeypatch_free_initial
+
+    problem = BasicReductionProblem(
+        initial=monkeypatch_free_initial,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    cuts = Cuts()
+    patches = [[(i, i + 1)] for i in range(30)]
+
+    await apply_patches(problem, cuts, patches)  # early_abort defaults to False
+
+    # All 30 distinct deletions get evaluated (plus the combined attempt).
+    assert problem.stats.calls >= 30
+    assert problem.current_test_case == monkeypatch_free_initial
+
+
 def apply_byte_assignments(patch, target):
     """Apply a set of (position, byte) assignments to target.
 

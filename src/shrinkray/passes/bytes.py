@@ -534,7 +534,7 @@ async def lower_bytes(problem: ReductionProblem[bytes]) -> None:
         if (r < c or r < d) and r >= 0
     ]
 
-    await apply_patches(problem, ByteReplacement(), patches)
+    await apply_patches(problem, ByteReplacement(), patches, early_abort=True)
 
 
 class IndividualByteReplacement(Patches[ReplacementPatch, bytes]):
@@ -580,7 +580,7 @@ async def lower_individual_bytes(problem: ReductionProblem[bytes]) -> None:
         for i, c in enumerate(initial)
         if i > 0 and initial[i - 1] > 0 and c == 0
     ]
-    await apply_patches(problem, IndividualByteReplacement(), patches)
+    await apply_patches(problem, IndividualByteReplacement(), patches, early_abort=True)
 
 
 # These are some cheat substitutions that are sometimes helpful, but mostly

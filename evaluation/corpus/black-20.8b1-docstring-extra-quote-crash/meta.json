@@ -18,5 +18,6 @@
     ],
     "exit_code": 123
   },
+  "shrinkray_args": ["--formatter=none"],
   "timeout": 10
 }

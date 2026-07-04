@@ -284,6 +284,7 @@ def reduce_entry(entry: dict) -> dict:
         ]
         if "parallelism" in entry:
             command.append(f"--parallelism={entry['parallelism']}")
+        command += entry.get("shrinkray_args", [])
         command += [str(check), str(source)]
         proc = subprocess.run(
             command, cwd=REPO_ROOT, capture_output=True, text=True,

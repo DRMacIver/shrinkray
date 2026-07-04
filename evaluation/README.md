@@ -64,6 +64,11 @@ Each `corpus/<id>/` holds:
   omit it and use shrink ray's default.
 - `timeout` — per-call timeout passed to shrinkray, avoiding its
   dynamic-timeout calibration.
+- `shrinkray_args` — optional extra flags for the shrinkray invocation.
+  For example the black entry needs `--formatter=none`: shrink ray's
+  default formatting step runs a *current* black on each Python
+  candidate, which rewrites away the very construct that crashes the
+  old black under test.
 
 `oracle` declares how to run the tool, one of three types:
 

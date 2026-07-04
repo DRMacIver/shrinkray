@@ -194,14 +194,15 @@ class VenvOracle(Oracle):
             ["uv", "venv", "--python", self.config["python"], str(self.venv)],
             check=True, capture_output=True,
         )
-        subprocess.run(
-            [
-                "uv", "pip", "install",
-                "--python", str(self.venv / "bin" / "python"),
-                *self.config["requirements"],
-            ],
-            check=True, capture_output=True,
-        )
+        if self.config["requirements"]:
+            subprocess.run(
+                [
+                    "uv", "pip", "install",
+                    "--python", str(self.venv / "bin" / "python"),
+                    *self.config["requirements"],
+                ],
+                check=True, capture_output=True,
+            )
         stamp.write_text(spec)
 
     def path_prefix(self) -> str:

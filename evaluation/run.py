@@ -256,8 +256,13 @@ def nows_size(path: Path) -> int:
     return len(re.sub(rb"\s+", b"", path.read_bytes()))
 
 
-def reduce_entry(entry: dict) -> dict:
-    """Reduce a single entry and return a result record."""
+def reduce_entry(entry: dict, parallelism: int | None = None) -> dict:
+    """Reduce a single entry and return a result record.
+
+    parallelism, if given, overrides the entry's own parallelism setting
+    (and shrink ray's all-cores default) — useful for bounding the load a
+    reduction places on the machine.
+    """
     oracle, check = prepare(entry)
     workdir = entry["dir"] / "work"
     source = workdir / ("reduced" + entry["extension"])
@@ -282,8 +287,11 @@ def reduce_entry(entry: dict) -> dict:
             "--ui=basic", "--no-history", "--in-place",
             f"--timeout={entry.get('timeout', 10)}",
         ]
-        if "parallelism" in entry:
-            command.append(f"--parallelism={entry['parallelism']}")
+        effective_parallelism = (
+            parallelism if parallelism is not None else entry.get("parallelism")
+        )
+        if effective_parallelism is not None:
+            command.append(f"--parallelism={effective_parallelism}")
         command += entry.get("shrinkray_args", [])
         command += [str(check), str(source)]
         proc = subprocess.run(
@@ -341,6 +349,10 @@ def main() -> int:
         "--check", action="store_true",
         help="only verify each entry still reproduces its failure",
     )
+    parser.add_argument(
+        "--parallelism", type=int, default=None,
+        help="override each reduction's parallelism (bounds machine load)",
+    )
     args = parser.parse_args()
 
     entries = load_entries(args.ids)
@@ -357,7 +369,11 @@ def main() -> int:
     for entry in entries:
         action = "Checking" if args.check else "Reducing"
         print(f"{action} {entry['id']} ({entry['tool']}) ...", flush=True)
-        record = check_entry(entry) if args.check else reduce_entry(entry)
+        record = (
+            check_entry(entry)
+            if args.check
+            else reduce_entry(entry, parallelism=args.parallelism)
+        )
         results.append(record)
         print("   " + json.dumps(record), flush=True)
 

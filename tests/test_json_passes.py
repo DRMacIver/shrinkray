@@ -6,6 +6,7 @@ import pytest
 
 from shrinkray.passes.json import (
     JSON,
+    MAX_JSON_DEPTH,
     DeleteIdentifiers,
     delete_identifiers,
     gather_identifiers,
@@ -50,6 +51,42 @@ def test_json_format_parse_invalid():
 def test_json_format_parse_invalid_unicode():
     with pytest.raises(ParseError):
         JSON.parse(b"\xff\xfe")
+
+
+def test_json_format_parse_undecodably_deep_raises_parse_error():
+    """Input nested too deep for json.loads itself raises a RecursionError
+    rather than a JSONDecodeError. parse must surface that as ParseError
+    (and is_valid must return False) so shrink ray does not crash. This is
+    the depth at which the C decoder gives up (~100k)."""
+    deep = b"[" * 100000 + b"1" + b"]" * 100000
+    with pytest.raises(ParseError):
+        JSON.parse(deep)
+    assert JSON.is_valid(deep) is False
+
+
+def test_json_format_parse_moderately_deep_raises_parse_error():
+    """Input that json.loads *can* decode but that is nested past
+    MAX_JSON_DEPTH is still declined, because the structured JSON passes
+    (deepcopy, tree walks) would overflow the recursion limit on it. Such
+    input falls back to the generic byte passes instead. Regression: shrink
+    ray crashed with a RecursionError from deepcopy on the deep-nesting
+    JSON corpus bugs once the decoder-level guard let them through."""
+    deep = b"[" * 3000 + b"1" + b"]" * 3000
+    assert json.loads(deep) is not None  # json.loads copes at this depth
+    with pytest.raises(ParseError):
+        JSON.parse(deep)
+    assert JSON.is_valid(deep) is False
+
+
+def test_json_format_parse_accepts_nesting_up_to_the_bound():
+    """Nesting up to MAX_JSON_DEPTH is still parsed as JSON so ordinary
+    (even fairly deep) documents keep using the structured passes; one
+    level past it is declined."""
+    # n bracket pairs wrap the leaf at structural depth n + 1.
+    at_bound = b"[" * (MAX_JSON_DEPTH - 1) + b"1" + b"]" * (MAX_JSON_DEPTH - 1)
+    assert JSON.is_valid(at_bound) is True
+    past_bound = b"[" * MAX_JSON_DEPTH + b"1" + b"]" * MAX_JSON_DEPTH
+    assert JSON.is_valid(past_bound) is False
 
 
 def test_json_format_dumps_object():

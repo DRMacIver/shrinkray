@@ -46,6 +46,15 @@ looking at when deciding how a new sort key should behave.
 5. **`report.py`** — renders `corpus/_inversions/REPORT.md`: formatter choices,
    disagreement rates, and illustrative example pairs.
 
+6. **`deletion_shrink.py`** — a sharper property test: for each formatted
+   instance, delete a single byte or line, and (if still valid) reformat; the
+   result *should* be a strict shrink under the sort key. It records every
+   violation (`sort_key(format(delete(f))) > sort_key(f)`), split by byte vs
+   line deletion, grouped by instance, to `corpus/_deletion_shrink/<lang>.json`.
+   `SR_DEL_KINDS=line` isolates one deletion kind. Finding: violated by every
+   formatter except JSON's `indent=2` (which is monotonic); black and ruff
+   behave identically (magic trailing comma + line wrapping).
+
 ## Formatters chosen
 
 | Language | Parser (validity gate)      | Formatter                |

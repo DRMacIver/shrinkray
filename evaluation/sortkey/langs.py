@@ -99,6 +99,21 @@ def _python_format(data: bytes) -> bytes | None:
     return formatted.encode("utf-8")
 
 
+def _ruff_format(data: bytes) -> bytes | None:
+    try:
+        proc = subprocess.run(
+            ["ruff", "format", "--stdin-filename", "snippet.py", "-"],
+            input=data,
+            capture_output=True,
+            timeout=20,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
 # --- JSON ------------------------------------------------------------------
 
 
@@ -257,6 +272,12 @@ LANGUAGES: dict[str, Language] = {
         "html", "html", _html_parse, _html_format, "BeautifulSoup.prettify"
     ),
 }
+
+
+# Alternative Python language using `ruff format` instead of black. Kept out of
+# LANGUAGES so it doesn't appear in the corpus pipeline; used for comparisons
+# (e.g. does ruff exhibit the same deletion-shrink violations as black?).
+PYTHON_RUFF = Language("python-ruff", "py", _python_parse, _ruff_format, "ruff format")
 
 
 def seeds_dir() -> Path:

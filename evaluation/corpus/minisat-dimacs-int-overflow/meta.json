@@ -1,0 +1,24 @@
+{
+  "id": "minisat-dimacs-int-overflow",
+  "format": "cnf",
+  "tool": "minisat 2.2 (git 37dc6c6, ASan)",
+  "extension": ".cnf",
+  "bug_url": "https://github.com/niklasso/minisat/issues/55",
+  "symptom": "MiniSat's DIMACS parser stores variable indices in a signed int. A literal of 2147483648 (INT_MAX+1) wraps to a negative variable id, and the subsequent value() lookup in SimpSolver::addClause_ reads out of bounds of the assignment vector (heap-buffer-overflow, CWE-190/CWE-125). Built with AddressSanitizer so the read aborts deterministically.",
+  "oracle": {
+    "type": "command",
+    "setup": "setup.sh",
+    "command": ["{tools}/minisat-int-overflow/minisat_asan", "{file}", "/dev/null"],
+    "env": {
+      "ASAN_OPTIONS": "abort_on_error=1:detect_leaks=0"
+    }
+  },
+  "interesting": {
+    "output_contains": [
+      "AddressSanitizer: heap-buffer-overflow",
+      "Minisat::SimpSolver::addClause_"
+    ],
+    "exit_code": 134
+  },
+  "timeout": 10
+}

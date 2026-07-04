@@ -1,0 +1,21 @@
+{
+  "id": "splr0172-eliminate-assert",
+  "format": "cnf",
+  "tool": "splr 0.17.2 (debug-assertions)",
+  "extension": ".cnf",
+  "bug_url": "https://github.com/shnarazk/splr/issues/232",
+  "symptom": "splr 0.17.2 aborts while solving certain satisfiable CNFs during variable elimination: 'assertion left != right failed, left: Some(false), right: Some(false)' at src/processor/eliminate.rs:210 (debug_assert_ne!(asg.assigned(*lit), Some(false)) inside the subsumption/elimination check).",
+  "oracle": {
+    "type": "command",
+    "setup": "setup.sh",
+    "command": ["{tools}/splr-0.17.2/bin/splr", "-o", "{workdir}", "{file}"]
+  },
+  "interesting": {
+    "output_contains": [
+      "src/processor/eliminate.rs:210:9",
+      "assertion `left != right` failed"
+    ],
+    "exit_code": 134
+  },
+  "timeout": 15
+}

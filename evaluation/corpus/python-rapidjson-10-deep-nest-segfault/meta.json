@@ -1,0 +1,18 @@
+{
+  "id": "python-rapidjson-10-deep-nest-segfault",
+  "format": "json",
+  "tool": "python-rapidjson 1.0",
+  "extension": ".json",
+  "bug_url": "https://github.com/Tencent/rapidjson/issues/1027",
+  "symptom": "RapidJSON's default recursive parser (used by python-rapidjson) descends one C++ stack frame per nesting level, so a deeply nested JSON array overflows the stack and segfaults the Python process.",
+  "oracle": {
+    "type": "venv",
+    "python": "3.10",
+    "requirements": ["python-rapidjson==1.0"],
+    "command": ["python", "-c", "import sys, rapidjson; rapidjson.load(open(sys.argv[1]))", "{file}"]
+  },
+  "interesting": {
+    "exit_code": 139
+  },
+  "timeout": 10
+}

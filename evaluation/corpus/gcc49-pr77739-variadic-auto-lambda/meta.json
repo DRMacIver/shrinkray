@@ -1,0 +1,28 @@
+{
+  "id": "gcc49-pr77739-variadic-auto-lambda",
+  "format": "cpp",
+  "tool": "gcc (gcc:4.9)",
+  "extension": ".cpp",
+  "bug_url": "https://gcc.gnu.org/bugzilla/show_bug.cgi?id=77739",
+  "symptom": "ICE in create_tmp_var when an auto-returning variadic member template returns a lambda that captures its parameter pack by copy, and is instantiated from a constructor with a non-trivially-copyable argument.",
+  "oracle": {
+    "type": "docker",
+    "image": "gcc:4.9",
+    "platform": "linux/amd64",
+    "command": [
+      "g++",
+      "-std=c++1y",
+      "-x",
+      "c++",
+      "-c",
+      "{file}",
+      "-o",
+      "/dev/null"
+    ]
+  },
+  "interesting": {
+    "output_contains": "internal compiler error: in create_tmp_var"
+  },
+  "parallelism": 1,
+  "timeout": 10
+}

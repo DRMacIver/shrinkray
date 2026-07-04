@@ -1,0 +1,28 @@
+{
+  "id": "gcc49-pr61636-genlambda-member",
+  "format": "cpp",
+  "tool": "gcc (gcc:4.9)",
+  "extension": ".cpp",
+  "bug_url": "https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61636",
+  "symptom": "Front-end segfault when a generic lambda inside a member function names a member (direct, inherited via using, or a member template) of the enclosing class.",
+  "oracle": {
+    "type": "docker",
+    "image": "gcc:4.9",
+    "platform": "linux/amd64",
+    "command": [
+      "g++",
+      "-std=c++1y",
+      "-x",
+      "c++",
+      "-c",
+      "{file}",
+      "-o",
+      "/dev/null"
+    ]
+  },
+  "interesting": {
+    "output_contains": "internal compiler error: Segmentation fault"
+  },
+  "parallelism": 1,
+  "timeout": 10
+}

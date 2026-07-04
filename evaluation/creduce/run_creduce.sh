@@ -7,13 +7,19 @@
 set -eu
 
 ENTRY="$1"
-HERE="$(cd "$(dirname "$0")" && pwd)"   # compiler-bug-corpus/creduce
-CORPUS="$(cd "$HERE/.." && pwd)"        # compiler-bug-corpus
+HERE="$(cd "$(dirname "$0")" && pwd)"     # evaluation/creduce
+CORPUS="$(cd "$HERE/../corpus" && pwd)"   # evaluation/corpus
 META="$CORPUS/$ENTRY/meta.json"
 
-j() { python3 -c "import json,sys;print(json.load(open('$META'))['$1'])"; }
-IMAGE=$(j image); STD=$(j std); SIG=$(j signature); COMPILER_KIND=$(j compiler)
-COMPILER=g++; [ "$COMPILER_KIND" = clang ] && COMPILER=clang++
+j() { python3 -c "
+import json
+meta = json.load(open('$META'))
+print($1)
+"; }
+IMAGE=$(j "meta['oracle']['image']")
+COMPILER=$(j "meta['oracle']['command'][0]")
+STD=$(j "[a for a in meta['oracle']['command'] if a.startswith('-std=')][0][len('-std='):]")
+SIG=$(j "(lambda s: s if isinstance(s, str) else s[0])(meta['interesting']['output_contains'])")
 
 CONTAINER="cred-oracle-$ENTRY"
 SHARED="$HERE/shared-$ENTRY"

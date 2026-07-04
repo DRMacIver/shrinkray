@@ -1,0 +1,28 @@
+{
+  "id": "gcc49-udlit-char-pack-template",
+  "format": "cpp",
+  "tool": "gcc (gcc:4.9)",
+  "extension": ".cpp",
+  "bug_url": "gcc.gnu.org g++.dg/cpp1y/udlit-char-template2.C (exact PR unconfirmed)",
+  "symptom": "ICE in type_dependent_expression_p when a template default argument uses decltype of a character-pack user-defined literal (operator\"\" with a char... template parameter).",
+  "oracle": {
+    "type": "docker",
+    "image": "gcc:4.9",
+    "platform": "linux/amd64",
+    "command": [
+      "g++",
+      "-std=c++1y",
+      "-x",
+      "c++",
+      "-c",
+      "{file}",
+      "-o",
+      "/dev/null"
+    ]
+  },
+  "interesting": {
+    "output_contains": "internal compiler error: in type_dependent_expression_p"
+  },
+  "parallelism": 1,
+  "timeout": 10
+}

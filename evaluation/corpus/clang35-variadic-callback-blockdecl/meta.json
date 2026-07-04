@@ -1,0 +1,28 @@
+{
+  "id": "clang35-variadic-callback-blockdecl",
+  "format": "cpp",
+  "tool": "clang (silkeh/clang:3.5)",
+  "extension": ".cpp",
+  "bug_url": "https://github.com/llvm/llvm-project/issues (c++/78816-class codegen crash)",
+  "symptom": "Backend crash in CodeGenFunction::GetAddrOfBlockDecl when a generic variadic lambda forwards its arguments through a pointer captured from an enclosing function template.",
+  "oracle": {
+    "type": "docker",
+    "image": "silkeh/clang:3.5",
+    "platform": "linux/amd64",
+    "command": [
+      "clang++",
+      "-std=c++1y",
+      "-x",
+      "c++",
+      "-c",
+      "{file}",
+      "-o",
+      "/dev/null"
+    ]
+  },
+  "interesting": {
+    "output_contains": "GetAddrOfBlockDecl"
+  },
+  "parallelism": 1,
+  "timeout": 10
+}

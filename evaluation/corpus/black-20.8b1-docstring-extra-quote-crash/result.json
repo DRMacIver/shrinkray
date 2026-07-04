@@ -1,0 +1,10 @@
+{
+  "id": "black-20.8b1-docstring-extra-quote-crash",
+  "status": "ok",
+  "original_bytes": 3124,
+  "reduced_bytes": 17,
+  "original_nows_bytes": 2212,
+  "reduced_nows_bytes": 15,
+  "seconds": 123.9,
+  "ratio": 99.5
+}

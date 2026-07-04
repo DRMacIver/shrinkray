@@ -1,0 +1,10 @@
+{
+  "id": "pylint-2.17.4-duplicate-bases-mro-crash",
+  "status": "ok",
+  "original_bytes": 2403,
+  "reduced_bytes": 51,
+  "original_nows_bytes": 1793,
+  "reduced_nows_bytes": 34,
+  "seconds": 109.0,
+  "ratio": 97.9
+}

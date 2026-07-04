@@ -1,0 +1,10 @@
+{
+  "id": "mypy-0.942-match-union-tuple-crash",
+  "status": "ok",
+  "original_bytes": 2537,
+  "reduced_bytes": 133,
+  "original_nows_bytes": 1948,
+  "reduced_nows_bytes": 77,
+  "seconds": 477.7,
+  "ratio": 94.8
+}

@@ -141,6 +141,7 @@ class SubprocessClient:
         test: list[str],
         parallelism: int | None = None,
         timeout: float | None = None,
+        memory_limit: int | None = None,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,
@@ -169,6 +170,8 @@ class SubprocessClient:
             params["parallelism"] = parallelism
         if timeout is not None:
             params["timeout"] = timeout
+        if memory_limit is not None:
+            params["memory_limit"] = memory_limit
         return await self.send_command("start", params)
 
     async def get_status(self) -> Response:

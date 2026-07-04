@@ -18,6 +18,11 @@ from shrinkray.cli import (
     validate_ui,
 )
 from shrinkray.formatting import determine_formatter_command
+from shrinkray.process import (
+    MEMORY_LIMIT_ENFORCEABLE,
+    default_memory_limit,
+    parse_memory_limit,
+)
 from shrinkray.state import (
     ShrinkRayDirectoryState,
     ShrinkRayState,
@@ -27,6 +32,18 @@ from shrinkray.tui import run_textual_ui
 from shrinkray.ui import BasicUI, ShrinkRayUI
 from shrinkray.validation import run_validation
 from shrinkray.work import Volume
+
+
+def _validate_memory_limit(
+    ctx: "click.Context", param: "click.Parameter", value: str | None
+) -> int | None:
+    """Click callback: parse --memory-limit, defaulting to physical RAM."""
+    if value is None:
+        return default_memory_limit()
+    try:
+        return parse_memory_limit(value)
+    except ValueError as e:
+        raise click.BadParameter(str(e))
 
 
 async def run_shrink_ray(
@@ -77,6 +94,18 @@ async def run_shrink_ray(
         "measured time (capped at 5 minutes). If set to <= 0 then no timeout "
         "will be used. Any commands that time out will be treated as failing "
         "the test"
+    ),
+)
+@click.option(
+    "--memory-limit",
+    default=None,
+    callback=_validate_memory_limit,
+    help=(
+        "Cap the address space of each interestingness-test subprocess so a "
+        "runaway test cannot exhaust host memory. Accepts a byte count or a "
+        "K/M/G/T suffix (e.g. '4G'). Set to 0 to disable. Defaults to the "
+        "machine's physical RAM. Enforced via RLIMIT_AS, which is not honoured "
+        "on macOS (there it only warns if the initial test exceeds it)."
     ),
 )
 @click.option(
@@ -221,6 +250,7 @@ def main(
     filename: str,
     test: list[str],
     timeout: float | None,
+    memory_limit: int | None,
     in_place: bool,
     parallelism: int,
     seed: int,
@@ -235,6 +265,14 @@ def main(
 ) -> None:
     if timeout is not None and timeout <= 0:
         timeout = float("inf")
+
+    if memory_limit is not None and not MEMORY_LIMIT_ENFORCEABLE:
+        print(
+            "Warning: --memory-limit cannot be enforced on this platform "
+            "(macOS does not honour RLIMIT_AS); shrink ray will still warn if "
+            "the initial test exceeds it, but later calls will not be capped.",
+            file=sys.stderr,
+        )
 
     if not os.access(test[0], os.X_OK):
         print(
@@ -305,6 +343,7 @@ def main(
         "in_place": in_place,
         "test": test,
         "timeout": timeout,
+        "memory_limit": memory_limit,
         "base": os.path.basename(filename),
         "parallelism": parallelism,
         "filename": filename,
@@ -355,6 +394,7 @@ def main(
             test=test,
             parallelism=parallelism,
             timeout=timeout,
+            memory_limit=memory_limit,
             seed=seed,
             input_type=input_type.name,
             in_place=in_place,

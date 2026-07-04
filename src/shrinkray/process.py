@@ -2,9 +2,100 @@
 
 import os
 import random
+import resource
 import signal
+import sys
+from collections.abc import Callable
 
 import trio
+
+
+# RLIMIT_AS (address-space) memory limiting is reliably enforced on Linux
+# but not on macOS, where setrlimit(RLIMIT_AS, ...) refuses to set a real
+# limit and the kernel would not honour it. We still attempt it (it is
+# harmless when it fails), but only advertise enforcement where it works,
+# so we can warn the user rather than give a false sense of protection.
+MEMORY_LIMIT_ENFORCEABLE = sys.platform != "darwin"
+
+_MEMORY_UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
+
+
+def parse_memory_limit(value: str) -> int | None:
+    """Parse a ``--memory-limit`` value into a byte count.
+
+    Accepts a plain byte count or a value with a binary K/M/G/T suffix
+    (e.g. ``512M``, ``8G``, ``1.5G``). A value of zero or less, or one of
+    ``none``/``off``/``disabled``/``unlimited``, disables the limit and
+    returns ``None``. Raises ``ValueError`` on anything unparseable.
+    """
+    text = value.strip().upper()
+    if text in ("NONE", "OFF", "DISABLED", "UNLIMITED"):
+        return None
+    multiplier = 1
+    if text and text[-1] in _MEMORY_UNITS:
+        multiplier = _MEMORY_UNITS[text[-1]]
+        text = text[:-1].strip()
+    try:
+        amount = float(text)
+    except ValueError:
+        raise ValueError(f"Invalid memory limit: {value!r}")
+    limit = int(amount * multiplier)
+    if limit <= 0:
+        return None
+    return limit
+
+
+def default_memory_limit() -> int:
+    """A generous default oracle memory limit: the machine's physical RAM.
+
+    A single interestingness test using more memory than the whole machine
+    has is pathological, so this is a safety net rather than a tight bound.
+    Falls back to 8 GiB when the physical size cannot be determined.
+    """
+    fallback = 8 * 1024**3
+    try:
+        pages = os.sysconf("SC_PHYS_PAGES")
+        page_size = os.sysconf("SC_PAGE_SIZE")
+    except (ValueError, OSError, AttributeError):
+        return fallback
+    if pages <= 0 or page_size <= 0:
+        return fallback
+    return pages * page_size
+
+
+def child_preexec(memory_limit: int | None) -> Callable[[], None]:
+    """Build the ``preexec_fn`` for an interestingness-test subprocess.
+
+    Always puts the child in its own session (via ``setsid``) so the whole
+    process group can be killed later, and, when a memory limit is set,
+    caps the child's address space so a runaway test cannot exhaust host
+    memory. A failure to set the limit (e.g. on macOS, which rejects
+    ``RLIMIT_AS``) is ignored so the child still launches.
+    """
+
+    def preexec() -> None:
+        os.setsid()
+        if memory_limit is not None and memory_limit > 0:
+            try:
+                resource.setrlimit(
+                    resource.RLIMIT_AS, (memory_limit, memory_limit)
+                )
+            except (ValueError, OSError):
+                pass
+
+    return preexec
+
+
+def peak_child_rss_bytes() -> int:
+    """Peak resident memory of reaped child processes, in bytes.
+
+    ``getrusage`` reports ``ru_maxrss`` in bytes on macOS/BSD and in
+    kibibytes on Linux; this normalises both to bytes.
+    """
+    ru_maxrss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    if sys.platform == "darwin":
+        return ru_maxrss
+    return ru_maxrss * 1024
 
 
 def signal_group(sp: "trio.Process", sig: int) -> None:

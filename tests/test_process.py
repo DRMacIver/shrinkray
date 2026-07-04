@@ -1,6 +1,7 @@
 """Tests for process management utilities."""
 
 import os
+import resource
 import signal
 import subprocess
 import sys
@@ -11,10 +12,123 @@ import trio
 
 from shrinkray.process import (
     _close_pipes_sync,
+    child_preexec,
+    default_memory_limit,
     interrupt_wait_and_kill,
     kill_process_group,
+    parse_memory_limit,
+    peak_child_rss_bytes,
     signal_group,
 )
+
+
+# === memory limit parsing tests ===
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("1024", 1024),
+        ("512M", 512 * 1024**2),
+        ("8G", 8 * 1024**3),
+        ("1.5G", int(1.5 * 1024**3)),
+        ("2T", 2 * 1024**4),
+        ("4K", 4 * 1024),
+        ("  8G  ", 8 * 1024**3),  # surrounding whitespace
+        ("8g", 8 * 1024**3),  # lowercase suffix
+        ("0", None),  # zero disables
+        ("-5", None),  # negative disables
+        ("none", None),
+        ("OFF", None),
+        ("disabled", None),
+        ("unlimited", None),
+    ],
+)
+def test_parse_memory_limit(value, expected):
+    assert parse_memory_limit(value) == expected
+
+
+@pytest.mark.parametrize("value", ["abc", "12x", "G", ""])
+def test_parse_memory_limit_rejects_garbage(value):
+    with pytest.raises(ValueError):
+        parse_memory_limit(value)
+
+
+def test_default_memory_limit_is_positive():
+    assert default_memory_limit() > 0
+
+
+def test_default_memory_limit_falls_back_when_unavailable():
+    with patch("shrinkray.process.os.sysconf", side_effect=ValueError):
+        assert default_memory_limit() == 8 * 1024**3
+
+
+def test_default_memory_limit_falls_back_on_nonsense_values():
+    with patch("shrinkray.process.os.sysconf", return_value=0):
+        assert default_memory_limit() == 8 * 1024**3
+
+
+# === child_preexec tests ===
+
+
+def test_child_preexec_sets_memory_rlimit():
+    with (
+        patch("shrinkray.process.os.setsid") as setsid,
+        patch("shrinkray.process.resource.setrlimit") as setrlimit,
+    ):
+        child_preexec(4 * 1024**3)()
+    setsid.assert_called_once_with()
+    setrlimit.assert_called_once_with(
+        resource.RLIMIT_AS, (4 * 1024**3, 4 * 1024**3)
+    )
+
+
+@pytest.mark.parametrize("limit", [None, 0, -1])
+def test_child_preexec_skips_rlimit_when_disabled(limit):
+    with (
+        patch("shrinkray.process.os.setsid") as setsid,
+        patch("shrinkray.process.resource.setrlimit") as setrlimit,
+    ):
+        child_preexec(limit)()
+    setsid.assert_called_once_with()
+    setrlimit.assert_not_called()
+
+
+def test_child_preexec_ignores_setrlimit_failure():
+    # macOS rejects RLIMIT_AS; a failure must not stop the child launching.
+    with (
+        patch("shrinkray.process.os.setsid"),
+        patch(
+            "shrinkray.process.resource.setrlimit",
+            side_effect=ValueError("current limit exceeds maximum limit"),
+        ),
+    ):
+        child_preexec(4 * 1024**3)()  # must not raise
+
+
+# === peak_child_rss_bytes tests ===
+
+
+def test_peak_child_rss_bytes_is_nonnegative():
+    assert peak_child_rss_bytes() >= 0
+
+
+def test_peak_child_rss_bytes_normalises_linux_kib():
+    fake = MagicMock(ru_maxrss=2048)
+    with (
+        patch("shrinkray.process.sys.platform", "linux"),
+        patch("shrinkray.process.resource.getrusage", return_value=fake),
+    ):
+        assert peak_child_rss_bytes() == 2048 * 1024
+
+
+def test_peak_child_rss_bytes_uses_bytes_on_macos():
+    fake = MagicMock(ru_maxrss=2048)
+    with (
+        patch("shrinkray.process.sys.platform", "darwin"),
+        patch("shrinkray.process.resource.getrusage", return_value=fake),
+    ):
+        assert peak_child_rss_bytes() == 2048
 
 
 # === signal_group tests ===

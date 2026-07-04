@@ -15,6 +15,7 @@ from shrinkray.problem import InvalidInitialExample, shortlex
 from shrinkray.process import kill_process_group as original_kill
 from shrinkray.state import (
     DYNAMIC_TIMEOUT_MIN,
+    MemoryLimitExceededOnInitial,
     OutputCaptureManager,
     ShrinkRayDirectoryState,
     ShrinkRayStateSingleFile,
@@ -37,6 +38,113 @@ def test_timeout_exceeded_message_includes_timeout():
     exc = TimeoutExceededOnInitial(runtime=5.5, timeout=2.0)
     assert "2.0s" in str(exc)
     assert "timeout" in str(exc).lower()
+
+
+# === memory limit tests ===
+
+
+def test_memory_limit_exceeded_stores_used_and_limit():
+    exc = MemoryLimitExceededOnInitial(used=200 * 1024**2, limit=50 * 1024**2)
+    assert exc.used == 200 * 1024**2
+    assert exc.limit == 50 * 1024**2
+
+
+def test_memory_limit_exceeded_message_mentions_memory_and_flag():
+    exc = MemoryLimitExceededOnInitial(used=200 * 1024**2, limit=50 * 1024**2)
+    assert "memory" in str(exc).lower()
+    assert "--memory-limit" in str(exc)
+
+
+@pytest.mark.parametrize("limit", [None, 0, -1])
+def test_effective_memory_limit_disabled(simple_state, limit):
+    simple_state.memory_limit = limit
+    assert simple_state.effective_memory_limit(first_call=True) is None
+    assert simple_state.effective_memory_limit(first_call=False) is None
+
+
+def test_effective_memory_limit_first_call_is_generous(simple_state):
+    simple_state.memory_limit = 1  # 1 byte configured
+    # First call gets generous headroom (physical RAM), not the tiny limit,
+    # so it can run and have its true peak measured.
+    assert simple_state.effective_memory_limit(first_call=True) > 1
+    assert simple_state.effective_memory_limit(first_call=False) == 1
+
+
+def test_raise_if_initial_over_memory_raises_when_over(simple_state):
+    simple_state.memory_limit = 50 * 1024**2
+    with patch(
+        "shrinkray.state.peak_child_rss_bytes", return_value=100 * 1024**2
+    ):
+        with pytest.raises(MemoryLimitExceededOnInitial):
+            simple_state.raise_if_initial_over_memory()
+
+
+def test_raise_if_initial_over_memory_ok_when_under(simple_state):
+    simple_state.memory_limit = 50 * 1024**2
+    with patch("shrinkray.state.peak_child_rss_bytes", return_value=1 * 1024**2):
+        simple_state.raise_if_initial_over_memory()  # must not raise
+
+
+@pytest.mark.parametrize("limit", [None, 0])
+def test_raise_if_initial_over_memory_noop_when_disabled(simple_state, limit):
+    simple_state.memory_limit = limit
+    with patch("shrinkray.state.peak_child_rss_bytes", return_value=10**12):
+        simple_state.raise_if_initial_over_memory()  # must not raise
+
+
+def _memory_hog_state(tmp_path):
+    # A test that really allocates ~200MB. With a 20MB configured limit the
+    # first call runs with generous headroom, its peak RSS is measured, and
+    # it is flagged. This is measurement-based, so it works even where the
+    # RLIMIT_AS enforcement itself is a no-op (macOS).
+    script = tmp_path / "hog.sh"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "b = bytearray(200 * 1024 * 1024)\n"
+        "assert b[0] == 0\n"
+    )
+    script.chmod(0o755)
+    target = tmp_path / "target.txt"
+    target.write_text("hello")
+
+    return ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=30.0,
+        base="target.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+        memory_limit=20 * 1024**2,
+    )
+
+
+async def test_run_script_raises_when_initial_exceeds_memory(tmp_path):
+    state = _memory_hog_state(tmp_path)
+    # The non-debug path runs the test in a nursery, so the failure arrives
+    # wrapped in an ExceptionGroup, exactly as the worker's
+    # `except* InvalidInitialExample` handler expects.
+    with pytest.raises(BaseExceptionGroup) as exc_info:
+        await state.run_script_on_file(
+            working=str(state.filename), cwd=str(tmp_path)
+        )
+    assert exc_info.value.subgroup(MemoryLimitExceededOnInitial) is not None
+
+
+async def test_run_script_debug_raises_when_initial_exceeds_memory(tmp_path):
+    state = _memory_hog_state(tmp_path)
+    # The debug path runs the test directly (no nursery), so it raises the
+    # exception unwrapped.
+    with pytest.raises(MemoryLimitExceededOnInitial):
+        await state.run_script_on_file(
+            working=str(state.filename), cwd=str(tmp_path), debug=True
+        )
 
 
 # === ShrinkRayStateSingleFile tests ===
@@ -2043,6 +2151,13 @@ async def test_run_for_exit_code_debug_mode_captures_stderr(tmp_path):
 
     # Check that stderr was captured
     assert "error from stderr" in state._last_debug_output
+
+
+async def test_build_error_message_for_memory_limit(simple_state):
+    exc = MemoryLimitExceededOnInitial(used=200 * 1024**2, limit=50 * 1024**2)
+    message = await simple_state.build_error_message(exc)
+    assert "memory" in message.lower()
+    assert "--memory-limit" in message
 
 
 async def test_build_error_message_includes_debug_output(tmp_path):

@@ -120,6 +120,7 @@ class ReductionClientProtocol(Protocol):
         test: list[str],
         parallelism: int | None = None,
         timeout: float | None = None,
+        memory_limit: int | None = None,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,
@@ -1639,6 +1640,7 @@ class ShrinkRayApp(App[None]):
         test: list[str],
         parallelism: int | None = None,
         timeout: float | None = None,
+        memory_limit: int | None = None,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,
@@ -1656,6 +1658,7 @@ class ShrinkRayApp(App[None]):
         self._test = test
         self._parallelism = parallelism
         self._timeout = timeout
+        self._memory_limit = memory_limit
         self._seed = seed
         self._input_type = input_type
         self._in_place = in_place
@@ -1821,6 +1824,7 @@ class ShrinkRayApp(App[None]):
                     test=self._test,
                     parallelism=self._parallelism,
                     timeout=self._timeout,
+                    memory_limit=self._memory_limit,
                     seed=self._seed,
                     input_type=self._input_type,
                     in_place=self._in_place,
@@ -2021,6 +2025,7 @@ def run_textual_ui(
     test: list[str],
     parallelism: int | None = None,
     timeout: float | None = None,
+    memory_limit: int | None = None,
     seed: int = 0,
     input_type: str = "all",
     in_place: bool = False,
@@ -2043,6 +2048,7 @@ def run_textual_ui(
         test=test,
         parallelism=parallelism,
         timeout=timeout,
+        memory_limit=memory_limit,
         seed=seed,
         input_type=input_type,
         in_place=in_place,

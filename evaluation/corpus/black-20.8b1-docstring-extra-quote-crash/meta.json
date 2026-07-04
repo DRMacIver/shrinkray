@@ -9,8 +9,7 @@
     "type": "venv",
     "python": "3.9",
     "requirements": ["black==20.8b1", "click==8.0.4"],
-    "command": ["sh", "-c", "black --check - < {file}"],
-    "env": {"TMPDIR": "{workdir}"}
+    "command": ["sh", "-c", "black --check - < {file}"]
   },
   "interesting": {
     "output_contains": [

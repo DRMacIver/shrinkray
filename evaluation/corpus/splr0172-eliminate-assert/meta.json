@@ -8,7 +8,7 @@
   "oracle": {
     "type": "command",
     "setup": "setup.sh",
-    "command": ["{tools}/splr-0.17.2/bin/splr", "-o", "{workdir}", "{file}"]
+    "command": ["{tools}/splr-0.17.2/bin/splr", "{file}"]
   },
   "interesting": {
     "output_contains": [
@@ -17,5 +17,6 @@
     ],
     "exit_code": 134
   },
-  "timeout": 15
+  "comment": "The assertion fires during preprocessing in well under a second; a short timeout keeps non-crashing candidates (which splr would otherwise try to fully solve) from dominating the reduction.",
+  "timeout": 3
 }

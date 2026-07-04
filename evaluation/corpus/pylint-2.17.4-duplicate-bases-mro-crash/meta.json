@@ -10,7 +10,7 @@
     "python": "3.11",
     "requirements": ["pylint==2.17.4", "astroid==2.15.5"],
     "command": ["pylint", "--persistent=n", "--score=n", "{file}"],
-    "env": {"PYLINTHOME": "{workdir}"}
+    "env": {"PYLINTHOME": "{sandbox}"}
   },
   "interesting": {
     "output_contains": [

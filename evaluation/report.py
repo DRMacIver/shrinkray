@@ -58,7 +58,7 @@ def size_cells(row: dict) -> dict:
         cells["reduced"] = reduced
         cells["nows"] = nows_size(row["reduced"])
         cells["ratio"] = f"{100 * (1 - reduced / original):.1f}%"
-    if row["result"] is not None:
+    if row["result"] is not None and row["result"].get("seconds") is not None:
         cells["seconds"] = row["result"]["seconds"]
     return cells
 

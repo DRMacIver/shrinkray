@@ -15,11 +15,23 @@ each removed.
 
 | Entry | Format | Tool | Original | Reduced | Reduced `nows` | Ratio | Seconds |
 |-------|--------|------|---------:|--------:|---------------:|------:|--------:|
+| black-20.8b1-docstring-extra-quote-crash | python | black 20.8b1 | 3124 | 17 | 15 | 99.5% | 123.9 |
 | clang35-variadic-callback-blockdecl | cpp | clang (silkeh/clang:3.5) | 1005 | 201 | 188 | 80.0% | — |
 | gcc49-pr61636-genlambda-member | cpp | gcc (gcc:4.9) | 1395 | 79 | 72 | 94.3% | — |
 | gcc49-pr64382-genlambda-template-member | cpp | gcc (gcc:4.9) | 879 | 128 | 119 | 85.4% | — |
 | gcc49-pr77739-variadic-auto-lambda | cpp | gcc (gcc:4.9) | 1004 | 166 | 160 | 83.5% | — |
 | gcc49-udlit-char-pack-template | cpp | gcc (gcc:4.9) | 834 | 126 | 122 | 84.9% | — |
+| jq-1.5-cve-2016-4074-deep-nest-segfault | json | jq 1.5 | 120426 | — | — | — | — |
+| kissat402-decide-disconnected | cnf | kissat 4.0.2 | 4295 | 536 | 349 | 87.5% | 918.2 |
+| minisat-dimacs-int-overflow | cnf | minisat 2.2 (git 37dc6c6, ASan) | 2326 | 14 | 12 | 99.4% | 1555.9 |
+| mypy-0.942-match-union-tuple-crash | python | mypy 0.942 | 2537 | 133 | 77 | 94.8% | 477.7 |
+| pylint-2.17.4-duplicate-bases-mro-crash | python | pylint 2.17.4 (astroid 2.15.5) | 2403 | 51 | 34 | 97.9% | 109.0 |
+| python-rapidjson-10-deep-nest-segfault | json | python-rapidjson 1.0 | 200426 | — | — | — | — |
+| ruff-0.0.277-isort-skip-block-panic | python | ruff 0.0.277 | 2774 | 55 | 37 | 98.0% | 20.3 |
+| shrinkray-json-deep-nesting | json | python json (deep-nesting regression) | 1495 | 608 | 602 | 59.3% | 55.8 |
+| shrinkray-libcst-deep-nesting | python | libcst 1.8.6 (deep-nesting regression) | 4378 | 800 | 800 | 81.7% | 1125.9 |
+| splr0172-eliminate-assert | cnf | splr 0.17.2 (debug-assertions) | 3148 | 329 | 209 | 89.5% | — |
+| ujson-510-indent-buffer-overflow | json | ujson 5.1.0 | 826 | 110 | 92 | 86.7% | 102.1 |
 
 ### c-reduce comparison (C/C++ entries)
 
@@ -32,6 +44,28 @@ each removed.
 | gcc49-udlit-char-pack-template | 834 | 126 | 118 | 122 | 80 |
 
 <!-- END GENERATED RESULTS -->
+
+## Notes on the multi-format entries
+
+**Robustness bugs the corpus found.** The deeply nested JSON entries (jq,
+python-rapidjson) exposed real crashes in shrink ray itself, all fixed:
+`is_python` handed deeply bracket-nested input to libcst, whose native
+parser overflowed the C stack (an uncatchable SIGSEGV); and the JSON
+passes recursed (via `json.loads` and `deepcopy`) on deep structures.
+Shrink ray now guards both — bounding libcst input by bracket depth, and
+declining JSON nested past a safe depth so it falls back to the generic
+byte passes. The two `shrinkray-*` entries are regression evaluations for
+exactly these paths.
+
+**Deep-nesting entries reduce to an inherently large floor.** jq 1.5
+(CVE-2016-4074) and python-rapidjson 1.0 crash only via recursion depth,
+so their *minimal* reproducer is still a deeply nested document — roughly
+the parser's crash-depth threshold (tens of thousands of levels). Shrink
+ray reduces them without crashing (the point of the fixes above), but the
+result stays large and the reduction is slow, so full reduced outputs are
+not committed for those two; they are kept as reproduce-and-don't-crash
+entries. The shallow ujson entry (a buffer overflow that triggers at
+modest depth) is the representative small-JSON reduction.
 
 ## C/C++ entries: shrink ray vs c-reduce
 

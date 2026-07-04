@@ -54,7 +54,11 @@ def _finish(out: list[str]) -> str:
 
 
 def _inline(s: str) -> str:
-    """Collapse whitespace and canonicalise operator spacing on a single line."""
+    """Collapse whitespace and canonicalise operator spacing on a single line.
+
+    Used for tag text nodes and Python statements, where '//' is not a comment,
+    so only string/char literals are preserved verbatim (not comments).
+    """
     out: list[str] = []
     i, n = 0, len(s)
     while i < n:
@@ -73,15 +77,6 @@ def _inline(s: str) -> str:
                     i += 1
                     break
                 i += 1
-            continue
-        if c == "/" and i + 1 < n and s[i + 1] == "/":
-            out.append(s[i:])
-            break
-        if c == "/" and i + 1 < n and s[i + 1] == "*":
-            j = s.find("*/", i + 2)
-            j = n if j < 0 else j + 2
-            out.append(s[i:j])
-            i = j
             continue
         if c.isspace():
             j = i
@@ -241,9 +236,6 @@ def _reflow_tag(s: str) -> str:
             lines.append(INDENT * max(0, depth) + text)
 
     while i < n:
-        if s[i].isspace():
-            i += 1
-            continue
         if s[i] == "<":
             if s.startswith("!--", i + 1):
                 j = s.find("-->", i)

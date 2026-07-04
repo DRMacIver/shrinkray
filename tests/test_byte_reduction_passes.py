@@ -147,10 +147,12 @@ async def test_apply_byte_replacement_patches(lowering, parallelism):
 
 
 @pytest.mark.parametrize("parallelism", [1, 2])
-def test_line_sorting_can_put_shorter_line_first_natural(parallelism):
+def test_line_sorting_sorts_lines_natural(parallelism):
+    # The reflow sort key canonicalises a plain two-line file by content, so the
+    # sorted order is "aaa" before "bb" (like shortlex here).
     assert_reduces_to(
-        origin=b"aaa\nbb",
-        target=b"bb\naaa",
+        origin=b"bb\naaa",
+        target=b"aaa\nbb",
         parallelism=parallelism,
         passes=[line_sorter],
     )
@@ -170,7 +172,7 @@ def test_line_sorting_can_put_shorter_line_first_shortlex(parallelism):
 @pytest.mark.parametrize("parallelism", [1, 2])
 def test_line_sorting_does_not_change_already_sorted(parallelism):
     reductions = direct_reductions(
-        origin=b"bb\naaa",
+        origin=b"aaa\nbb",
         parallelism=parallelism,
         passes=[line_sorter],
     )

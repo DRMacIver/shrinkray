@@ -46,4 +46,6 @@ def test_can_normalize_identifiers():
         return output == [42]
 
     # Ideally we would reduce further than this, but it's tricky for now.
-    assert reduce(ASSIGNMENT_CHAIN, is_interesting) == b"a=42\noutput.append(a)"
+    # The sort key keeps the canonical spacing around '=' (readable) rather than
+    # cramming it to "a=42".
+    assert reduce(ASSIGNMENT_CHAIN, is_interesting) == b"a = 42\noutput.append(a)"

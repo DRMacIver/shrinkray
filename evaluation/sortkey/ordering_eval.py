@@ -43,6 +43,8 @@ CRITERIA: dict[str, Callable[[str], Any]] = {
     "avg_sq_line": lambda s: sum(len(l) ** 2 for l in _lines(s)) / len(_lines(s)) ** 2,
     "line_count": lambda s: len(s.splitlines()),
     "line_len_list": lambda s: list(map(len, s.splitlines())),
+    # number of blank (whitespace-only) lines: junk the sort key should avoid
+    "blank_lines": lambda s: sum(1 for l in s.splitlines() if not l.strip()),
     # natural character order (whitespace < digits < lower < upper); final tiebreak
     "char_order": natural_string_lex,
 }
@@ -61,6 +63,20 @@ KEYS: dict[str, list[str]] = {
         "byte_len",
         "char_order",
     ],
+    # proposed + a blank-line penalty before the structure criterion, so blank
+    # lines never win a tie (fixes the avg_sq blank-line hurts).
+    "blank_aware": [
+        "nonws_len",
+        "blank_lines",
+        "avg_sq_line",
+        "line_count",
+        "line_len_list",
+        "byte_len",
+        "char_order",
+    ],
+    # content-first, then prefer the most compact byte layout (no structure
+    # criterion). Illustrates the tiny-compact vs readable-code tension.
+    "compact": ["nonws_len", "byte_len", "char_order"],
 }
 
 

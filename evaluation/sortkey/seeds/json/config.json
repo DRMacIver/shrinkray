@@ -1,0 +1,29 @@
+{
+  "service": {
+    "name": "billing-api",
+    "version": "2.4.1",
+    "listen": {
+      "host": "0.0.0.0",
+      "port": 8080,
+      "tls": {
+        "enabled": true,
+        "cert": "/etc/ssl/billing.pem",
+        "ciphers": ["ECDHE-RSA-AES128-GCM-SHA256", "ECDHE-RSA-AES256-GCM-SHA384"]
+      }
+    }
+  },
+  "database": {
+    "dsn": "postgres://localhost/billing",
+    "pool": { "min": 2, "max": 16, "timeout_seconds": 30 },
+    "replicas": [
+      { "host": "db-replica-1", "weight": 1 },
+      { "host": "db-replica-2", "weight": 2 }
+    ]
+  },
+  "features": {
+    "retry": true,
+    "dark_launch": false,
+    "sampling_rate": 0.05
+  },
+  "allowed_currencies": ["USD", "EUR", "GBP", "JPY"]
+}

@@ -82,3 +82,31 @@ uv run $DEPS python evaluation/sortkey/report.py           # render REPORT.md
 ```
 
 Each stage takes an optional list of languages, e.g. `... gather.py python json`.
+
+## Findings & open direction (2026-07-04)
+
+The `deletion_shrink` audit (delete a byte/line from a formatted instance,
+reformat, check it shrinks) found the **current sort key is essentially never
+badly wrong**: >99% of the ~6000 violations are formatter/parser quirks where
+the reformatted deleted version genuinely *is* worse — escaping (`>`→`&gt;`),
+`html5lib` injecting empty elements, `sqlglot` re-inserting an implied
+`SELECT *`, `black`'s magic trailing comma exploding an argument list, two
+`#define`s merged onto one line, etc. In all of these the sort key is *right*
+to reject the result.
+
+The one genuine ordering tension found is the **inline-comment merge**: deleting
+the newline before a standalone comment (`x\n# c` → `x  # c`) yields −1 line but
++1 byte — a cleaner, tidier form the key nonetheless rejects. The cause is
+structural: the sort key (`LazyChainedSortKey` over `NATURAL_ORDERING_FUNCTIONS`
+in `problem.py`) is a **strict lexicographic chain** that short-circuits on the
+first differing criterion, and **length is criterion #1** — so one extra byte is
+decisive and the lower criteria (line count, balance, …) only break *exact-length*
+ties, which almost never occur.
+
+**Deferred idea (not yet actioned — wants a bigger/better corpus first):**
+replace strict byte-length with some **per-character weighting** (let different
+characters cost different amounts, so e.g. a newline need not be strictly worse
+than a space), rather than a hard length gate. Other candidate levers noted:
+blend `bytes + k·lines` into one scalar; or normalize away formatter-discretion
+noise (trailing commas, comment placement) before comparing. **Do not change the
+sort key until the corpus is more complete.**

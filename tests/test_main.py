@@ -418,6 +418,36 @@ def test_memory_limit_disabled_gives_no_warning(tmpdir):
     assert "cannot be enforced" not in result.stderr
 
 
+def test_crashing_formatter_is_disabled_not_fatal(tmpdir):
+    # A formatter that crashes on the initial test case must not abort the
+    # run; shrink ray warns and reduces without it. The interestingness
+    # test only accepts the exact initial content, so nothing reduces and
+    # the run finishes promptly.
+    target = tmpdir / "hello.txt"
+    target.write_text("hello", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    script.write_text('#!/bin/bash\n[ "$(cat "$1")" = "hello" ]\n', encoding="utf-8")
+    script.chmod(0o777)
+    formatter = tmpdir / "fmt.sh"
+    formatter.write_text("#!/bin/bash\nexit 1\n", encoding="utf-8")  # crashes
+    formatter.chmod(0o777)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            str(script),
+            str(target),
+            "--ui=basic",
+            "--no-history",
+            "--parallelism=1",
+            f"--formatter={formatter}",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "continuing without formatting" in result.stderr
+
+
 @pytest.mark.slow
 def test_timeout_zero_sets_infinite(basic_shrink_target):
     runner = CliRunner(catch_exceptions=False)

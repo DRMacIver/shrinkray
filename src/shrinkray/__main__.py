@@ -321,6 +321,11 @@ def main(
         print(f"\nError: {validation_result.error_message}", file=sys.stderr)
         sys.exit(1)
 
+    if validation_result.formatter_works is False:
+        # The formatter misbehaved on the initial test case; reduce without
+        # it rather than aborting (validation already warned the user).
+        formatter = "none"
+
     print("\nStarting reduction...", file=sys.stderr, flush=True)
 
     # Determine if --also-interesting was explicitly passed

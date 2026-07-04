@@ -33,6 +33,11 @@ def _lines(s: str) -> list[str]:
     return s.split("\n")
 
 
+def _line_cost(s: str, penalty: int) -> int:
+    lines = s.splitlines()
+    return sum(len(l) ** 2 for l in lines) + penalty * len(lines)
+
+
 # Named criteria a sort order can be built from (all: str -> comparable).
 CRITERIA: dict[str, Callable[[str], Any]] = {
     # total byte length (the current primary criterion)
@@ -45,6 +50,12 @@ CRITERIA: dict[str, Callable[[str], Any]] = {
     "line_len_list": lambda s: list(map(len, s.splitlines())),
     # number of blank (whitespace-only) lines: junk the sort key should avoid
     "blank_lines": lambda s: sum(1 for l in s.splitlines() if not l.strip()),
+    # convex per-line cost with a per-line penalty P: sum(len^2) rewards breaking
+    # up a LONG line, +P*n_lines charges for each line so breaking a SHORT line
+    # isn't worth it. Captures "split long lines, keep short content together".
+    "line_cost40": lambda s: _line_cost(s, 40),
+    "line_cost60": lambda s: _line_cost(s, 60),
+    "line_cost100": lambda s: _line_cost(s, 100),
     # natural character order (whitespace < digits < lower < upper); final tiebreak
     "char_order": natural_string_lex,
 }
@@ -77,6 +88,12 @@ KEYS: dict[str, list[str]] = {
     # content-first, then prefer the most compact byte layout (no structure
     # criterion). Illustrates the tiny-compact vs readable-code tension.
     "compact": ["nonws_len", "byte_len", "char_order"],
+    # content-first, then a convex per-line cost: splits long lines but keeps
+    # short content together (so it does NOT reward fragment splits or blank
+    # lines, and prefers compact layout for tiny inputs).
+    "convex40": ["nonws_len", "line_cost40", "byte_len", "char_order"],
+    "convex60": ["nonws_len", "line_cost60", "byte_len", "char_order"],
+    "convex100": ["nonws_len", "line_cost100", "byte_len", "char_order"],
 }
 
 

@@ -427,6 +427,54 @@ HAND_PAIRS: list[dict] = [
         "rationale": "b splits short inline content onto its own line; avg_sq_line "
         "wrongly prefers it",
     },
+    # "oversplit" cases mined from the gathered corpus, where production and the
+    # convex60 candidate disagree: a MEDIUM-length line (~15-25 chars) is broken
+    # across lines. avg_sq_line and convex line_cost both reward the split
+    # (breaking a long-ish line lowers the metric), but the one-line form is
+    # clearly better. These are the residual "split quality is semantic" cases.
+    {
+        "id": "split-c-declaration",
+        "lang": "c",
+        "kind": "formatting",
+        "a": "int main(void){}\n",
+        "b": "int\nmain(void)\n{}\n",
+        "simpler": "a",
+        "confidence": "high",
+        "rationale": "b breaks a short declaration across three lines (between the "
+        "return type and name, and the body); one line is clearly better",
+    },
+    {
+        "id": "split-sql-dangling-paren",
+        "lang": "sql",
+        "kind": "formatting",
+        "a": "create table logs (id);\n",
+        "b": "create table logs (id\n);\n",
+        "simpler": "a",
+        "confidence": "high",
+        "rationale": "b splits off a dangling ');' onto its own line; one line is "
+        "clearly better",
+    },
+    {
+        "id": "split-html-doctype",
+        "lang": "html",
+        "kind": "formatting",
+        "a": "<!DOCTYPE html>\n",
+        "b": "<!DOCTYPE\nhtml>\n",
+        "simpler": "a",
+        "confidence": "high",
+        "rationale": "b splits the doctype across two lines; it belongs on one",
+    },
+    {
+        "id": "split-python-expression",
+        "lang": "python",
+        "kind": "formatting",
+        "a": "return alpha + beta\n",
+        "b": "return alpha +\nbeta\n",
+        "simpler": "a",
+        "confidence": "high",
+        "rationale": "b splits the expression after '+'; the whole expression fits "
+        "comfortably on one line",
+    },
 ]
 
 

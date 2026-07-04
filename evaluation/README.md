@@ -83,17 +83,27 @@ Each `corpus/<id>/` holds:
  "command": ["{tools}/cadical-1.5.0/build/cadical", "{file}"]}
 ```
 
+Every entry is reduced in shrink ray's **normal mode**: shrink ray runs
+each interestingness test in a fresh temp dir it creates and removes, so
+anything the tool writes beside the candidate is cleaned up (point a
+tool's own scratch there via the `{sandbox}` placeholder, e.g. pylint's
+`PYLINTHOME`).
+
 - **docker** — a persistent container per entry (started once, reused
-  across the thousands of oracle calls a reduction makes), bind-mounting
-  the work dir at `/w`. `{file}` becomes the in-container candidate path.
+  across the thousands of oracle calls a reduction makes). The candidate
+  is piped into the container on stdin (`docker exec -i`), so nothing is
+  shared into it; `{file}` is `-`, and the compiler reads stdin (`-x c++
+  -c -`).
 - **venv** — `uv venv --python <python>` + `uv pip install <requirements>`
   into `work/venv`, whose `bin` is prepended to PATH.
 - **command** — arbitrary command; `setup.sh` (run from the entry dir
   with `$TOOLS_DIR` = `evaluation/tools/`) builds the pinned tool once.
 
-Placeholders in `command` and `env` values: `{file}` (candidate copy),
-`{tools}`, `{entry}`, `{workdir}`. An optional `oracle.env` object
-exports environment variables in the check script.
+Placeholders in `command` and `env` values: `{file}` (the candidate, or
+`-` for docker stdin), `{sandbox}` (the per-test temp dir shrink ray
+cleans up), `{tools}`, `{entry}`, `{workdir}`. An optional `oracle.env`
+object exports environment variables in the check script. Progress is
+streamed to `<entry>/work/reduce.log`.
 
 ## Running
 

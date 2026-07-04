@@ -103,10 +103,25 @@ first differing criterion, and **length is criterion #1** — so one extra byte 
 decisive and the lower criteria (line count, balance, …) only break *exact-length*
 ties, which almost never occur.
 
+A sharper, genuinely-bad symptom of the same root cause: the sort key
+**systematically rates formatted code as worse than cramped code**, because
+formatting only adds whitespace (newlines, indentation) and whitespace counts
+full price under length-first ordering. Measured on the committed
+`shrinkray_reduced.{c,cpp}` evaluation outputs — with comments stripped first,
+since clang-format's `FixNamespaceComments` adds `} // namespace x` annotations
+that shouldn't count — clang-format's readable version is still rated worse in
+**5/5** cases, always on the length criterion (e.g. a 79-byte one-liner vs its
+106-byte / 10-line formatted form). Comment-stripping barely moves the numbers
+(the whitespace, not the comments, is what inflates length), so this is *why*
+the reduced C/C++ examples come out as dense unreadable blobs: the reducer is
+actively driven toward them. NB for future work: comparisons that involve a
+formatter should strip comments first.
+
 **Deferred idea (not yet actioned — wants a bigger/better corpus first):**
 replace strict byte-length with some **per-character weighting** (let different
-characters cost different amounts, so e.g. a newline need not be strictly worse
-than a space), rather than a hard length gate. Other candidate levers noted:
-blend `bytes + k·lines` into one scalar; or normalize away formatter-discretion
-noise (trailing commas, comment placement) before comparing. **Do not change the
-sort key until the corpus is more complete.**
+characters cost different amounts). This directly targets the symptom above: if
+newlines and indentation spaces are cheap, formatting barely changes the score,
+so the ordering stops preferring cramped over readable. Other candidate levers
+noted: blend `bytes + k·lines` into one scalar; or normalize away
+formatter-discretion noise (trailing commas, comment placement) before comparing.
+**Do not change the sort key until the corpus is more complete.**

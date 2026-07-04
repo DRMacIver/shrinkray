@@ -48,6 +48,7 @@ class FakeReductionClientForSnapshots:
         test: list[str],
         parallelism: int | None = None,
         timeout: float | None = None,
+        memory_limit: int | None = None,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,

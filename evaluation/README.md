@@ -120,14 +120,25 @@ minutes.
 
 ## Provenance
 
-Every entry corresponds to a real bug: `bug_url` links the upstream
-issue/PR/changelog, and `symptom` describes the failure. The C/C++
-triggers were found by screening gcc's own `g++.dg/cpp1y` testsuite and
-C++11/14 dark-corner snippets against old compiler Docker images; the
-Python/JSON/CNF entries reproduce reported crashes in pinned tool
-versions (formatters, type checkers, linters, JSON parsers, SAT
-solvers). Each trigger is then embedded in a larger realistic input and
-the failure re-verified.
+Most entries correspond to a real bug in an external tool: `bug_url`
+links the upstream issue/PR/changelog, and `symptom` describes the
+failure. The C/C++ triggers were found by screening gcc's own
+`g++.dg/cpp1y` testsuite and C++11/14 dark-corner snippets against old
+compiler Docker images; the Python/JSON/CNF entries reproduce reported
+crashes in pinned tool versions (formatters, type checkers, linters,
+JSON parsers, SAT solvers). Each trigger is then embedded in a larger
+realistic input and the failure re-verified.
+
+A few entries (`shrinkray-*`) are regression evaluations for shrink ray's
+own robustness rather than an external tool. They reduce deeply nested
+inputs that used to crash shrink ray itself — deeply bracket-nested code
+overflowed libcst's C stack in `is_python`, and deeply nested JSON
+overflowed the recursion in the JSON passes. Their interestingness test
+runs just the relevant bit of code (a bare `libcst.parse_module` /
+`json.loads`) and requires the input to stay parseable and nested past a
+threshold, so the reduced result is the minimal deeply nested trigger.
+Running shrink ray on them at all is the regression check; the reduction
+also exercises the generic passes on deep nesting.
 
 ## Comparing against c-reduce
 

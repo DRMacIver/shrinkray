@@ -1,0 +1,252 @@
+[
+  {
+    "id": "cpp-format-clang35-variadic-callback-blockdecl",
+    "lang": "cpp",
+    "kind": "formatting",
+    "a": "#include<string>\nnamespace a{using b=void(int);void l(b);template<class a>auto a(a l){static auto a=l;return[](auto){a;};}class n{public:n(std::string);void b(){l(a([]{}));}};}int n(){a::n b(0);b.b();}",
+    "b": "#include <string>\nnamespace a {\nusing b = void(int);\nvoid l(b);\ntemplate <class a> auto a(a l) {\n  static auto a = l;\n  return [](auto) { a; };\n}\nclass n {\npublic:\n  n(std::string);\n  void b() {\n    l(a([] {}));\n  }\n};\n}\nint n() {\n  a::n b(0);\n  b.b();\n}",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "same program; the readable multi-line form is the desired reduced output, not the dense one-liner"
+  },
+  {
+    "id": "cpp-format-gcc49-pr61636-genlambda-member",
+    "lang": "cpp",
+    "kind": "formatting",
+    "a": "struct c{c b(int);};class a:c{c c();};c a::c(){auto a=[&](auto a){b(a);};a(0);}",
+    "b": "struct c {\n  c b(int);\n};\nclass a : c {\n  c c();\n};\nc a::c() {\n  auto a = [&](auto a) { b(a); };\n  a(0);\n}",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "same program; the readable multi-line form is the desired reduced output, not the dense one-liner"
+  },
+  {
+    "id": "cpp-format-gcc49-pr64382-genlambda-template-member",
+    "lang": "cpp",
+    "kind": "formatting",
+    "a": "template<typename b>struct d{d a(b){auto d=[=](auto c){a(c);};a(d);}template<typename c>d a(c&d){d(0);}};template struct d<int>;",
+    "b": "template <typename b> struct d {\n  d a(b) {\n    auto d = [=](auto c) { a(c); };\n    a(d);\n  }\n  template <typename c> d a(c &d) { d(0); }\n};\ntemplate struct d<int>;",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "same program; the readable multi-line form is the desired reduced output, not the dense one-liner"
+  },
+  {
+    "id": "cpp-format-gcc49-pr77739-variadic-auto-lambda",
+    "lang": "cpp",
+    "kind": "formatting",
+    "a": "struct args{args();args(const args&);};class a{a();template<class...a>auto A(a&&...args){return[=]{write(args...);};}a write(args,const auto*);};a::a(){A(args(),\"\");}",
+    "b": "struct args {\n  args();\n  args(const args &);\n};\nclass a {\n  a();\n  template <class... a> auto A(a &&...args) {\n    return [=] { write(args...); };\n  }\n  a write(args, const auto *);\n};\na::a() { A(args(), \"\"); }",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "same program; the readable multi-line form is the desired reduced output, not the dense one-liner"
+  },
+  {
+    "id": "cpp-format-gcc49-udlit-char-pack-template",
+    "lang": "cpp",
+    "kind": "formatting",
+    "a": "template<class>class\na;template<class\nb,b...>a<b>operator\"\"_template();template<class=decltype(0_template),class\na>a\nb(a){b(0)",
+    "b": "template <class> class a;\ntemplate <class b, b...> a<b> operator\"\"_template();\ntemplate <class = decltype(0_template), class a> a b(a) {\n  b(0)",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "same program; the readable multi-line form is the desired reduced output, not the dense one-liner"
+  },
+  {
+    "id": "python-semicolons-vs-lines",
+    "lang": "python",
+    "kind": "formatting",
+    "a": "def f(x):\n    a = x + 1; b = a * 2; return b\n",
+    "b": "def f(x):\n    a = x + 1\n    b = a * 2\n    return b\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "same code; one statement per line is the readable form"
+  },
+  {
+    "id": "json-tiny-compact",
+    "lang": "json",
+    "kind": "formatting",
+    "a": "{\"a\": 1, \"b\": 2}\n",
+    "b": "{\n  \"a\": 1,\n  \"b\": 2\n}\n",
+    "simpler": "a",
+    "confidence": "medium",
+    "rationale": "a tiny object is at least as clear compact; expansion adds nothing"
+  },
+  {
+    "id": "html-tiny-compact",
+    "lang": "html",
+    "kind": "formatting",
+    "a": "<p>hi</p>\n",
+    "b": "<p>\n hi\n</p>\n",
+    "simpler": "a",
+    "confidence": "medium",
+    "rationale": "a trivial element is clearer on one line"
+  },
+  {
+    "id": "python-fewer-params-clean",
+    "lang": "python",
+    "kind": "content",
+    "a": "def f(a, b, c):\n    pass\n",
+    "b": "def f(a, b):\n    pass\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "two parameters is simpler than three"
+  },
+  {
+    "id": "python-fewer-statements",
+    "lang": "python",
+    "kind": "content",
+    "a": "x = 1\ny = 2\nz = 3\n",
+    "b": "x = 1\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "one statement is simpler than three"
+  },
+  {
+    "id": "c-remove-unused-var",
+    "lang": "c",
+    "kind": "content",
+    "a": "int f() {\n  int x = 0;\n  int y = 1;\n  return x;\n}\n",
+    "b": "int f() {\n  int x = 0;\n  return x;\n}\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "the unused variable is gone"
+  },
+  {
+    "id": "sql-fewer-columns",
+    "lang": "sql",
+    "kind": "content",
+    "a": "SELECT a, b, c FROM t;\n",
+    "b": "SELECT a FROM t;\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "one selected column is simpler than three"
+  },
+  {
+    "id": "html-fewer-list-items",
+    "lang": "html",
+    "kind": "content",
+    "a": "<ul>\n <li>a</li>\n <li>b</li>\n</ul>\n",
+    "b": "<ul>\n <li>a</li>\n</ul>\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "one list item is simpler than two"
+  },
+  {
+    "id": "python-fewer-params-magic-comma",
+    "lang": "python",
+    "kind": "content",
+    "a": "def f(a, b, c):\n    pass\n",
+    "b": "def f(\n    a,\n    b,\n):\n    pass\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "b has two parameters (fewer content) vs three; black's magic trailing comma only makes it longer, not more complex"
+  },
+  {
+    "id": "python-fewer-list-magic-comma",
+    "lang": "python",
+    "kind": "content",
+    "a": "xs = [1, 2, 3]\n",
+    "b": "xs = [\n    1,\n    2,\n]\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "b has two elements vs three; the exploded layout is incidental, the content is simpler"
+  },
+  {
+    "id": "cosmetic-ident-length",
+    "lang": "c",
+    "kind": "cosmetic",
+    "a": "int counter;\n",
+    "b": "int c;\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "shorter identifier"
+  },
+  {
+    "id": "cosmetic-ident-case",
+    "lang": "c",
+    "kind": "cosmetic",
+    "a": "int A;\n",
+    "b": "int a;\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "lowercase reads as simpler than uppercase (natural order)"
+  },
+  {
+    "id": "cosmetic-digit-choice",
+    "lang": "python",
+    "kind": "cosmetic",
+    "a": "x = 9\n",
+    "b": "x = 0\n",
+    "simpler": "b",
+    "confidence": "medium",
+    "rationale": "0 is the canonical smallest literal"
+  },
+  {
+    "id": "cosmetic-number-magnitude",
+    "lang": "python",
+    "kind": "cosmetic",
+    "a": "x = 100000\n",
+    "b": "x = 0\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "a smaller literal is simpler"
+  },
+  {
+    "id": "cosmetic-whitespace-noise",
+    "lang": "python",
+    "kind": "cosmetic",
+    "a": "x  =  1\n",
+    "b": "x = 1\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "no redundant internal spaces"
+  },
+  {
+    "id": "quirk-html-empty-element",
+    "lang": "html",
+    "kind": "quirk",
+    "a": "<ul>\n <li>\n  x\n </li>\n <li>\n </li>\n</ul>\n",
+    "b": "<ul>\n <li>\n  x\n </li>\n</ul>\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "the injected empty <li> is noise"
+  },
+  {
+    "id": "quirk-xml-stray-escape",
+    "lang": "xml",
+    "kind": "quirk",
+    "a": "<p>ok&gt;</p>\n",
+    "b": "<p>ok</p>\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "the stray escaped '>' is corruption, not content"
+  },
+  {
+    "id": "quirk-sql-mangled-alias",
+    "lang": "sql",
+    "kind": "quirk",
+    "a": "SELECT total AS FROMorders;\n",
+    "b": "SELECT total FROM orders;\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "a is a mangled parse (FROM absorbed into an alias); b is a real query"
+  },
+  {
+    "id": "quirk-cpp-define-merge",
+    "lang": "cpp",
+    "kind": "quirk",
+    "a": "#define A 1 #define B 2\n",
+    "b": "#define A 1\n#define B 2\n",
+    "simpler": "b",
+    "confidence": "high",
+    "rationale": "a merges two macros onto one line (A expands to '1 #define B 2'); b is two correct macros"
+  },
+  {
+    "id": "python-inline-comment",
+    "lang": "python",
+    "kind": "formatting",
+    "a": "x = 1\n# note\n",
+    "b": "x = 1  # note\n",
+    "simpler": "b",
+    "confidence": "low",
+    "rationale": "same code+comment; the inline form has one fewer line, but this is marginal"
+  }
+]

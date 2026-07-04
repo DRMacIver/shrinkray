@@ -67,6 +67,25 @@ looking at when deciding how a new sort key should behave.
 | XML      | `lxml` (strict)             | `lxml` `pretty_print`    |
 | HTML     | `html5lib` (strict)         | `BeautifulSoup.prettify` |
 
+## Ordering corpus (labelled pairs)
+
+`ordering_pairs.json` is a hand-curated set of pairs of similar test cases, each
+labelled with which member a *good* shrink order should treat as simpler (rank
+strictly smaller). It is the target a sort key should match, and the concrete
+testbed for tuning one. Pairs are tagged by `kind` (`formatting`, `content`,
+`cosmetic`, `quirk`) and `confidence`, and include both cases the current key
+gets right and wrong — the real cramped-vs-readable C/C++ examples, the
+magic-trailing-comma content cases, natural-order cosmetics, and formatter/parser
+corruptions (as guards). Built by `build_ordering_pairs.py` (which pulls the real
+C/C++ pairs from `evaluation/corpus/*/shrinkray_reduced.{c,cpp}`).
+
+`ordering_eval.py` scores a sort order against it — by default shrink ray's
+current key, or any `str -> comparable` function via `evaluate(key)`. The current
+key scores **16/25**: `cosmetic` 5/5, `quirk` 4/4, `content` 5/7 (misses the
+magic-comma cases), `formatting` 2/9 (misses every readable-code case). Every
+miss decides on the `length` criterion — the lever future work should target
+without regressing the cases already handled.
+
 ## Running
 
 Everything needs the extra parsers/formatters, injected with `uv run --with`:
@@ -79,6 +98,9 @@ uv run $DEPS python evaluation/sortkey/fetch_wild_seeds.py # refresh wild seeds
 uv run $DEPS python evaluation/sortkey/gather.py           # gather all corpora
 uv run $DEPS python evaluation/sortkey/inversions.py       # find inversions
 uv run $DEPS python evaluation/sortkey/report.py           # render REPORT.md
+
+uv run python evaluation/sortkey/build_ordering_pairs.py   # rebuild labelled pairs
+uv run python evaluation/sortkey/ordering_eval.py          # score sort key vs pairs
 ```
 
 Each stage takes an optional list of languages, e.g. `... gather.py python json`.

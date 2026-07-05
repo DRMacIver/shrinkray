@@ -52,7 +52,10 @@ def is_python[AnyStr: (str, bytes)](source: AnyStr) -> bool:
     try:
         libcst.parse_module(source)
         return True
-    except (SyntaxError, UnicodeDecodeError, libcst.ParserSyntaxError, Exception):
+    except Exception:
+        # libcst raises a wide variety of errors on malformed input
+        # (ParserSyntaxError, UnicodeDecodeError, plain SyntaxError, and
+        # others); any failure to parse means "not Python".
         return False
 
 

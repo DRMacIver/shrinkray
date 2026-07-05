@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator
 from copy import deepcopy
 from typing import Any
 
@@ -19,21 +20,26 @@ from shrinkray.problem import Format, ParseError, ReductionProblem
 MAX_JSON_DEPTH = 256
 
 
-def _exceeds_json_depth(value: Any, limit: int) -> bool:
-    """Whether the nesting depth of a parsed JSON value exceeds limit.
+def walk_json(value: Any) -> Iterator[tuple[Any, int]]:
+    """Yield (node, depth) for every node in a parsed JSON value.
 
-    Iterative so that checking the depth cannot itself overflow the stack.
+    Iterative so that walking cannot itself overflow the stack. A yielded
+    dict may be mutated before advancing; children removed that way are
+    not visited.
     """
     stack = [(value, 1)]
     while stack:
         node, depth = stack.pop()
-        if depth > limit:
-            return True
+        yield node, depth
         if isinstance(node, dict):
             stack.extend((child, depth + 1) for child in node.values())
         elif isinstance(node, list):
             stack.extend((child, depth + 1) for child in node)
-    return False
+
+
+def _exceeds_json_depth(value: Any, limit: int) -> bool:
+    """Whether the nesting depth of a parsed JSON value exceeds limit."""
+    return any(depth > limit for _, depth in walk_json(value))
 
 
 @define(frozen=True)
@@ -70,14 +76,9 @@ JSON = _JSON()
 
 def gather_identifiers(value: Any) -> set[str]:
     result = set()
-    stack = [value]
-    while stack:
-        target = stack.pop()
-        if isinstance(target, dict):
-            result.update(target.keys())
-            stack.extend(target.values())
-        elif isinstance(target, list):
-            stack.extend(target)
+    for node, _ in walk_json(value):
+        if isinstance(node, dict):
+            result.update(node.keys())
     return result
 
 
@@ -94,15 +95,10 @@ class DeleteIdentifiers(Patches[frozenset[str], Any]):
 
     def apply(self, patch: frozenset[str], target: Any) -> Any:
         target = deepcopy(target)
-        stack = [target]
-        while stack:
-            value = stack.pop()
-            if isinstance(value, dict):
+        for node, _ in walk_json(target):
+            if isinstance(node, dict):
                 for k in patch:
-                    value.pop(k, None)
-                stack.extend(value.values())
-            elif isinstance(value, list):
-                stack.extend(value)
+                    node.pop(k, None)
         return target
 
     def size(self, patch: frozenset[str]) -> int:

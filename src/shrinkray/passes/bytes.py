@@ -483,16 +483,26 @@ async def replace_space_with_newlines(problem: ReductionProblem[bytes]) -> None:
     )
 
 
-ReplacementPatch = dict[int, int]
+# Maps a key (a byte value or a byte position, depending on the Patches
+# subclass) to the replacement byte to write there. Note this is distinct
+# from patching.ReplacementPatch, which replaces byte *ranges*.
+ByteLoweringPatch = dict[int, int]
 
 
-class ByteReplacement(Patches[ReplacementPatch, bytes]):
+class ByteLoweringPatches(Patches[ByteLoweringPatch, bytes]):
+    """Shared structure for patches that lower bytes to smaller values.
+
+    Combining takes the smallest replacement on key collisions, and
+    patches never change the length of the target, so their size is 0.
+    Subclasses define what the patch keys refer to via apply().
+    """
+
     @property
-    def empty(self) -> ReplacementPatch:
+    def empty(self) -> ByteLoweringPatch:
         return {}
 
-    def combine(self, *patches: ReplacementPatch) -> ReplacementPatch:
-        result = {}
+    def combine(self, *patches: ByteLoweringPatch) -> ByteLoweringPatch:
+        result: ByteLoweringPatch = {}
         for p in patches:
             for k, v in p.items():
                 if k not in result:
@@ -501,14 +511,18 @@ class ByteReplacement(Patches[ReplacementPatch, bytes]):
                     result[k] = min(result[k], v)
         return result
 
-    def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
+    def size(self, patch: ByteLoweringPatch) -> int:
+        return 0
+
+
+class ByteReplacement(ByteLoweringPatches):
+    """Patches keyed by byte value: every occurrence is replaced."""
+
+    def apply(self, patch: ByteLoweringPatch, target: bytes) -> bytes:
         table = bytearray(range(256))
         for source, replacement in patch.items():
             table[source] = replacement
         return target.translate(bytes(table))
-
-    def size(self, patch: ReplacementPatch) -> int:
-        return 0
 
 
 class ByteRanks:
@@ -573,31 +587,16 @@ async def lower_bytes(problem: ReductionProblem[bytes]) -> None:
     await apply_patches(problem, ByteReplacement(), patches, early_abort=True)
 
 
-class IndividualByteReplacement(Patches[ReplacementPatch, bytes]):
-    @property
-    def empty(self) -> ReplacementPatch:
-        return {}
+class IndividualByteReplacement(ByteLoweringPatches):
+    """Patches keyed by byte position: only that position is replaced."""
 
-    def combine(self, *patches: ReplacementPatch) -> ReplacementPatch:
-        result = {}
-        for p in patches:
-            for k, v in p.items():
-                if k not in result:
-                    result[k] = v
-                else:
-                    result[k] = min(result[k], v)
-        return result
-
-    def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
+    def apply(self, patch: ByteLoweringPatch, target: bytes) -> bytes:
         # Patches are generated from and applied to the same test case, so
         # every position is in range.
         result = bytearray(target)
         for i, replacement in patch.items():
             result[i] = replacement
         return bytes(result)
-
-    def size(self, patch: ReplacementPatch) -> int:
-        return 0
 
 
 async def lower_individual_bytes(problem: ReductionProblem[bytes]) -> None:

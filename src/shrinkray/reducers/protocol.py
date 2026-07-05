@@ -6,23 +6,23 @@ base64-encoded so that arbitrary bytes survive the (textual) JSON transport.
 
 Messages shrink ray sends to the reducer:
 
-- **reduce** ``{"reduce": <base64>}`` — "reduce this test case to a fixpoint and
-  tell me when you are idle". The base64 payload is the current test case. The
-  first message the reducer receives is always a reduce request; further ones
-  arrive whenever shrink ray wants the reducer to work again (for example after
-  another pass has reduced the test case).
-- **feedback** ``{"content": <base64>, "interesting": <bool>}`` — the result of
-  the interestingness test for a query the reducer emitted, or an unsolicited
-  update to the current test case (for example after reformatting).
+- **feedback** ``{"content": <base64>, "interesting": <bool>}`` — either the
+  result of the interestingness test for a query the reducer emitted, or, when
+  the content matches no outstanding query, the current test case for the
+  reducer to work on. The reducer correlates a reply with a query by its
+  ``content``; a feedback message it did not ask for (interesting, unmatched) is
+  a fresh current test case to reduce to a fixpoint and then report ``idle`` on.
+  The first message the reducer receives is one of these, carrying the initial
+  test case.
 
 Messages the reducer sends to shrink ray:
 
 - **query** ``{"content": <base64>}`` — a candidate it wants evaluated.
-- **idle** ``{"idle": true}`` — "I have reached a fixpoint for the current
-  reduce request; I will do nothing until the next reduce request".
+- **idle** ``{"idle": true}`` — "I have reached a fixpoint for the current test
+  case; I will do nothing until I am given a new one".
 
-The reducer stays alive between reduce requests so that expensive startup (such
-as importing libcst) happens once. A reducer that instead exits at a fixpoint
+The reducer stays alive between test cases so that expensive startup (such as
+importing libcst) happens once. A reducer that instead exits at a fixpoint
 (closing its stdout) is also supported: shrink ray relaunches it next time.
 """
 
@@ -73,36 +73,15 @@ def decode_feedback(line: bytes | str) -> tuple[bytes, bool]:
     return base64.b64decode(obj["content"]), bool(obj["interesting"])
 
 
-def encode_reduce(content: bytes) -> bytes:
-    """Encode a reduce request (shrink ray -> reducer) as a protocol line."""
-    obj = {"reduce": base64.b64encode(content).decode("ascii")}
-    return (json.dumps(obj) + "\n").encode("utf-8")
-
-
 def encode_idle() -> bytes:
     """Encode an idle notification (reducer -> shrink ray) as a protocol line."""
     return (json.dumps({"idle": True}) + "\n").encode("utf-8")
 
 
-# === Message classification ===
+# === Reducer -> shrink ray message classification ===
 #
-# Each direction carries two message kinds, so the reader classifies a line into
+# This direction carries two message kinds, so the reader classifies a line into
 # a small tagged object rather than assuming which kind it is.
-
-
-@dataclass(frozen=True)
-class ReduceRequest:
-    """Shrink ray asks the reducer to reduce ``content`` to a fixpoint."""
-
-    content: bytes
-
-
-@dataclass(frozen=True)
-class Feedback:
-    """Shrink ray reports the interestingness of ``content``."""
-
-    content: bytes
-    interesting: bool
 
 
 @dataclass(frozen=True)
@@ -115,20 +94,6 @@ class Query:
 @dataclass(frozen=True)
 class Idle:
     """The reducer reports it has reached a fixpoint."""
-
-
-def parse_to_reducer(line: bytes | str) -> ReduceRequest | Feedback:
-    """Classify a message shrink ray sends to the reducer.
-
-    Raises ValueError if the line is not a recognised message.
-    """
-    obj = json.loads(line)
-    if isinstance(obj, dict):
-        if "reduce" in obj:
-            return ReduceRequest(base64.b64decode(obj["reduce"]))
-        if "content" in obj and "interesting" in obj:
-            return Feedback(base64.b64decode(obj["content"]), bool(obj["interesting"]))
-    raise ValueError("unrecognised message to reducer")
 
 
 def parse_from_reducer(line: bytes | str) -> Query | Idle:

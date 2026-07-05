@@ -25,12 +25,10 @@ from shrinkray.problem import (
     sort_key_for_initial,
 )
 from shrinkray.reducers.protocol import (
-    Feedback,
     LineReader,
-    ReduceRequest,
+    decode_feedback,
     encode_idle,
     encode_query,
-    parse_to_reducer,
 )
 from shrinkray.work import WorkContext
 
@@ -93,26 +91,29 @@ class RemoteReductionProblem(ReductionProblem[bytes]):
             self._stats.current_test_case_size = len(content)
             self._stats.reductions += 1
 
-    def handle_feedback(self, content: bytes, interesting: bool) -> None:
-        """Process one feedback message from shrink ray.
+    def handle_feedback(self, content: bytes, interesting: bool) -> bool:
+        """Try to resolve an outstanding query with a feedback message.
 
-        Updates the current test case and resolves a matching outstanding query
-        (if any). Feedback with no matching query is an unsolicited update to
-        the current test case.
+        Returns True if ``content`` matched an outstanding query (a reply),
+        resolving it and adopting the candidate as current if it is an
+        improvement. Returns False if it matched no query, in which case the
+        caller treats the feedback as a fresh current test case.
         """
-        self._consider(content, interesting)
         queue = self._waiters.get(content)
-        if queue:
-            event, slot = queue.popleft()
-            slot.append(interesting)
-            event.set()
-            if not queue:
-                del self._waiters[content]
+        if not queue:
+            return False
+        self._consider(content, interesting)
+        event, slot = queue.popleft()
+        slot.append(interesting)
+        event.set()
+        if not queue:
+            del self._waiters[content]
+        return True
 
     def set_current(self, content: bytes) -> None:
-        """Authoritatively set the current test case for a new reduce request.
+        """Authoritatively set the current test case shrink ray handed us.
 
-        Unlike adoption via feedback, this accepts ``content`` even when it is
+        Unlike adoption via a reply, this accepts ``content`` even when it is
         larger than what we hold: shrink ray is telling us what to reduce next
         (which may be bigger, e.g. after a pump).
         """
@@ -193,30 +194,29 @@ async def run_reducer(
 ) -> None:
     """Drive ``passes`` as an external reducer over the given streams.
 
-    The reducer stays alive across reduce requests: for each request it runs the
-    passes to a fixed point and reports idle, then waits for the next request. It
-    returns when shrink ray closes ``stdin_stream``.
+    The reducer stays alive across test cases: for each one shrink ray hands it
+    (as a feedback message that matches no outstanding query) it runs the passes
+    to a fixed point and reports idle, then waits for the next. It returns when
+    shrink ray closes ``stdin_stream``.
     """
     passes = list(passes)
     reader = LineReader(stdin_stream)
 
-    # The first message is a reduce request carrying the initial test case.
+    # The first message carries the initial test case.
     first = await reader.readline()
     if first is None:
         return
     try:
-        message = parse_to_reducer(first)
+        initial, _ = decode_feedback(first)
     except ValueError:
-        return
-    if not isinstance(message, ReduceRequest):
         return
 
     work = WorkContext(parallelism=parallelism, random=Random(seed))
     problem = RemoteReductionProblem(
-        message.content,
+        initial,
         send_stream=stdout_stream,
         work=work,
-        sort_key=sort_key_for_initial(message.content),
+        sort_key=sort_key_for_initial(initial),
     )
 
     reduce_send, reduce_recv = trio.open_memory_channel[None](float("inf"))
@@ -232,20 +232,19 @@ async def run_reducer(
                 if not line.strip():
                     continue
                 try:
-                    msg = parse_to_reducer(line)
+                    content, interesting = decode_feedback(line)
                 except ValueError:
                     continue
-                if isinstance(msg, Feedback):
-                    problem.handle_feedback(msg.content, msg.interesting)
-                else:  # ReduceRequest
-                    problem.set_current(msg.content)
+                # A reply resolves a query; anything else is a new test case.
+                if not problem.handle_feedback(content, interesting):
+                    problem.set_current(content)
                     await reduce_send.send(None)
             # Shrink ray is gone: unblock any pending queries and stop.
             problem.close()
             reduce_send.close()
             nursery.cancel_scope.cancel()
 
-        # Handle the initial reduce request, then wait for further ones.
+        # Reduce the initial test case, then any further ones.
         await run_passes_to_fixpoint(problem, passes)
         await problem.send_idle()
         while True:

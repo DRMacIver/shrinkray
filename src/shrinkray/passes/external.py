@@ -27,7 +27,6 @@ from shrinkray.reducers.protocol import (
     Idle,
     LineReader,
     encode_feedback,
-    encode_reduce,
     parse_from_reducer,
 )
 
@@ -45,12 +44,13 @@ async def drive_external_reducer(
     timeout: float = DEFAULT_REDUCER_TIMEOUT,
     parallelism: int = 1,
 ) -> bool:
-    """Run one reduce request against an external reducer.
+    """Reduce the current test case with an external reducer, once.
 
-    Sends the current test case as a reduce request, then answers the reducer's
-    queries (running interestingness tests up to ``parallelism`` at a time) until
-    the reducer reports idle. ``reader`` reads the reducer's output and is reused
-    across requests so buffered bytes are not lost.
+    Hands the reducer the current test case (as a feedback message, which -
+    matching no query it made - it takes as a fresh test case to reduce), then
+    answers its queries (running interestingness tests up to ``parallelism`` at a
+    time) until it reports idle. ``reader`` reads the reducer's output and is
+    reused across calls so buffered bytes are not lost.
 
     Returns True if the reducer went idle (and is still alive), or False if it
     exited (EOF) or timed out.
@@ -65,7 +65,7 @@ async def drive_external_reducer(
                 # The reducer exited; nothing more to say.
                 pass
 
-    await send(encode_reduce(problem.current_test_case))
+    await send(encode_feedback(problem.current_test_case, True))
 
     # A semaphore (not a CapacityLimiter) because it is acquired by the reader
     # loop but released by the handler task, and semaphore tokens are not bound

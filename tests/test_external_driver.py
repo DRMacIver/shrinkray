@@ -11,7 +11,6 @@ from shrinkray.reducers.protocol import (
     Query,
     decode_query,
     encode_feedback,
-    encode_reduce,
     parse_from_reducer,
 )
 from shrinkray.work import WorkContext
@@ -55,24 +54,21 @@ def test_properties() -> None:
     assert problem.sort_key(b"a") < problem.sort_key(b"ab")
 
 
-def test_handle_feedback_adopts_smaller_interesting() -> None:
+def test_handle_feedback_unmatched_returns_false() -> None:
     problem = make_problem(b"hello world\n")
-    problem.handle_feedback(b"hi\n", True)
-    assert problem.current_test_case == b"hi\n"
-    assert problem.stats.reductions == 1
-    assert problem.stats.current_test_case_size == 3
-
-
-def test_handle_feedback_ignores_larger() -> None:
-    problem = make_problem(b"hi\n")
-    problem.handle_feedback(b"a much longer thing\n", True)
-    assert problem.current_test_case == b"hi\n"
-
-
-def test_handle_feedback_ignores_uninteresting() -> None:
-    problem = make_problem(b"hello world\n")
-    problem.handle_feedback(b"hi\n", False)
+    # No outstanding query matches this content, so it is not a reply.
+    assert problem.handle_feedback(b"hi\n", True) is False
     assert problem.current_test_case == b"hello world\n"
+
+
+def test_set_current_sets_authoritatively() -> None:
+    problem = make_problem(b"hello world\n")
+    problem.set_current(b"hi\n")  # smaller
+    assert problem.current_test_case == b"hi\n"
+    # Even a larger value is adopted: shrink ray is telling us what to reduce.
+    problem.set_current(b"a much larger value\n")
+    assert problem.current_test_case == b"a much larger value\n"
+    assert problem.stats.current_test_case_size == len(b"a much larger value\n")
 
 
 # === is_interesting ===
@@ -98,10 +94,13 @@ async def test_is_interesting_awaits_feedback() -> None:
         await wait_all_tasks_blocked()
         # The query was sent, and the call is now blocked awaiting feedback.
         assert decode_query(bytes(problem._send_stream.sent)) == b"smaller\n"  # type: ignore[attr-defined]
-        problem.handle_feedback(b"smaller\n", True)
+        # The reply matches the outstanding query and adopts the candidate.
+        assert problem.handle_feedback(b"smaller\n", True) is True
 
     assert results == [True]
     assert problem.current_test_case == b"smaller\n"
+    assert problem.stats.reductions == 1
+    assert problem.stats.current_test_case_size == len(b"smaller\n")
 
 
 async def test_is_interesting_caches_results() -> None:
@@ -178,17 +177,27 @@ async def test_run_reducer_returns_on_empty_handshake() -> None:
     await query_recv.aclose()
 
 
-async def test_run_reducer_ignores_non_reduce_first_message() -> None:
-    """A first message that is not a reduce request ends the reducer."""
+async def test_run_reducer_reduces_first_message_then_exits() -> None:
+    """The first message is the initial test case; with nothing to reduce the
+    reducer reports idle and then exits when the stream closes."""
     feedback_send, feedback_recv = memory_stream_one_way_pair()
     query_send, query_recv = memory_stream_one_way_pair()
+    reader = LineReader(query_recv)
 
-    # Send feedback (not a reduce request) as the first message.
-    await feedback_send.send_all(encode_feedback(b"x = 1\n", True))
-    await feedback_send.aclose()
+    async with trio.open_nursery() as nursery:
 
-    await run_reducer([], stdin_stream=feedback_recv, stdout_stream=query_send)
-    await query_recv.aclose()
+        @nursery.start_soon
+        async def _reducer() -> None:
+            await run_reducer([], stdin_stream=feedback_recv, stdout_stream=query_send)
+            await query_send.aclose()
+
+        @nursery.start_soon
+        async def _shrinkray() -> None:
+            await feedback_send.send_all(encode_feedback(b"x = 1\n", True))
+            idle_line = await reader.readline()
+            assert idle_line is not None
+            assert isinstance(parse_from_reducer(idle_line), Idle)
+            await feedback_send.aclose()
 
 
 async def test_run_reducer_returns_on_malformed_first_message() -> None:
@@ -202,8 +211,8 @@ async def test_run_reducer_returns_on_malformed_first_message() -> None:
     await query_recv.aclose()
 
 
-async def test_run_reducer_handles_multiple_reduce_requests() -> None:
-    """The reducer stays alive and reduces again on each reduce request."""
+async def test_run_reducer_handles_multiple_test_cases() -> None:
+    """The reducer stays alive and reduces again on each new test case."""
     feedback_send, feedback_recv = memory_stream_one_way_pair()
     query_send, query_recv = memory_stream_one_way_pair()
     reader = LineReader(query_recv)
@@ -213,9 +222,9 @@ async def test_run_reducer_handles_multiple_reduce_requests() -> None:
         if len(current) > 1:
             await problem.is_interesting(current[:-1])
 
-    async def one_session(request_content: bytes) -> bytes:
-        """Send a reduce request, answer its single query (False), await idle."""
-        await feedback_send.send_all(encode_reduce(request_content))
+    async def one_session(test_case: bytes) -> bytes:
+        """Hand over a test case, answer its single query (False), await idle."""
+        await feedback_send.send_all(encode_feedback(test_case, True))
         query_line = await reader.readline()
         assert query_line is not None
         query = parse_from_reducer(query_line)
@@ -239,11 +248,11 @@ async def test_run_reducer_handles_multiple_reduce_requests() -> None:
 
         @nursery.start_soon
         async def _shrinkray() -> None:
-            # First reduce request.
+            # First test case (consumed as the initial).
             assert await one_session(b"abcd") == b"abc"
-            # A malformed message between requests is ignored.
+            # A malformed message between test cases is ignored.
             await feedback_send.send_all(b"junk\n")
-            # Second reduce request with a different (smaller) current.
+            # A second, different test case handed over while the reducer is idle.
             assert await one_session(b"xy") == b"x"
             await feedback_send.aclose()
 
@@ -292,7 +301,7 @@ async def test_run_reducer_skips_blank_lines() -> None:
         @nursery.start_soon
         async def _shrinkray() -> None:
             reader = LineReader(query_recv)
-            await feedback_send.send_all(encode_reduce(b"x = 1\n"))
+            await feedback_send.send_all(encode_feedback(b"x = 1\n", True))
             await feedback_send.send_all(b"\n")  # blank line: should be skipped
             query_line = await reader.readline()
             assert query_line is not None

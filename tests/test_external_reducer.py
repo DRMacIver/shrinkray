@@ -23,12 +23,10 @@ from shrinkray.reducers import python as python_reducer_module
 from shrinkray.reducers.driver import run_reducer
 from shrinkray.reducers.protocol import (
     LineReader,
-    ReduceRequest,
     decode_feedback,
+    encode_feedback,
     encode_idle,
     encode_query,
-    encode_reduce,
-    parse_to_reducer,
 )
 from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
@@ -226,8 +224,8 @@ def test_python_reducer_serve_over_pipes() -> None:
     feedback_read, feedback_write = os.pipe()
     query_read, query_write = os.pipe()
 
-    # Send one reduce request, then close, so the reducer sees EOF and exits.
-    os.write(feedback_write, encode_reduce(b"x = 1\n"))
+    # Send one test case, then close, so the reducer sees EOF and exits.
+    os.write(feedback_write, encode_feedback(b"x = 1\n", True))
     os.close(feedback_write)
 
     def fake_dup(fd: int) -> int:
@@ -314,10 +312,12 @@ async def test_drive_ignores_blank_and_malformed_queries() -> None:
         @nursery.start_soon
         async def _reducer() -> None:
             fb_reader = LineReader(fb_recv)
-            request_line = await fb_reader.readline()
-            assert request_line is not None
-            request = parse_to_reducer(request_line)
-            assert isinstance(request, ReduceRequest)
+            first_line = await fb_reader.readline()
+            assert first_line is not None
+            # The first message is the current test case, handed over as feedback.
+            content, interesting = decode_feedback(first_line)
+            assert content == b"hello world\n"
+            assert interesting is True
             await q_send.send_all(b"\n")  # blank: skipped
             await q_send.send_all(b"garbage not json\n")  # malformed: skipped
             await q_send.send_all(encode_query(b"h\n"))  # valid
@@ -418,8 +418,8 @@ async def test_external_reducer_writes_stderr_to_log(tmp_path) -> None:
     assert b"hello from reducer" in log_file.read_bytes()
 
 
-# A trivial persistent reducer: for each reduce request it immediately reports
-# idle (and never queries), staying alive until its stdin closes.
+# A trivial persistent reducer: for each test case it is handed it immediately
+# reports idle (and never queries), staying alive until its stdin closes.
 _IDLE_REDUCER = (
     "import sys, json\n"
     "for line in sys.stdin:\n"
@@ -427,7 +427,7 @@ _IDLE_REDUCER = (
     "    if not line:\n"
     "        continue\n"
     "    obj = json.loads(line)\n"
-    "    if 'reduce' in obj:\n"
+    "    if 'content' in obj:\n"
     "        sys.stdout.write('{\"idle\": true}\\n'); sys.stdout.flush()\n"
 )
 

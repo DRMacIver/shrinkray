@@ -12,7 +12,11 @@ import tempfile
 import pytest
 
 from shrinkray.cli import InputType
-from shrinkray.history import HistoryManager, sanitize_for_filename
+from shrinkray.history import (
+    HistoryManager,
+    deserialize_directory,
+    sanitize_for_filename,
+)
 
 
 # === sanitize_for_filename tests ===
@@ -1015,14 +1019,14 @@ def test_read_directory_content() -> None:
 
 
 def test_deserialize_directory() -> None:
-    """Test _deserialize_directory parses serialized content."""
+    """Test deserialize_directory parses serialized content."""
     original = {"file.txt": b"hello\x00world", "other.bin": b"\xff\xfe"}
     serialized = json.dumps(
         {k: base64.b64encode(v).decode() for k, v in sorted(original.items())},
         sort_keys=True,
     ).encode()
 
-    result = HistoryManager._deserialize_directory(serialized)
+    result = deserialize_directory(serialized)
     assert result == original
 
 

@@ -13,6 +13,7 @@ import trio
 import shrinkray.state as state_mod
 from shrinkray.adaptive_timeout import MIN_TIMEOUT, AdaptiveTimeoutPolicy
 from shrinkray.cli import InputType
+from shrinkray.history import deserialize_directory, serialize_directory
 from shrinkray.problem import InvalidInitialExample, shortlex
 from shrinkray.process import kill_process_group as original_kill
 from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
@@ -3763,7 +3764,7 @@ def test_directory_state_set_initial_for_restart_works(tmp_path):
 
     # Serialize new content
     new_content = {"file.txt": b"world", "other.txt": b"test"}
-    serialized = state._serialize_directory(new_content)
+    serialized = serialize_directory(new_content)
 
     # Set initial for restart
     state._set_initial_for_restart(serialized)
@@ -3808,7 +3809,7 @@ async def test_directory_state_excluded_test_cases(tmp_path):
 
     # Create exclusion set with serialized directory content
     excluded_content = {"file.txt": b"excluded"}
-    excluded_serialized = state._serialize_directory(excluded_content)
+    excluded_serialized = serialize_directory(excluded_content)
     state.excluded_test_cases = {excluded_serialized}
 
     # The excluded value should be rejected
@@ -3826,8 +3827,8 @@ def test_directory_state_serialize_deserialize_roundtrip():
         "binary.bin": bytes(range(256)),  # Binary content
     }
 
-    serialized = ShrinkRayDirectoryState._serialize_directory(original)
-    deserialized = ShrinkRayDirectoryState._deserialize_directory(serialized)
+    serialized = serialize_directory(original)
+    deserialized = deserialize_directory(serialized)
 
     assert deserialized == original
 

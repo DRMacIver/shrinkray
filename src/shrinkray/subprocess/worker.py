@@ -19,8 +19,8 @@ from shrinkray.passes.llm import DEFAULT_MODEL_SPEC
 from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import (
     OutputCaptureManager,
-    ShrinkRayDirectoryState,
     ShrinkRayStateSingleFile,
+    load_state_for_path,
 )
 from shrinkray.subprocess.protocol import (
     PassStatsData,
@@ -226,39 +226,26 @@ class ReducerWorker:
         llm_model = params.get("llm_model", DEFAULT_MODEL_SPEC)
         llm_only = params.get("llm_only", False)
 
-        state_kwargs: dict[str, Any] = {
-            "input_type": input_type,
-            "in_place": in_place,
-            "test": test,
-            "timeout": timeout,
-            "memory_limit": memory_limit,
-            "base": os.path.basename(filename),
-            "parallelism": parallelism,
-            "filename": filename,
-            "formatter": formatter,
-            "trivial_is_error": trivial_is_error,
-            "seed": seed,
-            "volume": volume,
-            "history_enabled": history_enabled,
-            "also_interesting_code": also_interesting_code,
-            "external_reducers": external_reducers,
-            "python_reducer": python_reducer,
-            "llm_enabled": llm_enabled,
-            "llm_model": llm_model,
-            "llm_only": llm_only,
-        }
-
-        if os.path.isdir(filename):
-            files = [os.path.join(d, f) for d, _, fs in os.walk(filename) for f in fs]
-            initial = {}
-            for f in files:
-                with open(f, "rb") as i:
-                    initial[os.path.relpath(f, filename)] = i.read()
-            self.state = ShrinkRayDirectoryState(initial=initial, **state_kwargs)
-        else:
-            with open(filename, "rb") as reader:
-                initial = reader.read()
-            self.state = ShrinkRayStateSingleFile(initial=initial, **state_kwargs)
+        self.state = load_state_for_path(
+            filename=filename,
+            input_type=input_type,
+            in_place=in_place,
+            test=test,
+            timeout=timeout,
+            memory_limit=memory_limit,
+            parallelism=parallelism,
+            formatter=formatter,
+            trivial_is_error=trivial_is_error,
+            seed=seed,
+            volume=volume,
+            history_enabled=history_enabled,
+            also_interesting_code=also_interesting_code,
+            external_reducers=external_reducers,
+            python_reducer=python_reducer,
+            llm_enabled=llm_enabled,
+            llm_model=llm_model,
+            llm_only=llm_only,
+        )
 
         # Create output manager for test output capture (always enabled for TUI)
         self._output_dir = tempfile.mkdtemp(prefix="shrinkray-output-")

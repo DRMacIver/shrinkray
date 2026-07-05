@@ -63,7 +63,7 @@ def test_canonicalises_layout_variants(a, b):
 
 def test_brace_braces_and_semicolons():
     out = basic_format("struct S{int a;int b;};")
-    assert out == "struct S {\n  int a;\n  int b;\n}\n;\n"
+    assert out == "struct S {\n  int a;\n  int b;\n};\n"
 
 
 def test_brace_nested_indentation():
@@ -74,6 +74,12 @@ def test_brace_nested_indentation():
 def test_brace_empty_braces_stay_together():
     assert basic_format("function() {}") == "function() {}\n"
     assert basic_format("f() { }") == "f() {}\n"
+
+
+def test_brace_semicolon_attaches_to_close_brace():
+    # a struct/class/enum trailing ';' stays on the '}' line
+    assert basic_format("struct S{int a;};") == "struct S {\n  int a;\n};\n"
+    assert basic_format("} ;") == "};\n"
 
 
 def test_brace_preserves_string_literal_with_specials():

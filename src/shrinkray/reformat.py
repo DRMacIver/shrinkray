@@ -205,7 +205,13 @@ def _reflow_brace(s: str) -> str:
             i += 1
             continue
         if c == ";":
-            emit(";")
+            # keep a semicolon attached to a preceding "}" on the same line
+            # (e.g. a struct/class/enum declaration: "};")
+            if not line_started and len(out) >= 2 and out[-1] == "\n" and out[-2] == "}":
+                out.pop()
+                out.append(";")
+            else:
+                emit(";")
             newline()
             i += 1
             continue

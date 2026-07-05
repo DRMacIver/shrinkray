@@ -1429,8 +1429,6 @@ async def test_attempt_format_with_formatter(tmp_path):
     assert state.can_format is False
 
 
-
-
 async def test_print_exit_message_formatting_increase(tmp_path, capsys):
     """Test print_exit_message when formatting increases size.
 
@@ -1550,8 +1548,6 @@ async def test_check_formatter_none(tmp_path):
     # check_formatter should return immediately without doing anything
     # (no exception, no side effects)
     await state.check_formatter()
-
-
 
 
 async def test_report_error_flaky_test(tmp_path, capsys):
@@ -4045,7 +4041,9 @@ async def test_reduction_notes_progress_to_policy(tmp_path):
     state = make_adaptive_state(tmp_path, "#!/bin/bash\nexit 0")
     problem = state.problem
     with patch.object(
-        state.timeout_policy, "note_reduction", wraps=state.timeout_policy.note_reduction
+        state.timeout_policy,
+        "note_reduction",
+        wraps=state.timeout_policy.note_reduction,
     ) as note:
         assert await problem.is_interesting(b"hello")
         note.assert_called_once()
@@ -4071,9 +4069,7 @@ if [ "$content" = "hello world" ]; then exit 0; fi
 if [ "$content" = "hello" ]; then sleep 0.4; exit 0; fi
 exit 1
 """
-    state = make_adaptive_state(
-        tmp_path, script_body, timeout=10.0, min_timeout=0.15
-    )
+    state = make_adaptive_state(tmp_path, script_body, timeout=10.0, min_timeout=0.15)
     await state.problem.setup()
     await state.reducer.run()
     assert state.problem.current_test_case == b"hello"

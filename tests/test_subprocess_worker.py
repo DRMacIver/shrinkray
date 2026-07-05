@@ -723,9 +723,7 @@ async def test_worker_emit_progress_updates_no_parallel_attr():
     worker.reducer = mock_reducer
 
     # State without parallel_tasks_running attribute
-    mock_state = MagicMock(
-        spec=["output_manager", "history_manager", "timeout_policy"]
-    )
+    mock_state = MagicMock(spec=["output_manager", "history_manager", "timeout_policy"])
     mock_state.output_manager = None  # No test output capture
     mock_state.history_manager = None  # No history
     mock_state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)

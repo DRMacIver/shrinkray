@@ -50,6 +50,31 @@ If you encounter a case where suppression seems genuinely necessary and principl
 
 Shrink Ray is a standalone application, not a library. Do not add backward compatibility shims, re-exports, or compatibility layers when refactoring. When moving code between modules, update all imports directly rather than re-exporting from the old location.
 
+### Changelog
+
+Shrink Ray keeps a user-facing `CHANGELOG.md`, assembled Hypothesis/Hegel-style
+from per-change `RELEASE.md` files.
+
+- **Any change that touches `src/` or `pyproject.toml` MUST add a `RELEASE.md` at
+  the repository root.** CI enforces this on PRs (`just check-release` locally).
+- Because Shrink Ray uses calver, there is **no release-type flag** — `RELEASE.md`
+  is just the changelog entry body (Markdown).
+- At release time the auto-release job folds `RELEASE.md` into `CHANGELOG.md` under
+  the new version heading and deletes it. You never edit `CHANGELOG.md` by hand.
+
+Write the entry for **users of the `shrinkray` command**, not for developers:
+
+- Describe **visible effects** (new/changed CLI options, behaviour, output, bug
+  fixes). Never mention Python modules, functions, internal refactors, tests,
+  types, or coverage.
+- Be **concise**: one or two sentences per change.
+- Use a **bullet-pointed list** when there is more than one change; avoid long
+  paragraphs.
+- Purely internal changes (refactors, test-only work) still need a `RELEASE.md`;
+  its body should just be `- No user-visible changes.`
+
+See the `writing-a-changelog-entry` skill for details and examples.
+
 ### CLAUDE.md as Source of Truth
 
 This file is the source of truth for project conventions. However:

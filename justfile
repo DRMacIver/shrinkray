@@ -49,6 +49,10 @@ docs:
     rm -rf docs/_build
     uv run sphinx-autobuild --open-browser docs docs/_build
 
+# Check that source changes on this branch include a RELEASE.md changelog entry
+check-release *args: install
+    uv run python scripts/check_release_file.py {{ args }}
+
 # Run the default CI checks (lint, tests)
 ci: lint test
 

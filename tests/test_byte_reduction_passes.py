@@ -50,7 +50,14 @@ def test_short_deletions_can_delete_brackets() -> None:
 @example(b"aaab")  # Triggers branch 103->102 (overlapping indices skipped)
 @given(st.binary())
 def test_ngram_endpoints(b):
-    find_ngram_endpoints(b)
+    for k, indices in find_ngram_endpoints(b):
+        # Each entry is a non-empty ngram at in-bounds, ordered positions,
+        # and every position holds the same ngram.
+        assert k >= 1
+        assert indices
+        assert indices == sorted(indices)
+        assert all(0 <= i and i + k <= len(b) for i in indices)
+        assert len({b[i : i + k] for i in indices}) == 1
 
 
 def test_debracket():

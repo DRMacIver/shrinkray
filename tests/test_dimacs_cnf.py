@@ -146,11 +146,12 @@ def test_boolean_equivalence_find_zero_error():
 
 
 def test_boolean_equivalence_merge_same():
-    """Test BooleanEquivalence.merge with same values."""
+    """Test BooleanEquivalence.merge with same values is a no-op."""
 
     be = BooleanEquivalence()
-    be.merge(1, 1)  # Should be a no-op
-    # Should not raise
+    be.merge(1, 1)
+    assert be.find(1) == 1
+    assert be.find(-1) == -1
 
 
 def test_boolean_equivalence_merge_contradiction():

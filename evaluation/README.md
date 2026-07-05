@@ -4,7 +4,8 @@ A corpus of **real bugs in real tools** — inputs that make a specific
 pinned version of a compiler, formatter, linter, JSON parser, or SAT
 solver crash — used to evaluate shrink ray's reduction quality on
 realistic material across the formats it supports (C/C++, Python, JSON,
-DIMACS CNF), and to compare it against other reducers.
+DIMACS CNF, and tree-sitter-grammar languages like Go, Rust, and
+JavaScript), and to compare it against other reducers.
 
 Each entry is a plausible, pre-reduction-sized input with a genuine bug
 trigger buried inside realistic scaffolding (application-shaped code,
@@ -17,9 +18,13 @@ shrink ray dispatches for that format.
 ```
 evaluation/
 ├── run.py        # reduce entries with shrink ray, write result.json
+├── watch.py      # run one entry interactively in the TUI (records nothing)
 ├── report.py     # regenerate the tables in RESULTS.md
+├── benchmark.py  # measure reducer efficiency (interestingness calls) against cheap in-process oracles
+├── benchmark_baseline.json  # committed benchmark metrics for main (compare with benchmark.py --baseline)
 ├── RESULTS.md    # generated tables + hand-written analysis
 ├── corpus/<id>/  # one directory per bug
+├── sortkey/      # sort-key tuning corpus (see sortkey/README.md)
 └── creduce/      # c-reduce comparison driver (C/C++ entries)
 ```
 
@@ -116,10 +121,22 @@ python3 evaluation/run.py --check
 python3 evaluation/run.py
 
 # Reduce / check specific entries
-python3 evaluation/run.py mypy-0971-crash-example
+python3 evaluation/run.py mypy-0.942-match-union-tuple-crash
 
 # Regenerate the tables in RESULTS.md
 python3 evaluation/report.py
+```
+
+To *watch* a reduction in shrink ray's normal interactive TUI, use
+`watch.py`. It sets up the entry's oracle exactly as run.py would, but
+always restarts from the original input, runs attached to your terminal,
+and records nothing (it reduces `<entry>/work/watch<ext>`, leaving
+run.py's resumable state and the committed results untouched). Unknown
+arguments are forwarded to shrinkray:
+
+```bash
+python3 evaluation/watch.py ruff-0.0.277-isort-skip-block-panic
+python3 evaluation/watch.py pylint-2.17.4-duplicate-bases-mro-crash --parallelism 4
 ```
 
 The C/C++ entries use amd64-only compiler images which run under
@@ -152,10 +169,10 @@ also exercises the generic passes on deep nesting.
 
 ## Comparing against c-reduce
 
-`creduce/` holds a driver that reduces the C/C++ entries with c-reduce
-2.11.0 (and its bundled `clang_delta`) against the identical
-compiler-in-Docker oracle, so the two tools are compared on equal
-footing. Build the c-reduce host image once, then run the driver:
+`creduce/` holds a driver that reduces the C/C++ entries with the
+Debian-packaged c-reduce (2.11.0 on bookworm, with its bundled
+`clang_delta`) against the identical compiler-in-Docker oracle, so the
+two tools are compared on equal footing. Build the c-reduce host image once, then run the driver:
 
 ```bash
 docker build --platform linux/amd64 -t creduce-host \

@@ -12,13 +12,17 @@ import tempfile
 import time
 from abc import ABC, abstractmethod
 from collections import deque
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
-from typing import Any
+from typing import IO, Any
 
+import attrs
 import humanize
 import trio
 from attrs import define
 
+from shrinkray.adaptive_timeout import AdaptiveTimeoutPolicy
 from shrinkray.cli import InputType
 from shrinkray.formatting import default_reformat_data, determine_formatter_command
 from shrinkray.history import (
@@ -27,8 +31,10 @@ from shrinkray.history import (
     serialize_directory,
 )
 from shrinkray.passes.cpp import C_FILE_EXTENSIONS
+from shrinkray.passes.treesitter import loadable_language_for_filename
 from shrinkray.problem import (
     BasicReductionProblem,
+    InterestingnessResult,
     InvalidInitialExample,
     ReductionProblem,
     sort_key_for_initial,
@@ -42,6 +48,27 @@ from shrinkray.process import (
 )
 from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
+
+
+@contextmanager
+def stdin_source(input_type: InputType, working: str) -> Iterator[IO[bytes] | int]:
+    """The stdin to give an interestingness-test subprocess.
+
+    When the stdin input type is enabled, this is the working file itself,
+    opened for reading, rather than its contents fed through a pipe. Piped
+    bytes deadlock on OpenBSD when the test case is bigger than the pipe
+    buffer and the script exits without reading stdin: OpenBSD's kqueue
+    never reports the pipe's write end as writable once the read end is
+    closed, so trio's stdin-feeder task blocks forever
+    (https://github.com/DRMacIver/shrinkray/issues/56). A real file
+    descriptor involves no feeder task at all, and also avoids copying the
+    whole test case through a pipe on every call.
+    """
+    if input_type.enabled(InputType.stdin) and not os.path.isdir(working):
+        with open(working, "rb") as f:
+            yield f
+    else:
+        yield subprocess.DEVNULL
 
 
 class TimeoutExceededOnInitial(InvalidInitialExample):
@@ -64,23 +91,23 @@ class MemoryLimitExceededOnInitial(InvalidInitialExample):
         )
 
 
-# Constants for dynamic timeout
+# The first call to the interestingness test is given generous headroom so
+# that we can measure its true runtime (and report clearly if it exceeds an
+# explicitly configured timeout) rather than killing it prematurely. When no
+# timeout was configured this fixed calibration timeout is used; afterwards
+# the AdaptiveTimeoutPolicy chooses timeouts from measured runtimes.
 DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT = 300.0  # 5 minutes for first call
-DYNAMIC_TIMEOUT_MULTIPLIER = 10
-DYNAMIC_TIMEOUT_MAX = 300.0  # 5 minutes maximum
-DYNAMIC_TIMEOUT_MIN = 1.0  # 1 second minimum to prevent edge cases
 
 
-def compute_dynamic_timeout(runtime: float) -> float:
-    """Compute dynamic timeout based on measured runtime.
+@define(frozen=True)
+class ScriptRunResult:
+    """The result of a single run of the interestingness test script."""
 
-    The timeout is set to 10x the measured runtime, clamped between
-    DYNAMIC_TIMEOUT_MIN and DYNAMIC_TIMEOUT_MAX.
-    """
-    return max(
-        DYNAMIC_TIMEOUT_MIN,
-        min(runtime * DYNAMIC_TIMEOUT_MULTIPLIER, DYNAMIC_TIMEOUT_MAX),
-    )
+    exit_code: int
+    # Whether the run was killed because it hit the timeout, and if so
+    # which timeout (in seconds) it was subject to.
+    timed_out: bool = False
+    timeout_used: float | None = None
 
 
 @define
@@ -220,7 +247,15 @@ class ShrinkRayState[TestCase](ABC):
     can_format: bool = True
     formatter_command: list[str] | None = None
 
-    first_call_time: float | None = None
+    # Chooses the timeout for each interestingness test run, adapting to
+    # measured runtimes. `timeout` (the user-specified value) acts as its
+    # maximum. Injectable for testing.
+    timeout_policy: AdaptiveTimeoutPolicy = attrs.field(
+        default=attrs.Factory(
+            lambda self: AdaptiveTimeoutPolicy(user_timeout=self.timeout),
+            takes_self=True,
+        )
+    )
 
     # Stores the output from the last debug run
     _last_debug_output: str = ""
@@ -241,6 +276,11 @@ class ShrinkRayState[TestCase](ABC):
     # Also-interesting exit code (None = disabled)
     # When a test returns this code, it's recorded but not used for reduction
     also_interesting_code: int | None = None
+
+    # External reducers (argv lists) to run as reduction passes, and whether to
+    # run the built-in Python reducer. Passed through to the reducer.
+    external_reducers: list[list[str]] = attrs.Factory(list)
+    python_reducer: bool = True
 
     # Set of test cases to exclude from interestingness (for restart-from-point)
     # These are byte-identical matches of previously reduced values
@@ -359,6 +399,16 @@ class ShrinkRayState[TestCase](ABC):
             output = self._get_last_captured_output()
             self.history_manager.record_also_interesting(test_case_bytes, output)
 
+    def reducer_log_dir(self) -> str | None:
+        """Directory for external reducer stderr logs, or None to discard them.
+
+        Uses a subdirectory of the run's history directory when history is
+        enabled, so reducer logs live alongside the run's other artifacts.
+        """
+        if self.history_manager is not None:
+            return os.path.join(self.history_manager.history_dir, "reducers")
+        return None
+
     @abstractmethod
     def new_reducer(self, problem: ReductionProblem[TestCase]) -> Reducer[TestCase]: ...
 
@@ -411,7 +461,7 @@ class ShrinkRayState[TestCase](ABC):
 
     async def run_script_on_file(
         self, working: str, cwd: str, debug: bool = False
-    ) -> int:
+    ) -> ScriptRunResult:
         if not os.path.exists(working):
             raise ValueError(f"No such file {working}")
         if self.input_type.enabled(InputType.arg):
@@ -425,18 +475,15 @@ class ShrinkRayState[TestCase](ABC):
             "cwd": cwd,
             "check": False,
         }
-        if self.input_type.enabled(InputType.stdin) and not os.path.isdir(working):
-            with open(working, "rb") as i:
-                kwargs["stdin"] = i.read()
-        else:
-            kwargs["stdin"] = b""
 
         # For debug mode, use simpler approach to capture output
         if debug:
             kwargs["capture_stdout"] = True
             kwargs["capture_stderr"] = True
             start_time = time.time()
-            completed = await trio.run_process(command, **kwargs)
+            with stdin_source(self.input_type, working) as stdin:
+                kwargs["stdin"] = stdin
+                completed = await trio.run_process(command, **kwargs)
             runtime = time.time() - start_time
 
             # Check for timeout violation (only when timeout is explicitly set)
@@ -450,9 +497,6 @@ class ShrinkRayState[TestCase](ABC):
 
             if self.first_call:
                 self.initial_exit_code = completed.returncode
-                # Set dynamic timeout if not explicitly specified
-                if self.timeout is None:
-                    self.timeout = compute_dynamic_timeout(runtime)
                 self.first_call = False
                 self.raise_if_initial_over_memory()
             else:
@@ -466,7 +510,7 @@ class ShrinkRayState[TestCase](ABC):
                 output_parts.append(completed.stderr.decode("utf-8", errors="replace"))
             self._last_debug_output = "\n".join(output_parts).strip()
 
-            return completed.returncode
+            return ScriptRunResult(exit_code=completed.returncode)
 
         # Determine output handling
         test_id: int | None = None
@@ -497,7 +541,11 @@ class ShrinkRayState[TestCase](ABC):
                     return trio.run_process(command, **kwargs, task_status=task_status)
 
                 start_time = time.time()
-                sp = await nursery.start(call_with_kwargs)
+                # nursery.start returns once the child has been spawned and
+                # inherited the stdin descriptor, so it can be closed then.
+                with stdin_source(self.input_type, working) as stdin:
+                    kwargs["stdin"] = stdin
+                    sp = await nursery.start(call_with_kwargs)
 
                 try:
                     # Determine effective timeout for this call
@@ -508,18 +556,22 @@ class ShrinkRayState[TestCase](ABC):
                         else:
                             effective_timeout = self.timeout * 10
                     else:
-                        # For subsequent calls, timeout must be set (either explicit or computed)
-                        assert self.timeout is not None
-                        effective_timeout = self.timeout
+                        effective_timeout = self.timeout_policy.current_timeout()
 
                     with trio.move_on_after(effective_timeout):
                         await sp.wait()
 
                     runtime = time.time() - start_time
+                    timed_out = sp.returncode is None
 
-                    if sp.returncode is None:
+                    if timed_out:
                         # Process didn't terminate before timeout - kill it
                         await interrupt_wait_and_kill(sp)
+                        self.timeout_policy.record_timeout(effective_timeout)
+                    else:
+                        self.timeout_policy.record_completion(
+                            runtime, interesting=sp.returncode == 0
+                        )
 
                     # Check for timeout violation (only when timeout is explicitly set)
                     if (
@@ -537,17 +589,17 @@ class ShrinkRayState[TestCase](ABC):
                 finally:
                     if self.first_call:
                         self.initial_exit_code = sp.returncode
-                        # Set dynamic timeout if not explicitly specified
-                        if self.timeout is None:
-                            runtime = time.time() - start_time
-                            self.timeout = compute_dynamic_timeout(runtime)
                     self.first_call = False
 
                 result: int | None = sp.returncode
                 assert result is not None
                 exit_code = result
 
-                return result
+                return ScriptRunResult(
+                    exit_code=result,
+                    timed_out=timed_out,
+                    timeout_used=effective_timeout if timed_out else None,
+                )
         finally:
             # Kill entire process group to clean up child processes.
             # The subprocess uses setsid (preexec_fn=os.setsid), so child
@@ -584,7 +636,9 @@ class ShrinkRayState[TestCase](ABC):
                     )
                 self.output_manager.mark_completed(test_id, recorded_code)
 
-    async def run_for_exit_code(self, test_case: TestCase, debug: bool = False) -> int:
+    async def run_for_result(
+        self, test_case: TestCase, debug: bool = False
+    ) -> ScriptRunResult:
         if self.in_place:
             if self.input_type == InputType.basename:
                 working = self.filename
@@ -660,10 +714,11 @@ class ShrinkRayState[TestCase](ABC):
         )
 
         problem: BasicReductionProblem[TestCase] = BasicReductionProblem(
-            is_interesting=self.is_interesting,
+            is_interesting=self.check_interesting,
             initial=self.initial,
             work=work,
             sort_key=sort_key_for_initial(self.initial),
+            unstick=self._attempt_unstick,
             **self.extra_problem_kwargs,
         )
 
@@ -697,8 +752,20 @@ class ShrinkRayState[TestCase](ABC):
             async with write_lock:
                 await self.write_test_case_to_file(self.filename, test_case)
 
+        # Progress resets the adaptive timeout's stall detection and any
+        # in-progress upward exploration of the timeout.
+        @problem.on_reduce
+        async def _(test_case: TestCase):
+            self.timeout_policy.note_reduction()
+
         self._cached_reducer = self.new_reducer(problem)
         return self._cached_reducer
+
+    async def _attempt_unstick(self) -> bool:
+        """Unstick hook for the reduction problem: raise the adaptive
+        timeout if timeouts may have been hiding possible reductions."""
+        await trio.lowlevel.checkpoint()
+        return self.timeout_policy.attempt_unstick()
 
     @property
     def extra_problem_kwargs(self):
@@ -708,27 +775,42 @@ class ShrinkRayState[TestCase](ABC):
     def problem(self):
         return self.reducer.target
 
-    async def is_interesting(self, test_case: TestCase) -> bool:
+    async def check_interesting(self, test_case: TestCase) -> InterestingnessResult:
+        """Run the interestingness test on test_case.
+
+        The result carries caching metadata: runs that timed out are only
+        valid while the adaptive timeout is no larger than the timeout they
+        ran under, so that they are retried if the timeout is later raised.
+        """
         # Check exclusion set first (for restart-from-point feature)
         if self.excluded_test_cases is not None:
             test_case_bytes = self._get_test_case_bytes(test_case)
             if test_case_bytes in self.excluded_test_cases:
-                return False
+                return InterestingnessResult(interesting=False)
 
-        if self.first_call_time is None:
-            self.first_call_time = time.time()
         async with self.is_interesting_limiter:
-            exit_code = await self.run_for_exit_code(test_case)
-            self._check_also_interesting(exit_code, test_case)
-            if exit_code == 0:
+            result = await self.run_for_result(test_case)
+            self._check_also_interesting(result.exit_code, test_case)
+            if result.exit_code == 0:
                 # Capture output now while still in the limiter to avoid race conditions
                 # where another test starts and overwrites the "current" output
                 test_case_bytes = self._get_test_case_bytes(test_case)
                 output = self._get_last_captured_output()
                 if output is not None:
                     self._successful_outputs[test_case_bytes] = output
-                return True
-            return False
+                return InterestingnessResult(interesting=True)
+            if result.timed_out and result.timeout_used is not None:
+                timeout_used = result.timeout_used
+                return InterestingnessResult(
+                    interesting=False,
+                    cache_valid=lambda: self.timeout_policy.cached_timeout_valid(
+                        timeout_used
+                    ),
+                )
+            return InterestingnessResult(interesting=False)
+
+    async def is_interesting(self, test_case: TestCase) -> bool:
+        return (await self.check_interesting(test_case)).interesting
 
     def reset_for_restart(self, new_initial: bytes, excluded: set[bytes]) -> None:
         """Reset state for restart from a history point.
@@ -749,6 +831,9 @@ class ShrinkRayState[TestCase](ABC):
             pass
         # Clear stored successful outputs (no longer relevant after restart)
         self._successful_outputs.clear()
+        # Forget learned timeout state: the restart point may be much
+        # slower than what the timeout had adapted down to.
+        self.timeout_policy.reset()
         # Reset initial_exit_code - the new initial is known to be interesting
         # (it came from history) so its exit code was 0
         self.initial_exit_code = 0
@@ -847,7 +932,7 @@ class ShrinkRayState[TestCase](ABC):
             )
         else:
             lines.append("Rerunning the interestingness test for debugging purposes...")
-            exit_code = await self.run_for_exit_code(self.initial, debug=True)
+            exit_code = (await self.run_for_result(self.initial, debug=True)).exit_code
             if exit_code != 0:
                 lines.append(
                     f"This exited with code {exit_code}, but the script should "
@@ -857,22 +942,26 @@ class ShrinkRayState[TestCase](ABC):
                 if self._last_debug_output:
                     lines.append("\nOutput from the interestingness test:")
                     lines.append(self._last_debug_output)
-                local_exit_code = await self.run_script_on_file(
-                    working=self.filename,
-                    debug=False,
-                    cwd=os.getcwd(),
-                )
+                local_exit_code = (
+                    await self.run_script_on_file(
+                        working=self.filename,
+                        debug=False,
+                        cwd=os.getcwd(),
+                    )
+                ).exit_code
                 if local_exit_code == 0:
                     lines.append(
                         "\nNote that Shrink Ray runs your script on a copy of the file "
                         "in a temporary directory. Here are the results of running it "
                         "in the current directory..."
                     )
-                    other_exit_code = await self.run_script_on_file(
-                        working=self.filename,
-                        debug=True,
-                        cwd=os.getcwd(),
-                    )
+                    other_exit_code = (
+                        await self.run_script_on_file(
+                            working=self.filename,
+                            debug=True,
+                            cwd=os.getcwd(),
+                        )
+                    ).exit_code
                     # Include the output from running in current directory
                     if self._last_debug_output:
                         lines.append(self._last_debug_output)
@@ -927,6 +1016,10 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
         return ShrinkRay(
             problem,
             enable_cpp_passes=os.path.splitext(self.filename)[1] in C_FILE_EXTENSIONS,
+            treesitter_language=loadable_language_for_filename(self.filename),
+            external_reducers=self.external_reducers,
+            python_reducer=self.python_reducer,
+            reducer_log_dir=self.reducer_log_dir(),
         )
 
     def _get_initial_bytes(self) -> bytes:
@@ -976,37 +1069,23 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
     async def run_formatter_command(
         self, command: str | list[str], input: bytes
     ) -> subprocess.CompletedProcess:
-        return await trio.run_process(
-            command,
-            stdin=input,
-            capture_stdout=True,
-            capture_stderr=True,
-            check=False,
-        )
+        # The formatter reads its input from a temp file rather than piped
+        # bytes for the same reason as stdin_source: a formatter that exits
+        # without draining stdin would deadlock the pipe feeder on OpenBSD.
+        with tempfile.TemporaryFile() as stdin:
+            stdin.write(input)
+            stdin.seek(0)
+            return await trio.run_process(
+                command,
+                stdin=stdin,
+                capture_stdout=True,
+                capture_stderr=True,
+                check=False,
+            )
 
     async def write_test_case_to_file_impl(self, working: str, test_case: bytes):
         async with await trio.open_file(working, "wb") as o:
             await o.write(test_case)
-
-    async def is_interesting(self, test_case: bytes) -> bool:
-        # Check exclusion set first (for restart-from-point feature)
-        if (
-            self.excluded_test_cases is not None
-            and test_case in self.excluded_test_cases
-        ):
-            return False
-
-        async with self.is_interesting_limiter:
-            exit_code = await self.run_for_exit_code(test_case)
-            self._check_also_interesting(exit_code, test_case)
-            if exit_code == 0:
-                # Capture output now while still in the limiter to avoid race conditions
-                # where another test starts and overwrites the "current" output
-                output = self._get_last_captured_output()
-                if output is not None:
-                    self._successful_outputs[test_case] = output
-                return True
-            return False
 
     async def print_exit_message(self, problem):
         formatting_increase = 0
@@ -1068,7 +1147,12 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     def new_reducer(
         self, problem: ReductionProblem[dict[str, bytes]]
     ) -> Reducer[dict[str, bytes]]:
-        return DirectoryShrinkRay(target=problem)
+        return DirectoryShrinkRay(
+            target=problem,
+            external_reducers=self.external_reducers,
+            python_reducer=self.python_reducer,
+            reducer_log_dir=self.reducer_log_dir(),
+        )
 
     def _get_initial_bytes(self) -> bytes:
         # Serialize directory content for history recording

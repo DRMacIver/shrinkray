@@ -2,6 +2,7 @@
 
 import io
 import json
+import math
 import os
 import runpy
 import signal
@@ -14,6 +15,7 @@ import trio
 import trio.testing
 
 import shrinkray.subprocess.worker
+from shrinkray.adaptive_timeout import AdaptiveTimeoutPolicy
 from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import ShrinkRayDirectoryState, ShrinkRayStateSingleFile
 from shrinkray.subprocess.protocol import (
@@ -471,6 +473,7 @@ async def test_worker_emit_progress_updates_loop():
     mock_state.parallel_tasks_running = 2
     mock_state.output_manager = None  # No test output capture in this mock
     mock_state.history_manager = None  # No history in this mock
+    mock_state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state = mock_state
 
     # Run for a short time then stop
@@ -488,7 +491,7 @@ async def test_worker_emit_progress_updates_loop():
 
 
 # === Integration tests with real files ===
-# These tests run actual bash scripts with tight timeouts, so they need to run
+# These tests run actual shell scripts with tight timeouts, so they need to run
 # sequentially to avoid timeout failures under parallel load.
 
 
@@ -501,7 +504,7 @@ async def test_worker_start_reduction_single_file(tmp_path):
 
     # Create a test script
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -529,6 +532,62 @@ async def test_worker_start_reduction_single_file(tmp_path):
     assert worker.problem.current_test_case == b"hello world"
 
 
+async def test_worker_start_reduction_reads_external_reducer_params(tmp_path):
+    """_start_reduction forwards external_reducers/python_reducer to the state."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    worker = ReducerWorker(output_stream=MemoryOutputStream())
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "formatter": "none",
+        "volume": "quiet",
+        "history_enabled": False,
+        "skip_validation": True,
+        "external_reducers": [["my-reducer", "arg"]],
+        "python_reducer": False,
+    }
+
+    await worker._start_reduction(params)
+
+    assert worker.state is not None
+    assert worker.state.external_reducers == [["my-reducer", "arg"]]
+    assert worker.state.python_reducer is False
+
+
+async def test_worker_start_reduction_default_external_reducer_params(tmp_path):
+    """_start_reduction defaults external reducers off / python reducer on."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    worker = ReducerWorker(output_stream=MemoryOutputStream())
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "formatter": "none",
+        "volume": "quiet",
+        "history_enabled": False,
+        "skip_validation": True,
+    }
+
+    await worker._start_reduction(params)
+
+    assert worker.state is not None
+    assert worker.state.external_reducers == []
+    assert worker.state.python_reducer is True
+
+
 async def test_worker_start_reduction_skip_validation(tmp_path):
     """Test _start_reduction with skip_validation=True skips setup()."""
     # Create a test file
@@ -537,7 +596,7 @@ async def test_worker_start_reduction_skip_validation(tmp_path):
 
     # Create a test script that would FAIL if run - this verifies setup() is skipped
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 1")  # Always fails
+    script.write_text("#!/bin/sh\nexit 1")  # Always fails
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -575,7 +634,7 @@ async def test_worker_start_reduction_directory(tmp_path):
 
     # Create a test script
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -612,7 +671,7 @@ async def test_worker_handle_start_success(tmp_path):
     target.write_text("hello")
 
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -720,9 +779,10 @@ async def test_worker_emit_progress_updates_no_parallel_attr():
     worker.reducer = mock_reducer
 
     # State without parallel_tasks_running attribute
-    mock_state = MagicMock(spec=["output_manager", "history_manager"])
+    mock_state = MagicMock(spec=["output_manager", "history_manager", "timeout_policy"])
     mock_state.output_manager = None  # No test output capture
     mock_state.history_manager = None  # No history
+    mock_state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state = mock_state
 
     # Run for a short time then stop
@@ -819,7 +879,7 @@ async def test_worker_start_reduction_with_c_file(tmp_path):
 
     # Create a test script
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -851,7 +911,7 @@ async def test_worker_full_run_with_mock(tmp_path):
 
     # Create a test script that passes
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     # Create a start command
@@ -916,7 +976,7 @@ async def test_worker_run_waits_for_start(tmp_path):
 
     # Create a test script
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -1051,7 +1111,7 @@ async def test_worker_start_with_failing_interestingness_test(tmp_path):
 
     # Create a test script that always fails (returns non-zero)
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 1")
+    script.write_text("#!/bin/sh\nexit 1")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -1167,7 +1227,7 @@ async def test_worker_timeout_on_initial_test(tmp_path):
 
     # Create a test script that sleeps longer than timeout
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nsleep 10\nexit 0")
+    script.write_text("#!/bin/sh\nsleep 10\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -1204,7 +1264,7 @@ async def test_worker_error_message_is_detailed(tmp_path):
 
     # Create a script that always fails
     script = tmp_path / "fail.sh"
-    script.write_text("#!/bin/bash\nexit 1")
+    script.write_text("#!/bin/sh\nexit 1")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -1245,7 +1305,7 @@ async def test_worker_trivial_result_error(tmp_path):
 
     # Create a script that always succeeds (accepts any input)
     script = tmp_path / "pass.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -1295,7 +1355,7 @@ async def test_worker_trivial_result_no_error_when_disabled(tmp_path):
 
     # Create a script that always succeeds (accepts any input)
     script = tmp_path / "pass.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -1676,6 +1736,7 @@ async def test_build_progress_update_with_reducer_none():
 
     # Set up state for parallel workers calculation
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None  # No test output capture
 
@@ -1717,6 +1778,7 @@ async def test_build_progress_update_with_reducer_pass_stats_none():
 
     # Set up state
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None  # No test output capture
 
@@ -1755,6 +1817,7 @@ async def test_build_progress_update_with_reducer_no_disabled_passes_attr():
 
     # Set up state
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None  # No test output capture
 
@@ -1787,6 +1850,7 @@ async def test_build_progress_update_periodic_size_history():
     worker.problem.current_test_case = b"test content"
 
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None
 
@@ -2312,7 +2376,7 @@ async def test_worker_logs_to_history_directory(tmp_path):
 
     # Create a test script that passes
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     # Create start command with history enabled (the default)
@@ -2401,7 +2465,7 @@ async def test_worker_log_file_close_exception(tmp_path):
 
     # Create a test script that passes
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     # Create start command with history enabled
@@ -2466,7 +2530,7 @@ async def test_worker_no_stderr_redirect_without_history(tmp_path):
 
     # Create a test script that passes
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     # Create start command with history disabled
@@ -2655,7 +2719,7 @@ async def test_restart_integration_stats_continue(tmp_path):
 
     # Create a test script that keeps lines starting with 'x'
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ngrep -q "^x" "$1"')
+    script.write_text('#!/bin/sh\ngrep -q "^x" "$1"')
     script.chmod(0o755)
 
     # Set up streams
@@ -2725,7 +2789,7 @@ async def test_restart_integration_from_history_point(tmp_path):
 
     # Create a test script that requires 'KEEP' in the file
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ngrep -q "KEEP" "$1"')
+    script.write_text('#!/bin/sh\ngrep -q "KEEP" "$1"')
     script.chmod(0o755)
 
     # Set up streams
@@ -2845,7 +2909,7 @@ async def test_restart_integration_stats_not_reset(tmp_path):
 
     # Test script that always passes (so we get lots of reductions)
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     input_stream = BidirectionalInputStream()
@@ -2947,7 +3011,7 @@ async def test_restart_integration_status_updates(tmp_path):
 
     # Create a test script that requires 'KEEP' in the file
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ngrep -q "KEEP" "$1"')
+    script.write_text('#!/bin/sh\ngrep -q "KEEP" "$1"')
     script.chmod(0o755)
 
     input_stream = BidirectionalInputStream()
@@ -3065,3 +3129,62 @@ async def test_restart_integration_status_updates(tmp_path):
     finally:
         os.chdir(old_cwd)
         await input_stream.aclose()
+
+
+@pytest.mark.trio
+async def test_build_progress_update_includes_adaptive_timeout():
+    worker = ReducerWorker()
+    worker.reducer = None
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 100
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = time.time()
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.5)
+    worker.problem.current_test_case = b"test content"
+
+    worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
+    worker.state.parallel_tasks_running = 2
+    worker.state.output_manager = None
+    worker.state.history_manager = None
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=50.0)
+    worker.state.timeout_policy.record_completion(0.1, interesting=True)
+
+    update = await worker._build_progress_update()
+    assert update is not None
+    assert update.current_timeout == pytest.approx(1.0)  # 10x the runtime
+    assert update.timeout_rate == 0.0
+
+
+@pytest.mark.trio
+async def test_build_progress_update_timeout_none_when_unbounded_with_no_data():
+    worker = ReducerWorker()
+    worker.reducer = None
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 100
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = time.time()
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.5)
+    worker.problem.current_test_case = b"test content"
+
+    worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
+    worker.state.parallel_tasks_running = 2
+    worker.state.output_manager = None
+    worker.state.history_manager = None
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
+
+    update = await worker._build_progress_update()
+    assert update is not None
+    assert update.current_timeout is None
+    assert update.timeout_rate == 0.0

@@ -7,19 +7,55 @@ reducer's own behaviour (pass ordering, stopping, tail churn) rather than
 how slow a real oracle is. Wall-clock cost of a real reduction is roughly
 `calls * oracle_time`, so fewer calls helps every entry in the corpus.
 
-Runs at parallelism 1 for reproducibility.
+Problems come in two flavours:
 
-    python3 evaluation/benchmark.py            # run all, print a table
-    python3 evaluation/benchmark.py <name> ... # run selected problems
+- synthetic: constructed inputs isolating one reducer behaviour
+  (bulk deletion, rigid-structure tail churn, stopping overhead).
+- corpus-derived: `original.*` files from `evaluation/corpus/` with a cheap
+  predicate approximating the real bug's requirements (required tokens,
+  syntactic validity, structural properties). These give realistic
+  reduction *trajectories* without a slow oracle.
+
+Metrics per problem:
+
+- calls: total interestingness-test calls (the primary cost metric).
+- final size: quality of the result (guards against "fast but worse").
+- c90 / c99: calls needed to achieve 90% / 99% of the total size
+  reduction the run eventually achieved (how front-loaded progress is).
+- tail: calls after the last successful reduction (pure stopping cost).
+
+Runs at parallelism 1 with a fixed random seed (WorkContext seeds its own
+Random(0)), so call counts are reproducible to within a couple of calls
+run to run; judge changes by call counts, not the informational seconds
+column, which varies with machine load.
+
+    python3 evaluation/benchmark.py                 # run all, print a table
+    python3 evaluation/benchmark.py NAME ...        # run selected problems
+    python3 evaluation/benchmark.py --json out.json # also dump metrics
+    python3 evaluation/benchmark.py --baseline B    # compare against a dump
+    python3 evaluation/benchmark.py --passes        # per-pass stats tables
 """
 
+import argparse
+import ast
+import json as json_module
 import sys
+import time
+import warnings
+from pathlib import Path
+
 import trio
 
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import ShrinkRay
 from shrinkray.state import sort_key_for_initial
 from shrinkray.work import WorkContext
+
+
+CORPUS = Path(__file__).resolve().parent / "corpus"
+
+
+# --- predicate helpers ------------------------------------------------------
 
 
 def bracket_depth(data: bytes) -> int:
@@ -37,26 +73,61 @@ def bracket_depth(data: bytes) -> int:
     return worst if depth == 0 else -1
 
 
-def run_problem(initial: bytes, is_interesting) -> tuple[bytes, int]:
-    async def acond(x: bytes) -> bool:
-        await trio.lowlevel.checkpoint()
-        return is_interesting(x)
-
-    async def go() -> tuple[bytes, int]:
-        problem: BasicReductionProblem[bytes] = BasicReductionProblem(
-            initial=initial,
-            is_interesting=acond,
-            work=WorkContext(parallelism=1),
-            sort_key=sort_key_for_initial(initial),
-        )
-        reducer = ShrinkRay(target=problem)
-        await reducer.run()
-        return problem.current_test_case, problem.stats.calls
-
-    return trio.run(go)
+def compiles_as_python(data: bytes) -> bool:
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            compile(data, "<benchmark>", "exec")
+    except Exception:
+        return False
+    return True
 
 
-# --- problem definitions: (name, initial, predicate) -----------------------
+def json_depth(data: bytes) -> int:
+    """Max nesting depth of a valid JSON document, else -1."""
+    try:
+        doc = json_module.loads(data)
+    except Exception:
+        return -1
+    depth = 0
+    stack = [(doc, 1)]
+    while stack:
+        value, d = stack.pop()
+        depth = max(depth, d)
+        if isinstance(value, dict):
+            stack.extend((child, d + 1) for child in value.values())
+        elif isinstance(value, list):
+            stack.extend((child, d + 1) for child in value)
+    return depth
+
+
+def has_dup_bases_and_metaclass(data: bytes) -> bool:
+    """Some class has syntactically duplicate bases, and some class uses a
+    metaclass keyword. Approximates the pylint/astroid DuplicateBasesError
+    corpus entry's requirements."""
+    try:
+        tree = ast.parse(data)
+    except Exception:
+        return False
+    dup = meta = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            dumped = [ast.dump(base) for base in node.bases]
+            if len(dumped) != len(set(dumped)):
+                dup = True
+            if any(kw.arg == "metaclass" for kw in node.keywords):
+                meta = True
+    return dup and meta
+
+
+def contains_all(*tokens: bytes):
+    def predicate(data: bytes) -> bool:
+        return all(t in data for t in tokens)
+
+    return predicate
+
+
+# --- synthetic problem inputs -----------------------------------------------
 
 
 def _scaffolded_deep_parens() -> bytes:
@@ -92,40 +163,295 @@ def _already_minimal() -> bytes:
     return b"x=RARE_MARKER_ALPHA+RARE_MARKER_BETA\n"
 
 
-PROBLEMS: dict[str, tuple[bytes, object]] = {
-    # Rigid deep structure: reduces to minimal parens at depth >= 400, then
-    # the reducer keeps trying (and failing) to go smaller -> tail churn.
-    "deep_parens": (
-        _scaffolded_deep_parens(),
-        lambda x: bracket_depth(x) >= 400,
-    ),
-    # Bulk deletion of a large file down to three scattered required markers.
-    "keep_markers": (
-        _big_file_with_markers(),
-        lambda x: b"RARE_MARKER_ALPHA" in x
-        and b"RARE_MARKER_BETA" in x
-        and b"RARE_MARKER_GAMMA" in x,
-    ),
-    # Already minimal: pure measure of the stopping / no-progress overhead.
-    "already_minimal": (
-        _already_minimal(),
-        lambda x: b"RARE_MARKER_ALPHA" in x and b"RARE_MARKER_BETA" in x,
-    ),
-}
+def _python_module_with_sentinel() -> bytes:
+    """A plausible generated module where candidates must stay valid Python.
+
+    Exercises the high-rejection regime typical of real reductions of
+    strict-syntax languages: most byte-level candidates fail to compile.
+    """
+    parts = [
+        b'"""Utilities for the frobnication service."""\n',
+        b"import collections\n",
+        b"import functools\n\n",
+    ]
+    for i in range(60):
+        parts.append(
+            (
+                f"class Handler{i}:\n"
+                f"    priority = {i}\n"
+                f"    def process(self, item):\n"
+                f"        queue = collections.deque(maxlen={i + 1})\n"
+                f"        queue.append(item)\n"
+                f"        return sorted(queue)\n\n"
+            ).encode()
+        )
+        if i == 30:
+            parts.append(
+                b"def sentinel():\n    SENTINEL_KEEP = 1\n    return SENTINEL_KEEP\n\n"
+            )
+    return b"".join(parts)
+
+
+# --- problem table ----------------------------------------------------------
+
+
+class Problem:
+    def __init__(self, initial: bytes, predicate, *, cpp: bool = False):
+        self.initial = initial
+        self.predicate = predicate
+        self.cpp = cpp
+
+
+def _corpus_file(entry: str, filename: str) -> bytes:
+    return (CORPUS / entry / filename).read_bytes()
+
+
+def build_problems() -> dict[str, Problem]:
+    problems = {
+        # Rigid deep structure: reduces to minimal parens at depth >= 400,
+        # then the reducer keeps trying (and failing) to go smaller.
+        "deep_parens": Problem(
+            _scaffolded_deep_parens(),
+            lambda x: bracket_depth(x) >= 400,
+        ),
+        # Bulk deletion of a large file down to three scattered markers.
+        "keep_markers": Problem(
+            _big_file_with_markers(),
+            contains_all(
+                b"RARE_MARKER_ALPHA", b"RARE_MARKER_BETA", b"RARE_MARKER_GAMMA"
+            ),
+        ),
+        # Already minimal: pure measure of stopping / no-progress overhead.
+        "already_minimal": Problem(
+            _already_minimal(),
+            contains_all(b"RARE_MARKER_ALPHA", b"RARE_MARKER_BETA"),
+        ),
+        # Valid-Python-required marker hunt: most candidates get rejected.
+        "python_syntax": Problem(
+            _python_module_with_sentinel(),
+            lambda x: b"SENTINEL_KEEP" in x and compiles_as_python(x),
+        ),
+        # Corpus-derived problems. Predicates approximate each entry's real
+        # bug requirements; see evaluation/corpus/<id>/meta.json.
+        "corpus_mypy": Problem(
+            _corpus_file("mypy-0.942-match-union-tuple-crash", "original.py"),
+            lambda x: (
+                compiles_as_python(x)
+                and contains_all(b"match ", b"case ", b"Union[", b"tuple[")(x)
+            ),
+        ),
+        "corpus_pylint": Problem(
+            _corpus_file("pylint-2.17.4-duplicate-bases-mro-crash", "original.py"),
+            has_dup_bases_and_metaclass,
+        ),
+        "corpus_ujson": Problem(
+            _corpus_file("ujson-510-indent-buffer-overflow", "original.json"),
+            lambda x: json_depth(x) >= 20,
+        ),
+        "corpus_udlit_cpp": Problem(
+            _corpus_file("gcc49-udlit-char-pack-template", "original.cpp"),
+            contains_all(b'operator""', b"decltype(", b"..."),
+            cpp=True,
+        ),
+        "corpus_minisat": Problem(
+            _corpus_file("minisat-dimacs-int-overflow", "original.cnf"),
+            contains_all(b"2147483648"),
+        ),
+    }
+    return problems
+
+
+# --- running and metrics ----------------------------------------------------
+
+
+def run_problem(name: str, problem: Problem) -> dict:
+    events: list[dict] = []
+
+    async def acond(x: bytes) -> bool:
+        await trio.lowlevel.checkpoint()
+        return problem.predicate(x)
+
+    async def go() -> tuple[bytes, object, object]:
+        reduction_problem: BasicReductionProblem[bytes] = BasicReductionProblem(
+            initial=problem.initial,
+            is_interesting=acond,
+            work=WorkContext(parallelism=1),
+            sort_key=sort_key_for_initial(problem.initial),
+        )
+
+        async def record(test_case: bytes) -> None:
+            stats = reduction_problem.current_pass_stats
+            events.append(
+                {
+                    "calls": reduction_problem.stats.calls,
+                    "size": len(test_case),
+                    "pass": stats.pass_name if stats is not None else None,
+                }
+            )
+
+        reduction_problem.on_reduce(record)
+        reducer = ShrinkRay(target=reduction_problem, enable_cpp_passes=problem.cpp)
+        await reducer.run()
+        return reduction_problem.current_test_case, reduction_problem, reducer
+
+    start = time.monotonic()
+    result, reduction_problem, reducer = trio.run(go)
+    seconds = time.monotonic() - start
+
+    initial_size = len(problem.initial)
+    final_size = len(result)
+    calls = reduction_problem.stats.calls
+
+    def calls_to_fraction(fraction: float) -> int:
+        if initial_size == final_size:
+            return 0
+        threshold = initial_size - fraction * (initial_size - final_size)
+        for event in events:
+            if event["size"] <= threshold:
+                return event["calls"]
+        return calls
+
+    tail_calls = calls - events[-1]["calls"] if events else calls
+
+    pass_stats = [
+        {
+            "pass": s.pass_name,
+            "runs": s.run_count,
+            "calls": s.test_evaluations,
+            "reductions": s.successful_reductions,
+            "bytes_deleted": s.bytes_deleted,
+        }
+        for s in reducer.pass_stats.get_stats_in_order()
+    ]
+
+    return {
+        "name": name,
+        "initial_size": initial_size,
+        "final_size": final_size,
+        "calls": calls,
+        "c90": calls_to_fraction(0.90),
+        "c99": calls_to_fraction(0.99),
+        "tail": tail_calls,
+        "reductions": len(events),
+        "seconds": round(seconds, 2),
+        "pass_stats": pass_stats,
+        "events": events,
+    }
+
+
+# --- output -----------------------------------------------------------------
+
+TABLE_COLUMNS = [
+    ("problem", "name", "<24"),
+    ("calls", "calls", ">8"),
+    ("final", "final_size", ">7"),
+    ("c90", "c90", ">8"),
+    ("c99", "c99", ">8"),
+    ("tail", "tail", ">7"),
+    ("secs", "seconds", ">7"),
+]
+
+
+def print_table(results: list[dict]) -> None:
+    header = " ".join(f"{title:{fmt}}" for title, _, fmt in TABLE_COLUMNS)
+    print(header)
+    print("-" * len(header))
+    for r in results:
+        print(" ".join(f"{r[key]:{fmt}}" for _, key, fmt in TABLE_COLUMNS))
+    total_calls = sum(r["calls"] for r in results)
+    print("-" * len(header))
+    print(f"{'TOTAL':<24} {total_calls:>8}")
+
+
+def print_pass_stats(results: list[dict]) -> None:
+    for r in results:
+        print()
+        print(f"=== {r['name']} (calls={r['calls']}) ===")
+        print(f"{'pass':<40} {'runs':>5} {'calls':>8} {'reds':>6} {'deleted':>9}")
+        for s in sorted(r["pass_stats"], key=lambda s: -s["calls"]):
+            if s["calls"] == 0 and s["reductions"] == 0:
+                continue
+            print(
+                f"{s['pass']:<40} {s['runs']:>5} {s['calls']:>8} "
+                f"{s['reductions']:>6} {s['bytes_deleted']:>9}"
+            )
+
+
+def print_comparison(baseline: dict, results: list[dict]) -> None:
+    by_name = {r["name"]: r for r in baseline["results"]}
+    print(f"{'problem':<24} {'calls':>16} {'Δ%':>7} {'final':>12} {'c99':>16}")
+    print("-" * 80)
+    total_old = total_new = 0
+    for r in results:
+        old = by_name.get(r["name"])
+        if old is None:
+            print(f"{r['name']:<24} {'(new)':>16}")
+            continue
+        total_old += old["calls"]
+        total_new += r["calls"]
+        delta = (
+            (r["calls"] - old["calls"]) / old["calls"] * 100 if old["calls"] else 0.0
+        )
+        print(
+            f"{r['name']:<24} "
+            f"{old['calls']:>7} → {r['calls']:>6} {delta:>+6.1f}% "
+            f"{old['final_size']:>5} → {r['final_size']:>4} "
+            f"{old['c99']:>7} → {r['c99']:>6}"
+        )
+    if total_old:
+        overall = (total_new - total_old) / total_old * 100
+        print("-" * 80)
+        print(f"{'TOTAL':<24} {total_old:>7} → {total_new:>6} {overall:>+6.1f}%")
 
 
 def main() -> int:
-    names = sys.argv[1:] or list(PROBLEMS)
-    print(f"{'problem':<18} {'calls':>8} {'final size':>11}")
-    print("-" * 40)
-    total = 0
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("names", nargs="*", help="problems to run (default: all)")
+    parser.add_argument("--json", help="write metrics to this file")
+    parser.add_argument("--baseline", help="compare against a previous --json dump")
+    parser.add_argument(
+        "--passes", action="store_true", help="print per-pass stats tables"
+    )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="include per-reduction event lists in the --json dump",
+    )
+    args = parser.parse_args()
+
+    problems = build_problems()
+    names = args.names or list(problems)
+    unknown = [n for n in names if n not in problems]
+    if unknown:
+        parser.error(
+            f"unknown problems: {', '.join(unknown)}. Available: {', '.join(problems)}"
+        )
+
+    for name, problem in problems.items():
+        if not problem.predicate(problem.initial):
+            raise AssertionError(
+                f"problem {name}: predicate is false on its initial input"
+            )
+
+    results = []
     for name in names:
-        initial, pred = PROBLEMS[name]
-        result, calls = run_problem(initial, pred)
-        total += calls
-        print(f"{name:<18} {calls:>8} {len(result):>11}")
-    print("-" * 40)
-    print(f"{'TOTAL':<18} {total:>8}")
+        results.append(run_problem(name, problems[name]))
+
+    print_table(results)
+    if args.passes:
+        print_pass_stats(results)
+    if args.baseline:
+        print()
+        with open(args.baseline) as f:
+            baseline = json_module.load(f)
+        print_comparison(baseline, results)
+    if args.json:
+        dumped = results
+        if not args.full:
+            dumped = [{k: v for k, v in r.items() if k != "events"} for r in results]
+        with open(args.json, "w") as f:
+            json_module.dump({"results": dumped}, f, indent=2)
+        print(f"\nwrote {args.json}")
     return 0
 
 

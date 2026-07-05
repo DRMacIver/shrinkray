@@ -1,0 +1,10 @@
+{
+  "id": "rustc-1941-gce-braced-const-arg-ice",
+  "status": "ok",
+  "original_bytes": 2480,
+  "reduced_bytes": 141,
+  "original_nows_bytes": 1847,
+  "reduced_nows_bytes": 111,
+  "seconds": 61.0,
+  "ratio": 94.3
+}

@@ -225,6 +225,91 @@ jobs:
         # dependencies we just synced at the matrix resolution.
         run: uv run --no-sync pytest tests/ -m "not slow" -q
 
+  test-openbsd:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    # The VM boot plus building libcst from source (no OpenBSD wheels)
+    # makes this the slowest test job by far.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      # The pip cache lives inside the workspace so it is synced into the
+      # VM and (via copyback) out again. On a hit it holds the wheels that
+      # pip otherwise builds from source (libcst, maturin,
+      # tree-sitter-language-pack, ...), skipping several minutes of rust
+      # and C compilation.
+      - name: Restore pip and grammar caches
+        id: pip-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .pip-cache
+            .ts-cache
+          key: openbsd-7.9-pip-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            openbsd-7.9-pip-
+      - name: Run fast tests in an OpenBSD VM
+        uses: vmactions/openbsd-vm@18edb32f4e48dae5865d7b8b3a9587bc01218a20 # v1.4.4
+        with:
+          # 7.9 rather than an older release because building
+          # tree-sitter-language-pack needs maturin, whose own from-source
+          # bootstrap needs a newer rustc than 7.7's 1.86.
+          release: "7.9"
+          usesh: true
+          copyback: false
+          mem: 8192
+          # rust is needed to build libcst (setuptools-rust) and maturin
+          # from source; zstd unpacks the tree-sitter parser sources.
+          prepare: |
+            pkg_add python3 py3-pip rust minisat zstd
+          run: |
+            set -ex
+            uname -a
+            python3 --version
+            df -h
+            # Everything sizeable must stay off the 1GB root partition:
+            # the venv, pip build dirs, and cargo's registry (maturin's
+            # build writes ~800MB there). /home has >100GB. The XDG cache
+            # (tree-sitter grammars) lives in the workspace so it can be
+            # persisted between runs.
+            mkdir -p /home/tmp /home/tmp/cargo
+            export TMPDIR=/home/tmp
+            export CARGO_HOME=/home/tmp/cargo
+            export XDG_CACHE_HOME="$PWD/.ts-cache"
+            # The workspace is rsync'd in preserving the host runner's
+            # uid, but we run as root, and pip silently disables a cache
+            # dir it does not own. Create the cache dirs and own them.
+            mkdir -p .pip-cache .ts-cache
+            chown -R root:wheel .pip-cache .ts-cache
+            python3 -m venv /home/venv
+            /home/venv/bin/pip install --quiet --upgrade pip
+            /home/venv/bin/pip install --cache-dir "$PWD/.pip-cache" ".[test]"
+            # tree-sitter-language-pack has no OpenBSD grammar binaries
+            # and its fallback fetches Linux ones; build all the grammars
+            # shrinkray maps natively instead.
+            /home/venv/bin/python scripts/prebuild_treesitter_grammars.py
+            df -h
+            /home/venv/bin/python -m pytest tests/ -m "not slow" -q
+      # vmactions only syncs the workspace back on success, so pull the
+      # caches out of the VM explicitly: seeding the expensive from-source
+      # wheel and grammar builds must not depend on a green run.
+      - name: Fetch caches from VM
+        if: always() && steps.pip-cache.outputs.cache-hit != 'true'
+        run: |
+          rsync -a "openbsd:${GITHUB_WORKSPACE}/.pip-cache/" .pip-cache/ || true
+          rsync -a "openbsd:${GITHUB_WORKSPACE}/.ts-cache/" .ts-cache/ || true
+      - name: Save pip and grammar caches
+        if: always() && steps.pip-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .pip-cache
+            .ts-cache
+          key: openbsd-7.9-pip-${{ hashFiles('uv.lock') }}
+
   coverage:
     permissions:
       contents: read

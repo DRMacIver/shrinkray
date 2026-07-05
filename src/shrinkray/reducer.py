@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from contextlib import contextmanager
@@ -9,6 +10,7 @@ import attrs
 import trio
 from attrs import define
 
+from shrinkray.history import sanitize_for_filename
 from shrinkray.passes.bytes import (
     Split,
     Tokenize,
@@ -37,6 +39,7 @@ from shrinkray.passes.definitions import (
     ReductionPump,
     compose,
 )
+from shrinkray.passes.external import ExternalReducerPass, external_reducer
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
     cut_comment_like_things,
@@ -44,13 +47,18 @@ from shrinkray.passes.genericlanguages import (
     normalize_identifiers,
     reduce_integer_literals,
     replace_falsey_with_zero,
+    replace_identifiers_with_zero,
     simplify_brackets,
 )
 from shrinkray.passes.json import JSON, JSON_PASSES
 from shrinkray.passes.patching import PatchApplier, Patches
-from shrinkray.passes.python import PYTHON_PASSES, is_python
+from shrinkray.passes.python import is_python, python_reducer_command
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
+from shrinkray.passes.treesitter import (
+    loadable_language_for_filename,
+    treesitter_passes,
+)
 from shrinkray.problem import (
     BasicReductionProblem,
     ReductionProblem,
@@ -152,6 +160,27 @@ class ShrinkRay(Reducer[bytes]):
     # restarted sub-reductions themselves so they don't recurse.
     restart_at_fixpoint: bool = True
 
+    # Enables grammar-aware passes for the named tree-sitter language.
+    # Set from the test case's file extension.
+    treesitter_language: str | None = None
+
+    # Commands (argv lists) for user-specified external reducers, run as
+    # reduction passes. See shrinkray.passes.external.
+    external_reducers: list[list[str]] = attrs.Factory(list)
+
+    # Whether to run the built-in libcst Python reducer (as an external
+    # reducer) when the test case looks like Python.
+    python_reducer: bool = True
+
+    # Directory to write external reducer stderr logs to, or None to discard.
+    reducer_log_dir: str | None = None
+
+    # The external reducer passes built for this reducer, kept so their
+    # subprocesses can be torn down when the run finishes.
+    _external_reducer_passes: list[ExternalReducerPass] = attrs.field(
+        factory=list, init=False
+    )
+
     current_pump: ReductionPump[bytes] | None = None
 
     unlocked_ok_passes: bool = False
@@ -219,13 +248,12 @@ class ShrinkRay(Reducer[bytes]):
             compose(Split(b"\n"), block_deletion(11, 20)),
             remove_indents,
             remove_whitespace,
-            compose(Tokenize(), block_deletion(1, 20)),
             reduce_integer_literals,
             replace_falsey_with_zero,
+            replace_identifiers_with_zero,
             combine_expressions,
             merge_adjacent_strings,
             lexeme_based_deletions,
-            short_deletions,
             normalize_identifiers,
             line_sorter,
         ]
@@ -233,11 +261,13 @@ class ShrinkRay(Reducer[bytes]):
 
     last_ditch_passes: list[ReductionPass[bytes]] = attrs.Factory(
         lambda: [
+            # Fine-grained token block deletion generates a very large
+            # candidate set with a low success rate; benchmarking shows it
+            # is much cheaper run late, on already-reduced test cases.
+            compose(Tokenize(), block_deletion(1, 20)),
             compose(Split(b"\n"), block_deletion(21, 100)),
             replace_space_with_newlines,
             delete_byte_spans,
-            lower_bytes,
-            lower_individual_bytes,
             simplify_brackets,
             standard_substitutions,
             # This is in last ditch because it's probably not useful
@@ -246,13 +276,92 @@ class ShrinkRay(Reducer[bytes]):
         ]
     )
 
+    # Expensive passes with very low success rates, mostly valuable for
+    # normalising the final result rather than shrinking it. They only run
+    # once everything else has converged: benchmarking showed they consumed
+    # a large fraction of all interestingness calls when interleaved with
+    # the productive passes, for almost no reductions.
+    polish_passes: list[ReductionPass[bytes]] = attrs.Factory(
+        lambda: [
+            short_deletions,
+            lower_bytes,
+            lower_individual_bytes,
+        ]
+    )
+
+    # Number of consecutive failed calls after which a pass on probation
+    # (one whose previous completed run made no progress) is abandoned for
+    # now. Abandoned passes are recorded in incomplete_passes and re-run
+    # without a budget before the reducer finishes, so this only affects
+    # when their work happens, not whether it does.
+    probation_budget: int = 25
+
+    # Passes whose previous completed run made no progress. Such a pass
+    # gets only probation_budget consecutive failures on its next run.
+    pass_probation: dict[str, bool] = attrs.Factory(dict)
+
+    # Passes whose most recent run was cut short by the probation budget,
+    # keyed by name. They must be re-run to completion before finishing.
+    incomplete_passes: dict[str, ReductionPass[bytes]] = attrs.Factory(dict)
+
+    # For each pass that ran to completion without making progress, the
+    # test case it ran against. Re-running a pass on an identical test
+    # case is a deterministic no-op (randomness only affects the order in
+    # which candidates are tried, not which candidates are generated), so
+    # such runs are skipped entirely.
+    pass_fingerprints: dict[str, bytes] = attrs.Factory(dict)
+
+    def _log_file_for(self, name: str) -> str | None:
+        """Path for an external reducer's stderr log, or None to discard."""
+        if self.reducer_log_dir is None:
+            return None
+        os.makedirs(self.reducer_log_dir, exist_ok=True)
+        return os.path.join(self.reducer_log_dir, f"reducer-{name}.log")
+
+    def build_external_reducer_passes(self) -> list[ExternalReducerPass]:
+        """Build the external reducer passes for the current test case.
+
+        This includes the built-in Python reducer (when enabled and the test
+        case looks like Python) followed by any user-specified reducers.
+        """
+        passes: list[ExternalReducerPass] = []
+        if self.python_reducer and is_python(self.target.current_test_case):
+            passes.append(
+                external_reducer(
+                    python_reducer_command(),
+                    name="python",
+                    log_file=self._log_file_for("python"),
+                )
+            )
+        for i, command in enumerate(self.external_reducers):
+            name = f"reduce-with-{i}"
+            passes.append(
+                external_reducer(
+                    command,
+                    name=name,
+                    log_file=self._log_file_for(name),
+                )
+            )
+        return passes
+
+    async def close_external_reducers(self) -> None:
+        """Tear down any external reducer subprocesses started during the run."""
+        with trio.CancelScope(shield=True):
+            for reducer_pass in self._external_reducer_passes:
+                await reducer_pass.aclose()
+
     def __attrs_post_init__(self) -> None:
-        if is_python(self.target.current_test_case):
-            self.great_passes.extend(PYTHON_PASSES)
-            self.initial_cuts.extend(PYTHON_PASSES)
+        external_passes = self.build_external_reducer_passes()
+        self._external_reducer_passes = external_passes
+        self.great_passes.extend(external_passes)
+        self.initial_cuts.extend(external_passes)
         if self.enable_cpp_passes:
             self.great_passes.extend(CPP_PASSES)
             self.initial_cuts.extend(CPP_PASSES)
+        if self.treesitter_language is not None:
+            passes = treesitter_passes(self.treesitter_language)
+            self.great_passes.extend(passes)
+            self.initial_cuts.extend(passes)
         self.register_format_specific_pass(JSON, JSON_PASSES)
         self.register_format_specific_pass(
             DimacsCNF,
@@ -287,12 +396,42 @@ class ShrinkRay(Reducer[bytes]):
             else:
                 return f"Running reduction pump {self.current_pump.__name__}"
 
-    async def run_pass(self, rp: ReductionPass[bytes]) -> None:
+    async def run_pass(
+        self, rp: ReductionPass[bytes], *, budgeted: bool = True
+    ) -> None:
         pass_name = rp.__name__
 
         # Skip if pass is disabled
         if self.is_pass_disabled(pass_name):
             return
+
+        problem = self.target
+
+        # A pass that ran to completion without making progress cannot make
+        # progress on an identical test case, so skip it for free.
+        if self.pass_fingerprints.get(pass_name) == problem.current_test_case:
+            return
+
+        use_budget = budgeted and self.pass_probation.get(pass_name, False)
+        scope = trio.CancelScope()
+        last_seen = problem.current_test_case
+        consecutive_failures = 0
+        budget_exhausted = False
+        made_progress = False
+
+        def monitor() -> None:
+            nonlocal last_seen, consecutive_failures, budget_exhausted
+            nonlocal made_progress
+            current = problem.current_test_case
+            if current is not last_seen:
+                last_seen = current
+                made_progress = True
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                if use_budget and consecutive_failures > self.probation_budget:
+                    budget_exhausted = True
+                    scope.cancel()
 
         try:
             assert self.current_reduction_pass is None
@@ -305,20 +444,37 @@ class ShrinkRay(Reducer[bytes]):
             stats_entry.run_count += 1
 
             # Set current pass stats on the problem for real-time updates
-            self.target.current_pass_stats = stats_entry
+            problem.current_pass_stats = stats_entry
+            problem.pass_call_monitor = monitor
 
             # Run the pass with a cancel scope that can be externally cancelled
-            with trio.CancelScope() as scope:
+            with scope:
                 self._current_pass_scope = scope
                 await rp(self.target)
 
-            # If the pass was cancelled/skipped, mark that passes were skipped
-            if scope.cancelled_caught:
+            if budget_exhausted:
+                # The pass was abandoned by its probation budget. It still
+                # has untried candidates, so it must be re-run before the
+                # reduction can finish.
+                self.incomplete_passes[pass_name] = rp
+                if made_progress:
+                    self.pass_probation[pass_name] = False
+            elif scope.cancelled_caught:
+                # The pass was skipped externally; mark that passes were
+                # skipped so the main loop runs it again later.
                 self._passes_were_skipped = True
+            else:
+                self.incomplete_passes.pop(pass_name, None)
+                self.pass_probation[pass_name] = not made_progress
+                if made_progress:
+                    self.pass_fingerprints.pop(pass_name, None)
+                else:
+                    self.pass_fingerprints[pass_name] = problem.current_test_case
 
         finally:
             self.current_reduction_pass = None
-            self.target.current_pass_stats = None
+            problem.current_pass_stats = None
+            problem.pass_call_monitor = None
             self._current_pass_scope = None
             self._skip_requested = False
 
@@ -448,6 +604,12 @@ class ShrinkRay(Reducer[bytes]):
                 return
 
     async def run(self) -> None:
+        try:
+            await self._run()
+        finally:
+            await self.close_external_reducers()
+
+    async def _run(self) -> None:
         initial = self.target.current_test_case
         initial_random_state = self.target.work.random.getstate()
         await self.__reduce()
@@ -507,6 +669,10 @@ class ShrinkRay(Reducer[bytes]):
         reducer = ShrinkRay(
             target=restarted,
             enable_cpp_passes=self.enable_cpp_passes,
+            treesitter_language=self.treesitter_language,
+            external_reducers=self.external_reducers,
+            python_reducer=self.python_reducer,
+            reducer_log_dir=self.reducer_log_dir,
             restart_at_fixpoint=False,
         )
         await reducer.run()
@@ -544,11 +710,34 @@ class ShrinkRay(Reducer[bytes]):
                 continue
             for pump in self.pumps:
                 await self.pump(pump)
-            if self.target.current_test_case == prev:
-                # Only terminate if no passes were skipped
-                # If passes were skipped, we need another full run to be sure
-                if not self._passes_were_skipped:
+            if self.target.current_test_case != prev:
+                continue
+            # Only once everything else has converged do the expensive,
+            # rarely-productive polish passes run.
+            for rp in self.polish_passes:
+                await self.run_pass(rp)
+            if self.target.current_test_case != prev:
+                continue
+            # Passes abandoned by a probation budget may have missed
+            # reductions. Re-run them without a budget before concluding,
+            # so the final result is a fixpoint of every pass.
+            if self.incomplete_passes:
+                for name in sorted(self.incomplete_passes):
+                    await self.run_pass(self.incomplete_passes[name], budgeted=False)
+                if self.target.current_test_case != prev:
+                    continue
+            # Only terminate if no passes were skipped
+            # If passes were skipped, we need another full run to be sure
+            if not self._passes_were_skipped:
+                # Give the problem a chance to change something (e.g.
+                # raise an adaptive timeout) that makes another round
+                # worth trying before we give up for good.
+                if not await self.target.attempt_unstick():
                     break
+                # Something changed, so a pass that previously ran to
+                # completion without progress may now succeed on the same
+                # test case: no-progress fingerprints are no longer valid.
+                self.pass_fingerprints.clear()
 
 
 class UpdateKeys(Patches[dict[str, bytes], dict[str, bytes]]):
@@ -611,12 +800,19 @@ class KeyProblem(ReductionProblem[bytes]):
 
 @define
 class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
+    # Forwarded to each per-file ShrinkRay. See ShrinkRay for details.
+    external_reducers: list[list[str]] = attrs.Factory(list)
+    python_reducer: bool = True
+    reducer_log_dir: str | None = None
+
     async def run(self):
-        prev = None
-        while prev != self.target.current_test_case:
+        while True:
             prev = self.target.current_test_case
             await self.delete_keys()
             await self.shrink_values()
+            if self.target.current_test_case == prev:
+                if not await self.target.attempt_unstick():
+                    break
 
     async def delete_keys(self):
         target = self.target.current_test_case
@@ -636,8 +832,18 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
                     applier=applier,
                     key=k,
                 )
+                if self.reducer_log_dir is not None:
+                    key_log_dir: str | None = os.path.join(
+                        self.reducer_log_dir, sanitize_for_filename(k)
+                    )
+                else:
+                    key_log_dir = None
                 key_shrinkray = ShrinkRay(
                     enable_cpp_passes=any(k.endswith(s) for s in C_FILE_EXTENSIONS),
+                    treesitter_language=loadable_language_for_filename(k),
                     target=key_problem,
+                    external_reducers=self.external_reducers,
+                    python_reducer=self.python_reducer,
+                    reducer_log_dir=key_log_dir,
                 )
                 nursery.start_soon(key_shrinkray.run)

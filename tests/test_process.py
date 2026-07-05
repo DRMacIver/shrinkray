@@ -1,7 +1,6 @@
 """Tests for process management utilities."""
 
 import os
-import resource
 import signal
 import subprocess
 import sys
@@ -11,6 +10,7 @@ import pytest
 import trio
 
 from shrinkray.process import (
+    MEMORY_RLIMIT,
     _close_pipes_sync,
     child_preexec,
     default_memory_limit,
@@ -78,7 +78,7 @@ def test_child_preexec_sets_memory_rlimit():
     ):
         child_preexec(4 * 1024**3)()
     setsid.assert_called_once_with()
-    setrlimit.assert_called_once_with(resource.RLIMIT_AS, (4 * 1024**3, 4 * 1024**3))
+    setrlimit.assert_called_once_with(MEMORY_RLIMIT, (4 * 1024**3, 4 * 1024**3))
 
 
 @pytest.mark.parametrize("limit", [None, 0, -1])
@@ -157,15 +157,16 @@ async def test_signal_group_sends_signal_to_process_group():
 
 
 async def test_signal_group_refuses_own_process_group():
-    # Start a process WITHOUT setsid, so it shares our process group.
-    # signal_group must refuse to signal it, as that would signal
-    # shrink-ray itself (SIGCONT is used as it is harmless if sent).
+    # Start a process WITHOUT setsid, so it shares our process group and
+    # is not a group leader. signal_group must not signal our group in
+    # that case: the child's pid names no process group at all, so killpg
+    # fails with ESRCH (SIGCONT is used as it is harmless if sent).
     sp = await trio.lowlevel.open_process(
         [sys.executable, "-c", "import time; time.sleep(100)"],
     )
     try:
         assert os.getpgid(sp.pid) == os.getpgrp()
-        with pytest.raises(AssertionError):
+        with pytest.raises(ProcessLookupError):
             signal_group(sp, signal.SIGCONT)
     finally:
         sp.kill()
@@ -232,6 +233,44 @@ async def test_interrupt_wait_and_kill_handles_fast_exit_after_sigint(tmp_path):
     await interrupt_wait_and_kill(sp, delay=0.05)
 
     assert sp.returncode == 0
+
+
+async def test_interrupt_wait_and_kill_tolerates_eperm_for_exited_group():
+    # On macOS, killpg raises EPERM (not ESRCH) when the target group's
+    # only member exits between interrupt_wait_and_kill closing its pipes
+    # and the signal being sent - exactly what the external reducer's
+    # persistent subprocess does, since it exits on stdin EOF. The kill
+    # sequence must fall through and reap rather than crash.
+    sp = await trio.lowlevel.open_process(
+        [sys.executable, "-c", "import sys; sys.stdin.read()"],
+        preexec_fn=os.setsid,
+        stdin=subprocess.PIPE,
+    )
+    with patch(
+        "shrinkray.process.os.killpg",
+        side_effect=PermissionError(1, "Operation not permitted"),
+    ):
+        await interrupt_wait_and_kill(sp, delay=0.5)
+    assert sp.returncode == 0
+
+
+async def test_interrupt_wait_and_kill_raises_when_signals_cannot_be_sent():
+    # If killpg reports EPERM while the process is genuinely still alive,
+    # nothing can be killed and the failure must be loud.
+    sp = await trio.lowlevel.open_process(
+        [sys.executable, "-c", "import time; time.sleep(100)"],
+        preexec_fn=os.setsid,
+    )
+    try:
+        with patch(
+            "shrinkray.process.os.killpg",
+            side_effect=PermissionError(1, "Operation not permitted"),
+        ):
+            with pytest.raises(ValueError, match="Could not kill subprocess"):
+                await interrupt_wait_and_kill(sp, delay=0.01)
+    finally:
+        sp.kill()
+        await sp.wait()
 
 
 async def test_interrupt_wait_and_kill_closes_pipes_before_signaling():

@@ -1,5 +1,6 @@
 """Worker subprocess that runs the reducer with trio and communicates via JSON protocol."""
 
+import math
 import os
 import shutil
 import signal
@@ -202,6 +203,8 @@ class ReducerWorker:
         skip_validation = params.get("skip_validation", False)
         history_enabled = params.get("history_enabled", True)
         also_interesting_code = params.get("also_interesting_code")
+        external_reducers = params.get("external_reducers", [])
+        python_reducer = params.get("python_reducer", True)
 
         state_kwargs: dict[str, Any] = {
             "input_type": input_type,
@@ -218,6 +221,8 @@ class ReducerWorker:
             "volume": volume,
             "history_enabled": history_enabled,
             "also_interesting_code": also_interesting_code,
+            "external_reducers": external_reducers,
+            "python_reducer": python_reducer,
         }
 
         if os.path.isdir(filename):
@@ -628,6 +633,16 @@ class ReducerWorker:
             history_dir = self.state.history_manager.history_dir
             target_basename = self.state.history_manager.target_basename
 
+        # Adaptive timeout stats. An infinite timeout (no runtime data yet,
+        # or timeouts unbounded and unraised) is reported as "unknown".
+        current_timeout: float | None = None
+        timeout_rate = 0.0
+        if self.state is not None:
+            policy_timeout = self.state.timeout_policy.current_timeout()
+            if math.isfinite(policy_timeout):
+                current_timeout = policy_timeout
+            timeout_rate = self.state.timeout_policy.recent_timeout_rate
+
         return ProgressUpdate(
             status=self.reducer.status if self.reducer else "",
             size=stats.current_test_case_size,
@@ -641,6 +656,8 @@ class ReducerWorker:
             average_parallelism=average_parallelism,
             effective_parallelism=effective_parallelism,
             time_since_last_reduction=stats.time_since_last_reduction(),
+            current_timeout=current_timeout,
+            timeout_rate=timeout_rate,
             content_preview=content_preview,
             hex_mode=hex_mode,
             pass_stats=pass_stats_list,

@@ -167,7 +167,7 @@ def test_sigterm_kills_running_interestingness_tests(tmp_path):
     pid_file = tmp_path / "test_pids"
     script = tmp_path / "test.sh"
     script.write_text(
-        f"#!/bin/bash\necho $$ >> {shlex.quote(str(pid_file))}\nsleep 1000\n"
+        f"#!/bin/sh\necho $$ >> {shlex.quote(str(pid_file))}\nsleep 1000\n"
     )
     script.chmod(0o755)
 

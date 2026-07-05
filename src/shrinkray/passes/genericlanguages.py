@@ -211,6 +211,19 @@ async def replace_falsey_with_zero(problem: ReductionProblem[bytes]) -> None:
     await problem.is_interesting(b"0")
 
 
+@regex_pass(rb"\b[A-Za-z_][A-Za-z0-9_]*\b")
+async def replace_identifiers_with_zero(problem: ReductionProblem[bytes]) -> None:
+    """Replace an identifier with the literal 0.
+
+    Turning a name reference into a constant often drops a dependency - e.g.
+    ``assert x`` becomes ``assert 0`` - which can unblock further reduction such
+    as deleting the definition the name referred to. Replacements that break the
+    test are rejected, so this can be tried indiscriminately on every identifier
+    (keywords included).
+    """
+    await problem.is_interesting(b"0")
+
+
 async def simplify_brackets(problem: ReductionProblem[bytes]) -> None:
     """Try to replace bracket types with simpler ones.
 

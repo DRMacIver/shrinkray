@@ -21,16 +21,19 @@ each removed.
 | gcc49-pr64382-genlambda-template-member | cpp | gcc (gcc:4.9) | 879 | 128 | 119 | 85.4% | — |
 | gcc49-pr77739-variadic-auto-lambda | cpp | gcc (gcc:4.9) | 1004 | 166 | 160 | 83.5% | — |
 | gcc49-udlit-char-pack-template | cpp | gcc (gcc:4.9) | 834 | 126 | 122 | 84.9% | — |
+| go11810-generic-untyped-bool-ice | go | go 1.18.10 (gc) | 2288 | 220 | 181 | 90.4% | 906.2 |
 | jq-1.5-cve-2016-4074-deep-nest-segfault | json | jq 1.5 | 120426 | — | — | — | — |
 | kissat402-decide-disconnected | cnf | kissat 4.0.2 | 4295 | 536 | 349 | 87.5% | 918.2 |
 | minisat-dimacs-int-overflow | cnf | minisat 2.2 (git 37dc6c6, ASan) | 2326 | 14 | 12 | 99.4% | 1555.9 |
 | mypy-0.942-match-union-tuple-crash | python | mypy 0.942 | 2537 | 133 | 77 | 94.8% | 477.7 |
 | pylint-2.17.4-duplicate-bases-mro-crash | python | pylint 2.17.4 (astroid 2.15.5) | 2403 | 51 | 34 | 97.9% | 109.0 |
 | python-rapidjson-10-deep-nest-segfault | json | python-rapidjson 1.0 | 200426 | — | — | — | — |
-| ruff-0.0.277-isort-skip-block-panic | python | ruff 0.0.277 | 2774 | 55 | 37 | 98.0% | 20.3 |
+| ruff-0.0.277-isort-skip-block-panic | python | ruff 0.0.277 | 2774 | 56 | 38 | 98.0% | 10.0 |
+| rustc-1941-gce-braced-const-arg-ice | rust | rustc 1.94.1 | 2480 | 141 | 111 | 94.3% | 61.0 |
 | shrinkray-json-deep-nesting | json | python json (deep-nesting regression) | 1495 | 608 | 602 | 59.3% | 55.8 |
 | shrinkray-libcst-deep-nesting | python | libcst 1.8.6 (deep-nesting regression) | 4378 | 800 | 800 | 81.7% | 1125.9 |
 | splr0172-eliminate-assert | cnf | splr 0.17.2 (debug-assertions) | 3148 | 329 | 209 | 89.5% | — |
+| terser-5151-forof-empty-pattern-crash | javascript | terser 5.15.1 | 2945 | 24 | 22 | 99.2% | 44.3 |
 | ujson-510-indent-buffer-overflow | json | ujson 5.1.0 | 826 | 110 | 92 | 86.7% | 102.1 |
 
 ### c-reduce comparison (C/C++ entries)
@@ -66,6 +69,57 @@ result stays large and the reduction is slow, so full reduced outputs are
 not committed for those two; they are kept as reproduce-and-don't-crash
 entries. The shallow ujson entry (a buffer overflow that triggers at
 modest depth) is the representative small-JSON reduction.
+
+## The tree-sitter entries (Go, Rust, JavaScript)
+
+The `go11810`, `rustc-1941`, and `terser-5151` entries were added to
+evaluate the tree-sitter suggestion in issue #59: they are real crash
+bugs in languages shrink ray had **no** dedicated passes for, all
+reproducible natively with fast oracles. The method followed the
+issue's suggestion: reduce with the byte-level passes only, inspect
+what was left, prototype grammar-aware candidates starting from that
+converged output, then integrate what earned its keep as the passes in
+`src/shrinkray/passes/treesitter.py`.
+
+Baseline (pre-tree-sitter) vs current, same oracles and settings:
+
+| Entry | Baseline | With tree-sitter passes | Baseline seconds | Seconds |
+|-------|---------:|------------------------:|-----------------:|--------:|
+| go11810-generic-untyped-bool-ice | 317 | 220 | 1828 | 937 |
+| rustc-1941-gce-braced-const-arg-ice | 185 | 141 | 165 | 77 |
+| terser-5151-forof-empty-pattern-crash | 24 | 24 | 60 | 44 |
+
+Observations:
+
+- **Coupled deletions were the real gap, not deletion as such.** The
+  baseline Go result kept a dead function, `sort.Strings`/`strings.Join`
+  calls, and three imports: Go hard-errors on unused imports, so the
+  dead function and the imports only it used could only be deleted
+  *together*, and no byte-level pass can propose that jointly. The
+  `delete_orphaned_declarations` pass (delete a node plus declarations
+  left textually unreferenced, cascading) expresses exactly this and
+  accounts for most of the Go improvement.
+- **Grammar passes alone are not competitive.** A greedy reducer using
+  only the tree-sitter candidates reached 368/247/86 bytes from the
+  originals — worse than the byte-level baseline on every entry. The
+  value is complementarity: grammar passes unblock structural steps,
+  byte-level passes clean up (whitespace, identifiers, literals). This
+  is why they are ordinary passes inside the pipeline rather than a
+  separate mode.
+- **They make reduction faster, not slower.** Every entry converged in
+  roughly half the wall-clock time: structure-sized cuts land early
+  and shrink the input for every later pass. The one Python entry
+  re-run as a regression check (`ruff`) was byte-for-byte comparable
+  (56 vs 55 bytes, run-to-run noise) in half the time.
+- **Remaining floor.** The Go result still keeps `type a`, a slice
+  append loop, and the `strings` import because removing the final
+  `strings.Join` call needs a four-way coupled edit (delete the return
+  statement + the function's result type + the then-unused local + the
+  import). Reaching it generically would need candidates driven by
+  more than textual reference-counting; noted as possible future work.
+- tree-sitter's error tolerance matters: mid-reduction states are
+  often syntactically invalid (the converged Rust output is not valid
+  Rust), and the passes keep operating on the parseable parts.
 
 ## C/C++ entries: shrink ray vs c-reduce
 

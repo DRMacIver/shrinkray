@@ -15,6 +15,7 @@ from shrinkray.cli import (
     InputType,
     UIType,
     validate_command,
+    validate_commands,
     validate_ui,
 )
 from shrinkray.formatting import determine_formatter_command
@@ -89,11 +90,13 @@ async def run_shrink_ray(
     default=None,
     type=click.FLOAT,
     help=(
-        "Time out subprocesses after this many seconds. If not specified, "
-        "runs the interestingness test once and sets timeout to 10x the "
-        "measured time (capped at 5 minutes). If set to <= 0 then no timeout "
-        "will be used. Any commands that time out will be treated as failing "
-        "the test"
+        "Maximum time in seconds to allow the interestingness test to run. "
+        "Shrink Ray adapts the actual timeout to measured test runtimes over "
+        "the course of the run, never exceeding this value (or 5 minutes if "
+        "not specified), and temporarily raises it again when reduction "
+        "stalls with tests timing out. If set to <= 0 the adaptive timeout "
+        "has no upper bound. Any commands that time out will be treated as "
+        "failing the test"
     ),
 )
 @click.option(
@@ -239,6 +242,29 @@ If --no-history is passed, also-interesting recording is disabled unless
 cases are recorded, not reductions). Set to 0 to disable. Default: 101.
 """.strip(),
 )
+@click.option(
+    "--reduce-with",
+    "reduce_with",
+    multiple=True,
+    callback=validate_commands,
+    help="""
+An external reducer to run as a reduction pass, specified as a command. May be
+passed more than once to run several reducers.
+
+An external reducer is a program that shrink ray drives over its stdin/stdout
+using a small JSON protocol (its stderr is logged to the .shrinkray directory).
+See the documentation for the protocol.
+""".strip(),
+)
+@click.option(
+    "--python-reducer/--no-python-reducer",
+    default=True,
+    help="""
+Run shrink ray's built-in libcst-based Python reducer (as an external reducer)
+when the input looks like Python. Enabled by default; use --no-python-reducer
+to disable it.
+""".strip(),
+)
 @click.argument("test", callback=validate_command)
 @click.argument(
     "filename",
@@ -262,6 +288,8 @@ def main(
     theme: str,
     history: bool,
     also_interesting: int,
+    reduce_with: list[list[str]],
+    python_reducer: bool,
 ) -> None:
     if timeout is not None and timeout <= 0:
         timeout = float("inf")
@@ -358,6 +386,8 @@ def main(
         "volume": volume,
         "history_enabled": history,
         "also_interesting_code": also_interesting_code,
+        "external_reducers": reduce_with,
+        "python_reducer": python_reducer,
     }
 
     state: ShrinkRayState[Any]
@@ -410,6 +440,8 @@ def main(
             theme=theme,  # type: ignore[arg-type]
             history_enabled=history,
             also_interesting_code=also_interesting_code,
+            external_reducers=reduce_with,
+            python_reducer=python_reducer,
         )
         return
 

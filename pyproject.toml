@@ -1,6 +1,6 @@
 [project]
 name = "shrinkray"
-version = "26.7.5.0"
+version = "26.7.5.5"
 description = "Shrink Ray"
 authors = [
     {name = "David R. MacIver", email = "david@drmaciver.com"}
@@ -28,20 +28,25 @@ dependencies = [
     "exceptiongroup>=1.2.0",
     "binaryornot>=0.4.4",
     "black>=24.1.0",
+    "tree-sitter>=0.26.0",
+    "tree-sitter-language-pack>=1.12.2",
 ]
 
 [project.urls]
 Homepage = "https://github.com/DRMacIver/shrinkray"
 Repository = "https://github.com/DRMacIver/shrinkray"
-Documentation = "https://shrinkray.readthedocs.io"
-Changelog = "https://github.com/DRMacIver/shrinkray/releases"
+Changelog = "https://github.com/DRMacIver/shrinkray/blob/main/CHANGELOG.md"
 
 [project.scripts]
 shrinkray = "shrinkray.__main__:main"
 shrinkray-worker = "shrinkray.__main__:worker_main"
 
 [project.optional-dependencies]
-dev = [
+# Everything needed to run the test suite. Kept separate from dev because
+# the OpenBSD CI job installs only this: the lint tools in dev ship no
+# OpenBSD wheels (ruff would need a huge rust build, basedpyright needs
+# node binaries).
+test = [
     "coverage>=7.4.0",
     "hypothesis>=6.92.1",
     "hypothesmith>=0.3.1",
@@ -56,10 +61,13 @@ dev = [
     "jinja2>=3.0.0",
     "coverage[toml]>=7.4.0",
     "pygments>=2.17.0",
-    "basedpyright>=1.1.0",
-    "ruff>=0.1.0",
     "pexpect>=4.9.0",
     "pyte>=0.8.2",
+]
+dev = [
+    "shrinkray[test]",
+    "basedpyright>=1.1.0",
+    "ruff>=0.1.0",
 ]
 
 [tool.setuptools.packages.find]

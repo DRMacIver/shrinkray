@@ -1,0 +1,21 @@
+{
+  "id": "go11810-generic-untyped-bool-ice",
+  "format": "go",
+  "tool": "go 1.18.10 (gc)",
+  "extension": ".go",
+  "bug_url": "https://github.com/golang/go/issues/54537",
+  "symptom": "The go1.18 compiler crashes with 'internal compiler error: expression has untyped type' when a string comparison (an untyped bool expression) is assigned to a variable of a generic type parameter constrained by ~bool. Fixed during go1.20 development.",
+  "oracle": {
+    "type": "command",
+    "setup": "setup.sh",
+    "command": ["go", "build", "-o", "/dev/null", "{file}"],
+    "env": {
+      "GOTOOLCHAIN": "go1.18.10"
+    }
+  },
+  "interesting": {
+    "output_contains": "internal compiler error: expression has untyped type",
+    "exit_code": 2
+  },
+  "timeout": 10
+}

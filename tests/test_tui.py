@@ -96,6 +96,8 @@ class FakeReductionClient:
         skip_validation: bool = False,
         history_enabled: bool = True,
         also_interesting_code: int | None = None,
+        external_reducers: list[list[str]] | None = None,
+        python_reducer: bool = True,
     ) -> Response:
         if self._start_error:
             return Response(id="start", error=self._start_error)
@@ -2295,7 +2297,7 @@ def temp_test_script():
     """Create a temporary interestingness test script."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
         # Script that succeeds if file contains "Hello"
-        f.write('#!/bin/bash\ngrep -q "Hello" "$1"\n')
+        f.write('#!/bin/sh\ngrep -q "Hello" "$1"\n')
         temp_path = f.name
     os.chmod(temp_path, 0o755)
     yield temp_path
@@ -3016,6 +3018,8 @@ def test_run_textual_ui_creates_and_runs_app():
             theme="dark",
             history_enabled=True,
             also_interesting_code=None,
+            external_reducers=None,
+            python_reducer=True,
         )
 
         # Verify run() was called
@@ -7429,3 +7433,35 @@ def test_history_modal_highlighted_skipped_during_refresh(tmp_path):
     modal.set_timer.assert_not_called()
     # Selection path should remain unchanged
     assert modal._selected_reductions_path == str(entry_dir)
+
+
+def test_stats_display_shows_adaptive_timeout():
+    widget = StatsDisplay()
+    update = ProgressUpdate(
+        status="Testing",
+        size=500,
+        original_size=1000,
+        calls=20,
+        reductions=8,
+        runtime=5.0,
+        current_timeout=2.5,
+        timeout_rate=0.25,
+    )
+    widget.update_stats(update)
+    rendered = widget.render()
+    assert "Test timeout: 2.5s" in rendered
+    assert "25%" in rendered
+
+
+def test_stats_display_hides_timeout_when_unknown():
+    widget = StatsDisplay()
+    update = ProgressUpdate(
+        status="Testing",
+        size=500,
+        original_size=1000,
+        calls=20,
+        reductions=8,
+        runtime=5.0,
+    )
+    widget.update_stats(update)
+    assert "Test timeout" not in widget.render()

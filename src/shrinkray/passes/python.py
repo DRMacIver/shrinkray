@@ -1,3 +1,4 @@
+import sys
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -34,6 +35,15 @@ def _exceeds_bracket_depth[AnyStr: (str, bytes)](source: AnyStr, limit: int) -> 
         elif code in _CLOSING_BRACKETS and depth > 0:
             depth -= 1
     return False
+
+
+def python_reducer_command() -> list[str]:
+    """The command that launches the built-in Python reducer subprocess.
+
+    Runs the reducer with the same interpreter shrink ray is using so it shares
+    this environment's libcst and shrinkray installation.
+    """
+    return [sys.executable, "-m", "shrinkray.reducers.python"]
 
 
 def is_python[AnyStr: (str, bytes)](source: AnyStr) -> bool:

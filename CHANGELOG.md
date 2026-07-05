@@ -3,6 +3,60 @@
 This is the changelog for [Shrink Ray](https://github.com/DRMacIver/shrinkray), a
 fast multi-format test-case reducer. Versions are calendar-based (`YY.M.D.N`).
 
+## 26.7.5.5 — 2026-07-05
+
+- Added `--reduce-with '<command>'` (repeatable) to plug in your own external
+  reducer: a program that reduces the test case by talking to Shrink Ray over a
+  small JSON protocol on its stdin/stdout.
+- The built-in Python reducer now runs as one of these external reducers. Use
+  `--no-python-reducer` to turn it off. When history is enabled, each reducer's
+  log is written under the run's `.shrinkray` directory.
+- Reduction can now replace an identifier with `0` (e.g. `assert x` becomes
+  `assert 0`), which drops dependencies and unblocks further reduction such as
+  deleting the definition the name referred to.
+
+## 26.7.5.4 — 2026-07-05
+
+- Shrink Ray now has grammar-aware reduction passes for any language with a
+  tree-sitter grammar (Go, Rust, JavaScript, Java, Haskell, and many others,
+  selected by file extension). These delete whole syntactic constructs, lift
+  nested structure into parent positions, replace constructs with smaller
+  same-kind ones found elsewhere in the file, and delete dead declarations
+  together with the imports only they used — the latter unblocks reduction in
+  languages like Go whose compilers reject unused imports.
+
+## 26.7.5.3 — 2026-07-05
+
+- The timeout for interestingness tests now adapts to measured test runtimes
+  over the course of the run, instead of staying fixed at 10x the first run's
+  time. This speeds up reduction when tests get faster as the test case
+  shrinks, while staying robust to variable timings under parallel load.
+- When reduction stalls while tests are timing out, Shrink Ray now temporarily
+  raises the timeout (up to `--timeout`, or 5 minutes if unset) to check
+  whether slower test runs would unlock further reductions, and lowers it
+  again if they don't. Reduction no longer ends while a raised timeout might
+  still make progress.
+- `--timeout` now sets the maximum the adaptive timeout may reach rather than
+  a fixed timeout. With `--timeout` <= 0 the adaptive timeout has no upper
+  bound: tests still get killed once they run well past recent runtimes, but
+  the timeout can always be raised again, so no candidate is permanently lost.
+- The TUI now shows the current test timeout and the fraction of recent test
+  runs that timed out.
+
+## 26.7.5.2 — 2026-07-05
+
+- Reduction passes are now scheduled adaptively: expensive passes that
+  rarely find anything run only after everything else has converged, and a
+  pass that recently made no progress is given only a short trial before
+  Shrink Ray moves on to more promising work (it is still re-run in full
+  before finishing, so final results are unaffected). Reductions make
+  progress sooner and typically need fewer runs of the interestingness test.
+
+## 26.7.5.1 — 2026-07-05
+
+- Fixed the package's metadata links: removed a dead documentation URL and
+  pointed the changelog link at the actual changelog.
+
 ## 26.7.5.0 — 2026-07-05
 
 - The final reduced file is now tidied up for readability: Shrink Ray re-indents

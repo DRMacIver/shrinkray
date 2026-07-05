@@ -1,0 +1,31 @@
+{
+  "id": "rustc-1941-gce-braced-const-arg-ice",
+  "format": "rust",
+  "tool": "rustc 1.94.1",
+  "extension": ".rs",
+  "bug_url": "https://github.com/rust-lang/rust/issues/157938",
+  "symptom": "rustc 1.94.1 (and current nightly) panics with 'var types encountered in structurally_relate_consts: ?1c ?1c' when, under generic_const_exprs, a trait is implemented both generically (with a where clause) and for a braced block const argument ('Trait<{ { N } }>') on the same type.",
+  "oracle": {
+    "type": "command",
+    "setup": "setup.sh",
+    "command": [
+      "rustc",
+      "+1.94.1",
+      "--edition",
+      "2021",
+      "--crate-type",
+      "lib",
+      "{file}",
+      "-o",
+      "/dev/null"
+    ],
+    "env": {
+      "RUSTC_ICE": "0"
+    }
+  },
+  "interesting": {
+    "output_contains": "var types encountered in structurally_relate_consts",
+    "exit_code": 101
+  },
+  "timeout": 10
+}

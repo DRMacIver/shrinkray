@@ -21,13 +21,8 @@ snapshot_report.html
 *.bak
 .shrinkray/
 
-# claude-reliability managed
-.claude/bin/
-.claude/*.local.md
-.claude/*.local.json
-.claude/*.local
-.claude-reliability/
-
 # Sort-key tuning corpus: generated data is large and regenerable; keep it out
 # of git. The harness scripts and seeds under evaluation/sortkey/ ARE committed.
 evaluation/sortkey/corpus/
+.pip-cache/
+.ts-cache/

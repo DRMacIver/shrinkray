@@ -2,6 +2,7 @@
 
 import os
 import re
+import sys
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -10,13 +11,15 @@ import pytest
 import trio
 
 import shrinkray.state as state_mod
+from shrinkray.adaptive_timeout import MIN_TIMEOUT, AdaptiveTimeoutPolicy
 from shrinkray.cli import InputType
 from shrinkray.problem import InvalidInitialExample, shortlex
 from shrinkray.process import kill_process_group as original_kill
+from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
 from shrinkray.state import (
-    DYNAMIC_TIMEOUT_MIN,
     MemoryLimitExceededOnInitial,
     OutputCaptureManager,
+    ScriptRunResult,
     ShrinkRayDirectoryState,
     ShrinkRayStateSingleFile,
     TimeoutExceededOnInitial,
@@ -148,7 +151,7 @@ async def test_run_script_debug_raises_when_initial_exceeds_memory(tmp_path):
 def simple_state(tmp_path):
     """Create a simple state for testing."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -212,6 +215,103 @@ async def test_single_file_state_run_formatter_command(simple_state):
     assert result.returncode == 0
 
 
+# === External reducer wiring ===
+
+
+def test_reducer_log_dir_none_without_history(simple_state):
+    # simple_state has history_enabled=False
+    assert simple_state.reducer_log_dir() is None
+
+
+def test_reducer_log_dir_under_history(tmp_path):
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=True,
+    )
+    assert state.history_manager is not None
+    log_dir = state.reducer_log_dir()
+    assert log_dir == os.path.join(state.history_manager.history_dir, "reducers")
+
+
+def test_new_reducer_forwards_external_reducer_settings(tmp_path):
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+        external_reducers=[["my-reducer"]],
+        python_reducer=False,
+    )
+    reducer = state.reducer
+    assert isinstance(reducer, ShrinkRay)
+    assert reducer.external_reducers == [["my-reducer"]]
+    assert reducer.python_reducer is False
+    assert reducer.reducer_log_dir is None
+
+
+def test_directory_new_reducer_forwards_settings(tmp_path):
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "a.txt").write_text("hello")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="target",
+        parallelism=1,
+        initial={"a.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+        external_reducers=[["my-reducer"]],
+        python_reducer=False,
+    )
+    reducer = state.reducer
+    assert isinstance(reducer, DirectoryShrinkRay)
+    assert reducer.external_reducers == [["my-reducer"]]
+    assert reducer.python_reducer is False
+
+
 # === ShrinkRayDirectoryState tests ===
 
 
@@ -219,7 +319,7 @@ async def test_single_file_state_run_formatter_command(simple_state):
 def directory_state(tmp_path):
     """Create a directory state for testing."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "target"
@@ -352,7 +452,7 @@ async def test_directory_state_run_formatter_command_raises(directory_state):
 
 async def test_attempt_format_returns_data_when_cannot_format(tmp_path):
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -380,13 +480,13 @@ async def test_attempt_format_returns_data_when_cannot_format(tmp_path):
     assert result == b"test"
 
 
-# === run_for_exit_code tests ===
+# === run_for_result tests ===
 
 
-async def test_run_for_exit_code_returns_script_exit_code(tmp_path):
-    """Test that run_for_exit_code returns the script's exit code."""
+async def test_run_for_result_returns_script_exit_code(tmp_path):
+    """Test that run_for_result returns the script's exit code."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 42")
+    script.write_text("#!/bin/sh\nexit 42")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -408,15 +508,15 @@ async def test_run_for_exit_code_returns_script_exit_code(tmp_path):
         history_enabled=False,
     )
 
-    exit_code = await state.run_for_exit_code(b"hello")
+    exit_code = (await state.run_for_result(b"hello")).exit_code
     assert exit_code == 42
 
 
-async def test_run_for_exit_code_with_stdin_input_type(tmp_path):
+async def test_run_for_result_with_stdin_input_type(tmp_path):
     """Test that stdin input type pipes data correctly."""
     # Script that exits 0 if stdin contains 'magic'
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\ngrep -q magic && exit 0 || exit 1")
+    script.write_text("#!/bin/sh\ngrep -q magic && exit 0 || exit 1")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -439,18 +539,100 @@ async def test_run_for_exit_code_with_stdin_input_type(tmp_path):
     )
 
     # Should exit 0 because stdin contains 'magic'
-    exit_code = await state.run_for_exit_code(b"magic word")
+    exit_code = (await state.run_for_result(b"magic word")).exit_code
     assert exit_code == 0
 
     # Should exit 1 because stdin doesn't contain 'magic'
-    exit_code = await state.run_for_exit_code(b"other word")
+    exit_code = (await state.run_for_result(b"other word")).exit_code
     assert exit_code == 1
 
 
-async def test_run_for_exit_code_in_place_mode(tmp_path):
+# Regression tests for https://github.com/DRMacIver/shrinkray/issues/56:
+# on OpenBSD, kqueue never reports a pipe's write end as writable once the
+# read end is closed, so feeding test-case bytes to the script through a
+# pipe deadlocks trio's stdin-feeder task whenever the test case exceeds
+# the pipe buffer and the script exits without reading stdin. Test-case
+# stdin must therefore be a real file descriptor, not a pipe.
+
+STDIN_IS_REGULAR_FILE = (
+    "import os, stat, sys; sys.exit(0 if stat.S_ISREG(os.fstat(0).st_mode) else 1)"
+)
+
+
+def _stdin_check_state(tmp_path):
+    target = tmp_path / "test.txt"
+    target.write_bytes(b"hello")
+    return ShrinkRayStateSingleFile(
+        input_type=InputType.stdin,
+        in_place=False,
+        test=[sys.executable, "-c", STDIN_IS_REGULAR_FILE],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+    )
+
+
+async def test_stdin_is_a_regular_file_not_a_pipe(tmp_path):
+    state = _stdin_check_state(tmp_path)
+    assert (await state.run_for_result(b"hello")).exit_code == 0
+
+
+async def test_stdin_is_a_regular_file_not_a_pipe_in_debug_mode(tmp_path):
+    state = _stdin_check_state(tmp_path)
+    assert (await state.run_for_result(b"hello", debug=True)).exit_code == 0
+
+
+async def test_large_unread_stdin_does_not_deadlock(tmp_path):
+    # The script never reads stdin and the test case is much larger than a
+    # pipe buffer; with file-descriptor stdin there is no pipe to deadlock.
+    content = b"x" * (1 << 20)
+    target = tmp_path / "test.txt"
+    target.write_bytes(content)
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=["true"],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=content,
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+    )
+    assert (await state.run_for_result(content)).exit_code == 0
+
+
+async def test_formatter_stdin_is_a_regular_file(simple_state):
+    # The formatter gets its input the same way, so a formatter that exits
+    # without draining stdin must not deadlock either.
+    result = await simple_state.run_formatter_command(
+        [
+            sys.executable,
+            "-c",
+            "import os, stat, sys; assert stat.S_ISREG(os.fstat(0).st_mode); "
+            "sys.stdout.write(sys.stdin.read())",
+        ],
+        b"hello",
+    )
+    assert result.returncode == 0
+    assert result.stdout == b"hello"
+
+
+async def test_run_for_result_in_place_mode(tmp_path):
     """Test in_place mode writes to original file location."""
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ncat "$1" | grep -q hello && exit 0 || exit 1')
+    script.write_text('#!/bin/sh\ncat "$1" | grep -q hello && exit 0 || exit 1')
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -473,7 +655,7 @@ async def test_run_for_exit_code_in_place_mode(tmp_path):
     )
 
     # Should exit 0 because file contains 'hello'
-    exit_code = await state.run_for_exit_code(b"hello there")
+    exit_code = (await state.run_for_result(b"hello there")).exit_code
     assert exit_code == 0
 
 
@@ -483,7 +665,7 @@ async def test_run_for_exit_code_in_place_mode(tmp_path):
 async def test_is_interesting_returns_true_for_exit_zero(tmp_path):
     """Test that is_interesting returns True when script exits 0."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -519,7 +701,7 @@ async def test_is_interesting_stores_no_output_when_none_available(tmp_path):
     disabled so no output manager is created.
     """
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test_dir"
@@ -556,7 +738,7 @@ async def test_is_interesting_stores_no_output_when_none_available(tmp_path):
 async def test_is_interesting_returns_false_for_non_zero_exit(tmp_path):
     """Test that is_interesting returns False when script exits non-zero."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 1")
+    script.write_text("#!/bin/sh\nexit 1")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -588,7 +770,7 @@ async def test_is_interesting_returns_false_for_non_zero_exit(tmp_path):
 async def test_attempt_format_with_working_formatter(tmp_path):
     """Test attempt_format returns formatted data when formatter works."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -619,7 +801,7 @@ async def test_attempt_format_with_working_formatter(tmp_path):
 async def test_attempt_format_disables_on_failure(tmp_path):
     """Test attempt_format disables formatting when formatter fails."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -657,7 +839,7 @@ async def test_attempt_format_disables_on_failure(tmp_path):
 async def test_is_interesting_tracks_parallel_tasks(tmp_path):
     """Test that is_interesting properly tracks parallel task count."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nsleep 0.1\nexit 0")
+    script.write_text("#!/bin/sh\nsleep 0.1\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -700,9 +882,9 @@ async def test_is_interesting_tracks_parallel_tasks(tmp_path):
 
 
 async def test_first_call_flag_is_cleared(tmp_path):
-    """Test that first_call flag is cleared after first run_for_exit_code call."""
+    """Test that first_call flag is cleared after first run_for_result call."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -727,7 +909,7 @@ async def test_first_call_flag_is_cleared(tmp_path):
     # First call flag should be True initially
     assert state.first_call is True
 
-    await state.run_for_exit_code(b"hello")
+    await state.run_for_result(b"hello")
 
     # First call flag should be cleared after first call
     assert state.first_call is False
@@ -749,7 +931,7 @@ async def test_print_exit_message_directory(directory_state, capsys):
 async def test_print_exit_message_already_reduced(tmp_path, capsys):
     """Test print_exit_message when test case was already minimal."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -780,7 +962,7 @@ async def test_print_exit_message_already_reduced(tmp_path, capsys):
 async def test_print_exit_message_reduced(tmp_path, capsys):
     """Test print_exit_message when size was reduced."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -817,7 +999,7 @@ async def test_print_exit_message_reduced(tmp_path, capsys):
 async def test_report_error_timeout_exceeded(tmp_path, capsys):
     """Test report_error with TimeoutExceededOnInitial."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -847,11 +1029,11 @@ async def test_report_error_timeout_exceeded(tmp_path, capsys):
     assert "5.5" in captured.err or "5.50" in captured.err
 
 
-async def test_run_for_exit_code_no_input_type_arg(tmp_path):
-    """Test run_for_exit_code with input_type that doesn't include arg."""
+async def test_run_for_result_no_input_type_arg(tmp_path):
+    """Test run_for_result with input_type that doesn't include arg."""
     script = tmp_path / "test.sh"
     # Script that exits 0 always (testing that command is called without arg)
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -874,14 +1056,14 @@ async def test_run_for_exit_code_no_input_type_arg(tmp_path):
     )
 
     # Should run without the file argument
-    exit_code = await state.run_for_exit_code(b"hello")
+    exit_code = (await state.run_for_result(b"hello")).exit_code
     assert exit_code == 0
 
 
-async def test_run_for_exit_code_in_place_not_basename(tmp_path):
-    """Test run_for_exit_code in_place mode but not basename input type."""
+async def test_run_for_result_in_place_not_basename(tmp_path):
+    """Test run_for_result in_place mode but not basename input type."""
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ntest -f "$1" && exit 0 || exit 1')
+    script.write_text('#!/bin/sh\ntest -f "$1" && exit 0 || exit 1')
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -904,16 +1086,16 @@ async def test_run_for_exit_code_in_place_not_basename(tmp_path):
     )
 
     # Should create a temporary file with unique name
-    exit_code = await state.run_for_exit_code(b"hello world")
+    exit_code = (await state.run_for_result(b"hello world")).exit_code
     assert exit_code == 0
 
 
-async def test_run_for_exit_code_in_place_cleanup_handles_unlink_error(
+async def test_run_for_result_in_place_cleanup_handles_unlink_error(
     tmp_path, monkeypatch
 ):
     """Test that in-place cleanup handles OSError from os.unlink gracefully."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -945,7 +1127,7 @@ async def test_run_for_exit_code_in_place_cleanup_handles_unlink_error(
 
     monkeypatch.setattr(state_mod.os, "unlink", failing_unlink)
     # Should not raise despite unlink failure
-    exit_code = await state.run_for_exit_code(b"hello world")
+    exit_code = (await state.run_for_result(b"hello world")).exit_code
     assert exit_code == 0
 
 
@@ -953,7 +1135,7 @@ async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
     """Test that the process group is killed when the task is cancelled."""
     script = tmp_path / "test.sh"
     # Script that sleeps forever
-    script.write_text("#!/bin/bash\nsleep 1000")
+    script.write_text("#!/bin/sh\nsleep 1000")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -983,7 +1165,7 @@ async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
 
     monkeypatch.setattr(state_mod, "kill_process_group", tracking_kill)
     with trio.move_on_after(0.5):
-        await state.run_for_exit_code(b"hello")
+        await state.run_for_result(b"hello")
 
     assert kill_called[0]
 
@@ -994,7 +1176,7 @@ async def test_cancelled_test_is_not_recorded_as_exiting_with_code_zero(tmp_path
     TUI showed "exited with code 0" for a test that was actually killed."""
     script = tmp_path / "test.sh"
     # Script that sleeps forever
-    script.write_text("#!/bin/bash\nsleep 1000")
+    script.write_text("#!/bin/sh\nsleep 1000")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1018,7 +1200,7 @@ async def test_cancelled_test_is_not_recorded_as_exiting_with_code_zero(tmp_path
     state.output_manager = OutputCaptureManager(output_dir=str(tmp_path))
 
     with trio.move_on_after(0.5):
-        await state.run_for_exit_code(b"hello")
+        await state.run_for_result(b"hello")
 
     _, _, return_code = state.output_manager.get_current_output()
     assert return_code is not None
@@ -1031,7 +1213,7 @@ async def test_cleanup_when_process_never_started(tmp_path):
     Covers the sp=None branch in the finally block of run_script_on_file.
     """
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1054,7 +1236,7 @@ async def test_cleanup_when_process_never_started(tmp_path):
     )
 
     # Cancel immediately so nursery.start never completes and sp stays None.
-    # Call run_script_on_file directly because run_for_exit_code would be
+    # Call run_script_on_file directly because run_for_result would be
     # cancelled during write_test_case_to_file before reaching this code.
     with trio.CancelScope() as scope:
         scope.cancel()
@@ -1070,7 +1252,7 @@ async def test_report_error_non_timeout_rerun_fails(tmp_path, capsys):
     Exercises the debug rerun path where the script produces a non-zero exit code.
     """
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 1")  # Always fails
+    script.write_text("#!/bin/sh\nexit 1")  # Always fails
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1108,7 +1290,7 @@ async def test_report_error_cwd_dependent(tmp_path, capsys, monkeypatch):
 
     script = tmp_path / "test.sh"
     # Script that always succeeds
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1130,17 +1312,17 @@ async def test_report_error_cwd_dependent(tmp_path, capsys, monkeypatch):
         history_enabled=False,
     )
 
-    # Mock run_for_exit_code to fail (simulating temp dir failure)
-    original_run_for_exit_code = state.run_for_exit_code
+    # Mock run_for_result to fail (simulating temp dir failure)
+    original_run_for_result = state.run_for_result
 
-    async def mock_run_for_exit_code(test_case, debug=False):
+    async def mock_run_for_result(test_case, debug=False):
         call_count["value"] += 1
         if call_count["value"] == 1:
             # First call in report_error should fail
-            return 1
-        return await original_run_for_exit_code(test_case, debug)
+            return ScriptRunResult(exit_code=1)
+        return await original_run_for_result(test_case, debug)
 
-    monkeypatch.setattr(state, "run_for_exit_code", mock_run_for_exit_code)
+    monkeypatch.setattr(state, "run_for_result", mock_run_for_result)
 
     with pytest.raises(SystemExit):
         await state.report_error(ValueError("test error"))
@@ -1156,7 +1338,7 @@ async def test_print_exit_message_trivial_error(tmp_path, capsys):
     """
 
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1196,7 +1378,7 @@ async def test_print_exit_message_no_reduction(tmp_path, capsys):
     """
 
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1238,7 +1420,7 @@ async def test_run_script_on_file_nonexistent(tmp_path):
     Exercises the FileNotFoundError path in run_script_on_file.
     """
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1276,11 +1458,11 @@ async def test_check_formatter_failure(tmp_path, capsys):
     """
     # Create a formatter that always fails
     formatter = tmp_path / "bad_formatter.sh"
-    formatter.write_text("#!/bin/bash\necho 'error' >&2\nexit 1")
+    formatter.write_text("#!/bin/sh\necho 'error' >&2\nexit 1")
     formatter.chmod(0o755)
 
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1315,12 +1497,12 @@ async def test_check_formatter_makes_uninteresting(tmp_path, capsys):
     """
     # Create a formatter that outputs different content
     formatter = tmp_path / "formatter.sh"
-    formatter.write_text("#!/bin/bash\necho 'different'")
+    formatter.write_text("#!/bin/sh\necho 'different'")
     formatter.chmod(0o755)
 
     # Script that only accepts 'hello'
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ngrep -q "hello" "$1" && exit 0 || exit 1')
+    script.write_text('#!/bin/sh\ngrep -q "hello" "$1" && exit 0 || exit 1')
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1354,7 +1536,7 @@ async def test_default_formatter_fallback(tmp_path):
     Exercises the default_reformat_data fallback path in format_data.
     """
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     # Use a file extension that won't match any known formatter
@@ -1391,12 +1573,12 @@ async def test_attempt_format_with_formatter(tmp_path):
     """
     # Create a formatter that outputs something different
     formatter = tmp_path / "formatter.sh"
-    formatter.write_text("#!/bin/bash\necho 'formatted'")
+    formatter.write_text("#!/bin/sh\necho 'formatted'")
     formatter.chmod(0o755)
 
     # Script that doesn't accept 'formatted'
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ngrep -q "hello" "$1" && exit 0 || exit 1')
+    script.write_text('#!/bin/sh\ngrep -q "hello" "$1" && exit 0 || exit 1')
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1428,46 +1610,6 @@ async def test_attempt_format_with_formatter(tmp_path):
     assert state.can_format is False
 
 
-async def test_is_interesting_tracks_first_call_time(tmp_path):
-    """Test that is_interesting sets first_call_time on first call.
-
-    Exercises the first_call_time initialization in is_interesting.
-    """
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
-    script.chmod(0o755)
-
-    target = tmp_path / "test.txt"
-    target.write_text("hello")
-
-    # Use ShrinkRayDirectoryState to test the base class is_interesting
-    # (ShrinkRayStateSingleFile has its own implementation)
-    state = ShrinkRayDirectoryState(
-        input_type=InputType.arg,
-        in_place=False,
-        test=[str(script)],
-        filename=str(target),
-        timeout=5.0,
-        base="test.txt",
-        parallelism=1,
-        initial={"a.txt": b"hello"},
-        formatter="none",
-        trivial_is_error=True,
-        seed=0,
-        volume=Volume.quiet,
-        history_enabled=False,
-    )
-
-    # first_call_time should be None initially
-    assert state.first_call_time is None
-
-    # Call is_interesting
-    await state.is_interesting({"a.txt": b"hello"})
-
-    # first_call_time should now be set
-    assert state.first_call_time is not None
-
-
 async def test_print_exit_message_formatting_increase(tmp_path, capsys):
     """Test print_exit_message when formatting increases size.
 
@@ -1476,11 +1618,11 @@ async def test_print_exit_message_formatting_increase(tmp_path, capsys):
 
     # Create a formatter that adds content (increases size)
     formatter = tmp_path / "formatter.sh"
-    formatter.write_text("#!/bin/bash\ncat; echo 'extra content'")
+    formatter.write_text("#!/bin/sh\ncat; echo 'extra content'")
     formatter.chmod(0o755)
 
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1514,10 +1656,10 @@ async def test_print_exit_message_formatting_increase(tmp_path, capsys):
     assert "deleted" in captured.out.lower() or "increase" in captured.out.lower()
 
 
-async def test_run_for_exit_code_in_place_basename(tmp_path):
-    """Test run_for_exit_code in_place mode with basename input type.
+async def test_run_for_result_in_place_basename(tmp_path):
+    """Test run_for_result in_place mode with basename input type.
 
-    Exercises the in_place with basename input type path in run_for_exit_code.
+    Exercises the in_place with basename input type path in run_for_result.
     """
 
     # Change to tmp_path so the script can find the file by basename
@@ -1527,7 +1669,7 @@ async def test_run_for_exit_code_in_place_basename(tmp_path):
     try:
         script = tmp_path / "test.sh"
         # Script that checks the file by basename exists in cwd
-        script.write_text('#!/bin/bash\ntest -f "test.txt" && exit 0 || exit 1')
+        script.write_text('#!/bin/sh\ntest -f "test.txt" && exit 0 || exit 1')
         script.chmod(0o755)
 
         target = tmp_path / "test.txt"
@@ -1550,7 +1692,7 @@ async def test_run_for_exit_code_in_place_basename(tmp_path):
         )
 
         # Should write to the original filename and run the script
-        exit_code = await state.run_for_exit_code(b"hello world")
+        exit_code = (await state.run_for_result(b"hello world")).exit_code
         assert exit_code == 0
     finally:
         os.chdir(original_cwd)
@@ -1562,7 +1704,7 @@ async def test_check_formatter_none(tmp_path):
     Exercises the early return path in check_formatter when no formatter is set.
     """
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1589,46 +1731,6 @@ async def test_check_formatter_none(tmp_path):
     await state.check_formatter()
 
 
-async def test_is_interesting_multiple_calls(tmp_path):
-    """Test is_interesting when called multiple times (first_call_time already set).
-
-    Exercises the skip path in is_interesting when first_call_time is already set.
-    """
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
-    script.chmod(0o755)
-
-    target = tmp_path / "test.txt"
-    target.write_text("hello")
-
-    state = ShrinkRayDirectoryState(
-        input_type=InputType.arg,
-        in_place=False,
-        test=[str(script)],
-        filename=str(target),
-        timeout=5.0,
-        base="test.txt",
-        parallelism=1,
-        initial={"a.txt": b"hello"},
-        formatter="none",
-        trivial_is_error=True,
-        seed=0,
-        volume=Volume.quiet,
-        history_enabled=False,
-    )
-
-    # First call sets first_call_time
-    await state.is_interesting({"a.txt": b"hello"})
-    first_time = state.first_call_time
-
-    # Second call should skip setting first_call_time
-    await state.is_interesting({"a.txt": b"hello"})
-    second_time = state.first_call_time
-
-    # first_call_time should remain the same
-    assert first_time == second_time
-
-
 async def test_report_error_flaky_test(tmp_path, capsys):
     """Test report_error when test is flaky (different exit codes).
 
@@ -1645,7 +1747,7 @@ async def test_report_error_flaky_test(tmp_path, capsys):
     # Call 2 (cwd, local_exit_code): exits 0 (succeeds)
     # Call 3 (cwd, other_exit_code): exits 1 (different from 0 = flaky!)
     script.write_text(
-        f"""#!/bin/bash
+        f"""#!/bin/sh
 COUNTER=$(cat "{counter_file}")
 COUNTER=$((COUNTER + 1))
 echo $COUNTER > "{counter_file}"
@@ -1680,7 +1782,7 @@ fi
     )
 
     # Set initial_exit_code to 0 (what it would be if initial test passed)
-    # Also set first_call = False to prevent run_for_exit_code from overwriting it
+    # Also set first_call = False to prevent run_for_result from overwriting it
     state.initial_exit_code = 0
     state.first_call = False
 
@@ -1698,7 +1800,7 @@ async def test_report_error_nondeterministic(tmp_path, capsys):
     the test now succeeds but previously failed.
     """
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")  # Always succeeds now
+    script.write_text("#!/bin/sh\nexit 0")  # Always succeeds now
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1721,7 +1823,7 @@ async def test_report_error_nondeterministic(tmp_path, capsys):
     )
 
     # Set initial_exit_code to non-zero (as if initial test returned non-zero)
-    # Also set first_call = False to prevent run_for_exit_code from overwriting it
+    # Also set first_call = False to prevent run_for_result from overwriting it
     state.initial_exit_code = 1
     state.first_call = False
 
@@ -1739,12 +1841,12 @@ async def test_print_exit_message_reformatted_is_interesting(tmp_path, capsys):
     """
     # Create a formatter that transforms content
     formatter = tmp_path / "formatter.sh"
-    formatter.write_text("#!/bin/bash\necho 'formatted'")
+    formatter.write_text("#!/bin/sh\necho 'formatted'")
     formatter.chmod(0o755)
 
     # Script accepts anything
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1786,12 +1888,12 @@ async def test_check_formatter_reformatted_is_interesting(tmp_path):
     """
     # Create a formatter that transforms content
     formatter = tmp_path / "formatter.sh"
-    formatter.write_text("#!/bin/bash\ncat")  # Just passes through
+    formatter.write_text("#!/bin/sh\ncat")  # Just passes through
     formatter.chmod(0o755)
 
     # Script accepts anything
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1820,11 +1922,11 @@ async def test_check_formatter_reformatted_is_interesting(tmp_path):
 async def test_timeout_on_first_call(tmp_path):
     """Test that TimeoutExceededOnInitial is raised when first call exceeds timeout.
 
-    Exercises the timeout check on first call in run_for_exit_code.
+    Exercises the timeout check on first call in run_for_result.
     """
     # Create a script that sleeps longer than the timeout
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nsleep 0.5\nexit 0")
+    script.write_text("#!/bin/sh\nsleep 0.5\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1848,7 +1950,7 @@ async def test_timeout_on_first_call(tmp_path):
 
     # First call should raise TimeoutExceededOnInitial (wrapped in ExceptionGroup by trio)
     with pytest.raises(ExceptionGroup) as exc_info:
-        await state.run_for_exit_code(b"hello")
+        await state.run_for_result(b"hello")
 
     # Find the TimeoutExceededOnInitial in the group
     timeout_exc = None
@@ -1874,7 +1976,7 @@ async def test_process_killed_on_timeout(tmp_path):
     """
     # Create a script that sleeps for 2 seconds
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nsleep 2\nexit 0")
+    script.write_text("#!/bin/sh\nsleep 2\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1898,7 +2000,7 @@ async def test_process_killed_on_timeout(tmp_path):
 
     # First call should raise TimeoutExceededOnInitial and also kill the process
     with pytest.raises(ExceptionGroup) as exc_info:
-        await state.run_for_exit_code(b"hello")
+        await state.run_for_result(b"hello")
 
     # Find the TimeoutExceededOnInitial in the group
     timeout_exc = None
@@ -1923,7 +2025,7 @@ async def test_directory_cleanup_in_place_mode(tmp_path):
     """
     # Create a script that creates a directory instead of file
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test_dir"
@@ -1948,21 +2050,21 @@ async def test_directory_cleanup_in_place_mode(tmp_path):
     )
 
     # This should exercise the directory cleanup code
-    exit_code = await state.run_for_exit_code({"a.txt": b"modified"})
+    exit_code = (await state.run_for_result({"a.txt": b"modified"})).exit_code
     assert exit_code == 0
 
 
 # === Debug mode tests ===
 
 
-async def test_run_for_exit_code_debug_mode_timeout_on_first_call(tmp_path):
+async def test_run_for_result_debug_mode_timeout_on_first_call(tmp_path):
     """Test timeout handling in debug mode on first call.
 
     Exercises the timeout check in debug mode.
     """
     # Create a script that sleeps longer than the timeout
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nsleep 0.5\nexit 0")
+    script.write_text("#!/bin/sh\nsleep 0.5\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1986,7 +2088,7 @@ async def test_run_for_exit_code_debug_mode_timeout_on_first_call(tmp_path):
 
     # First call in debug mode should raise TimeoutExceededOnInitial
     with pytest.raises(TimeoutExceededOnInitial) as exc_info:
-        await state.run_for_exit_code(b"hello", debug=True)
+        await state.run_for_result(b"hello", debug=True)
 
     assert exc_info.value.timeout == 0.1
     assert exc_info.value.runtime >= 0.1
@@ -1994,13 +2096,10 @@ async def test_run_for_exit_code_debug_mode_timeout_on_first_call(tmp_path):
     assert state.first_call is False
 
 
-async def test_run_for_exit_code_debug_mode_dynamic_timeout(tmp_path):
-    """Test dynamic timeout computation in debug mode on first call.
-
-    Exercises the dynamic timeout computation path in debug mode.
-    """
+async def test_run_for_result_debug_mode_dynamic_timeout(tmp_path):
+    """Debug mode does not enforce or adapt timeouts on the first call."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2022,25 +2121,20 @@ async def test_run_for_exit_code_debug_mode_dynamic_timeout(tmp_path):
         history_enabled=False,
     )
 
-    # First call in debug mode with None timeout should compute dynamic timeout
+    # The user-specified timeout stays unset; timeouts are chosen by the
+    # adaptive policy, which the debug path does not feed.
     assert state.timeout is None
-    exit_code = await state.run_for_exit_code(b"hello", debug=True)
+    exit_code = (await state.run_for_result(b"hello", debug=True)).exit_code
     assert exit_code == 0
-    # After first call, timeout should be computed
-    assert state.timeout is not None
-    assert state.timeout > 0
+    assert state.timeout is None
     # first_call should be False after this
     assert state.first_call is False
 
 
-async def test_run_for_exit_code_dynamic_timeout_non_debug(tmp_path):
-    """Test dynamic timeout computation in non-debug mode on first call.
-
-    Exercises the dynamic timeout computation path in non-debug mode,
-    which uses run_script_on_file instead of the debug path.
-    """
+async def test_run_for_result_dynamic_timeout_non_debug(tmp_path):
+    """The first call's measured runtime feeds the adaptive timeout policy."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2062,26 +2156,26 @@ async def test_run_for_exit_code_dynamic_timeout_non_debug(tmp_path):
         history_enabled=False,
     )
 
-    # First call in non-debug mode with None timeout should compute dynamic timeout
+    # With no user timeout, the first call runs under the calibration
+    # timeout and its runtime is recorded by the adaptive policy.
     assert state.timeout is None
-    exit_code = await state.run_for_exit_code(b"hello", debug=False)
+    exit_code = (await state.run_for_result(b"hello", debug=False)).exit_code
     assert exit_code == 0
-    # After first call, timeout should be computed
-    assert state.timeout is not None
-    assert state.timeout > 0
-    # Verify minimum timeout is respected
-    assert state.timeout >= DYNAMIC_TIMEOUT_MIN
+    assert state.timeout is None
+    # The fast measured runtime pulls the adaptive timeout down from the cap.
+    policy = state.timeout_policy
+    assert MIN_TIMEOUT <= policy.current_timeout() < policy.cap
     # first_call should be False after this
     assert state.first_call is False
 
 
-async def test_run_for_exit_code_debug_mode_captures_stdout(tmp_path):
+async def test_run_for_result_debug_mode_captures_stdout(tmp_path):
     """Test that debug mode captures stdout output.
 
     Exercises the stdout capture in debug mode.
     """
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\necho 'hello from stdout'\nexit 0")
+    script.write_text("#!/bin/sh\necho 'hello from stdout'\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2104,20 +2198,20 @@ async def test_run_for_exit_code_debug_mode_captures_stdout(tmp_path):
     )
 
     # Run in debug mode
-    exit_code = await state.run_for_exit_code(b"hello", debug=True)
+    exit_code = (await state.run_for_result(b"hello", debug=True)).exit_code
     assert exit_code == 0
 
     # Check that stdout was captured
     assert "hello from stdout" in state._last_debug_output
 
 
-async def test_run_for_exit_code_debug_mode_captures_stderr(tmp_path):
+async def test_run_for_result_debug_mode_captures_stderr(tmp_path):
     """Test that debug mode captures stderr output.
 
     Exercises the stderr capture in debug mode.
     """
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\necho 'error from stderr' >&2\nexit 0")
+    script.write_text("#!/bin/sh\necho 'error from stderr' >&2\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2140,7 +2234,7 @@ async def test_run_for_exit_code_debug_mode_captures_stderr(tmp_path):
     )
 
     # Run in debug mode
-    exit_code = await state.run_for_exit_code(b"hello", debug=True)
+    exit_code = (await state.run_for_result(b"hello", debug=True)).exit_code
     assert exit_code == 0
 
     # Check that stderr was captured
@@ -2161,7 +2255,7 @@ async def test_build_error_message_includes_debug_output(tmp_path):
     """
 
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\necho 'diagnostic output' >&2\nexit 1")
+    script.write_text("#!/bin/sh\necho 'diagnostic output' >&2\nexit 1")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2190,7 +2284,7 @@ async def test_build_error_message_includes_debug_output(tmp_path):
     # Create an InvalidInitialExample exception
     exc = InvalidInitialExample("Test error")
 
-    # Build the error message (this calls run_for_exit_code with debug=True internally)
+    # Build the error message (this calls run_for_result with debug=True internally)
     error_message = await state.build_error_message(exc)
 
     # The error message should include the captured debug output
@@ -2205,12 +2299,12 @@ async def test_build_error_message_includes_cwd_debug_output(tmp_path):
     counter_file.write_text("0")
 
     # Create a script that:
-    # Call 1: run_for_exit_code with debug=True (returns 1 to trigger first-call failure path)
+    # Call 1: run_for_result with debug=True (returns 1 to trigger first-call failure path)
     # Call 2: run_script_on_file with debug=False from cwd (returns 0 to trigger cwd success path)
     # Call 3: run_script_on_file with debug=True from cwd (produces output for error message)
     script = tmp_path / "test.sh"
     script.write_text(
-        f"""#!/bin/bash
+        f"""#!/bin/sh
 COUNTER_FILE="{counter_file}"
 COUNT=$(cat "$COUNTER_FILE")
 COUNT=$((COUNT + 1))
@@ -2271,7 +2365,7 @@ async def test_volume_debug_inherits_stderr(tmp_path):
     """Test that volume=debug causes stderr to be inherited, not discarded."""
     # Create a script that writes to stderr
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\necho 'debug output' >&2\nexit 0")
+    script.write_text("#!/bin/sh\necho 'debug output' >&2\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2300,7 +2394,7 @@ async def test_volume_debug_inherits_stderr(tmp_path):
     # Run the script - with volume=debug, stderr should NOT be subprocess.DEVNULL
     # We can verify this by checking the kwargs would have stderr=None
     # The actual stderr output would go to the parent process's stderr
-    exit_code = await state.run_for_exit_code(b"hello")
+    exit_code = (await state.run_for_result(b"hello")).exit_code
     assert exit_code == 0
 
 
@@ -2606,7 +2700,7 @@ def test_output_manager_return_code(tmp_path):
 def test_state_with_history_disabled(tmp_path):
     """Test that history is not set up when history_enabled=False."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2637,7 +2731,7 @@ def test_state_with_history_disabled(tmp_path):
 def test_state_with_history_enabled_creates_output_manager(tmp_path):
     """Test that history enabled creates an output manager for capturing output."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2669,7 +2763,7 @@ def test_state_with_history_enabled_creates_output_manager(tmp_path):
 def test_get_last_captured_output_with_no_output_manager(tmp_path):
     """Test _get_last_captured_output returns None when output_manager is None."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2697,7 +2791,7 @@ def test_get_last_captured_output_with_no_output_manager(tmp_path):
 def test_get_last_captured_output_with_no_output_available(tmp_path):
     """Test _get_last_captured_output returns None when no output is available."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2728,7 +2822,7 @@ def test_get_last_captured_output_with_no_output_available(tmp_path):
 def test_get_last_captured_output_returns_stored_output(tmp_path):
     """Test _get_last_captured_output returns the stored _last_test_output."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2764,7 +2858,7 @@ def test_get_last_captured_output_returns_stored_output(tmp_path):
 async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
     """Test run_script_on_file handles OSError when reading output file."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2803,10 +2897,10 @@ async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.open", mock_open)
 
     # Run the script - should complete without raising OSError
-    exit_code = await state.run_script_on_file(
+    run_result = await state.run_script_on_file(
         str(target), debug=False, cwd=str(tmp_path)
     )
-    assert exit_code == 0
+    assert run_result.exit_code == 0
 
     # The OSError was caught, so _last_test_output should be None
     assert state._last_test_output is None
@@ -2815,7 +2909,7 @@ async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
 def test_directory_state_get_test_case_bytes_returns_serialized(tmp_path):
     """Test that directory state returns serialized bytes for history recording."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target_dir = tmp_path / "target"
@@ -2855,7 +2949,7 @@ def test_directory_state_get_test_case_bytes_returns_serialized(tmp_path):
 def test_check_trivial_result_returns_error_message(tmp_path):
     """Test check_trivial_result returns error message for trivial results."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2890,7 +2984,7 @@ def test_check_trivial_result_returns_error_message(tmp_path):
 def test_check_trivial_result_returns_none_for_non_trivial(tmp_path):
     """Test check_trivial_result returns None for non-trivial results."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2923,7 +3017,7 @@ def test_check_trivial_result_returns_none_for_non_trivial(tmp_path):
 def test_state_with_history_enabled_uses_existing_output_manager(tmp_path):
     """Test that history enabled uses an existing output_manager instead of creating a new one."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2962,7 +3056,7 @@ def test_state_with_history_enabled_uses_existing_output_manager(tmp_path):
 async def test_run_script_discards_output_in_quiet_mode_without_history(tmp_path):
     """Test that output is discarded in quiet mode without history or TUI."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\necho hello\nexit 0")
+    script.write_text("#!/bin/sh\necho hello\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2985,19 +3079,19 @@ async def test_run_script_discards_output_in_quiet_mode_without_history(tmp_path
     )
 
     # Should succeed and discard output
-    exit_code = await state.run_script_on_file(
+    run_result = await state.run_script_on_file(
         working=str(target),
         cwd=str(tmp_path),
         debug=False,
     )
-    assert exit_code == 0
+    assert run_result.exit_code == 0
 
 
 @pytest.mark.trio
 async def test_volume_debug_without_history_or_output_manager(tmp_path):
     """Test debug mode inherits stderr when no output_manager is present."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\necho 'debug output' >&2\nexit 0")
+    script.write_text("#!/bin/sh\necho 'debug output' >&2\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3022,19 +3116,19 @@ async def test_volume_debug_without_history_or_output_manager(tmp_path):
     # With history disabled and debug mode, stderr should be inherited
     # stdout goes to DEVNULL, stderr inherited
     assert state.output_manager is None
-    exit_code = await state.run_script_on_file(
+    run_result = await state.run_script_on_file(
         working=str(target),
         cwd=str(tmp_path),
         debug=False,
     )
-    assert exit_code == 0
+    assert run_result.exit_code == 0
 
 
 @pytest.mark.trio
 async def test_reducer_property_initializes_history(tmp_path):
     """Test that accessing reducer property initializes history when enabled."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3079,7 +3173,7 @@ async def test_reducer_property_initializes_history(tmp_path):
 async def test_reducer_property_without_history(tmp_path):
     """Test that accessing reducer property works when history is disabled."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3116,7 +3210,7 @@ async def test_history_callback_records_reduction(tmp_path):
     """Test that the history callback records reductions when they happen."""
     script = tmp_path / "test.sh"
     # Script that always says "interesting" (exit 0)
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3180,7 +3274,7 @@ async def test_history_callback_records_directory_mode(tmp_path):
     """Test that history callback records reductions for directory mode."""
     script = tmp_path / "test.sh"
     # Script that always says "interesting" (exit 0)
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     # Create a target directory with a file
@@ -3250,7 +3344,7 @@ async def test_is_interesting_records_also_interesting_exit_code(tmp_path):
     """Test that is_interesting records test cases with also-interesting exit code."""
     script = tmp_path / "test.sh"
     # Script that returns 101 (also-interesting code)
-    script.write_text("#!/bin/bash\nexit 101")
+    script.write_text("#!/bin/sh\nexit 101")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3304,7 +3398,7 @@ async def test_is_interesting_records_also_interesting_exit_code(tmp_path):
 async def test_also_interesting_disabled_by_default(tmp_path):
     """Test that also-interesting is disabled when code is None."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 101")
+    script.write_text("#!/bin/sh\nexit 101")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3348,7 +3442,7 @@ async def test_also_interesting_disabled_by_default(tmp_path):
 async def test_also_interesting_works_without_full_history(tmp_path):
     """Test that also-interesting works even when history_enabled=False."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 101")
+    script.write_text("#!/bin/sh\nexit 101")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3392,7 +3486,7 @@ async def test_also_interesting_works_without_full_history(tmp_path):
 async def test_no_history_manager_when_both_disabled(tmp_path):
     """Test that no history manager is created when both history and also-interesting are disabled."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 101")
+    script.write_text("#!/bin/sh\nexit 101")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3428,7 +3522,7 @@ async def test_also_interesting_different_exit_code_not_recorded(tmp_path):
     """Test that non-matching exit codes are not recorded."""
     script = tmp_path / "test.sh"
     # Script returns 1, but also-interesting is 101
-    script.write_text("#!/bin/bash\nexit 1")
+    script.write_text("#!/bin/sh\nexit 1")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3470,7 +3564,7 @@ async def test_also_interesting_different_exit_code_not_recorded(tmp_path):
 async def test_also_interesting_exit_code_zero_is_interesting_not_also(tmp_path):
     """Test that exit code 0 is interesting, not also-interesting."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3513,7 +3607,7 @@ async def test_also_interesting_records_directory_mode(tmp_path):
     """Test that also-interesting records for directory mode."""
     script = tmp_path / "test.sh"
     # Script that returns 101 (also-interesting code)
-    script.write_text("#!/bin/bash\nexit 101")
+    script.write_text("#!/bin/sh\nexit 101")
     script.chmod(0o755)
 
     # Create a target directory with a file
@@ -3577,7 +3671,7 @@ async def test_history_counter_never_lags_stats_reductions(tmp_path):
     restart_from(N) request then fails with "Reduction N not found".
     """
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ngrep -q KEEP "$1"')
+    script.write_text('#!/bin/sh\ngrep -q KEEP "$1"')
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3644,7 +3738,7 @@ async def test_history_counter_never_lags_stats_reductions(tmp_path):
 async def test_excluded_test_cases_rejects_matching(tmp_path):
     """Test that excluded_test_cases causes is_interesting to return False."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3683,7 +3777,7 @@ async def test_excluded_test_cases_rejects_matching(tmp_path):
 async def test_reset_for_restart_clears_reducer(tmp_path):
     """Test that reset_for_restart clears the cached reducer."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3728,7 +3822,7 @@ async def test_reset_for_restart_clears_reducer(tmp_path):
 async def test_reset_for_restart_without_existing_reducer(tmp_path):
     """Test reset_for_restart when reducer hasn't been accessed yet."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3767,7 +3861,7 @@ async def test_reset_for_restart_resets_initial_exit_code(tmp_path):
     when the assertion `assert self.initial_exit_code not in (None, 0)` was hit.
     """
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -3804,7 +3898,7 @@ async def test_reset_for_restart_resets_initial_exit_code(tmp_path):
 def test_directory_state_set_initial_for_restart_works(tmp_path):
     """Test that directory state can deserialize and set initial for restart."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target_dir = tmp_path / "target"
@@ -3846,7 +3940,7 @@ async def test_directory_state_excluded_test_cases(tmp_path):
     _get_test_case_bytes for comparison.
     """
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target_dir = tmp_path / "target"
@@ -3905,7 +3999,7 @@ def make_in_place_state(tmp_path, filename="reduced.cpp", initial=b"aaaa"):
     """Factory for an in-place single-file state whose interestingness
     test always succeeds, for exercising temp-file handling."""
     script = tmp_path / "t.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
     target = tmp_path / filename
     target.write_bytes(initial)
@@ -3934,7 +4028,7 @@ def working_file_leftovers(directory, filename="reduced.cpp"):
 
 def test_in_place_run_cleans_up_its_working_file(tmp_path):
     state = make_in_place_state(tmp_path)
-    trio.run(state.run_for_exit_code, b"aaa")
+    trio.run(state.run_for_result, b"aaa")
     assert working_file_leftovers(tmp_path) == []
 
 
@@ -3954,7 +4048,7 @@ def test_in_place_working_file_cleanup_survives_cwd_change(tmp_path, monkeypatch
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(state, "run_script_on_file", run_then_chdir)
-    trio.run(state.run_for_exit_code, b"aaa")
+    trio.run(state.run_for_result, b"aaa")
     assert working_file_leftovers(tmp_path) == []
 
 
@@ -4004,3 +4098,163 @@ def test_sweep_tolerates_unlink_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "unlink", boom)
     # Must swallow the error rather than propagating it.
     state.sweep_stale_working_files()
+
+
+# === adaptive timeout integration tests ===
+
+
+def make_adaptive_state(
+    tmp_path,
+    script_body,
+    *,
+    timeout=5.0,
+    min_timeout=0.1,
+    initial=b"hello world",
+):
+    script = tmp_path / "adaptive_test.sh"
+    script.write_text(script_body)
+    script.chmod(0o755)
+
+    target = tmp_path / "adaptive_target.txt"
+    target.write_bytes(initial)
+
+    return ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=timeout,
+        base="adaptive_target.txt",
+        parallelism=1,
+        initial=initial,
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+        timeout_policy=AdaptiveTimeoutPolicy(
+            user_timeout=timeout, min_timeout=min_timeout
+        ),
+    )
+
+
+def test_state_creates_timeout_policy_from_user_timeout(simple_state):
+    assert simple_state.timeout_policy.cap == simple_state.timeout
+
+
+async def test_fast_completions_pull_timeout_down(tmp_path):
+    # A generous cap so that even a heavily loaded machine (slow script
+    # startup inflates the measured runtime) stays well below it.
+    state = make_adaptive_state(
+        tmp_path, "#!/bin/sh\nexit 0", timeout=60.0, min_timeout=0.2
+    )
+    result = await state.run_for_result(b"hello")
+    assert result.exit_code == 0
+    assert not result.timed_out
+    assert result.timeout_used is None
+    # The fast run pulls the adaptive timeout down well below the cap
+    # (how far depends on the measured runtime).
+    policy = state.timeout_policy
+    assert 0.2 <= policy.current_timeout() < policy.cap
+
+
+async def test_timed_out_run_is_recorded_in_policy(tmp_path):
+    state = make_adaptive_state(tmp_path, "#!/bin/sh\nsleep 5", min_timeout=0.1)
+    policy = state.timeout_policy
+    # Skip first-call calibration and adapt the timeout down so the test
+    # runs quickly.
+    state.first_call = False
+    policy.record_completion(0.02, interesting=True)
+    expected_timeout = policy.current_timeout()
+    assert expected_timeout < 1.0
+
+    result = await state.run_for_result(b"hello")
+    assert result.timed_out
+    assert result.exit_code != 0
+    assert result.timeout_used == pytest.approx(expected_timeout)
+    assert policy.recent_timeout_rate == pytest.approx(0.5)
+
+
+async def test_timed_out_results_are_conditionally_cached(tmp_path):
+    state = make_adaptive_state(tmp_path, "#!/bin/sh\nsleep 5", min_timeout=0.1)
+    policy = state.timeout_policy
+    state.first_call = False
+    policy.record_completion(0.02, interesting=True)
+
+    outcome = await state.check_interesting(b"hello")
+    assert not outcome.interesting
+    assert outcome.cache_valid is not None
+    assert outcome.cache_valid()
+    # Raising the timeout invalidates the cached result.
+    assert policy.attempt_unstick()
+    assert not outcome.cache_valid()
+
+
+async def test_completed_uninteresting_results_cached_unconditionally(tmp_path):
+    state = make_adaptive_state(tmp_path, "#!/bin/sh\nexit 1")
+    outcome = await state.check_interesting(b"hello")
+    assert not outcome.interesting
+    assert outcome.cache_valid is None
+
+
+async def test_interesting_results_cached_unconditionally(tmp_path):
+    state = make_adaptive_state(tmp_path, "#!/bin/sh\nexit 0")
+    outcome = await state.check_interesting(b"hello")
+    assert outcome.interesting
+    assert outcome.cache_valid is None
+
+
+async def test_problem_unstick_raises_policy_timeout(tmp_path):
+    state = make_adaptive_state(tmp_path, "#!/bin/sh\nexit 0", min_timeout=0.1)
+    policy = state.timeout_policy
+    state.first_call = False
+    policy.record_completion(0.02, interesting=True)
+    policy.record_timeout(policy.current_timeout())
+    before = policy.current_timeout()
+
+    problem = state.problem
+    assert await problem.attempt_unstick()
+    assert policy.current_timeout() == 2 * before
+
+    # Repeated unsticking climbs to the cap, then gives up and reverts.
+    while await problem.attempt_unstick():
+        assert policy.current_timeout() <= policy.cap
+    assert policy.current_timeout() == before
+
+
+async def test_reduction_notes_progress_to_policy(tmp_path):
+    state = make_adaptive_state(tmp_path, "#!/bin/sh\nexit 0")
+    problem = state.problem
+    with patch.object(
+        state.timeout_policy,
+        "note_reduction",
+        wraps=state.timeout_policy.note_reduction,
+    ) as note:
+        assert await problem.is_interesting(b"hello")
+        note.assert_called_once()
+
+
+def test_reset_for_restart_resets_timeout_policy(tmp_path):
+    state = make_adaptive_state(tmp_path, "#!/bin/sh\nexit 0")
+    policy = state.timeout_policy
+    policy.record_completion(0.02, interesting=True)
+    assert policy.current_timeout() < policy.cap
+    state.reset_for_restart(b"new", set())
+    assert policy.current_timeout() == policy.cap
+
+
+@pytest.mark.slow
+async def test_adaptive_timeout_unlocks_slow_reduction(tmp_path):
+    """End-to-end: a reduction whose interesting form is much slower than
+    the adapted timeout is still found, because the reducer raises the
+    timeout before giving up."""
+    script_body = """#!/bin/sh
+content=$(cat "$1")
+if [ "$content" = "hello world" ]; then exit 0; fi
+if [ "$content" = "hello" ]; then sleep 0.4; exit 0; fi
+exit 1
+"""
+    state = make_adaptive_state(tmp_path, script_body, timeout=10.0, min_timeout=0.15)
+    await state.problem.setup()
+    await state.reducer.run()
+    assert state.problem.current_test_case == b"hello"

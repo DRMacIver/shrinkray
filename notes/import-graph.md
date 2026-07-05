@@ -23,16 +23,18 @@ flowchart TD
     n14[problem]
     n15[process]
     n16[reducer]
-    n17[state]
-    n18[subprocess]
-    n19[subprocess.client]
-    n20[subprocess.protocol]
-    n21[subprocess.worker]
-    n22[tui]
-    n23[ui]
-    n24[validation]
-    n25[work]
+    n17[reformat]
+    n18[state]
+    n19[subprocess]
+    n20[subprocess.client]
+    n21[subprocess.protocol]
+    n22[subprocess.worker]
+    n23[tui]
+    n24[ui]
+    n25[validation]
+    n26[work]
 
+    n2 --> n17
     n3 --> n1
     n5 --> n10
     n5 --> n14
@@ -44,13 +46,13 @@ flowchart TD
     n8 --> n7
     n8 --> n10
     n8 --> n14
-    n8 --> n25
+    n8 --> n26
     n9 --> n7
     n9 --> n10
     n9 --> n14
     n10 --> n14
     n11 --> n14
-    n11 --> n25
+    n11 --> n26
     n12 --> n7
     n12 --> n10
     n12 --> n13
@@ -59,7 +61,8 @@ flowchart TD
     n13 --> n10
     n13 --> n14
     n14 --> n2
-    n14 --> n25
+    n14 --> n17
+    n14 --> n26
     n16 --> n5
     n16 --> n6
     n16 --> n7
@@ -70,28 +73,28 @@ flowchart TD
     n16 --> n12
     n16 --> n13
     n16 --> n14
-    n17 --> n1
-    n17 --> n2
-    n17 --> n3
-    n17 --> n6
-    n17 --> n14
-    n17 --> n15
-    n17 --> n16
-    n17 --> n25
-    n18 --> n19
-    n18 --> n20
+    n18 --> n1
+    n18 --> n2
+    n18 --> n3
+    n18 --> n6
+    n18 --> n14
+    n18 --> n15
+    n18 --> n16
+    n18 --> n26
     n19 --> n20
-    n21 --> n1
-    n21 --> n14
-    n21 --> n17
-    n21 --> n20
-    n21 --> n25
-    n22 --> n2
-    n22 --> n19
-    n22 --> n20
-    n23 --> n14
-    n23 --> n17
-    n24 --> n1
+    n19 --> n21
+    n20 --> n21
+    n22 --> n1
+    n22 --> n14
+    n22 --> n18
+    n22 --> n21
+    n22 --> n26
+    n23 --> n2
+    n23 --> n20
+    n23 --> n21
+    n24 --> n14
+    n24 --> n18
+    n25 --> n1
 ```
 
 ---

@@ -175,7 +175,7 @@ class HistoryManager:
         if self.input_type.enabled(InputType.stdin) and not self.is_directory:
             command += f' < "$WORK"/{quoted_base}'
 
-        script_content = f"""#!/bin/bash
+        script_content = f"""#!/bin/sh
 # Shrink Ray interestingness test wrapper
 # Run with: ./run.sh [target_file]
 # If no target_file specified, uses the original

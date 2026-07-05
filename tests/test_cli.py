@@ -7,7 +7,14 @@ from unittest.mock import patch
 import click
 import pytest
 
-from shrinkray.cli import EnumChoice, InputType, UIType, validate_command, validate_ui
+from shrinkray.cli import (
+    EnumChoice,
+    InputType,
+    UIType,
+    validate_command,
+    validate_commands,
+    validate_ui,
+)
 
 
 # === validate_command tests ===
@@ -15,7 +22,7 @@ from shrinkray.cli import EnumChoice, InputType, UIType, validate_command, valid
 
 def test_validate_command_existing_file(tmp_path):
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\necho hello")
+    script.write_text("#!/bin/sh\necho hello")
     script.chmod(0o755)
 
     result = validate_command(None, None, str(script))
@@ -24,7 +31,7 @@ def test_validate_command_existing_file(tmp_path):
 
 def test_validate_command_with_args(tmp_path):
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\necho hello")
+    script.write_text("#!/bin/sh\necho hello")
     script.chmod(0o755)
 
     result = validate_command(None, None, f"{script} arg1 arg2")
@@ -60,6 +67,26 @@ def test_validate_command_raises_for_unparseable_command():
     # Regression test: an unclosed quote raised ValueError from shlex.
     with pytest.raises(click.BadParameter):
         validate_command(None, None, "'unclosed quote")
+
+
+# === validate_commands tests (repeatable --reduce-with) ===
+
+
+def test_validate_commands_empty_tuple():
+    assert validate_commands(None, None, ()) == []
+
+
+def test_validate_commands_resolves_each():
+    result = validate_commands(None, None, ("ls -la", "ls"))
+    assert len(result) == 2
+    assert os.path.basename(result[0][0]) == "ls"
+    assert result[0][1:] == ["-la"]
+    assert os.path.basename(result[1][0]) == "ls"
+
+
+def test_validate_commands_raises_for_nonexistent():
+    with pytest.raises(click.BadParameter, match="command not found"):
+        validate_commands(None, None, ("ls", "nonexistent_command_xyz123"))
 
 
 # === EnumChoice tests ===

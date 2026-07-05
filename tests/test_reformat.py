@@ -80,6 +80,14 @@ def test_brace_semicolon_attaches_to_close_brace():
     assert basic_format("} ;") == "};\n"
 
 
+def test_brace_drops_operator_trailing_space_at_line_break():
+    # An operator emits a trailing space in case an operand follows; when a
+    # line break arrives instead (here from '}'), newline() must pop that
+    # dangling space rather than leave "a = \n". This input pins coverage of
+    # that path, which hypothesis inputs only sometimes reach.
+    assert basic_format("a = }") == "a =\n}\n"
+
+
 def test_brace_preserves_string_literal_with_specials():
     # braces / ; / operators inside a string are untouched
     out = basic_format('x = "a{b;c+d}"')

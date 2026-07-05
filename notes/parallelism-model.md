@@ -12,15 +12,16 @@ Shrink Ray uses Trio for structured concurrency and achieves parallelism through
 
 ### Core Methods
 
-**map(fn, items)**
-Parallel map with lazy evaluation and backpressure. Returns an async iterator.
+**map(items, fn)**
+Parallel map with lazy evaluation and backpressure. An async context manager that yields a receive channel of results:
 ```python
-async for result in work.map(process_item, items):
-    handle(result)
+async with work.map(items, process_item) as results:
+    async for result in results:
+        handle(result)
 ```
 
-**filter(predicate, items)**
-Parallel filter, returns items where predicate is true.
+**filter(items, predicate)**
+Parallel filter; an async context manager yielding the items where predicate is true.
 
 **find_first_value(items, predicate)**
 Returns the first item where predicate is true.
@@ -57,11 +58,11 @@ This doesn't test blocks sequentially. Instead:
 
 When multiple parallel tests succeed, all but one are "wasted" - the reduction was already achieved. `problem.stats.wasted_interesting_calls` tracks this.
 
-The system always runs at the maximum parallelism supported by the current reduction pass and the configured parallelism limit.
+Patch application (`apply_patches`) runs at the full configured parallelism. The `map`/`find_first_value` path instead ramps up prefetching gradually (processing 1 item, then batches of 2, 4, 8, ... up to the parallelism limit) so that searches which expect an early hit don't speculate too far ahead.
 
 ## Backpressure
 
-`LazyParallelMap` uses bounded queues to prevent unbounded work creation. The channel buffer size is set to `parallelism`, which limits in-flight work and prevents memory exhaustion on large inputs.
+`WorkContext.map` (and the underlying `parallel_map`) use bounded channels to prevent unbounded work creation. The `map` result channel buffer is `parallelism + 1`, which limits in-flight work and prevents memory exhaustion on large inputs.
 
 ## Structured Concurrency
 
@@ -106,7 +107,8 @@ The `is_interesting_limiter` (a `trio.CapacityLimiter`) in `ShrinkRayState` limi
 # In ShrinkRayState.__attrs_post_init__():
 self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
 
-# In ShrinkRayState.is_interesting():
+# Simplified from ShrinkRayState.is_interesting() (the real method also
+# handles exclusion sets, --also-interesting, and output capture):
 async def is_interesting(self, test_case):
     async with self.is_interesting_limiter:
         return await self.run_for_exit_code(test_case) == 0

@@ -6,15 +6,18 @@ from hypothesis import strategies as st
 
 from shrinkray.passes.bytes import (
     ByteReplacement,
+    SuffixRaises,
     debracket,
     find_ngram_endpoints,
     line_sorter,
     lower_bytes,
     lower_individual_bytes,
+    lower_with_suffix_raises,
     short_deletions,
+    whitespace_layout_candidates,
 )
-from shrinkray.passes.patching import apply_patches
-from shrinkray.problem import BasicReductionProblem, shortlex
+from shrinkray.passes.patching import Conflict, apply_patches
+from shrinkray.problem import BasicReductionProblem, shortlex, sort_key_for_initial
 from shrinkray.work import WorkContext
 from tests.helpers import assert_reduces_to, direct_reductions, reduce_with
 
@@ -57,12 +60,15 @@ def test_debracket():
 
 @pytest.mark.parametrize("parallelism", [1, 2])
 def test_byte_reduction_example_1(parallelism):
+    # Uses shortlex so the expected minimum is the numerically lowered
+    # byte; under natural text ordering whitespace replacements sort lower.
     assert (
         reduce_with(
             [lower_bytes],
             b"\x00\x03",
             lambda x: (len(x) == 2 and x[1] >= 2),
             parallelism=parallelism,
+            sort_key=shortlex,
         )
         == b"\x00\x02"
     )
@@ -76,6 +82,7 @@ def test_byte_reduction_example_2(parallelism):
             b"\x03\x00",
             lambda x: (len(x) == 2 and x[0] >= 2),
             parallelism=parallelism,
+            sort_key=shortlex,
         )
         == b"\x02\x00"
     )
@@ -89,6 +96,177 @@ def test_byte_reduction_example_3(parallelism):
         parallelism=parallelism,
         sort_key=shortlex,
     )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_lower_individual_bytes_descends_in_sort_key_order(parallelism):
+    """Natural text ordering ranks b"z" below b"\\x00", so lowering must be
+    able to move a byte to a numerically larger but lower-sorting value,
+    converging on the smallest interesting one."""
+    sort_key = sort_key_for_initial(b"a\x00")
+    assert (
+        reduce_with(
+            [lower_individual_bytes],
+            b"a\x00",
+            lambda x: sort_key(x) >= sort_key(b"az"),
+            parallelism=parallelism,
+            sort_key=sort_key,
+        )
+        == b"az"
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_lower_bytes_descends_in_sort_key_order(parallelism):
+    """As above, but for the pass that replaces all occurrences of a byte."""
+    sort_key = sort_key_for_initial(b"\x00\x00")
+    assert (
+        reduce_with(
+            [lower_bytes],
+            b"\x00\x00",
+            lambda x: sort_key(x) >= sort_key(b"zz"),
+            parallelism=parallelism,
+            sort_key=sort_key,
+        )
+        == b"zz"
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_lowering_can_raise_suffix_natural_order(parallelism):
+    """Position-by-position orderings can require lowering one byte while
+    raising the bytes after it: reaching b"qqz" from b"qrq" needs position 1
+    lowered from "r" at the same time as position 2 is raised above "z"."""
+    sort_key = sort_key_for_initial(b"qrq")
+    assert (
+        reduce_with(
+            [lower_with_suffix_raises, lower_individual_bytes],
+            b"qrq",
+            lambda x: sort_key(x) >= sort_key(b"qqz"),
+            parallelism=parallelism,
+            sort_key=sort_key,
+        )
+        == b"qqz"
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_lowering_can_raise_suffix_shortlex(parallelism):
+    """The shortlex version of suffix raising is numeric carrying across a
+    run of positions: b"\\x98\\x00\\x00" can only descend towards
+    b"\\x97\\xff\\x08" by lowering position 0 while raising the rest."""
+    assert (
+        reduce_with(
+            [lower_with_suffix_raises, lower_individual_bytes],
+            b"\x98\x00\x00",
+            lambda x: shortlex(x) >= shortlex(b"\x97\xff\x08"),
+            parallelism=parallelism,
+            sort_key=shortlex,
+        )
+        == b"\x97\xff\x08"
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_can_lower_while_stripping_trailing_whitespace(parallelism):
+    """Reaching b"qzzz" from b"r 00\\n" needs a chain of coupled edits: a
+    suffix raise that preserves the trailing newline, then lowering the
+    raised bytes, and finally a lowering step combined with stripping the
+    trailing whitespace (b"qzzz\\n" sorts below the target and b"qzz~"
+    sorts above the intermediate, so the last two edits must land as one)."""
+    assert_reduces_to(
+        origin=b"\x00\x00\x00\x00",
+        target=b"qzzz",
+        parallelism=parallelism,
+        language_restrictions=False,
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_restart_phase_escapes_greedy_corner(parallelism):
+    """Greedy reduction from this origin deletes bytes first and wanders
+    into whitespace-layout states from which the pair-replacement target
+    cannot be reached by any single edit. The restart phase re-reduces from
+    the original input constrained below the fixpoint, which excludes that
+    basin and finds the target."""
+    assert_reduces_to(
+        origin=b"\x93\xe3.\xc5",
+        target=b"\x93\t\t\xc5",
+        parallelism=parallelism,
+        language_restrictions=False,
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_restart_replays_original_attempt_sequence(parallelism):
+    """The pair replacement needed to reach this target is only attempted
+    within the early-abort budget under the run's initial shuffle order, so
+    the restart phase must replay the original random state for the same
+    candidates to stay reachable (found by the generic shrinking
+    properties)."""
+    assert_reduces_to(
+        origin=b"1N\x94\xcd\xb5\x13\x10hr\x87\x9b\xa0'yI",
+        target=b"1N\x94\xcd\xb5\x13\x1ehr\x87\x9b\x1e'yI",
+        parallelism=parallelism,
+        language_restrictions=False,
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_can_reach_whitespace_padded_target(parallelism):
+    """The reflow text ordering is not length-monotone: b"\\t\\t" sorts below
+    the single byte b"0", so reduction can adopt a state from which the
+    target is only reachable by temporarily growing the test case. The
+    whitespace padding pump must recover this."""
+    assert_reduces_to(
+        origin=b"ab",
+        target=b"\t\t",
+        parallelism=parallelism,
+        language_restrictions=False,
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_can_reach_content_preserving_padded_target(parallelism):
+    """As above, but the padded target keeps some of the original content:
+    b"a\\t\\t" is longer than the intermediate state b"ab" yet sorts below
+    it, so it needs padding followed by byte lowering."""
+    assert_reduces_to(
+        origin=b"abc",
+        target=b"a\t\t",
+        parallelism=parallelism,
+        language_restrictions=False,
+    )
+
+
+def test_suffix_raises_patch_algebra():
+    patches = SuffixRaises()
+    a = frozenset([(0, 1, 2, 3, b"")])
+    b = frozenset([(1, 2, 3, 4, b"")])
+    assert patches.combine(a) == a
+    assert patches.combine(a, patches.empty) == a
+    with pytest.raises(Conflict):
+        patches.combine(a, b)
+    assert patches.apply(patches.empty, b"xyz") == b"xyz"
+    assert patches.apply(a, b"xyz") == b"\x01\x02\x02"
+    assert patches.size(a) == 0
+
+
+async def test_whitespace_layout_skips_length_monotone_orderings():
+    calls = []
+
+    async def is_interesting(x):
+        calls.append(x)
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"abc",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        sort_key=shortlex,
+    )
+    await whitespace_layout_candidates(problem)
+    assert calls == []
 
 
 @st.composite

@@ -213,6 +213,7 @@ async def test_apply_patches_early_abort_gives_up(monkeypatch):
     a bounded number of attempts instead of trying every candidate."""
     monkeypatch.setattr("shrinkray.passes.patching.MIN_PATCH_ATTEMPTS", 5)
     monkeypatch.setattr("shrinkray.passes.patching.EARLY_ABORT_SIZE_FACTOR", 0)
+    monkeypatch.setattr("shrinkray.passes.patching.FULL_EXPLORATION_LIMIT", 0)
 
     initial = bytes(range(50))  # distinct bytes so each deletion differs
 
@@ -232,6 +233,39 @@ async def test_apply_patches_early_abort_gives_up(monkeypatch):
     # give_up_after == 5, so it must stop well before trying all 50 patches.
     assert problem.stats.calls < 50
     assert problem.current_test_case == initial
+
+
+@pytest.mark.parametrize("parallelism", [2, 4])
+async def test_apply_patches_early_abort_deterministic_across_parallelism(
+    parallelism, monkeypatch
+):
+    """With early_abort and no successful reductions, the set of candidates
+    attempted must not depend on parallelism: the budget must cut off at a
+    fixed position in the (deterministically shuffled) patch queue rather
+    than at a scheduling-dependent count of completed attempts."""
+    monkeypatch.setattr("shrinkray.passes.patching.MIN_PATCH_ATTEMPTS", 10)
+    monkeypatch.setattr("shrinkray.passes.patching.EARLY_ABORT_SIZE_FACTOR", 0)
+    monkeypatch.setattr("shrinkray.passes.patching.FULL_EXPLORATION_LIMIT", 0)
+
+    initial = bytes(range(60))
+    patches = [[(i, i + 1)] for i in range(60)]
+
+    async def run(par):
+        attempted = set()
+
+        async def is_interesting(x):
+            attempted.add(x)
+            return x == initial
+
+        problem = BasicReductionProblem(
+            initial=initial,
+            is_interesting=is_interesting,
+            work=WorkContext(parallelism=par),
+        )
+        await apply_patches(problem, Cuts(), patches, early_abort=True)
+        return attempted
+
+    assert await run(parallelism) == await run(1)
 
 
 async def test_apply_patches_no_early_abort_by_default():

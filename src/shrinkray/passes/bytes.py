@@ -11,7 +11,9 @@ Key passes:
 - delete_byte_spans: Deletes contiguous byte ranges
 - short_deletions: Deletes small (1-10 byte) sequences
 - remove_indents/remove_whitespace: Whitespace normalization
-- lower_bytes: Reduces byte values toward 0
+- lower_bytes/lower_individual_bytes: Replace bytes with lower-sorting ones
+- lower_with_suffix_raises: Lower a byte while raising those after it
+- whitespace_layout_candidates: Whitespace-padded layouts of the content
 - lexeme_based_deletions: Deletes between repeated patterns
 
 Formats:
@@ -24,7 +26,13 @@ from collections.abc import Sequence
 
 from attrs import define
 
-from shrinkray.passes.patching import Cuts, Patches, apply_patches
+from shrinkray.passes.patching import (
+    Conflict,
+    Cuts,
+    Patches,
+    Replacements,
+    apply_patches,
+)
 from shrinkray.problem import Format, ReductionProblem
 
 
@@ -511,27 +519,73 @@ class ByteReplacement(Patches[ReplacementPatch, bytes]):
         return 0
 
 
+class ByteRanks:
+    """Every byte value ranked by the problem's ordering of single bytes.
+
+    Rank 0 is the byte whose one-byte test case sorts lowest. Numeric byte
+    order and the problem's ordering can disagree (natural text ordering
+    ranks b"z" below b"\\x00"), so lowering passes descend in this rank
+    space rather than assuming smaller byte values are better.
+    """
+
+    def __init__(self, problem: ReductionProblem[bytes]):
+        self.order = sorted(range(256), key=lambda i: problem.sort_key(bytes([i])))
+        self.rank = [0] * 256
+        for rank, byte in enumerate(self.order):
+            self.rank[byte] = rank
+
+    def is_lower(self, replacement: int, c: int) -> bool:
+        """Whether `replacement` is plausibly lower than `c`.
+
+        A candidate counts if it is lower in either ordering: single-byte
+        ranks are only a proxy for how a byte sorts in context (b"\\n" is
+        the lowest byte on its own but the highest whitespace within a
+        line), so numerically lower bytes stay in play too.
+        """
+        return self.rank[replacement] < self.rank[c] or replacement < c
+
+    def lowering_candidates(self, c: int) -> list[int]:
+        """Candidate replacements for byte `c`, in both orderings.
+
+        Proposes the classic numeric candidates (0, 1, half, whitespace)
+        plus exponentially-backed-off steps below `c` in both numeric and
+        rank space (c-1, c-2, c-4, ...), so iterating converges on the
+        smallest interesting replacement in logarithmically many rounds.
+        """
+        r = self.rank[c]
+        steps = [1 << k for k in range(8)]
+        candidates = {0, 1, c // 2} | set(b" \t\r\n")
+        candidates.update(c - step for step in steps)
+        candidates.update(
+            self.order[i]
+            for i in {0, 1, r // 2, *(r - step for step in steps)}
+            if 0 <= i < r
+        )
+        return sorted(x for x in candidates if 0 <= x and self.is_lower(x, c))
+
+
 async def lower_bytes(problem: ReductionProblem[bytes]) -> None:
-    """Globally replace byte values with smaller ones.
+    """Globally replace byte values with lower-sorting ones.
 
     For each distinct byte value in the input, tries replacing all
-    occurrences with smaller values (0, 1, half, value-1, whitespace).
-    Also tries replacing pairs of bytes with the same smaller value.
+    occurrences with values that sort below it (see
+    ByteRanks.lowering_candidates). Also tries replacing pairs of bytes
+    with the same value.
     """
+    ranks = ByteRanks(problem)
     sources = sorted(set(problem.current_test_case))
 
     patches = [
-        {c: r}
-        for c in sources
-        for r in sorted({0, 1, c // 2, c - 1} | set(b" \t\r\n"))
-        if r < c and r >= 0
+        {c: r} for c in sources for r in ranks.lowering_candidates(c)
     ] + [
         {c: r, d: r}
         for c in sources
         for d in sources
         if c != d
-        for r in sorted({0, 1, c // 2, c - 1, d // 2, d - 1} | set(b" \t\r\n"))
-        if (r < c or r < d) and r >= 0
+        for r in sorted(
+            set(ranks.lowering_candidates(c)) | set(ranks.lowering_candidates(d))
+        )
+        if ranks.is_lower(r, c) or ranks.is_lower(r, d)
     ]
 
     await apply_patches(problem, ByteReplacement(), patches, early_abort=True)
@@ -563,24 +617,209 @@ class IndividualByteReplacement(Patches[ReplacementPatch, bytes]):
 
 
 async def lower_individual_bytes(problem: ReductionProblem[bytes]) -> None:
-    """Replace individual bytes at specific positions with smaller values.
+    """Replace individual bytes at specific positions with lower-sorting
+    values.
 
     Unlike lower_bytes (which replaces all occurrences of a byte value),
     this tries reducing individual byte positions. Also handles carry-like
     patterns where decrementing one byte allows the next to become 255.
     """
+    ranks = ByteRanks(problem)
     initial = problem.current_test_case
-    patches = [
-        {i: r}
-        for i, c in enumerate(initial)
-        for r in sorted({0, 1, c // 2, c - 1} | set(b" \t\r\n"))
-        if r < c and r >= 0
+    fills = raise_fills(initial)
+    patches: list[dict[int, int]] = [
+        {i: r} for i, c in enumerate(initial) for r in ranks.lowering_candidates(c)
     ] + [
         {i - 1: initial[i - 1] - 1, i: 255}
         for i, c in enumerate(initial)
         if i > 0 and initial[i - 1] > 0 and c == 0
+    ] + [
+        # Lower one byte while raising the byte after it: a position-by-
+        # position ordering can require the pair to move together (the
+        # single-position analogue of lower_with_suffix_raises).
+        {i: r, i + 1: z}
+        for i, c in enumerate(initial[:-1])
+        for r in ranks.lowering_candidates(c)
+        for z in fills
+        if ranks.rank[z] > ranks.rank[initial[i + 1]]
     ]
     await apply_patches(problem, IndividualByteReplacement(), patches, early_abort=True)
+
+
+WHITESPACE_BYTES = frozenset(b" \t\r\n\x0b\x0c")
+
+
+def whitespace_like_bytes(problem: ReductionProblem[bytes]) -> frozenset[int]:
+    """Bytes the problem's ordering treats as pure whitespace.
+
+    Under the reflow text ordering, exactly the whitespace-like bytes sort
+    below b"0" as one-byte test cases (their canonical form collapses to a
+    newline). This picks up encoding-specific whitespace such as no-break
+    space that a fixed ASCII set would miss.
+    """
+    zero_key = problem.sort_key(b"0")
+    return frozenset(
+        i for i in range(256) if problem.sort_key(bytes([i])) < zero_key
+    )
+
+
+def raise_fills(initial: bytes) -> set[int]:
+    """Fill bytes used when a lowering needs later bytes raised.
+
+    255 is the maximum byte under shortlex, "~" is the highest-sorting
+    printable ASCII character (255 often fails to decode, which sorts a
+    text candidate above everything decodable and so blocks adoption),
+    "z" is the top of the deliberately-preferred character range, and the
+    current maximum handles test cases whose bytes exceed all of those.
+    """
+    return {255, ord("z"), ord("~"), max(initial, default=0)}
+
+
+def length_without_trailing_whitespace(
+    data: bytes, ws_bytes: frozenset[int] = WHITESPACE_BYTES
+) -> int:
+    end = len(data)
+    while end > 0 and data[end - 1] in ws_bytes:
+        end -= 1
+    return end
+
+
+SuffixRaisePatch = frozenset[tuple[int, int, int, int, bytes]]
+
+
+class SuffixRaises(Patches[SuffixRaisePatch, bytes]):
+    """Patches that lower one byte and raise a run of bytes after it.
+
+    A patch is a singleton set of (index, replacement, fill, stop, tail):
+    the byte at `index` becomes `replacement`, everything after it up to
+    `stop` becomes `fill`, and the rest of the test case becomes `tail`.
+    Two such patches rewrite overlapping runs, so combining distinct
+    patches raises Conflict rather than merging.
+    """
+
+    @property
+    def empty(self) -> SuffixRaisePatch:
+        return frozenset()
+
+    def combine(self, *patches: SuffixRaisePatch) -> SuffixRaisePatch:
+        result: SuffixRaisePatch = frozenset().union(*patches)
+        if len(result) > 1:
+            raise Conflict()
+        return result
+
+    def apply(self, patch: SuffixRaisePatch, target: bytes) -> bytes:
+        if not patch:
+            return target
+        [(i, replacement, fill, stop, tail)] = patch
+        return target[:i] + bytes([replacement]) + bytes([fill]) * (stop - i - 1) + tail
+
+    def size(self, patch: SuffixRaisePatch) -> int:
+        return 0
+
+
+async def lower_with_suffix_raises(problem: ReductionProblem[bytes]) -> None:
+    """Lower one byte while raising the bytes after it.
+
+    Orderings that compare position by position (shortlex and the natural
+    text ordering alike) can require a byte to be lowered at the same time
+    as later bytes are raised: b"\\x98\\x00\\x00" only descends towards
+    b"\\x97\\xff\\x08" through b"\\x97\\xff\\xff". This is the multi-position
+    generalisation of numeric carrying. The raised run is filled with a
+    high-sorting byte and other passes then lower it back down. Variants
+    stop before any trailing whitespace — which the reflow ordering treats
+    as layout that raising would destroy — either preserving it or raising
+    it to the highest whitespace-like byte.
+    """
+    ranks = ByteRanks(problem)
+    initial = problem.current_test_case
+    fills = raise_fills(initial)
+    ws_bytes = whitespace_like_bytes(problem)
+    end = length_without_trailing_whitespace(initial, ws_bytes)
+    variants: set[tuple[int, bytes]] = {(len(initial), b"")}
+    if end < len(initial):
+        variants.add((end, initial[end:]))
+        variants.add((end, bytes([max(ws_bytes)]) * (len(initial) - end)))
+    patches = [
+        frozenset([(i, r, z, stop, tail)])
+        for stop, tail in variants
+        for i, c in enumerate(initial[: stop - 1])
+        for r in ranks.lowering_candidates(c)
+        for z in fills
+    ]
+    await apply_patches(problem, SuffixRaises(), patches, early_abort=True)
+
+
+async def replace_byte_with_whitespace_run(problem: ReductionProblem[bytes]) -> None:
+    """Replace single bytes with short runs of whitespace.
+
+    Under the reflow ordering a run of interior whitespace can sort below a
+    single non-whitespace byte even though it is longer (whitespace
+    collapses in the canonical form). Single-character replacements are
+    already covered by the lowering passes; this proposes the multi-byte
+    runs, which deletion passes then trim to the minimal interesting length.
+    """
+    if problem.sort_key(b"\n\n") >= problem.sort_key(b"0"):
+        # Under a length-monotone ordering the replacement grows the test
+        # case, so it can never be an improvement.
+        return
+    initial = problem.current_test_case
+    patches = [
+        ((i, i + 1, bytes([ws]) * k),)
+        for i in range(len(initial))
+        for ws in b"\n\t \r"
+        for k in (2, 4, 8)
+    ]
+    await apply_patches(problem, Replacements(), patches, early_abort=True)
+
+
+async def lower_byte_and_strip_trailing_whitespace(
+    problem: ReductionProblem[bytes],
+) -> None:
+    """Lower a single byte while deleting the trailing whitespace run.
+
+    Under the reflow ordering a test case with trailing whitespace can sort
+    below its stripped form, so the two edits sometimes have to land
+    together: b"qzz{\\n" can only descend to b"qzzz" in one step, because
+    b"qzzz\\n" sorts below it and b"qzz{" sorts above it.
+    """
+    initial = problem.current_test_case
+    end = length_without_trailing_whitespace(initial, whitespace_like_bytes(problem))
+    if end == len(initial):
+        return
+    ranks = ByteRanks(problem)
+    patches = [
+        ((i, i + 1, bytes([r])), (end, len(initial), b""))
+        for i in range(end)
+        for r in ranks.lowering_candidates(initial[i])
+    ]
+    await apply_patches(problem, Replacements(), patches, early_abort=True)
+
+
+async def whitespace_layout_candidates(problem: ReductionProblem[bytes]) -> None:
+    """Propose simple whitespace layouts of the current content.
+
+    Under the reflow text ordering, whitespace-padded forms of the current
+    content (or pure whitespace) can sort below the current test case even
+    when they are longer. Greedy shrinking passes cannot reach them, so this
+    pass proposes them directly: runs of a single whitespace character on
+    their own and as a prefix or suffix of the non-whitespace content.
+    Deletion passes then trim any overshoot to the minimal interesting form.
+    """
+    if problem.sort_key(b"\n\n") >= problem.sort_key(b"0"):
+        # Under a length-monotone ordering longer test cases never sort
+        # lower, so padded layouts cannot be improvements.
+        return
+    ws_bytes = whitespace_like_bytes(problem)
+    current = problem.current_test_case
+    content = bytes(c for c in current if c not in ws_bytes)
+    max_pad = max(8, problem.stats.initial_test_case_size, len(current))
+    for ws_byte in sorted(ws_bytes):
+        ws = bytes([ws_byte])
+        n = 1
+        while n <= max_pad:
+            for candidate in (ws * n, content + ws * n, ws * n + content):
+                await problem.is_interesting(candidate)
+            n *= 2
 
 
 # These are some cheat substitutions that are sometimes helpful, but mostly

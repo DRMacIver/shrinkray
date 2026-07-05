@@ -7,11 +7,19 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from shrinkray.reducers.protocol import (
+    Feedback,
+    Idle,
     LineReader,
+    Query,
+    ReduceRequest,
     decode_feedback,
     decode_query,
     encode_feedback,
+    encode_idle,
     encode_query,
+    encode_reduce,
+    parse_from_reducer,
+    parse_to_reducer,
 )
 
 
@@ -81,6 +89,48 @@ def test_decode_feedback_rejects_missing_interesting() -> None:
     content = base64.b64encode(b"x").decode()
     with pytest.raises(ValueError):
         decode_feedback(json.dumps({"content": content}))
+
+
+# === reduce / idle + message classification ===
+
+
+@given(st.binary())
+def test_parse_to_reducer_classifies_reduce(content: bytes) -> None:
+    assert parse_to_reducer(encode_reduce(content)) == ReduceRequest(content)
+
+
+@given(st.binary(), st.booleans())
+def test_parse_to_reducer_classifies_feedback(content: bytes, ok: bool) -> None:
+    assert parse_to_reducer(encode_feedback(content, ok)) == Feedback(content, ok)
+
+
+def test_parse_to_reducer_rejects_unknown() -> None:
+    with pytest.raises(ValueError):
+        parse_to_reducer(json.dumps({"nope": 1}))
+
+
+def test_parse_to_reducer_rejects_non_object() -> None:
+    with pytest.raises(ValueError):
+        parse_to_reducer(b"[1, 2]")
+
+
+@given(st.binary())
+def test_parse_from_reducer_classifies_query(content: bytes) -> None:
+    assert parse_from_reducer(encode_query(content)) == Query(content)
+
+
+def test_parse_from_reducer_classifies_idle() -> None:
+    assert parse_from_reducer(encode_idle()) == Idle()
+
+
+def test_parse_from_reducer_rejects_unknown() -> None:
+    with pytest.raises(ValueError):
+        parse_from_reducer(json.dumps({"nope": 1}))
+
+
+def test_parse_from_reducer_rejects_non_object() -> None:
+    with pytest.raises(ValueError):
+        parse_from_reducer(b"42")
 
 
 # === LineReader ===

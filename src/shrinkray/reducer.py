@@ -37,7 +37,7 @@ from shrinkray.passes.definitions import (
     ReductionPump,
     compose,
 )
-from shrinkray.passes.external import external_reducer
+from shrinkray.passes.external import ExternalReducerPass, external_reducer
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
     cut_comment_like_things,
@@ -161,6 +161,12 @@ class ShrinkRay(Reducer[bytes]):
 
     # Directory to write external reducer stderr logs to, or None to discard.
     reducer_log_dir: str | None = None
+
+    # The external reducer passes built for this reducer, kept so their
+    # subprocesses can be torn down when the run finishes.
+    _external_reducer_passes: list[ExternalReducerPass] = attrs.field(
+        factory=list, init=False
+    )
 
     current_pump: ReductionPump[bytes] | None = None
 
@@ -298,13 +304,13 @@ class ShrinkRay(Reducer[bytes]):
         os.makedirs(self.reducer_log_dir, exist_ok=True)
         return os.path.join(self.reducer_log_dir, f"reducer-{name}.log")
 
-    def build_external_reducer_passes(self) -> list[ReductionPass[bytes]]:
+    def build_external_reducer_passes(self) -> list[ExternalReducerPass]:
         """Build the external reducer passes for the current test case.
 
         This includes the built-in Python reducer (when enabled and the test
         case looks like Python) followed by any user-specified reducers.
         """
-        passes: list[ReductionPass[bytes]] = []
+        passes: list[ExternalReducerPass] = []
         if self.python_reducer and is_python(self.target.current_test_case):
             passes.append(
                 external_reducer(
@@ -324,8 +330,15 @@ class ShrinkRay(Reducer[bytes]):
             )
         return passes
 
+    async def close_external_reducers(self) -> None:
+        """Tear down any external reducer subprocesses started during the run."""
+        with trio.CancelScope(shield=True):
+            for reducer_pass in self._external_reducer_passes:
+                await reducer_pass.aclose()
+
     def __attrs_post_init__(self) -> None:
         external_passes = self.build_external_reducer_passes()
+        self._external_reducer_passes = external_passes
         self.great_passes.extend(external_passes)
         self.initial_cuts.extend(external_passes)
         if self.enable_cpp_passes:
@@ -576,6 +589,12 @@ class ShrinkRay(Reducer[bytes]):
                 return
 
     async def run(self) -> None:
+        try:
+            await self._run()
+        finally:
+            await self.close_external_reducers()
+
+    async def _run(self) -> None:
         await self.target.setup()
 
         if await self.target.is_interesting(b""):

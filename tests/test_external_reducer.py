@@ -23,9 +23,12 @@ from shrinkray.reducers import python as python_reducer_module
 from shrinkray.reducers.driver import run_reducer
 from shrinkray.reducers.protocol import (
     LineReader,
+    ReduceRequest,
     decode_feedback,
-    encode_feedback,
+    encode_idle,
     encode_query,
+    encode_reduce,
+    parse_to_reducer,
 )
 from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
@@ -81,9 +84,10 @@ async def run_connected(
         sort_key=sort_key_for_initial(initial),
     )
 
-    # feedback: shrink ray -> reducer; queries: reducer -> shrink ray
+    # feedback/reduce: shrink ray -> reducer; queries/idle: reducer -> shrink ray
     feedback_send, feedback_recv = memory_stream_one_way_pair()
     query_send, query_recv = memory_stream_one_way_pair()
+    reader = LineReader(query_recv)
 
     async with trio.open_nursery() as nursery:
 
@@ -100,13 +104,16 @@ async def run_connected(
 
         @nursery.start_soon
         async def _shrinkray() -> None:
-            await drive_external_reducer(
+            # One reduce request drives the reducer to a fixpoint.
+            alive = await drive_external_reducer(
                 problem,
                 send_stream=feedback_send,
-                recv_stream=query_recv,
+                reader=reader,
                 timeout=30.0,
                 parallelism=parallelism,
             )
+            assert alive  # the reducer reported idle, staying alive
+            # Close the request stream so the reducer exits.
             await feedback_send.aclose()
 
     return problem.current_test_case
@@ -174,8 +181,12 @@ def reduce_with_real_subprocess(
             work=WorkContext(parallelism=parallelism),
             sort_key=sort_key_for_initial(initial),
         )
-        await reducer_pass(problem)
-        return problem.current_test_case
+        try:
+            await reducer_pass(problem)
+            return problem.current_test_case
+        finally:
+            # The reducer stays alive between calls, so tear it down explicitly.
+            await reducer_pass.aclose()
 
     return trio.run(run)
 
@@ -215,8 +226,8 @@ def test_python_reducer_serve_over_pipes() -> None:
     feedback_read, feedback_write = os.pipe()
     query_read, query_write = os.pipe()
 
-    # Send only the handshake, then close, so the reducer sees EOF and exits.
-    os.write(feedback_write, encode_feedback(b"x = 1\n", True))
+    # Send one reduce request, then close, so the reducer sees EOF and exits.
+    os.write(feedback_write, encode_reduce(b"x = 1\n"))
     os.close(feedback_write)
 
     def fake_dup(fd: int) -> int:
@@ -277,87 +288,101 @@ def test_python_reducer_module_entry_point() -> None:
 
 
 async def test_drive_ignores_blank_and_malformed_queries() -> None:
-    """Blank and malformed query lines are skipped; valid ones are answered."""
+    """Blank and malformed lines are skipped; valid queries are answered; idle
+    ends the request with the reducer still alive."""
     problem = make_basic_problem(b"hello world\n", lambda x: b"h" in x)
 
     fb_send, fb_recv = memory_stream_one_way_pair()
     q_send, q_recv = memory_stream_one_way_pair()
+    reader = LineReader(q_recv)
+
+    result: list[bool] = []
 
     async with trio.open_nursery() as nursery:
 
         @nursery.start_soon
         async def _shrinkray() -> None:
-            await drive_external_reducer(
+            alive = await drive_external_reducer(
                 problem,
                 send_stream=fb_send,
-                recv_stream=q_recv,
+                reader=reader,
                 timeout=5.0,
                 parallelism=1,
             )
+            result.append(alive)
 
         @nursery.start_soon
         async def _reducer() -> None:
-            reader = LineReader(fb_recv)
-            await reader.readline()  # consume the handshake
+            fb_reader = LineReader(fb_recv)
+            request_line = await fb_reader.readline()
+            assert request_line is not None
+            request = parse_to_reducer(request_line)
+            assert isinstance(request, ReduceRequest)
             await q_send.send_all(b"\n")  # blank: skipped
             await q_send.send_all(b"garbage not json\n")  # malformed: skipped
             await q_send.send_all(encode_query(b"h\n"))  # valid
-            line = await reader.readline()
+            line = await fb_reader.readline()
             assert line is not None
             content, interesting = decode_feedback(line)
             assert content == b"h\n"
             assert interesting is True
-            await q_send.aclose()  # EOF -> drive returns
+            await q_send.send_all(encode_idle())  # reducer done for now
+
+    assert result == [True]
 
 
-async def test_drive_times_out_when_reducer_is_silent() -> None:
-    """If the reducer sends no query within the timeout, drive returns."""
+async def test_drive_returns_false_on_timeout() -> None:
+    """If the reducer sends nothing within the timeout, drive returns False."""
     problem = make_basic_problem(b"hello\n", lambda x: True)
 
     fb_send, _fb_recv = memory_stream_one_way_pair()
     _q_send, q_recv = memory_stream_one_way_pair()
+    reader = LineReader(q_recv)
 
-    # q_recv never receives data and is never closed; the timeout must fire.
     with trio.fail_after(5):
-        await drive_external_reducer(
+        alive = await drive_external_reducer(
             problem,
             send_stream=fb_send,
-            recv_stream=q_recv,
+            reader=reader,
             timeout=0.05,
             parallelism=1,
         )
+    assert alive is False
 
 
-async def test_drive_tolerates_broken_send_stream() -> None:
-    """A broken feedback stream (reducer gone) does not raise out of drive."""
+async def test_drive_returns_false_and_tolerates_broken_send() -> None:
+    """A broken send stream is swallowed and EOF returns False."""
     problem = make_basic_problem(b"hello\n", lambda x: True)
 
     fb_send, fb_recv = memory_stream_one_way_pair()
     q_send, q_recv = memory_stream_one_way_pair()
-    await fb_recv.aclose()  # sending feedback will now break
-    await q_send.aclose()  # query stream is at EOF
+    reader = LineReader(q_recv)
+    await fb_recv.aclose()  # sending the reduce request will now break
+    await q_send.aclose()  # reducer output stream is at EOF
 
-    # Handshake send raises BrokenResourceError internally; it is swallowed and
-    # the loop then sees EOF and returns cleanly.
-    await drive_external_reducer(
+    alive = await drive_external_reducer(
         problem,
         send_stream=fb_send,
-        recv_stream=q_recv,
+        reader=reader,
         timeout=5.0,
         parallelism=1,
     )
+    assert alive is False
 
 
 # === external_reducer factory (fast subprocesses) ===
 
 
 async def test_external_reducer_launches_and_terminates() -> None:
-    """A reducer that reads the handshake and exits is handled cleanly."""
+    """A reducer that reads its first request and exits is handled cleanly."""
     problem = make_basic_problem(b"hello\n", lambda x: True)
     command = [sys.executable, "-c", "import sys; sys.stdin.readline()"]
     reducer_pass = external_reducer(command, log_file=None)
-    with trio.fail_after(30):
-        await reducer_pass(problem)
+    try:
+        with trio.fail_after(30):
+            await reducer_pass(problem)
+    finally:
+        await reducer_pass.aclose()
 
 
 async def test_external_reducer_passes_extra_env(tmp_path) -> None:
@@ -391,6 +416,44 @@ async def test_external_reducer_writes_stderr_to_log(tmp_path) -> None:
     with trio.fail_after(30):
         await reducer_pass(problem)
     assert b"hello from reducer" in log_file.read_bytes()
+
+
+# A trivial persistent reducer: for each reduce request it immediately reports
+# idle (and never queries), staying alive until its stdin closes.
+_IDLE_REDUCER = (
+    "import sys, json\n"
+    "for line in sys.stdin:\n"
+    "    line = line.strip()\n"
+    "    if not line:\n"
+    "        continue\n"
+    "    obj = json.loads(line)\n"
+    "    if 'reduce' in obj:\n"
+    "        sys.stdout.write('{\"idle\": true}\\n'); sys.stdout.flush()\n"
+)
+
+
+async def test_external_reducer_reuses_persistent_subprocess() -> None:
+    """A reducer that goes idle stays alive and is reused on the next call."""
+    problem = make_basic_problem(b"hello\n", lambda x: True)
+    reducer_pass = external_reducer([sys.executable, "-c", _IDLE_REDUCER])
+    try:
+        with trio.fail_after(30):
+            await reducer_pass(problem)
+            first_proc = reducer_pass._proc
+            assert first_proc is not None  # stayed alive after going idle
+            await reducer_pass(problem)
+            assert reducer_pass._proc is first_proc  # reused, not relaunched
+    finally:
+        await reducer_pass.aclose()
+    assert reducer_pass._proc is None  # torn down by aclose
+
+
+async def test_external_reducer_launch_failure_propagates() -> None:
+    """If the reducer command cannot be launched, the error propagates."""
+    problem = make_basic_problem(b"hello\n", lambda x: True)
+    reducer_pass = external_reducer(["/nonexistent/shrinkray-reducer-xyz"])
+    with pytest.raises(OSError):
+        await reducer_pass(problem)
 
 
 def test_external_reducer_default_name_from_command() -> None:

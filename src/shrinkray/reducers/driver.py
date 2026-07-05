@@ -25,9 +25,12 @@ from shrinkray.problem import (
     sort_key_for_initial,
 )
 from shrinkray.reducers.protocol import (
+    Feedback,
     LineReader,
-    decode_feedback,
+    ReduceRequest,
+    encode_idle,
     encode_query,
+    parse_to_reducer,
 )
 from shrinkray.work import WorkContext
 
@@ -106,6 +109,24 @@ class RemoteReductionProblem(ReductionProblem[bytes]):
             if not queue:
                 del self._waiters[content]
 
+    def set_current(self, content: bytes) -> None:
+        """Authoritatively set the current test case for a new reduce request.
+
+        Unlike adoption via feedback, this accepts ``content`` even when it is
+        larger than what we hold: shrink ray is telling us what to reduce next
+        (which may be bigger, e.g. after a pump).
+        """
+        self.__current = content
+        self._stats.current_test_case_size = len(content)
+
+    async def send_idle(self) -> None:
+        """Tell shrink ray we have reached a fixpoint for the current request."""
+        async with self._send_lock:
+            try:
+                await self._send_stream.send_all(encode_idle())
+            except (trio.BrokenResourceError, trio.ClosedResourceError):
+                pass
+
     def close(self) -> None:
         """Mark the connection closed and fail all outstanding queries.
 
@@ -172,41 +193,66 @@ async def run_reducer(
 ) -> None:
     """Drive ``passes`` as an external reducer over the given streams.
 
-    Reads the handshake (the initial test case) from ``stdin_stream``, then runs
-    the passes to a fixed point while a background task reads feedback. Returns
-    when the passes finish or shrink ray closes ``stdin_stream``.
+    The reducer stays alive across reduce requests: for each request it runs the
+    passes to a fixed point and reports idle, then waits for the next request. It
+    returns when shrink ray closes ``stdin_stream``.
     """
     passes = list(passes)
     reader = LineReader(stdin_stream)
 
-    handshake = await reader.readline()
-    if handshake is None:
-        # Shrink ray closed the connection before sending anything.
+    # The first message is a reduce request carrying the initial test case.
+    first = await reader.readline()
+    if first is None:
         return
-    initial, _ = decode_feedback(handshake)
+    try:
+        message = parse_to_reducer(first)
+    except ValueError:
+        return
+    if not isinstance(message, ReduceRequest):
+        return
 
     work = WorkContext(parallelism=parallelism, random=Random(seed))
     problem = RemoteReductionProblem(
-        initial,
+        message.content,
         send_stream=stdout_stream,
         work=work,
-        sort_key=sort_key_for_initial(initial),
+        sort_key=sort_key_for_initial(message.content),
     )
+
+    reduce_send, reduce_recv = trio.open_memory_channel[None](float("inf"))
 
     async with trio.open_nursery() as nursery:
 
         @nursery.start_soon
-        async def read_feedback() -> None:
+        async def read_messages() -> None:
             while True:
                 line = await reader.readline()
                 if line is None:
                     break
-                if line.strip():
-                    content, interesting = decode_feedback(line)
-                    problem.handle_feedback(content, interesting)
+                if not line.strip():
+                    continue
+                try:
+                    msg = parse_to_reducer(line)
+                except ValueError:
+                    continue
+                if isinstance(msg, Feedback):
+                    problem.handle_feedback(msg.content, msg.interesting)
+                else:  # ReduceRequest
+                    problem.set_current(msg.content)
+                    await reduce_send.send(None)
             # Shrink ray is gone: unblock any pending queries and stop.
             problem.close()
+            reduce_send.close()
             nursery.cancel_scope.cancel()
 
+        # Handle the initial reduce request, then wait for further ones.
         await run_passes_to_fixpoint(problem, passes)
+        await problem.send_idle()
+        while True:
+            try:
+                await reduce_recv.receive()
+            except trio.EndOfChannel:
+                break
+            await run_passes_to_fixpoint(problem, passes)
+            await problem.send_idle()
         nursery.cancel_scope.cancel()

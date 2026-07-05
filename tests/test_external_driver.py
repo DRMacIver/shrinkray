@@ -6,9 +6,13 @@ from trio.testing import memory_stream_one_way_pair, wait_all_tasks_blocked
 from shrinkray.problem import ReductionProblem, sort_key_for_initial
 from shrinkray.reducers.driver import RemoteReductionProblem, run_reducer
 from shrinkray.reducers.protocol import (
+    Idle,
     LineReader,
+    Query,
     decode_query,
     encode_feedback,
+    encode_reduce,
+    parse_from_reducer,
 )
 from shrinkray.work import WorkContext
 
@@ -174,8 +178,100 @@ async def test_run_reducer_returns_on_empty_handshake() -> None:
     await query_recv.aclose()
 
 
-async def test_run_reducer_skips_blank_feedback_lines() -> None:
-    """Blank feedback lines are ignored by the reducer's feedback reader."""
+async def test_run_reducer_ignores_non_reduce_first_message() -> None:
+    """A first message that is not a reduce request ends the reducer."""
+    feedback_send, feedback_recv = memory_stream_one_way_pair()
+    query_send, query_recv = memory_stream_one_way_pair()
+
+    # Send feedback (not a reduce request) as the first message.
+    await feedback_send.send_all(encode_feedback(b"x = 1\n", True))
+    await feedback_send.aclose()
+
+    await run_reducer([], stdin_stream=feedback_recv, stdout_stream=query_send)
+    await query_recv.aclose()
+
+
+async def test_run_reducer_returns_on_malformed_first_message() -> None:
+    """A malformed first message ends the reducer cleanly."""
+    feedback_send, feedback_recv = memory_stream_one_way_pair()
+    query_send, query_recv = memory_stream_one_way_pair()
+    await feedback_send.send_all(b"garbage not json\n")
+    await feedback_send.aclose()
+
+    await run_reducer([], stdin_stream=feedback_recv, stdout_stream=query_send)
+    await query_recv.aclose()
+
+
+async def test_run_reducer_handles_multiple_reduce_requests() -> None:
+    """The reducer stays alive and reduces again on each reduce request."""
+    feedback_send, feedback_recv = memory_stream_one_way_pair()
+    query_send, query_recv = memory_stream_one_way_pair()
+    reader = LineReader(query_recv)
+
+    async def chop_last_byte(problem: ReductionProblem[bytes]) -> None:
+        current = problem.current_test_case
+        if len(current) > 1:
+            await problem.is_interesting(current[:-1])
+
+    async def one_session(request_content: bytes) -> bytes:
+        """Send a reduce request, answer its single query (False), await idle."""
+        await feedback_send.send_all(encode_reduce(request_content))
+        query_line = await reader.readline()
+        assert query_line is not None
+        query = parse_from_reducer(query_line)
+        assert isinstance(query, Query)
+        await feedback_send.send_all(encode_feedback(query.content, False))
+        idle_line = await reader.readline()
+        assert idle_line is not None
+        assert isinstance(parse_from_reducer(idle_line), Idle)
+        return query.content
+
+    async with trio.open_nursery() as nursery:
+
+        @nursery.start_soon
+        async def _reducer() -> None:
+            await run_reducer(
+                [chop_last_byte],
+                stdin_stream=feedback_recv,
+                stdout_stream=query_send,
+            )
+            await query_send.aclose()
+
+        @nursery.start_soon
+        async def _shrinkray() -> None:
+            # First reduce request.
+            assert await one_session(b"abcd") == b"abc"
+            # A malformed message between requests is ignored.
+            await feedback_send.send_all(b"junk\n")
+            # Second reduce request with a different (smaller) current.
+            assert await one_session(b"xy") == b"x"
+            await feedback_send.aclose()
+
+
+async def test_send_idle_tolerates_broken_stream() -> None:
+    """send_idle swallows a broken send stream rather than raising."""
+
+    class BrokenStream(trio.abc.SendStream):
+        async def send_all(self, data: bytes | bytearray | memoryview) -> None:
+            raise trio.BrokenResourceError
+
+        async def wait_send_all_might_not_block(self) -> None:
+            await trio.lowlevel.checkpoint()
+
+        async def aclose(self) -> None:
+            await trio.lowlevel.checkpoint()
+
+    problem = RemoteReductionProblem(
+        b"x",
+        send_stream=BrokenStream(),
+        work=WorkContext(parallelism=1),
+        sort_key=sort_key_for_initial(b"x"),
+    )
+    await problem.send_idle()  # must not raise
+
+
+async def test_run_reducer_skips_blank_lines() -> None:
+    """Blank lines are ignored by the reducer's message reader."""
     feedback_send, feedback_recv = memory_stream_one_way_pair()
     query_send, query_recv = memory_stream_one_way_pair()
 
@@ -195,11 +291,15 @@ async def test_run_reducer_skips_blank_feedback_lines() -> None:
 
         @nursery.start_soon
         async def _shrinkray() -> None:
-            await feedback_send.send_all(encode_feedback(b"x = 1\n", True))
-            await feedback_send.send_all(b"\n")  # blank line: should be skipped
             reader = LineReader(query_recv)
-            line = await reader.readline()
-            assert line is not None
-            content = decode_query(line)
-            await feedback_send.send_all(encode_feedback(content, False))
+            await feedback_send.send_all(encode_reduce(b"x = 1\n"))
+            await feedback_send.send_all(b"\n")  # blank line: should be skipped
+            query_line = await reader.readline()
+            assert query_line is not None
+            query = parse_from_reducer(query_line)
+            assert isinstance(query, Query)
+            await feedback_send.send_all(encode_feedback(query.content, False))
+            idle_line = await reader.readline()
+            assert idle_line is not None
+            assert isinstance(parse_from_reducer(idle_line), Idle)
             await feedback_send.aclose()

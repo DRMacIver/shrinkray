@@ -3,34 +3,37 @@
 An external reducer is a subprocess that shrink ray drives over the protocol in
 :mod:`shrinkray.reducers.protocol`. This module provides the shrink-ray side:
 
-- :func:`drive_external_reducer` runs the protocol over a pair of streams,
+- :func:`drive_external_reducer` runs one reduce request over a pair of streams,
   evaluating the reducer's queries with ``problem.is_interesting`` and feeding
   the results back. It is independent of process management so it can be tested
   directly.
-- :func:`external_reducer` wraps a command line as a :data:`ReductionPass`,
-  launching the subprocess, redirecting its stderr to a log file, and killing it
-  on completion, timeout, or cancellation.
+- :class:`ExternalReducerPass` wraps a command line as a reduction pass. It
+  keeps the subprocess alive across invocations (so expensive startup happens
+  once), redirects its stderr to a log file, and cleans it up on completion,
+  timeout, or cancellation.
+- :func:`external_reducer` is a thin constructor for :class:`ExternalReducerPass`.
 """
 
 import os
 import subprocess
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import IO
 
 import trio
 
-from shrinkray.passes.definitions import ReductionPass
 from shrinkray.problem import ReductionProblem
 from shrinkray.process import interrupt_wait_and_kill
 from shrinkray.reducers.protocol import (
+    Idle,
     LineReader,
-    decode_query,
     encode_feedback,
+    encode_reduce,
+    parse_from_reducer,
 )
 
 
-# If the reducer emits no query for this long, we assume it has wedged and
-# terminate it. Overridable per reducer.
+# If the reducer emits nothing for this long while working, we assume it has
+# wedged and terminate it. Overridable per reducer.
 DEFAULT_REDUCER_TIMEOUT = 60.0
 
 
@@ -38,56 +41,50 @@ async def drive_external_reducer(
     problem: ReductionProblem[bytes],
     *,
     send_stream: trio.abc.SendStream,
-    recv_stream: trio.abc.ReceiveStream,
+    reader: LineReader,
     timeout: float = DEFAULT_REDUCER_TIMEOUT,
     parallelism: int = 1,
-) -> None:
-    """Run the shrink-ray side of the external reducer protocol.
+) -> bool:
+    """Run one reduce request against an external reducer.
 
-    Sends the initial test case, then reads candidate queries from
-    ``recv_stream`` and answers them on ``send_stream``, running interestingness
-    tests up to ``parallelism`` at a time. Returns when the reducer closes
-    ``recv_stream`` (EOF) or when no query arrives for ``timeout`` seconds.
+    Sends the current test case as a reduce request, then answers the reducer's
+    queries (running interestingness tests up to ``parallelism`` at a time) until
+    the reducer reports idle. ``reader`` reads the reducer's output and is reused
+    across requests so buffered bytes are not lost.
+
+    Returns True if the reducer went idle (and is still alive), or False if it
+    exited (EOF) or timed out.
     """
-    reader = LineReader(recv_stream)
     send_lock = trio.Lock()
-    # The current test case as last advertised to the reducer. Whenever the real
-    # current test case moves ahead of this, we push an unsolicited update.
-    last_advertised = problem.current_test_case
 
-    async def send_feedback(content: bytes, interesting: bool) -> None:
-        try:
-            await send_stream.send_all(encode_feedback(content, interesting))
-        except (trio.BrokenResourceError, trio.ClosedResourceError):
-            # The reducer exited while we were replying; nothing more to say.
-            pass
+    async def send(data: bytes) -> None:
+        async with send_lock:
+            try:
+                await send_stream.send_all(data)
+            except (trio.BrokenResourceError, trio.ClosedResourceError):
+                # The reducer exited; nothing more to say.
+                pass
 
-    # Handshake: tell the reducer what it is starting from.
-    await send_feedback(problem.current_test_case, True)
+    await send(encode_reduce(problem.current_test_case))
 
     # A semaphore (not a CapacityLimiter) because it is acquired by the reader
-    # task but released by the handler task, and semaphore tokens are not bound
+    # loop but released by the handler task, and semaphore tokens are not bound
     # to the acquiring task.
     slots = trio.Semaphore(max(parallelism, 1))
 
     async def handle(candidate: bytes) -> None:
-        nonlocal last_advertised
         try:
             interesting = await problem.is_interesting(candidate)
-            async with send_lock:
-                await send_feedback(candidate, interesting)
-                current = problem.current_test_case
-                if current != last_advertised:
-                    last_advertised = current
-                    await send_feedback(current, True)
+            await send(encode_feedback(candidate, interesting))
         finally:
             slots.release()
 
+    idle = False
     async with trio.open_nursery() as nursery:
         while True:
-            # Acquire a slot before reading so that a flood of queries can't
-            # outrun our workers: once all slots are busy the pipe fills and the
-            # reducer blocks on its next send.
+            # Acquire a slot before reading so a flood of queries can't outrun
+            # our workers: once all slots are busy the pipe fills and the reducer
+            # blocks on its next send.
             await slots.acquire()
             line: bytes | None = None
             with trio.move_on_after(timeout) as scope:
@@ -102,19 +99,111 @@ async def drive_external_reducer(
                 slots.release()
                 continue
             try:
-                candidate = decode_query(line)
+                message = parse_from_reducer(line)
             except ValueError:
-                # Malformed line: ignore it rather than killing the reducer.
                 slots.release()
                 continue
-            nursery.start_soon(handle, candidate)
+            if isinstance(message, Idle):
+                slots.release()
+                idle = True
+                break
+            nursery.start_soon(handle, message.content)
         nursery.cancel_scope.cancel()
+    return idle
 
 
 async def _terminate(proc: trio.Process) -> None:
     """Shut down the reducer subprocess, killing its process group if needed."""
     with trio.CancelScope(shield=True):
         await interrupt_wait_and_kill(proc)
+
+
+class ExternalReducerPass:
+    """A reduction pass that reduces via a persistent external reducer subprocess.
+
+    The subprocess is launched on first use and kept alive across pass
+    invocations, so per-launch startup cost (such as importing libcst) is paid
+    once. It is torn down when the reducer exits, when a call is cancelled or
+    errors, or when :meth:`aclose` is called (by the reducer at the end of a
+    run).
+    """
+
+    def __init__(
+        self,
+        command: Sequence[str],
+        *,
+        log_file: str | os.PathLike[str] | None = None,
+        timeout: float = DEFAULT_REDUCER_TIMEOUT,
+        name: str | None = None,
+        extra_env: Mapping[str, str] | None = None,
+    ) -> None:
+        self._command = list(command)
+        self._log_file = log_file
+        self._timeout = timeout
+        self._extra_env = extra_env
+        self.__name__ = name or f"external:{os.path.basename(self._command[0])}"
+        self._proc: trio.Process | None = None
+        self._reader: LineReader | None = None
+        self._stderr_file: IO[bytes] | None = None
+
+    async def _launch(self, parallelism: int) -> None:
+        env = dict(os.environ)
+        env["SHRINKRAY_REDUCER_PARALLELISM"] = str(parallelism)
+        if self._extra_env is not None:
+            env.update(self._extra_env)
+
+        target = self._log_file if self._log_file is not None else os.devnull
+        stderr_file: IO[bytes] = open(target, "ab")
+        try:
+            proc = await trio.lowlevel.open_process(
+                self._command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=stderr_file.fileno(),
+                env=env,
+                preexec_fn=os.setsid,
+            )
+        except BaseException:
+            stderr_file.close()
+            raise
+        assert proc.stdout is not None
+        self._proc = proc
+        self._reader = LineReader(proc.stdout)
+        self._stderr_file = stderr_file
+
+    async def __call__(self, problem: ReductionProblem[bytes]) -> None:
+        parallelism = problem.work.parallelism
+        try:
+            if self._proc is None:
+                await self._launch(parallelism)
+            assert self._proc is not None
+            assert self._proc.stdin is not None
+            assert self._reader is not None
+            alive = await drive_external_reducer(
+                problem,
+                send_stream=self._proc.stdin,
+                reader=self._reader,
+                timeout=self._timeout,
+                parallelism=parallelism,
+            )
+            if not alive:
+                await self._shutdown()
+        except BaseException:
+            await self._shutdown()
+            raise
+
+    async def _shutdown(self) -> None:
+        if self._proc is not None:
+            await _terminate(self._proc)
+            self._proc = None
+            self._reader = None
+        if self._stderr_file is not None:
+            self._stderr_file.close()
+            self._stderr_file = None
+
+    async def aclose(self) -> None:
+        """Terminate the reducer subprocess if it is still running."""
+        await self._shutdown()
 
 
 def external_reducer(
@@ -124,54 +213,23 @@ def external_reducer(
     timeout: float = DEFAULT_REDUCER_TIMEOUT,
     name: str | None = None,
     extra_env: Mapping[str, str] | None = None,
-) -> ReductionPass[bytes]:
+) -> ExternalReducerPass:
     """Build a reduction pass that reduces via an external reducer subprocess.
 
     Args:
         command: The command (argv) to launch the reducer.
         log_file: Path to append the reducer's stderr to. If None, stderr is
             discarded.
-        timeout: Seconds without a query before the reducer is terminated.
+        timeout: Seconds without output from a working reducer before it is
+            terminated.
         name: Name for the pass (used in stats/status). Defaults to the command
             basename.
         extra_env: Extra environment variables for the subprocess.
     """
-    command = list(command)
-    reducer_name = name or f"external:{os.path.basename(command[0])}"
-
-    async def run_external(problem: ReductionProblem[bytes]) -> None:
-        parallelism = problem.work.parallelism
-        env = dict(os.environ)
-        env["SHRINKRAY_REDUCER_PARALLELISM"] = str(parallelism)
-        if extra_env is not None:
-            env.update(extra_env)
-
-        if log_file is not None:
-            stderr_ctx: Any = open(log_file, "ab")
-        else:
-            stderr_ctx = open(os.devnull, "ab")
-
-        with stderr_ctx as stderr:
-            proc = await trio.lowlevel.open_process(
-                command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=stderr.fileno(),
-                env=env,
-                preexec_fn=os.setsid,
-            )
-            try:
-                assert proc.stdin is not None
-                assert proc.stdout is not None
-                await drive_external_reducer(
-                    problem,
-                    send_stream=proc.stdin,
-                    recv_stream=proc.stdout,
-                    timeout=timeout,
-                    parallelism=parallelism,
-                )
-            finally:
-                await _terminate(proc)
-
-    run_external.__name__ = reducer_name
-    return run_external
+    return ExternalReducerPass(
+        command,
+        log_file=log_file,
+        timeout=timeout,
+        name=name,
+        extra_env=extra_env,
+    )

@@ -18,23 +18,38 @@ Newline-delimited JSON on the reducer's stdin/stdout; stderr is logged to a file
 (under `.shrinkray/<run>/reducers/` when history is enabled). Test-case content
 is base64-encoded so arbitrary bytes survive JSON.
 
-- **query** (reducer → shrink ray): `{"content": <base64>}` — a candidate the
-  reducer wants evaluated.
-- **feedback** (shrink ray → reducer): `{"content": <base64>, "interesting": <bool>}`.
+Shrink ray → reducer:
+
+- **reduce** `{"reduce": <base64>}` — "reduce this test case to a fixpoint and
+  tell me when you are idle".
+- **feedback** `{"content": <base64>, "interesting": <bool>}` — the result for a
+  query, or an unsolicited update to the current test case.
+
+Reducer → shrink ray:
+
+- **query** `{"content": <base64>}` — a candidate it wants evaluated.
+- **idle** `{"idle": true}` — "I have reached a fixpoint for the current reduce
+  request".
 
 Sequence:
 
-1. On launch shrink ray sends one feedback message: the initial test case, with
-   `interesting` true. This is the reducer's starting point.
+1. Shrink ray sends a reduce request with the current test case. (The first
+   message the reducer receives is always a reduce request.)
 2. The reducer emits queries. Shrink ray runs its interestingness test on each
    (up to `parallelism` concurrently) and replies with a feedback message
-   echoing the query's `content` plus the boolean result.
-3. When the current test case changes (a reduction is adopted, possibly
-   reformatted, or another pass advances it), shrink ray sends an unsolicited
-   feedback message with the new content. The reducer distinguishes a reply
-   from an update by whether the `content` matches an outstanding query.
-4. The reducer exits when it has nothing left to try. Shrink ray also terminates
-   it if it emits no query for a timeout (default 60s).
+   echoing the query's `content` plus the boolean result. The reducer adopts a
+   candidate as its new current when the reply says it is interesting.
+3. When the reducer can make no more progress it sends idle; shrink ray's pass
+   returns, leaving the reducer alive.
+4. On a later invocation shrink ray sends another reduce request (with the
+   possibly-changed current) and the reducer works again. It exits only when
+   shrink ray closes its stdin.
+
+Keeping the reducer alive across reduce requests means expensive startup (such
+as importing libcst) is paid once. A reducer that instead **exits** at a
+fixpoint (closing its stdout) is also supported: shrink ray relaunches it next
+time. Shrink ray also terminates a reducer that produces no output for a timeout
+(default 60s).
 
 Because queries can be pipelined and answered concurrently, a reducer keeps its
 own parallelism to keep shrink ray busy. Shrink ray passes its parallelism to

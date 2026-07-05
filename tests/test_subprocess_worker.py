@@ -549,6 +549,7 @@ async def test_worker_start_reduction_reads_external_reducer_params(tmp_path):
         "formatter": "none",
         "volume": "quiet",
         "history_enabled": False,
+        "skip_validation": True,
         "external_reducers": [["my-reducer", "arg"]],
         "python_reducer": False,
     }
@@ -577,6 +578,7 @@ async def test_worker_start_reduction_default_external_reducer_params(tmp_path):
         "formatter": "none",
         "volume": "quiet",
         "history_enabled": False,
+        "skip_validation": True,
     }
 
     await worker._start_reduction(params)

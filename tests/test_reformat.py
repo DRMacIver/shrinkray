@@ -370,3 +370,29 @@ def test_indent_unterminated_string():
 
 def test_detect_brace_with_close_brace_only():
     assert detect_family("a}b") == "brace"
+
+
+def test_detect_family_colon_needs_strictly_deeper_body():
+    # A ':'-terminated line is only a Python block if the next non-blank line is
+    # *more* indented than it. This keeps reflowed brace output (uniform
+    # per-depth indentation) and C/C++ labels out of the indent family.
+    assert detect_family("if a:\n    b") == "indent"  # deeper body -> block
+    assert detect_family("a:\nb") == "brace"  # same indent -> not a block
+    assert detect_family("{\n  :\n") == "brace"  # label colon, only blanks after
+    assert detect_family("class C {\n  public:\n  int x;\n}") == "brace"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{:",  # the Hypothesis-found idempotency counterexample
+        "{\n  :\n",  # its own once-reflowed output
+        "class C{public:int x;};",  # C++ access specifier
+        "case 1:\nx;",  # C label colon at end of line
+    ],
+)
+def test_brace_output_is_idempotent(text):
+    # Reflowed brace output must not re-detect as Python, or a second pass would
+    # change it (basic_format must be a fixed point).
+    once = basic_format(text)
+    assert basic_format(once) == once

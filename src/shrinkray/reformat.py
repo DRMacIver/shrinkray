@@ -49,9 +49,33 @@ VOID = {
 }
 
 _TAG = re.compile(r"<(/?)([A-Za-z][\w:-]*)?", re.S)
-_PY_COLON = re.compile(r":[ \t]*(\n|$)")
-_PY_INDENT = re.compile(r"\n[ \t]+\S")
 _TAG_ANY = re.compile(r"<[A-Za-z!/?][^>]*>")
+
+
+def _has_python_block(s: str) -> bool:
+    """Whether ``s`` contains a Python-style block: a ``:``-terminated line
+    directly followed by a strictly more-indented line.
+
+    Requiring the body to be *more* indented than the header (rather than just
+    "a colon somewhere and an indented line somewhere") is what keeps detection
+    stable under reflow: brace output has uniform indentation per depth, so a
+    trailing label colon (``public:``, ``case 1:``, or a bare ``:``) is never
+    followed by a deeper line and stays in the brace family. This makes
+    ``basic_format`` idempotent and stops C/C++ labels reading as Python.
+    """
+    lines = s.split("\n")
+    for k, header in enumerate(lines[:-1]):
+        if not header.rstrip().endswith(":"):
+            continue
+        header_indent = len(header) - len(header.lstrip(" \t"))
+        for body in lines[k + 1 :]:
+            if body.strip() == "":
+                continue
+            body_indent = len(body) - len(body.lstrip(" \t"))
+            if body_indent > header_indent:
+                return True
+            break
+    return False
 
 
 def _finish(out: list[str]) -> str:
@@ -417,8 +441,9 @@ def _reflow_indent(s: str) -> str:
 
 def detect_family(s: str) -> str:
     # Python wins even with braces (dict/set literals): a ':'-terminated line
-    # followed by an indented line is a block, and indentation is the structure.
-    if _PY_COLON.search(s) and _PY_INDENT.search(s):
+    # directly followed by a more-indented line is a block, and indentation is
+    # the structure.
+    if _has_python_block(s):
         return "indent"
     if _TAG_ANY.search(s) and "{" not in s and "}" not in s:
         return "tag"

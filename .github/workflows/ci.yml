@@ -236,12 +236,22 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
+      # The pip cache lives inside the workspace so it is synced into the
+      # VM and (via copyback) out again. On a hit it holds the previously
+      # built libcst OpenBSD wheel, skipping the ~90s rust build.
+      - name: Cache pip downloads and built wheels
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .pip-cache
+          key: openbsd-7.7-pip-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            openbsd-7.7-pip-
       - name: Run fast tests in an OpenBSD VM
         uses: vmactions/openbsd-vm@18edb32f4e48dae5865d7b8b3a9587bc01218a20 # v1.4.4
         with:
           release: "7.7"
           usesh: true
-          copyback: false
+          copyback: true
           mem: 8192
           # rust is needed to build libcst from source via setuptools-rust.
           prepare: |
@@ -252,7 +262,7 @@ jobs:
             python3 --version
             python3 -m venv /tmp/venv
             /tmp/venv/bin/pip install --quiet --upgrade pip
-            /tmp/venv/bin/pip install ".[test]"
+            /tmp/venv/bin/pip install --cache-dir "$PWD/.pip-cache" ".[test]"
             /tmp/venv/bin/python -m pytest tests/ -m "not slow" -q
 
   coverage:

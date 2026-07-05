@@ -46,6 +46,7 @@ from pathlib import Path
 
 import trio
 
+from shrinkray.passes.treesitter import parse_tree
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import ShrinkRay
 from shrinkray.state import sort_key_for_initial
@@ -201,6 +202,24 @@ def coupled_arity_python_ok(data: bytes) -> bool:
 def contains_all(*tokens: bytes):
     def predicate(data: bytes) -> bool:
         return all(t in data for t in tokens)
+
+    return predicate
+
+
+def valid_go_with(*tokens: bytes):
+    """Candidate parses as Go with no syntax errors and keeps the tokens.
+
+    Approximates the go1.18 untyped-bool ICE well enough to drive a
+    realistic, Go-shaped reduction: it keeps the generic ~bool trigger
+    while requiring syntactic validity, which puts the grammar-aware
+    passes under the rejection pressure real strict-syntax reductions
+    face and makes the final size a meaningful quality signal (a plain
+    token predicate collapses to a few unparsable bytes instead)."""
+
+    def predicate(data: bytes) -> bool:
+        if not all(t in data for t in tokens):
+            return False
+        return not parse_tree("go", data).root_node.has_error
 
     return predicate
 
@@ -450,13 +469,13 @@ def build_problems() -> dict[str, Problem]:
             contains_all(b"2147483648"),
         ),
         # Tree-sitter (Go): keeps the generic ~bool constraint and a
-        # comparison (the untyped-bool ICE trigger) while letting the rest
-        # of the module — and the imports coupled to it — be deleted, so the
-        # grammar-aware passes (delete_orphaned_declarations in particular)
-        # are exercised and measured.
+        # comparison (the untyped-bool ICE trigger) and requires the
+        # candidate to stay syntactically valid Go, so the grammar-aware
+        # passes are exercised under realistic rejection pressure and the
+        # final size is a meaningful quality signal.
         "corpus_go": Problem(
             _corpus_file("go11810-generic-untyped-bool-ice", "original.go"),
-            contains_all(b"~bool", b"=="),
+            valid_go_with(b"~bool", b"=="),
             treesitter_language="go",
         ),
     }

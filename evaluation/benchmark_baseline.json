@@ -2707,173 +2707,173 @@
     {
       "name": "corpus_go",
       "initial_size": 2288,
-      "final_size": 7,
-      "calls": 327,
-      "c90": 17,
-      "c99": 69,
-      "tail": 203,
-      "reductions": 35,
-      "seconds": 0.04,
+      "final_size": 21,
+      "calls": 1195,
+      "c90": 55,
+      "c99": 114,
+      "tail": 599,
+      "reductions": 37,
+      "seconds": 0.11,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
-          "runs": 4,
+          "runs": 5,
           "calls": 1,
           "reductions": 1,
           "bytes_deleted": 392
         },
         {
           "pass": "hollow",
-          "runs": 5,
-          "calls": 22,
-          "reductions": 16,
-          "bytes_deleted": 1790
+          "runs": 7,
+          "calls": 29,
+          "reductions": 13,
+          "bytes_deleted": 1562
         },
         {
           "pass": "split(b'\\n')/delete_duplicates",
-          "runs": 5,
+          "runs": 7,
           "calls": 1,
           "reductions": 1,
-          "bytes_deleted": 8
+          "bytes_deleted": 28
         },
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 3,
-          "calls": 0,
+          "calls": 10,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lift_braces",
-          "runs": 5,
+          "runs": 7,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "remove_indents",
-          "runs": 5,
+          "runs": 7,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "remove_whitespace",
-          "runs": 5,
-          "calls": 2,
-          "reductions": 2,
-          "bytes_deleted": 8
+          "runs": 6,
+          "calls": 9,
+          "reductions": 0,
+          "bytes_deleted": 0
         },
         {
           "pass": "treesitter(go)/delete_children",
-          "runs": 6,
-          "calls": 57,
-          "reductions": 11,
-          "bytes_deleted": 69
+          "runs": 7,
+          "calls": 157,
+          "reductions": 10,
+          "bytes_deleted": 258
         },
         {
           "pass": "treesitter(go)/delete_orphaned_declarations",
-          "runs": 5,
-          "calls": 0,
+          "runs": 6,
+          "calls": 2,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "treesitter(go)/lift_nodes",
-          "runs": 5,
-          "calls": 20,
-          "reductions": 2,
+          "runs": 6,
+          "calls": 104,
+          "reductions": 3,
           "bytes_deleted": 11
         },
         {
           "pass": "treesitter(go)/substitute_nodes",
-          "runs": 4,
+          "runs": 5,
           "calls": 1,
-          "reductions": 0,
-          "bytes_deleted": 0
+          "reductions": 1,
+          "bytes_deleted": 10
         },
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
-          "runs": 3,
-          "calls": 0,
+          "runs": 5,
+          "calls": 19,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "split(b';')/block_deletion(1, 10)",
-          "runs": 3,
+          "runs": 5,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "debracket",
-          "runs": 3,
-          "calls": 1,
+          "runs": 5,
+          "calls": 4,
           "reductions": 1,
           "bytes_deleted": 2
         },
         {
           "pass": "delete_byte_spans",
-          "runs": 2,
-          "calls": 10,
+          "runs": 4,
+          "calls": 68,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "split(b'\\n')/block_deletion(11, 20)",
-          "runs": 2,
+          "runs": 3,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "reduce_integer_literals",
-          "runs": 2,
+          "runs": 3,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "replace_falsey_with_zero",
-          "runs": 2,
-          "calls": 0,
-          "reductions": 0,
-          "bytes_deleted": 0
+          "runs": 3,
+          "calls": 3,
+          "reductions": 1,
+          "bytes_deleted": 1
         },
         {
           "pass": "replace_identifiers_with_zero",
-          "runs": 2,
-          "calls": 2,
-          "reductions": 0,
+          "runs": 3,
+          "calls": 12,
+          "reductions": 1,
           "bytes_deleted": 0
         },
         {
           "pass": "combine_expressions",
-          "runs": 2,
+          "runs": 3,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "merge_adjacent_strings",
-          "runs": 2,
+          "runs": 3,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lexeme_based_deletions",
-          "runs": 2,
-          "calls": 0,
+          "runs": 3,
+          "calls": 4,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "normalize_identifiers",
-          "runs": 2,
-          "calls": 4,
-          "reductions": 0,
+          "runs": 3,
+          "calls": 27,
+          "reductions": 1,
           "bytes_deleted": 0
         },
         {
@@ -2886,34 +2886,34 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 12,
-          "reductions": 1,
-          "bytes_deleted": 1
+          "calls": 266,
+          "reductions": 3,
+          "bytes_deleted": 3
         },
         {
           "pass": "split(b'\\n')/block_deletion(21, 100)",
-          "runs": 1,
+          "runs": 2,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "replace_space_with_newlines",
-          "runs": 1,
-          "calls": 0,
+          "runs": 2,
+          "calls": 8,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "simplify_brackets",
-          "runs": 1,
-          "calls": 0,
-          "reductions": 0,
+          "runs": 2,
+          "calls": 1,
+          "reductions": 1,
           "bytes_deleted": 0
         },
         {
           "pass": "standard_substitutions",
-          "runs": 1,
+          "runs": 2,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
@@ -2921,21 +2921,21 @@
         {
           "pass": "short_deletions",
           "runs": 1,
-          "calls": 14,
+          "calls": 76,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 141,
+          "calls": 238,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 32,
+          "calls": 148,
           "reductions": 0,
           "bytes_deleted": 0
         }

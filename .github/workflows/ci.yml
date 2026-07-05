@@ -237,23 +237,29 @@ jobs:
         with:
           persist-credentials: false
       # The pip cache lives inside the workspace so it is synced into the
-      # VM and (via copyback) out again. On a hit it holds the previously
-      # built libcst OpenBSD wheel, skipping the ~90s rust build.
+      # VM and (via copyback) out again. On a hit it holds the wheels that
+      # pip otherwise builds from source (libcst, maturin,
+      # tree-sitter-language-pack, ...), skipping several minutes of rust
+      # and C compilation.
       - name: Cache pip downloads and built wheels
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .pip-cache
-          key: openbsd-7.7-pip-${{ hashFiles('uv.lock') }}
+          key: openbsd-7.9-pip-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            openbsd-7.7-pip-
+            openbsd-7.9-pip-
       - name: Run fast tests in an OpenBSD VM
         uses: vmactions/openbsd-vm@18edb32f4e48dae5865d7b8b3a9587bc01218a20 # v1.4.4
         with:
-          release: "7.7"
+          # 7.9 rather than an older release because building
+          # tree-sitter-language-pack needs maturin, whose own from-source
+          # bootstrap needs a newer rustc than 7.7's 1.86.
+          release: "7.9"
           usesh: true
           copyback: true
           mem: 8192
-          # rust is needed to build libcst from source via setuptools-rust.
+          # rust is needed to build libcst (setuptools-rust) and maturin
+          # from source.
           prepare: |
             pkg_add python3 py3-pip rust minisat
           run: |

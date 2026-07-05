@@ -54,9 +54,10 @@ def compose(format: Format[S, T], reduction_pass: ReductionPass[T]) -> Reduction
 
     @wraps(reduction_pass)
     async def wrapped_pass(problem: ReductionProblem[S]) -> None:
-        view = problem.view(format)
-
         try:
+            # Creating the view parses the current test case, so this can
+            # raise too, not just the re-parse on a cached view.
+            view = problem.view(format)
             view.current_test_case
         except ParseError:
             return

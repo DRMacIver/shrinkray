@@ -39,18 +39,20 @@ def test_format_is_valid_for_unparseable():
     assert fmt.is_valid("not a number") is False
 
 
+class SelectiveFormat(Format[str, str]):
+    """A format that only parses strings starting with "VALID:"."""
+
+    def parse(self, input: str) -> str:
+        if input.startswith("VALID:"):
+            return input[6:]
+        raise ParseError("must start with VALID:")
+
+    def dumps(self, input: str) -> str:
+        return "VALID:" + input
+
+
 async def test_compose_returns_early_on_parse_error():
     """Test that compose returns early when parsing fails after problem changes."""
-
-    # Create a format that parses strings starting with "VALID:" successfully
-    class SelectiveFormat(Format[str, str]):
-        def parse(self, input: str) -> str:
-            if input.startswith("VALID:"):
-                return input[6:]
-            raise ParseError("must start with VALID:")
-
-        def dumps(self, input: str) -> str:
-            return "VALID:" + input
 
     fmt = SelectiveFormat()
 
@@ -89,3 +91,33 @@ async def test_compose_returns_early_on_parse_error():
 
     # The inner pass should not have been called because re-parsing failed
     assert not pass_called
+
+
+async def test_compose_is_noop_when_view_creation_fails_to_parse():
+    """Creating the view itself parses the current test case, so a composed
+    pass run against a test case that no longer parses must no-op rather
+    than let ParseError escape. Regression test: format-specific passes are
+    registered when the *initial* test case parses, but the current one may
+    stop parsing mid-reduction."""
+
+    fmt = SelectiveFormat()
+    pass_called = False
+
+    async def tracking_pass(problem):
+        nonlocal pass_called
+        pass_called = True
+
+    composed = compose(fmt, tracking_pass)
+
+    async def is_interesting(s: str) -> bool:
+        return len(s) > 0
+
+    work = WorkContext(random=Random(0), volume=Volume.quiet, parallelism=1)
+    problem = BasicReductionProblem(
+        initial="INVALID", is_interesting=is_interesting, work=work
+    )
+
+    await composed(problem)
+
+    assert not pass_called
+    assert problem.current_test_case == "INVALID"

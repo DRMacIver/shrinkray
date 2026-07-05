@@ -121,8 +121,12 @@ async def test_eof_kills_running_interestingness_tests(tmp_path):
         },
     )
 
-    input_stream = ClosableInputStream((serialize(start_request) + "\n").encode("utf-8"))
-    worker = ReducerWorker(input_stream=input_stream, output_stream=MemoryOutputStream())
+    input_stream = ClosableInputStream(
+        (serialize(start_request) + "\n").encode("utf-8")
+    )
+    worker = ReducerWorker(
+        input_stream=input_stream, output_stream=MemoryOutputStream()
+    )
 
     test_pid: int | None = None
     try:

@@ -6,9 +6,14 @@ default:
 install:
     uv sync --extra dev
 
-# Run tests with coverage enforcement (skips slow tests when no args given)
+# Run tests with coverage enforcement (skips slow tests when no args given).
+# Coverage is measured on Python 3.13 to match CI: on 3.14 the coverage tracer
+# intermittently drops a branch under xdist (flaky <100% with either the ctrace
+# or sysmon core, even on coverage 7.15), so pinning the coverage runs to 3.13
+# keeps the gate deterministic. `just test <args>` and `just test-quick` still
+# use the default interpreter for fast local iteration.
 test *args: install
-    {{ if args == "" { "uv run pytest tests -n auto -m 'not slow and not serial' --durations=10 --cov --cov-report= && uv run pytest tests -n 0 -m 'serial and not slow' --cov --cov-append --cov-report=term-missing --cov-fail-under=100" } else { "uv run pytest " + args } }}
+    {{ if args == "" { "uv run --python 3.13 --extra dev pytest tests -n auto -m 'not slow and not serial' --durations=10 --cov --cov-report= && uv run --python 3.13 --extra dev pytest tests -n 0 -m 'serial and not slow' --cov --cov-append --cov-report=term-missing --cov-fail-under=100" } else { "uv run pytest " + args } }}
 
 # Run tests without coverage (faster for development)
 test-quick *args: install
@@ -48,6 +53,10 @@ docs-build:
 docs:
     rm -rf docs/_build
     uv run sphinx-autobuild --open-browser docs docs/_build
+
+# Check that source changes on this branch include a RELEASE.md changelog entry
+check-release *args: install
+    uv run python scripts/check_release_file.py {{ args }}
 
 # Run the default CI checks (lint, tests)
 ci: lint test

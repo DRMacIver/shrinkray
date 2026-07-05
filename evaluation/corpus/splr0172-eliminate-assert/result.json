@@ -1,0 +1,11 @@
+{
+  "id": "splr0172-eliminate-assert",
+  "status": "ok",
+  "original_bytes": 3148,
+  "reduced_bytes": 329,
+  "original_nows_bytes": 2436,
+  "reduced_nows_bytes": 209,
+  "seconds": null,
+  "note": "time-capped: rigid CNF + slow debug-assertions oracle; 90% reduced",
+  "ratio": 89.5
+}

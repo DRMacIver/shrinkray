@@ -1,0 +1,23 @@
+{
+  "id": "shrinkray-json-deep-nesting",
+  "format": "json",
+  "tool": "python json (deep-nesting regression)",
+  "extension": ".json",
+  "bug_url": "internal: shrink ray JSON deepcopy/recursion overflow (fixed in this repo)",
+  "symptom": "Regression evaluation for shrink ray's own deep-nesting robustness. shrink ray's JSON passes copy and walk the parsed structure (deepcopy), recursing per nesting level, and json.loads itself recurses while decoding; deeply nested JSON overflowed the recursion limit and crashed shrink ray. This entry is a realistic config document with one 600-level nested array; reducing it must not crash shrink ray and should shrink it to a minimal deeply nested array. The interestingness test runs the relevant bit of code directly (json.loads) and requires valid JSON nested at least 300 levels deep.",
+  "oracle": {
+    "type": "venv",
+    "python": "3.12",
+    "requirements": [],
+    "command": [
+      "python",
+      "-c",
+      "import sys, json\ndata = open(sys.argv[1], 'rb').read()\ntry:\n    value = json.loads(data)\nexcept (ValueError, RecursionError):\n    sys.exit(1)\nstack = [(value, 1)]\nworst = 0\nwhile stack:\n    node, depth = stack.pop()\n    if depth > worst:\n        worst = depth\n    if isinstance(node, list):\n        stack.extend((child, depth + 1) for child in node)\n    elif isinstance(node, dict):\n        stack.extend((child, depth + 1) for child in node.values())\nsys.exit(0 if worst >= 300 else 1)\n",
+      "{file}"
+    ]
+  },
+  "interesting": {
+    "exit_code": 0
+  },
+  "timeout": 10
+}

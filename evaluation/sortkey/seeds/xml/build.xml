@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<project name="demo" default="build">
+  <property name="src.dir" value="src"/>
+  <property name="build.dir" value="build"/>
+  <target name="clean">
+    <delete dir="${build.dir}"/>
+  </target>
+  <target name="compile" depends="clean">
+    <mkdir dir="${build.dir}"/>
+    <javac srcdir="${src.dir}" destdir="${build.dir}">
+      <classpath>
+        <pathelement location="lib/util.jar"/>
+      </classpath>
+    </javac>
+  </target>
+  <target name="build" depends="compile">
+    <jar destfile="${build.dir}/demo.jar" basedir="${build.dir}"/>
+  </target>
+</project>

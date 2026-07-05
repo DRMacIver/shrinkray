@@ -1,0 +1,25 @@
+{
+  "id": "mypy-0.942-match-union-tuple-crash",
+  "format": "python",
+  "tool": "mypy 0.942",
+  "extension": ".py",
+  "bug_url": "https://github.com/python/mypy/issues/12533",
+  "symptom": "mypy 0.942 crashes with INTERNAL ERROR (AssertionError in checkpattern.construct_sequence_child) when checking a match statement whose subject is a Union of a fixed-length tuple type and a non-tuple type, e.g. matching Union[str, tuple[str]] against the pattern (a,). Fixed by python/mypy PR #13514, first released in mypy 0.990.",
+  "oracle": {
+    "type": "venv",
+    "python": "3.10",
+    "requirements": ["mypy==0.942"],
+    "command": [
+      "mypy",
+      "--show-traceback",
+      "--no-incremental",
+      "--cache-dir=/dev/null",
+      "{file}"
+    ]
+  },
+  "interesting": {
+    "output_contains": ["INTERNAL ERROR", "construct_sequence_child"],
+    "exit_code": 2
+  },
+  "timeout": 10
+}

@@ -331,14 +331,27 @@ async def validate_initial_example(
         formatter_result = await _run_formatter(formatter_command, initial_content)
 
         if formatter_result.returncode != 0:
+            # The formatter is only a cosmetic aid, so a formatter that
+            # crashes on the initial test case should not abort the whole
+            # reduction. Warn and carry on without it, mirroring the
+            # in-reduction behaviour (attempt_format disables a formatter
+            # that fails or changes interestingness).
+            print(
+                "\nFormatter exited unexpectedly on the initial test case; "
+                "continuing without formatting. Pass --formatter=none to "
+                "silence this, or choose a working formatter.",
+                file=sys.stderr,
+                flush=True,
+            )
+            print(
+                formatter_result.stderr.decode("utf-8", errors="replace").strip(),
+                file=sys.stderr,
+                flush=True,
+            )
             return ValidationResult(
-                success=False,
-                error_message=(
-                    "Formatter exited unexpectedly on initial test case. "
-                    "If this is expected, please run with --formatter=none.\n\n"
-                    f"Formatter stderr:\n{formatter_result.stderr.decode('utf-8', errors='replace').strip()}"
-                ),
-                exit_code=formatter_result.returncode,
+                success=True,
+                exit_code=0,
+                formatter_works=False,
             )
 
         reformatted = formatter_result.stdout

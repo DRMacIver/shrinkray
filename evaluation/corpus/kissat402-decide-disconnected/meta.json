@@ -1,0 +1,18 @@
+{
+  "id": "kissat402-decide-disconnected",
+  "format": "cnf",
+  "tool": "kissat 4.0.2",
+  "extension": ".cnf",
+  "bug_url": "https://github.com/arminbiere/kissat/issues/68",
+  "symptom": "Kissat 4.0.2 aborts on certain CNF inputs with 'assertion !DISCONNECTED (res) failed' in last_enqueued_unassigned_variable (decide.c:17). Caused by the VMTF queue not re-establishing stamping order after factoring/BVA introduces new variables; fixed in release 4.0.3.",
+  "oracle": {
+    "type": "command",
+    "setup": "setup.sh",
+    "command": ["{tools}/kissat-4.0.2/build/kissat", "{file}"]
+  },
+  "interesting": {
+    "output_contains": "Assertion failed: (!DISCONNECTED (res)), function last_enqueued_unassigned_variable, file decide.c, line 17.",
+    "exit_code": 134
+  },
+  "timeout": 10
+}

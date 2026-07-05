@@ -1,0 +1,18 @@
+{
+  "id": "ujson-510-indent-buffer-overflow",
+  "format": "json",
+  "tool": "ujson 5.1.0",
+  "extension": ".json",
+  "bug_url": "https://github.com/ultrajson/ultrajson/issues/501",
+  "symptom": "CVE-2021-45958: ujson's Buffer_Reserve does not account for indentation, so pretty-printing a parsed document (indent=100) writes unchecked indent runs past the output buffer and segfaults once the input is nested deeply enough. Fixed in 5.2.0.",
+  "oracle": {
+    "type": "venv",
+    "python": "3.10",
+    "requirements": ["ujson==5.1.0"],
+    "command": ["python", "-c", "import sys, ujson; ujson.dumps(ujson.load(open(sys.argv[1])), indent=100)", "{file}"]
+  },
+  "interesting": {
+    "exit_code": 139
+  },
+  "timeout": 10
+}

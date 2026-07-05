@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns:meta="http://example.com/meta">
+  <book id="bk101" available="true">
+    <author>Gambardella, Matthew</author>
+    <title>XML Developer's Guide</title>
+    <genre>Computer</genre>
+    <price currency="USD">44.95</price>
+    <meta:published>2000-10-01</meta:published>
+    <description>An in-depth look at creating applications with XML.</description>
+  </book>
+  <book id="bk102" available="false">
+    <author>Ralls, Kim</author>
+    <title>Midnight Rain</title>
+    <genre>Fantasy</genre>
+    <price currency="USD">5.95</price>
+    <meta:published>2000-12-16</meta:published>
+    <description>A former architect battles corporate zombies.</description>
+  </book>
+</catalog>

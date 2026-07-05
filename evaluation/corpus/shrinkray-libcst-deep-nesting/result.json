@@ -1,0 +1,10 @@
+{
+  "id": "shrinkray-libcst-deep-nesting",
+  "status": "ok",
+  "original_bytes": 4378,
+  "reduced_bytes": 800,
+  "original_nows_bytes": 4223,
+  "reduced_nows_bytes": 800,
+  "seconds": 1125.9,
+  "ratio": 81.7
+}

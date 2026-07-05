@@ -11,6 +11,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 import black
+import click
 import pexpect
 import pyte
 import pytest
@@ -18,8 +19,8 @@ import trio
 from attrs import define
 from click.testing import CliRunner
 
-from shrinkray.__main__ import main, worker_main
-from shrinkray.process import interrupt_wait_and_kill
+from shrinkray.__main__ import _validate_memory_limit, main, worker_main
+from shrinkray.process import default_memory_limit, interrupt_wait_and_kill
 from shrinkray.validation import ValidationResult
 
 
@@ -353,6 +354,98 @@ def test_error_when_test_not_executable(tmpdir):
     )
     assert result.exit_code == 1
     assert "not executable" in result.stderr
+
+
+# === --memory-limit tests ===
+
+
+def _call_validate_memory_limit(value: str | None) -> int | None:
+    ctx = click.Context(click.Command("shrinkray"))
+    param = click.Option(["--memory-limit"])
+    return _validate_memory_limit(ctx, param, value)
+
+
+def test_validate_memory_limit_defaults_to_physical_ram():
+    assert _call_validate_memory_limit(None) == default_memory_limit()
+
+
+def test_validate_memory_limit_parses_suffix():
+    assert _call_validate_memory_limit("4G") == 4 * 1024**3
+
+
+def test_validate_memory_limit_zero_disables():
+    assert _call_validate_memory_limit("0") is None
+
+
+def test_validate_memory_limit_rejects_garbage():
+    with pytest.raises(click.BadParameter):
+        _call_validate_memory_limit("notanumber")
+
+
+@pytest.mark.parametrize("enforceable", [True, False])
+def test_memory_limit_warns_only_when_not_enforceable(tmpdir, enforceable):
+    # Use a non-executable test so main() exits right after the warning
+    # check (no reduction), keeping this fast. The warning must appear iff
+    # the platform cannot enforce the limit.
+    target = tmpdir / "hello.txt"
+    target.write_text("hello world", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")  # not executable
+
+    runner = CliRunner(catch_exceptions=False)
+    with patch("shrinkray.__main__.MEMORY_LIMIT_ENFORCEABLE", enforceable):
+        result = runner.invoke(
+            main,
+            [str(script), str(target), "--ui=basic", "--memory-limit=8G"],
+        )
+    assert result.exit_code == 1  # exits on the non-executable test
+    assert ("cannot be enforced" in result.stderr) == (not enforceable)
+
+
+def test_memory_limit_disabled_gives_no_warning(tmpdir):
+    target = tmpdir / "hello.txt"
+    target.write_text("hello world", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")  # not executable
+
+    runner = CliRunner(catch_exceptions=False)
+    with patch("shrinkray.__main__.MEMORY_LIMIT_ENFORCEABLE", False):
+        result = runner.invoke(
+            main,
+            [str(script), str(target), "--ui=basic", "--memory-limit=0"],
+        )
+    assert result.exit_code == 1
+    assert "cannot be enforced" not in result.stderr
+
+
+def test_crashing_formatter_is_disabled_not_fatal(tmpdir):
+    # A formatter that crashes on the initial test case must not abort the
+    # run; shrink ray warns and reduces without it. The interestingness
+    # test only accepts the exact initial content, so nothing reduces and
+    # the run finishes promptly.
+    target = tmpdir / "hello.txt"
+    target.write_text("hello", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    script.write_text('#!/bin/bash\n[ "$(cat "$1")" = "hello" ]\n', encoding="utf-8")
+    script.chmod(0o777)
+    formatter = tmpdir / "fmt.sh"
+    formatter.write_text("#!/bin/bash\nexit 1\n", encoding="utf-8")  # crashes
+    formatter.chmod(0o777)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            str(script),
+            str(target),
+            "--ui=basic",
+            "--no-history",
+            "--parallelism=1",
+            f"--formatter={formatter}",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "continuing without formatting" in result.stderr
 
 
 @pytest.mark.slow

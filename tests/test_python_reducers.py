@@ -210,6 +210,22 @@ def test_is_python_returns_false_for_invalid_python():
     assert is_python(invalid_code) is False
 
 
+@pytest.mark.parametrize(
+    "source", [b"[" * 5000 + b"1" + b"]" * 5000, "(" * 5000 + ")" * 5000]
+)
+def test_is_python_does_not_crash_on_deeply_nested_brackets(source):
+    """Deeply bracket-nested input must not crash is_python.
+
+    libcst's native parser recurses per nesting level and overflows the C
+    stack on such input, which is an uncatchable SIGSEGV rather than an
+    exception the try/except could handle. is_python must guard against
+    this and return a plain bool (it reports such data as not-Python).
+    Regression: shrink ray segfaulted at startup on deeply nested JSON
+    because it probes every input with is_python.
+    """
+    assert is_python(source) is False
+
+
 async def test_libcst_transform_handles_test_case_becoming_invalid():
     """Test that libcst_transform handles the case where the test case becomes invalid Python mid-reduction.
 

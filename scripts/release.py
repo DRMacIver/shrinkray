@@ -11,6 +11,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from changelog import consume_release_file
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
 
 def get_current_pyproject_version() -> str | None:
     """Get the current version from pyproject.toml."""
@@ -127,7 +132,10 @@ def update_version_in_pyproject(new_version: str) -> str:
     name_match = re.search(name_pattern, content, flags=re.MULTILINE)
     if not name_match or name_match.group(1) != "shrinkray":
         print("Error: pyproject.toml does not belong to shrinkray", file=sys.stderr)
-        print(f"Found project name: {name_match.group(1) if name_match else 'unknown'}", file=sys.stderr)
+        print(
+            f"Found project name: {name_match.group(1) if name_match else 'unknown'}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Find and replace the version line
@@ -146,7 +154,9 @@ def update_version_in_pyproject(new_version: str) -> str:
 
     # Extract old version for display
     old_version_match = re.search(pattern, content, flags=re.MULTILINE)
-    old_version = old_version_match.group(0).split('"')[1] if old_version_match else "unknown"
+    old_version = (
+        old_version_match.group(0).split('"')[1] if old_version_match else "unknown"
+    )
 
     # Write updated content
     pyproject_path.write_text(new_content)
@@ -154,13 +164,21 @@ def update_version_in_pyproject(new_version: str) -> str:
     return old_version
 
 
-def create_release_commit_and_tag(version: str) -> None:
-    """Commit version change and create git tag."""
+def create_release_commit_and_tag(version: str, changelog_updated: bool) -> None:
+    """Commit version change and create git tag.
+
+    If ``changelog_updated`` is true, CHANGELOG.md was regenerated and RELEASE.md
+    was consumed, so both are included in the release commit (adding the deleted
+    RELEASE.md stages its removal).
+    """
     # Update uv.lock to reflect the new version
     run_command(["uv", "lock"])
 
     # Commit the version change and lock file
-    run_command(["git", "add", "pyproject.toml", "uv.lock"])
+    add_paths = ["pyproject.toml", "uv.lock"]
+    if changelog_updated:
+        add_paths += ["CHANGELOG.md", "RELEASE.md"]
+    run_command(["git", "add", *add_paths])
     run_command(["git", "commit", "-m", f"Release {version}"])
     print(f"Created commit for release {version}")
 
@@ -179,7 +197,7 @@ def create_release_commit_and_tag(version: str) -> None:
         run_command(["git", "push", "--set-upstream", "origin", branch])
 
     run_command(["git", "push", "--tags"])
-    print(f"Pushed commit and tag to GitHub")
+    print("Pushed commit and tag to GitHub")
 
 
 def main() -> None:
@@ -194,13 +212,22 @@ def main() -> None:
     new_version = get_calver()
     print(f"Calver version: {new_version}")
 
+    release_date = datetime.now().strftime("%Y-%m-%d")
+    has_release_notes = (ROOT / "RELEASE.md").exists()
+
     if dry_run:
-        pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
+        pyproject_path = ROOT / "pyproject.toml"
         content = pyproject_path.read_text()
         pattern = r'^version = "[^"]+"'
         old_version_match = re.search(pattern, content, flags=re.MULTILINE)
-        old_version = old_version_match.group(0).split('"')[1] if old_version_match else "unknown"
+        old_version = (
+            old_version_match.group(0).split('"')[1] if old_version_match else "unknown"
+        )
         print(f"Would update version: {old_version} → {new_version}")
+        if has_release_notes:
+            print("Would fold RELEASE.md into CHANGELOG.md and delete RELEASE.md")
+        else:
+            print("No RELEASE.md found; CHANGELOG.md would be left unchanged")
         print("Would run uv lock to update uv.lock")
         print(f"Would create commit (pyproject.toml + uv.lock) and tag: v{new_version}")
         print("Would push to GitHub")
@@ -211,8 +238,11 @@ def main() -> None:
         # Update version in pyproject.toml
         update_version_in_pyproject(new_version)
 
+        # Fold this release's RELEASE.md into CHANGELOG.md, if present
+        changelog_updated = consume_release_file(ROOT, new_version, release_date)
+
         # Create commit and tag
-        create_release_commit_and_tag(new_version)
+        create_release_commit_and_tag(new_version, changelog_updated)
 
         print("\n✓ Version updated and committed")
         print(f"✓ Tag v{new_version} created and pushed")

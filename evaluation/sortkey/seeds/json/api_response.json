@@ -1,0 +1,29 @@
+{
+  "page": 1,
+  "per_page": 2,
+  "total": 137,
+  "results": [
+    {
+      "id": 4821,
+      "type": "issue",
+      "title": "Crash on empty input",
+      "labels": ["bug", "priority:high"],
+      "assignee": { "login": "octocat", "id": 583231 },
+      "reactions": { "+1": 12, "-1": 0, "heart": 3 },
+      "closed": false
+    },
+    {
+      "id": 4822,
+      "type": "pull_request",
+      "title": "Fix off-by-one in pager",
+      "labels": [],
+      "assignee": null,
+      "reactions": { "+1": 4, "-1": 1, "heart": 0 },
+      "closed": true
+    }
+  ],
+  "links": {
+    "next": "/issues?page=2",
+    "prev": null
+  }
+}

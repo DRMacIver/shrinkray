@@ -165,11 +165,31 @@ class PatchApplier[PatchType, TargetType]:
             return await receive_merge_result.receive()
 
 
+# If a pass tries this many candidate patches without a single successful
+# reduction, give up on the rest rather than churning through them: a pass
+# that cannot make any progress on this input is very unlikely to start.
+# The bound scales with the input size (so large inputs get a proportionate
+# try) with a floor (so small inputs are explored fully). Because
+# apply_patches shuffles patches, a pass that *can* help almost always
+# lands an early success and so runs to completion.
+MIN_PATCH_ATTEMPTS = 250
+EARLY_ABORT_SIZE_FACTOR = 3
+
+
 async def apply_patches[PatchType, TargetType](
     problem: ReductionProblem[TargetType],
     patch_info: Patches[PatchType, TargetType],
     patches: Iterable[PatchType],
+    early_abort: bool = False,
 ) -> None:
+    """Try to apply `patches`, adopting any that reduce the test case.
+
+    `early_abort` is for passes whose candidates are interchangeable and
+    same-length (e.g. byte lowering): with it, a pass that makes no progress
+    at all within a size-scaled budget gives up instead of grinding through
+    every remaining candidate. It must NOT be set for deletion passes, whose
+    useful patches can be sparse and would then be skipped, losing size.
+    """
     try:
         if await problem.is_interesting(
             patch_info.apply(patch_info.combine(*patches), problem.current_test_case)
@@ -189,17 +209,29 @@ async def apply_patches[PatchType, TargetType](
         send_patches.send_nowait(patch)
     send_patches.close()
 
+    give_up_after = max(
+        MIN_PATCH_ATTEMPTS, EARLY_ABORT_SIZE_FACTOR * problem.current_size
+    )
+    attempts = 0
+    any_success = False
+
     async with trio.open_nursery() as nursery:
         for _i in range(problem.work.parallelism):
 
             @nursery.start_soon
             async def worker() -> None:
+                nonlocal attempts, any_success
                 while True:
                     try:
                         patch = await receive_patches.receive()
                     except trio.EndOfChannel:
                         break
-                    await applier.try_apply_patch(patch)
+                    if await applier.try_apply_patch(patch):
+                        any_success = True
+                    attempts += 1
+                    if early_abort and not any_success and attempts >= give_up_after:
+                        nursery.cancel_scope.cancel()
+                        return
 
 
 ReplacementPatch = tuple[tuple[int, int, bytes], ...]

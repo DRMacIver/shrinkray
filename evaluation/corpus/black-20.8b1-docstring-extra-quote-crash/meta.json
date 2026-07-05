@@ -1,0 +1,22 @@
+{
+  "id": "black-20.8b1-docstring-extra-quote-crash",
+  "format": "python",
+  "tool": "black 20.8b1",
+  "extension": ".py",
+  "bug_url": "https://github.com/psf/black/issues/1926",
+  "symptom": "black 20.8b1 aborts with 'INTERNAL ERROR: Black produced different code on the second pass of the formatter' when a docstring opens with four single quotes (an accidental extra quote) and contains a further non-empty line: the docstring normalization is unstable, so the safety re-format check fails. Fixed by the docstring handling rework shipped in 21.4bX (no error on 21.4b2).",
+  "oracle": {
+    "type": "venv",
+    "python": "3.9",
+    "requirements": ["black==20.8b1", "click==8.0.4"],
+    "command": ["sh", "-c", "black --check - < {file}"]
+  },
+  "interesting": {
+    "output_contains": [
+      "INTERNAL ERROR: Black produced different code on the second pass of the formatter"
+    ],
+    "exit_code": 123
+  },
+  "shrinkray_args": ["--formatter=none"],
+  "timeout": 10
+}

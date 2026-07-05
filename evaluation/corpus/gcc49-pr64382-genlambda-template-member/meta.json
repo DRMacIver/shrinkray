@@ -1,0 +1,28 @@
+{
+  "id": "gcc49-pr64382-genlambda-template-member",
+  "format": "cpp",
+  "tool": "gcc (gcc:4.9)",
+  "extension": ".cpp",
+  "bug_url": "https://gcc.gnu.org/bugzilla/show_bug.cgi?id=64382",
+  "symptom": "Front-end segfault when a class-template member function builds a generic lambda that calls a sibling member and forwards the lambda to another member template.",
+  "oracle": {
+    "type": "docker",
+    "image": "gcc:4.9",
+    "platform": "linux/amd64",
+    "command": [
+      "g++",
+      "-std=c++1y",
+      "-x",
+      "c++",
+      "-c",
+      "{file}",
+      "-o",
+      "/dev/null"
+    ]
+  },
+  "interesting": {
+    "output_contains": "internal compiler error: Segmentation fault"
+  },
+  "parallelism": 1,
+  "timeout": 10
+}

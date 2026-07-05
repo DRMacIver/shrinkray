@@ -1,0 +1,26 @@
+{
+  "id": "ruff-0.0.277-isort-skip-block-panic",
+  "format": "python",
+  "tool": "ruff 0.0.277",
+  "extension": ".py",
+  "bug_url": "https://github.com/astral-sh/ruff/issues/5621",
+  "symptom": "ruff 0.0.277 panics ('range start index 2 out of range for slice of length 1' in rules/isort/block.rs) while building isort blocks for the I001 rule when consecutive import statements carry '# isort: skip' trailing comments, as in ipykernel's debugger module. The panic is reported as a warning and ruff still exits 0. Fixed by astral-sh/ruff PR #5623, released in 0.0.278.",
+  "oracle": {
+    "type": "venv",
+    "python": "3.12",
+    "requirements": ["ruff==0.0.277"],
+    "command": [
+      "ruff",
+      "check",
+      "--select",
+      "I001",
+      "--no-cache",
+      "--isolated",
+      "{file}"
+    ]
+  },
+  "interesting": {
+    "output_contains": ["Linting panicked", "rules/isort/block.rs:159"]
+  },
+  "timeout": 10
+}

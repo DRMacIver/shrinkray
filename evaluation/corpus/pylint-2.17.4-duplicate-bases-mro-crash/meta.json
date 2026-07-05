@@ -1,0 +1,23 @@
+{
+  "id": "pylint-2.17.4-duplicate-bases-mro-crash",
+  "format": "python",
+  "tool": "pylint 2.17.4 (astroid 2.15.5)",
+  "extension": ".py",
+  "bug_url": "https://github.com/pylint-dev/pylint/issues/8698",
+  "symptom": "pylint 2.17.4 with astroid 2.15.5 crashes ('Fatal error while checking', astroid-error F0002) when a class uses a metaclass whose own base list contains duplicates (e.g. class Meta(type(object), type(object))): computing the metaclass MRO in _is_invalid_metaclass raises astroid.exceptions.DuplicateBasesError, which escapes instead of being handled. Fixed in the pylint 3.x series (no crash on pylint 3.0.3).",
+  "oracle": {
+    "type": "venv",
+    "python": "3.11",
+    "requirements": ["pylint==2.17.4", "astroid==2.15.5"],
+    "command": ["pylint", "--persistent=n", "--score=n", "{file}"],
+    "env": {"PYLINTHOME": "{sandbox}"}
+  },
+  "interesting": {
+    "output_contains": [
+      "_is_invalid_metaclass",
+      "astroid.exceptions.DuplicateBasesError",
+      "Fatal error while checking"
+    ]
+  },
+  "timeout": 10
+}

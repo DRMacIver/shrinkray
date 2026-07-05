@@ -1,0 +1,25 @@
+{
+  "id": "shrinkray-libcst-deep-nesting",
+  "format": "python",
+  "tool": "libcst 1.8.6 (deep-nesting regression)",
+  "extension": ".py",
+  "bug_url": "internal: shrink ray is_python/libcst C-stack overflow (fixed in this repo)",
+  "symptom": "Regression evaluation for shrink ray's own deep-nesting robustness. shrink ray probes every input with is_python, which parses it via libcst; libcst's native parser recurses per nesting level and overflowed the C stack (SIGSEGV) on deeply bracket-nested input, crashing shrink ray at startup. This entry is a deeply nested (600-level) Python expression; reducing it must not crash shrink ray and should shrink it to a minimal deeply nested expression. The interestingness test runs the relevant bit of code directly (libcst.parse_module) and requires the file to stay valid Python nested at least 400 levels deep.",
+  "oracle": {
+    "type": "venv",
+    "python": "3.12",
+    "requirements": ["libcst==1.8.6"],
+    "command": [
+      "python",
+      "-c",
+      "import sys, libcst\ndata = open(sys.argv[1], 'rb').read()\ntry:\n    libcst.parse_module(data)\nexcept Exception:\n    sys.exit(1)\ndepth = worst = 0\nfor byte in data:\n    if byte in b'([{':\n        depth += 1\n        if depth > worst:\n            worst = depth\n    elif byte in b')]}' and depth:\n        depth -= 1\nsys.exit(0 if worst >= 400 else 1)\n",
+      "{file}"
+    ]
+  },
+  "interesting": {
+    "exit_code": 0
+  },
+  "comment": "shrink ray's default formatter (black) errors on deeply nested parentheses, so disable it for this deep-nesting entry.",
+  "shrinkray_args": ["--formatter=none"],
+  "timeout": 10
+}

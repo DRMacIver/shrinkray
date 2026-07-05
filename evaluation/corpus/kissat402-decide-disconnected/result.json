@@ -1,0 +1,10 @@
+{
+  "id": "kissat402-decide-disconnected",
+  "status": "ok",
+  "original_bytes": 4295,
+  "reduced_bytes": 536,
+  "original_nows_bytes": 2993,
+  "reduced_nows_bytes": 349,
+  "seconds": 918.2,
+  "ratio": 87.5
+}

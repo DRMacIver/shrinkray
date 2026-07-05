@@ -255,6 +255,7 @@ def test_subprocess_client_start_reduction():
                 test=["test.sh"],
                 parallelism=2,
                 timeout=5.0,
+                memory_limit=8 * 1024**3,
                 seed=42,
                 input_type="arg",
                 in_place=False,

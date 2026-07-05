@@ -33,7 +33,13 @@ from shrinkray.problem import (
     ReductionProblem,
     sort_key_for_initial,
 )
-from shrinkray.process import interrupt_wait_and_kill, kill_process_group
+from shrinkray.process import (
+    child_preexec,
+    default_memory_limit,
+    interrupt_wait_and_kill,
+    kill_process_group,
+    peak_child_rss_bytes,
+)
 from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
 
@@ -44,6 +50,17 @@ class TimeoutExceededOnInitial(InvalidInitialExample):
         self.timeout = timeout
         super().__init__(
             f"Initial test call exceeded timeout of {timeout}s. Try raising or disabling timeout."
+        )
+
+
+class MemoryLimitExceededOnInitial(InvalidInitialExample):
+    def __init__(self, used: int, limit: int) -> None:
+        self.used = used
+        self.limit = limit
+        super().__init__(
+            f"Initial test call used {humanize.naturalsize(used)} of memory, "
+            f"exceeding the limit of {humanize.naturalsize(limit)}. Try raising "
+            f"or disabling --memory-limit."
         )
 
 
@@ -192,6 +209,11 @@ class ShrinkRayState[TestCase](ABC):
     trivial_is_error: bool
     seed: int
     volume: Volume
+
+    # Address-space cap (bytes) for each interestingness-test subprocess,
+    # or None to disable. Prevents a runaway test from exhausting host
+    # memory. Enforced via RLIMIT_AS where the platform supports it.
+    memory_limit: int | None = None
 
     first_call: bool = True
     initial_exit_code: int | None = None
@@ -356,6 +378,37 @@ class ShrinkRayState[TestCase](ABC):
     async def write_test_case_to_file(self, working: str, test_case: TestCase):
         await self.write_test_case_to_file_impl(working, test_case)
 
+    def effective_memory_limit(self, first_call: bool) -> int | None:
+        """The address-space cap to impose on a test subprocess, in bytes.
+
+        Returns None (no cap) when memory limiting is disabled. The first
+        call is given generous headroom (up to physical RAM) rather than
+        the configured limit, so it can run to completion and we can
+        measure its true peak usage and report clearly if it exceeds the
+        limit — mirroring the timeout's generous first-call calibration.
+        """
+        if self.memory_limit is None or self.memory_limit <= 0:
+            return None
+        if first_call:
+            return max(self.memory_limit, default_memory_limit())
+        return self.memory_limit
+
+    def raise_if_initial_over_memory(self) -> None:
+        """Raise if the initial test call used more memory than the limit.
+
+        Mirrors the initial-timeout check: the first call is allowed to
+        run, its peak child RSS is measured, and if that meets or exceeds
+        the configured limit we fail loudly with a helpful message rather
+        than letting later calls be silently killed by the limit. This
+        works even on platforms where the limit itself is not enforceable
+        (the measurement does not depend on enforcement).
+        """
+        if self.memory_limit is None or self.memory_limit <= 0:
+            return
+        peak = peak_child_rss_bytes()
+        if peak >= self.memory_limit:
+            raise MemoryLimitExceededOnInitial(used=peak, limit=self.memory_limit)
+
     async def run_script_on_file(
         self, working: str, cwd: str, debug: bool = False
     ) -> int:
@@ -368,7 +421,7 @@ class ShrinkRayState[TestCase](ABC):
 
         kwargs: dict[str, Any] = {
             "universal_newlines": False,
-            "preexec_fn": os.setsid,
+            "preexec_fn": child_preexec(self.effective_memory_limit(self.first_call)),
             "cwd": cwd,
             "check": False,
         }
@@ -400,7 +453,10 @@ class ShrinkRayState[TestCase](ABC):
                 # Set dynamic timeout if not explicitly specified
                 if self.timeout is None:
                     self.timeout = compute_dynamic_timeout(runtime)
-            self.first_call = False
+                self.first_call = False
+                self.raise_if_initial_over_memory()
+            else:
+                self.first_call = False
 
             # Store captured output
             output_parts = []
@@ -475,6 +531,9 @@ class ShrinkRayState[TestCase](ABC):
                             timeout=self.timeout,
                             runtime=runtime,
                         )
+
+                    if self.first_call:
+                        self.raise_if_initial_over_memory()
                 finally:
                     if self.first_call:
                         self.initial_exit_code = sp.returncode
@@ -776,6 +835,16 @@ class ShrinkRayState[TestCase](ABC):
                 f"exceeding your timeout setting of {self.timeout}."
             )
             lines.append(f"Try rerunning with --timeout={math.ceil(e.runtime * 2)}.")
+        elif isinstance(e, MemoryLimitExceededOnInitial):
+            lines.append(
+                f"This is because your initial test case used "
+                f"{humanize.naturalsize(e.used)} of memory, exceeding your "
+                f"--memory-limit setting of {humanize.naturalsize(e.limit)}."
+            )
+            lines.append(
+                "Try rerunning with a higher --memory-limit, or --memory-limit=0 "
+                "to disable the limit."
+            )
         else:
             lines.append("Rerunning the interestingness test for debugging purposes...")
             exit_code = await self.run_for_exit_code(self.initial, debug=True)

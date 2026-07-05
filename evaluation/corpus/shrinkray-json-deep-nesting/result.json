@@ -1,0 +1,10 @@
+{
+  "id": "shrinkray-json-deep-nesting",
+  "status": "ok",
+  "original_bytes": 1495,
+  "reduced_bytes": 608,
+  "original_nows_bytes": 1495,
+  "reduced_nows_bytes": 602,
+  "seconds": 55.8,
+  "ratio": 59.3
+}

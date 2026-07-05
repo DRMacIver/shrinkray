@@ -1,0 +1,10 @@
+{
+  "id": "minisat-dimacs-int-overflow",
+  "status": "ok",
+  "original_bytes": 2326,
+  "reduced_bytes": 14,
+  "original_nows_bytes": 1580,
+  "reduced_nows_bytes": 12,
+  "seconds": 1555.9,
+  "ratio": 99.4
+}

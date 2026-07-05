@@ -877,8 +877,9 @@ async def test_validate_with_formatter_success():
         assert result.formatter_works is True
 
 
-async def test_validate_with_formatter_failure():
-    """Test validation with a formatter that fails."""
+async def test_validate_with_formatter_failure_disables_formatter(capsys):
+    """A formatter that crashes on the initial test case is auto-disabled
+    (validation still succeeds) rather than aborting the reduction."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Create test file
         test_file = os.path.join(tmp_dir, "test.txt")
@@ -905,10 +906,9 @@ async def test_validate_with_formatter_failure():
             formatter_command=[formatter],
         )
 
-        assert not result.success
-        assert result.error_message is not None
-        assert "Formatter exited unexpectedly" in result.error_message
-        assert result.exit_code == 1
+        assert result.success
+        assert result.formatter_works is False
+        assert "continuing without formatting" in capsys.readouterr().err
 
 
 async def test_validate_with_formatter_makes_content_uninteresting():

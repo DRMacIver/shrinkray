@@ -140,6 +140,26 @@ jobs:
           git push
           echo "::notice::Gallery GIFs have been regenerated and pushed."
 
+  changelog:
+    name: Require changelog entry
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch base branch
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git fetch --no-tags --depth=1 origin "$BASE_REF"
+      - name: Require RELEASE.md for source changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 scripts/check_release_file.py "origin/$BASE_REF"
+
   lint:
     runs-on: ubuntu-latest
     permissions:
@@ -309,27 +329,19 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --extra dev
 
-      - name: Check for changes since last release
+      - name: Check for a pending release
         id: changes
         run: |
-          # Get the latest release tag
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-
-          if [ -z "$LATEST_TAG" ]; then
-            echo "No previous release found, will create first release"
+          # A release is cut exactly when there is a RELEASE.md to fold into the
+          # changelog. Every source-affecting PR adds one (enforced by the
+          # "changelog" job), and the release step consumes it. This means
+          # changelog-free commits (e.g. bot auto-formatting) do not release.
+          if [ -f RELEASE.md ]; then
+            echo "RELEASE.md present; will cut a release."
             echo "has_changes=true" >> $GITHUB_OUTPUT
           else
-            echo "Latest release: $LATEST_TAG"
-
-            # Check if there are changes in src/ or pyproject.toml since the tag
-            if git diff --quiet "$LATEST_TAG" HEAD -- src/ pyproject.toml; then
-              echo "No changes in src/ or pyproject.toml since $LATEST_TAG"
-              echo "has_changes=false" >> $GITHUB_OUTPUT
-            else
-              echo "Changes found since $LATEST_TAG:"
-              git diff --stat "$LATEST_TAG" HEAD -- src/ pyproject.toml
-              echo "has_changes=true" >> $GITHUB_OUTPUT
-            fi
+            echo "No RELEASE.md; nothing to release."
+            echo "has_changes=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Configure git

@@ -3,15 +3,20 @@ name: OpenBSD debugging (issue 56)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   openbsd-diagnostics:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
 
       - name: Run diagnostics in an OpenBSD VM
-        uses: vmactions/openbsd-vm@v1
+        uses: vmactions/openbsd-vm@18edb32f4e48dae5865d7b8b3a9587bc01218a20 # v1.4.4
         with:
           release: "7.7"
           usesh: true

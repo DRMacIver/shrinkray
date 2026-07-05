@@ -3,6 +3,30 @@
 This is the changelog for [Shrink Ray](https://github.com/DRMacIver/shrinkray), a
 fast multi-format test-case reducer. Versions are calendar-based (`YY.M.D.N`).
 
+## 26.7.5.6 — 2026-07-05
+
+- Fixed reduction hanging without making progress on OpenBSD (#56). The
+  interestingness test's stdin is now the test file itself rather than data
+  piped from Shrink Ray, avoiding an OpenBSD kqueue deadlock that triggered
+  whenever the file was bigger than a pipe buffer and the test exited
+  without reading stdin. This also stops copying the whole file to the test
+  on every call, on all platforms.
+- The `run.sh` reproduction script that `--history` writes now uses
+  `#!/bin/sh` instead of `#!/bin/bash`, so it works on systems without
+  bash (such as OpenBSD).
+- Fixed two more OpenBSD problems: killing a timed-out interestingness
+  test no longer fails with a permission error, and `--memory-limit` now
+  caps test memory there too (OpenBSD has no address-space limit, so the
+  data-segment limit is used instead).
+- When a tree-sitter grammar cannot be loaded (for example because it
+  has to be fetched at runtime and the download fails, or no grammar
+  exists for the platform), Shrink Ray now prints a warning saying what
+  went wrong and reduces without tree-sitter passes, instead of crashing
+  partway through the reduction.
+- Fixed a crash on macOS when shutting down an external reducer whose
+  subprocess had just exited on its own (a permission error from
+  signalling an already-exited process group).
+
 ## 26.7.5.5 — 2026-07-05
 
 - Added `--reduce-with '<command>'` (repeatable) to plug in your own external

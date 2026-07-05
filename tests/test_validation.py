@@ -158,7 +158,7 @@ async def test_validate_initial_example_success():
         # Create test script that exits 0
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -187,7 +187,7 @@ async def test_validate_initial_example_failure():
         # Create test script that exits 1
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 1\n")
+            f.write("#!/bin/sh\nexit 1\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -238,7 +238,7 @@ async def test_validate_initial_example_stdin_input():
         # Create test script that reads stdin and exits 0
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\ncat > /dev/null\nexit 0\n")
+            f.write("#!/bin/sh\ncat > /dev/null\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -262,7 +262,7 @@ async def test_validate_initial_example_in_place():
         # Create test script that exits 0
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -287,7 +287,7 @@ async def test_validate_initial_example_in_place_basename():
         # Create test script that exits 0
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -318,7 +318,7 @@ async def test_formatter_failure_does_not_clobber_original_file_in_place_basenam
         # Test passes only for the exact original content.
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write(f'#!/bin/bash\ngrep -qx "test content" {shlex.quote(test_file)}\n')
+            f.write(f'#!/bin/sh\ngrep -qx "test content" {shlex.quote(test_file)}\n')
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -350,7 +350,7 @@ async def test_formatter_success_restores_original_file_in_place_basename():
 
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -377,7 +377,7 @@ async def test_validate_initial_example_in_place_cleans_temp_file():
         # Create test script that exits 0
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # List files before validation
@@ -409,7 +409,7 @@ async def test_validate_initial_example_in_place_failure_preserves_temp():
         # Create test script that fails
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 1\n")
+            f.write("#!/bin/sh\nexit 1\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -444,7 +444,7 @@ def test_run_validation_success():
         # Create test script
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         result = run_validation(
@@ -468,7 +468,7 @@ def test_run_validation_failure():
         # Create test script that fails
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 42\n")
+            f.write("#!/bin/sh\nexit 42\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         result = run_validation(
@@ -499,7 +499,7 @@ def test_run_validation_captures_output(capsys):
         # Create test script
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         run_validation(
@@ -525,7 +525,7 @@ def test_run_validation_shows_temp_dir_on_failure(capsys):
         # Create test script that fails
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 1\n")
+            f.write("#!/bin/sh\nexit 1\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         result = run_validation(
@@ -564,7 +564,7 @@ async def test_cleanup_handles_already_deleted_file():
         script = os.path.join(tmp_dir, "test.sh")
         # The script will receive the temp file path as an argument and delete it
         with open(script, "w") as f:
-            f.write('#!/bin/bash\nrm -f "$1" 2>/dev/null; exit 0\n')
+            f.write('#!/bin/sh\nrm -f "$1" 2>/dev/null; exit 0\n')
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Run with in_place=True + arg so it creates a temp file that gets passed to script
@@ -594,7 +594,7 @@ async def test_cleanup_handles_exception():
         # Create test script that exits 0
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Mock os.unlink to raise an exception
@@ -634,7 +634,7 @@ async def test_validation_with_captured_stderr():
         # Create test script that prints output and exits 0
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\necho 'test output'\nexit 0\n")
+            f.write("#!/bin/sh\necho 'test output'\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Mock sys.stderr.fileno to raise UnsupportedOperation
@@ -670,7 +670,7 @@ async def test_validation_with_captured_output_failure():
         # Create test script that prints output and exits 1
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\necho 'error output' >&2\nexit 1\n")
+            f.write("#!/bin/sh\necho 'error output' >&2\nexit 1\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Mock sys.stderr.fileno to raise UnsupportedOperation
@@ -739,7 +739,7 @@ async def test_failure_with_no_temp_dirs():
         # Create test script that fails
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 1\n")
+            f.write("#!/bin/sh\nexit 1\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Run with in_place=True + basename so no temp files are created
@@ -781,7 +781,7 @@ def test_validation_output_streams_immediately():
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
             f.write(
-                "#!/bin/bash\necho 'MARKER_OUTPUT_APPEARED' >&2\nsleep 1000\nexit 0\n"
+                "#!/bin/sh\necho 'MARKER_OUTPUT_APPEARED' >&2\nsleep 1000\nexit 0\n"
             )
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
@@ -856,13 +856,13 @@ async def test_validate_with_formatter_success():
         # Create test script that exits 0
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Create formatter that outputs to stderr and passes content through
         formatter = os.path.join(tmp_dir, "formatter.sh")
         with open(formatter, "w") as f:
-            f.write("#!/bin/bash\necho 'FORMATTER_STDERR' >&2\ncat\n")
+            f.write("#!/bin/sh\necho 'FORMATTER_STDERR' >&2\ncat\n")
         os.chmod(formatter, os.stat(formatter).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -889,13 +889,13 @@ async def test_validate_with_formatter_failure_disables_formatter(capsys):
         # Create test script that exits 0
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Create formatter that fails
         formatter = os.path.join(tmp_dir, "formatter.sh")
         with open(formatter, "w") as f:
-            f.write("#!/bin/bash\necho 'FORMATTER_ERROR' >&2\nexit 1\n")
+            f.write("#!/bin/sh\necho 'FORMATTER_ERROR' >&2\nexit 1\n")
         os.chmod(formatter, os.stat(formatter).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -922,13 +922,13 @@ async def test_validate_with_formatter_makes_content_uninteresting():
         # Create test script that only accepts "hello", not "goodbye"
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write('#!/bin/bash\ngrep -q hello "$1"\n')
+            f.write('#!/bin/sh\ngrep -q hello "$1"\n')
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Create formatter that changes content to "goodbye"
         formatter = os.path.join(tmp_dir, "formatter.sh")
         with open(formatter, "w") as f:
-            f.write("#!/bin/bash\necho 'goodbye'\n")
+            f.write("#!/bin/sh\necho 'goodbye'\n")
         os.chmod(formatter, os.stat(formatter).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -957,13 +957,13 @@ async def test_validate_with_formatter_preserves_interesting_content():
         # Create test script that accepts any content
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Create formatter that changes content (uppercase)
         formatter = os.path.join(tmp_dir, "formatter.sh")
         with open(formatter, "w") as f:
-            f.write("#!/bin/bash\ntr '[:lower:]' '[:upper:]'\n")
+            f.write("#!/bin/sh\ntr '[:lower:]' '[:upper:]'\n")
         os.chmod(formatter, os.stat(formatter).st_mode | stat.S_IEXEC)
 
         result = await validate_initial_example(
@@ -989,13 +989,13 @@ def test_run_validation_with_formatter(capsys):
         # Create test script
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Create formatter that outputs stderr
         formatter = os.path.join(tmp_dir, "formatter.sh")
         with open(formatter, "w") as f:
-            f.write("#!/bin/bash\necho 'FORMATTER_STDERR' >&2\ncat\n")
+            f.write("#!/bin/sh\necho 'FORMATTER_STDERR' >&2\ncat\n")
         os.chmod(formatter, os.stat(formatter).st_mode | stat.S_IEXEC)
 
         result = run_validation(
@@ -1028,14 +1028,14 @@ async def test_validate_with_formatter_in_place_cleans_temp_file():
         # Create test script that accepts any content
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Create formatter that changes content (adds newline)
         formatter = os.path.join(tmp_dir, "formatter.sh")
         with open(formatter, "w") as f:
             # Change content so it's different from original
-            f.write("#!/bin/bash\ncat; echo ''\n")
+            f.write("#!/bin/sh\ncat; echo ''\n")
         os.chmod(formatter, os.stat(formatter).st_mode | stat.S_IEXEC)
 
         # List files before validation
@@ -1077,13 +1077,13 @@ async def test_validate_with_formatter_basename_no_temp_dirs():
             # Create test script that accepts any content
             script = os.path.join(tmp_dir, "test.sh")
             with open(script, "w") as f:
-                f.write("#!/bin/bash\nexit 0\n")
+                f.write("#!/bin/sh\nexit 0\n")
             os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
             # Create formatter that changes content
             formatter = os.path.join(tmp_dir, "formatter.sh")
             with open(formatter, "w") as f:
-                f.write("#!/bin/bash\ncat; echo ''\n")
+                f.write("#!/bin/sh\ncat; echo ''\n")
             os.chmod(formatter, os.stat(formatter).st_mode | stat.S_IEXEC)
 
             result = await validate_initial_example(
@@ -1111,13 +1111,13 @@ async def test_validate_with_formatter_cleanup_handles_exception():
         # Create test script that accepts any content
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Create formatter that changes content
         formatter = os.path.join(tmp_dir, "formatter.sh")
         with open(formatter, "w") as f:
-            f.write("#!/bin/bash\ncat; echo ''\n")
+            f.write("#!/bin/sh\ncat; echo ''\n")
         os.chmod(formatter, os.stat(formatter).st_mode | stat.S_IEXEC)
 
         # Mock shutil.rmtree to raise an exception during cleanup
@@ -1153,13 +1153,13 @@ async def test_validate_with_formatter_cleanup_nonexistent_path():
         # Create test script that accepts any content
         script = os.path.join(tmp_dir, "test.sh")
         with open(script, "w") as f:
-            f.write("#!/bin/bash\nexit 0\n")
+            f.write("#!/bin/sh\nexit 0\n")
         os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
 
         # Create formatter that changes content
         formatter = os.path.join(tmp_dir, "formatter.sh")
         with open(formatter, "w") as f:
-            f.write("#!/bin/bash\ncat; echo ''\n")
+            f.write("#!/bin/sh\ncat; echo ''\n")
         os.chmod(formatter, os.stat(formatter).st_mode | stat.S_IEXEC)
 
         # Mock os.path.isdir and os.path.exists to simulate a path that doesn't exist

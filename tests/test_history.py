@@ -124,7 +124,7 @@ def test_initialize_copies_local_test_file() -> None:
 
             # Create a test script
             test_script = os.path.join(tmpdir, "check.sh")
-            test_content = b"#!/bin/bash\nexit 0\n"
+            test_content = b"#!/bin/sh\nexit 0\n"
             with open(test_script, "wb") as f:
                 f.write(test_content)
 
@@ -148,7 +148,7 @@ def test_initialize_creates_wrapper_script() -> None:
             # Create a test script
             test_script = os.path.join(tmpdir, "check.sh")
             with open(test_script, "w") as f:
-                f.write("#!/bin/bash\nexit 0\n")
+                f.write("#!/bin/sh\nexit 0\n")
 
             manager = HistoryManager.create([test_script], "buggy.c")
             manager.initialize(b"content", [test_script], "buggy.c")
@@ -170,7 +170,7 @@ def test_initialize_wrapper_script_content_with_local_test() -> None:
             # Create a test script
             test_script = os.path.join(tmpdir, "check.sh")
             with open(test_script, "w") as f:
-                f.write("#!/bin/bash\nexit 0\n")
+                f.write("#!/bin/sh\nexit 0\n")
 
             manager = HistoryManager.create([test_script, "--flag"], "buggy.c")
             manager.initialize(b"content", [test_script, "--flag"], "buggy.c")
@@ -231,7 +231,7 @@ def test_wrapper_script_reproduces_stdin_input_type(tmp_path) -> None:
     not reproduce the run."""
     wrapper = _initialize_run_script(
         str(tmp_path),
-        '#!/bin/bash\ncontent="$(cat)"\n[ "$content" = "hello" ]\n',
+        '#!/bin/sh\ncontent="$(cat)"\n[ "$content" = "hello" ]\n',
         InputType.stdin,
     )
     result = subprocess.run(
@@ -243,7 +243,7 @@ def test_wrapper_script_reproduces_stdin_input_type(tmp_path) -> None:
 def test_wrapper_script_reproduces_arg_input_type(tmp_path) -> None:
     wrapper = _initialize_run_script(
         str(tmp_path),
-        '#!/bin/bash\ngrep -q hello "$1"\n',
+        '#!/bin/sh\ngrep -q hello "$1"\n',
         InputType.arg,
     )
     result = subprocess.run(
@@ -258,7 +258,7 @@ def test_wrapper_script_reproduces_basename_input_type(tmp_path) -> None:
     run.sh did not arrange."""
     wrapper = _initialize_run_script(
         str(tmp_path),
-        "#!/bin/bash\ngrep -q hello ./buggy.c\n",
+        "#!/bin/sh\ngrep -q hello ./buggy.c\n",
         InputType.basename,
     )
     result = subprocess.run(
@@ -271,7 +271,7 @@ def test_wrapper_script_reproduces_all_input_type(tmp_path) -> None:
     """The default input type passes the test case every way at once."""
     wrapper = _initialize_run_script(
         str(tmp_path),
-        '#!/bin/bash\n[ "$(cat)" = "hello" ] && grep -q hello "$1" '
+        '#!/bin/sh\n[ "$(cat)" = "hello" ] && grep -q hello "$1" '
         "&& grep -q hello ./buggy.c\n",
         InputType.all,
     )
@@ -285,7 +285,7 @@ def test_wrapper_script_accepts_explicit_target(tmp_path) -> None:
     """run.sh runs the test against an explicitly passed file."""
     wrapper = _initialize_run_script(
         str(tmp_path),
-        '#!/bin/bash\ngrep -q goodbye "$1"\n',
+        '#!/bin/sh\ngrep -q goodbye "$1"\n',
         InputType.arg,
     )
     other = tmp_path / "other.c"
@@ -865,7 +865,7 @@ def test_initialize_directory_creates_structure() -> None:
             # Create a test script
             test_script = os.path.join(tmpdir, "test.sh")
             with open(test_script, "w") as f:
-                f.write("#!/bin/bash\nexit 0\n")
+                f.write("#!/bin/sh\nexit 0\n")
             os.chmod(test_script, 0o755)
 
             manager = HistoryManager.create(

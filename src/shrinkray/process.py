@@ -17,6 +17,11 @@ import trio
 # so we can warn the user rather than give a false sense of protection.
 MEMORY_LIMIT_ENFORCEABLE = sys.platform != "darwin"
 
+# OpenBSD has no RLIMIT_AS at all; RLIMIT_DATA there covers malloc'd
+# memory (the kernel accounts it against the data segment), so it serves
+# the same runaway-test protection.
+MEMORY_RLIMIT = getattr(resource, "RLIMIT_AS", resource.RLIMIT_DATA)
+
 _MEMORY_UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
 
 
@@ -77,7 +82,7 @@ def child_preexec(memory_limit: int | None) -> Callable[[], None]:
         os.setsid()
         if memory_limit is not None and memory_limit > 0:
             try:
-                resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_limit))
+                resource.setrlimit(MEMORY_RLIMIT, (memory_limit, memory_limit))
             except (ValueError, OSError):
                 pass
 
@@ -97,11 +102,18 @@ def peak_child_rss_bytes() -> int:
 
 
 def signal_group(sp: "trio.Process", sig: int) -> None:
-    """Send a signal to a process group."""
-    gid = os.getpgid(sp.pid)
-    # Never signal our own process group - that would signal shrink-ray itself.
-    assert gid != os.getpgrp()
-    os.killpg(gid, sig)
+    """Send a signal to the process group led by sp.
+
+    Test subprocesses are started with setsid (see child_preexec), so the
+    child leads its own process group and its pid names that group. The
+    group is deliberately not looked up with getpgid: on OpenBSD that
+    fails with EPERM for processes in a different session, and using the
+    pid directly also cannot name shrink-ray's own group by mistake (that
+    would signal shrink-ray itself): shrink-ray's group leader predates
+    the child, so their pids cannot collide, and for a child that somehow
+    skipped setsid, killpg fails with ESRCH instead.
+    """
+    os.killpg(sp.pid, sig)
 
 
 def _close_pipes_sync(sp: "trio.Process") -> None:
@@ -154,15 +166,17 @@ async def interrupt_wait_and_kill(sp: "trio.Process", delay: float = 0.1) -> Non
                 if sp.poll() is not None:
                     return
                 await trio.sleep(delay * 1.5**n * random.random())
-        except ProcessLookupError:  # pragma: no cover
-            # This is incredibly hard to trigger reliably, because it only happens
-            # if the process exits at exactly the wrong time.
+        except (ProcessLookupError, PermissionError):
+            # The group can be gone if the process exits at exactly the
+            # wrong time. macOS reports that as EPERM rather than ESRCH
+            # when the group's only member has exited but is unreaped;
+            # the sp.wait() below then reaps it.
             pass
 
         if sp.returncode is None:
             try:
                 signal_group(sp, signal.SIGKILL)
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
                 pass
 
         with trio.move_on_after(delay):

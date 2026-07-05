@@ -29,6 +29,7 @@ states other passes produce.
 import bisect
 import os
 import re
+import sys
 from collections.abc import Iterator
 
 import tree_sitter
@@ -104,6 +105,35 @@ def language_for_filename(filename: str) -> str | None:
     """The tree-sitter language for a file, judged by its extension."""
     ext = os.path.splitext(filename)[1].lower()
     return EXTENSION_LANGUAGES.get(ext)
+
+
+def loadable_language_for_filename(filename: str) -> str | None:
+    """language_for_filename, restricted to grammars that actually load.
+
+    tree-sitter-language-pack fetches grammars at runtime (and compiles
+    them from source on platforms it publishes no prebuilt binaries
+    for), so a mapped language can still be unavailable: a download can
+    fail, or the grammar may not build on this platform. Reduction then
+    runs without tree-sitter passes rather than crashing partway.
+    """
+    language = language_for_filename(filename)
+    if language is None:
+        return None
+    try:
+        tree_sitter_language_pack.get_language(language)
+    except tree_sitter_language_pack.exceptions.Error as e:
+        # The exception type says what failed: DownloadError for a
+        # fetch, LanguageNotFoundError for a grammar this platform does
+        # not have, DynamicLoadError for a broken build, and so on.
+        print(
+            f"WARNING: could not load the tree-sitter grammar {language!r} "
+            f"for {filename} ({type(e).__name__}: {e}); "
+            "reducing without tree-sitter passes.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+    return language
 
 
 def parse_tree(language: str, source: bytes) -> tree_sitter.Tree:

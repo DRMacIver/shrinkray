@@ -491,7 +491,7 @@ async def test_worker_emit_progress_updates_loop():
 
 
 # === Integration tests with real files ===
-# These tests run actual bash scripts with tight timeouts, so they need to run
+# These tests run actual shell scripts with tight timeouts, so they need to run
 # sequentially to avoid timeout failures under parallel load.
 
 
@@ -504,7 +504,7 @@ async def test_worker_start_reduction_single_file(tmp_path):
 
     # Create a test script
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -596,7 +596,7 @@ async def test_worker_start_reduction_skip_validation(tmp_path):
 
     # Create a test script that would FAIL if run - this verifies setup() is skipped
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 1")  # Always fails
+    script.write_text("#!/bin/sh\nexit 1")  # Always fails
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -634,7 +634,7 @@ async def test_worker_start_reduction_directory(tmp_path):
 
     # Create a test script
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -671,7 +671,7 @@ async def test_worker_handle_start_success(tmp_path):
     target.write_text("hello")
 
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -879,7 +879,7 @@ async def test_worker_start_reduction_with_c_file(tmp_path):
 
     # Create a test script
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -911,7 +911,7 @@ async def test_worker_full_run_with_mock(tmp_path):
 
     # Create a test script that passes
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     # Create a start command
@@ -976,7 +976,7 @@ async def test_worker_run_waits_for_start(tmp_path):
 
     # Create a test script
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -1111,7 +1111,7 @@ async def test_worker_start_with_failing_interestingness_test(tmp_path):
 
     # Create a test script that always fails (returns non-zero)
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 1")
+    script.write_text("#!/bin/sh\nexit 1")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -1227,7 +1227,7 @@ async def test_worker_timeout_on_initial_test(tmp_path):
 
     # Create a test script that sleeps longer than timeout
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nsleep 10\nexit 0")
+    script.write_text("#!/bin/sh\nsleep 10\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -1264,7 +1264,7 @@ async def test_worker_error_message_is_detailed(tmp_path):
 
     # Create a script that always fails
     script = tmp_path / "fail.sh"
-    script.write_text("#!/bin/bash\nexit 1")
+    script.write_text("#!/bin/sh\nexit 1")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -1305,7 +1305,7 @@ async def test_worker_trivial_result_error(tmp_path):
 
     # Create a script that always succeeds (accepts any input)
     script = tmp_path / "pass.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -1355,7 +1355,7 @@ async def test_worker_trivial_result_no_error_when_disabled(tmp_path):
 
     # Create a script that always succeeds (accepts any input)
     script = tmp_path / "pass.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     output = MemoryOutputStream()
@@ -2376,7 +2376,7 @@ async def test_worker_logs_to_history_directory(tmp_path):
 
     # Create a test script that passes
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     # Create start command with history enabled (the default)
@@ -2465,7 +2465,7 @@ async def test_worker_log_file_close_exception(tmp_path):
 
     # Create a test script that passes
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     # Create start command with history enabled
@@ -2530,7 +2530,7 @@ async def test_worker_no_stderr_redirect_without_history(tmp_path):
 
     # Create a test script that passes
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     # Create start command with history disabled
@@ -2719,7 +2719,7 @@ async def test_restart_integration_stats_continue(tmp_path):
 
     # Create a test script that keeps lines starting with 'x'
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ngrep -q "^x" "$1"')
+    script.write_text('#!/bin/sh\ngrep -q "^x" "$1"')
     script.chmod(0o755)
 
     # Set up streams
@@ -2789,7 +2789,7 @@ async def test_restart_integration_from_history_point(tmp_path):
 
     # Create a test script that requires 'KEEP' in the file
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ngrep -q "KEEP" "$1"')
+    script.write_text('#!/bin/sh\ngrep -q "KEEP" "$1"')
     script.chmod(0o755)
 
     # Set up streams
@@ -2909,7 +2909,7 @@ async def test_restart_integration_stats_not_reset(tmp_path):
 
     # Test script that always passes (so we get lots of reductions)
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     input_stream = BidirectionalInputStream()
@@ -3011,7 +3011,7 @@ async def test_restart_integration_status_updates(tmp_path):
 
     # Create a test script that requires 'KEEP' in the file
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/bash\ngrep -q "KEEP" "$1"')
+    script.write_text('#!/bin/sh\ngrep -q "KEEP" "$1"')
     script.chmod(0o755)
 
     input_stream = BidirectionalInputStream()

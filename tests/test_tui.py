@@ -2297,7 +2297,7 @@ def temp_test_script():
     """Create a temporary interestingness test script."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".sh", delete=False) as f:
         # Script that succeeds if file contains "Hello"
-        f.write('#!/bin/bash\ngrep -q "Hello" "$1"\n')
+        f.write('#!/bin/sh\ngrep -q "Hello" "$1"\n')
         temp_path = f.name
     os.chmod(temp_path, 0o755)
     yield temp_path

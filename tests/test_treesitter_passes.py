@@ -1,9 +1,12 @@
+from tree_sitter_language_pack.exceptions import LanguageNotFoundError
+
 from shrinkray.passes.treesitter import (
     EXTENSION_LANGUAGES,
     _names_mentioned,
     child_deletion_cuts,
     language_for_filename,
     lift_cuts,
+    loadable_language_for_filename,
     minimal_substitutions,
     orphaned_declaration_cuts,
     parse_tree,
@@ -38,6 +41,38 @@ def test_language_for_known_extensions():
 def test_language_for_unknown_extension():
     assert language_for_filename("foo.unknownext") is None
     assert language_for_filename("foo") is None
+
+
+def test_loadable_language_matches_mapping_when_grammar_loads():
+    assert loadable_language_for_filename("foo.go") == "go"
+
+
+def test_loadable_language_none_for_unknown_extension():
+    assert loadable_language_for_filename("foo.unknownext") is None
+
+
+def test_loadable_language_none_when_grammar_unavailable(monkeypatch, capsys):
+    # Grammars are fetched (and on some platforms compiled) at runtime,
+    # so a mapped language can still fail to load; reduction must fall
+    # back to running without tree-sitter passes instead of crashing,
+    # and must say what actually went wrong (download failure, grammar
+    # missing for this platform, build failure, ...) rather than
+    # swallowing the error.
+    def unavailable(name):
+        raise LanguageNotFoundError(f"Language '{name}' not found")
+
+    monkeypatch.setattr(
+        "shrinkray.passes.treesitter.tree_sitter_language_pack.get_language",
+        unavailable,
+    )
+    assert loadable_language_for_filename("foo.go") is None
+    stderr = capsys.readouterr().err
+    assert "WARNING" in stderr
+    assert "'go'" in stderr
+    assert "foo.go" in stderr
+    assert "LanguageNotFoundError" in stderr
+    assert "Language 'go' not found" in stderr
+    assert "without tree-sitter passes" in stderr
 
 
 def test_all_mapped_languages_are_loadable_and_parse():

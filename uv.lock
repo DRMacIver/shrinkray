@@ -816,6 +816,21 @@ dev = [
     { name = "ruff" },
     { name = "syrupy" },
 ]
+test = [
+    { name = "coverage" },
+    { name = "hypothesis" },
+    { name = "hypothesmith" },
+    { name = "jinja2" },
+    { name = "pexpect" },
+    { name = "pygments" },
+    { name = "pyte" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "pytest-trio" },
+    { name = "pytest-xdist" },
+    { name = "syrupy" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -824,31 +839,32 @@ requires-dist = [
     { name = "black", specifier = ">=24.1.0" },
     { name = "chardet", specifier = ">=5.2.0" },
     { name = "click", specifier = ">=8.2.1" },
-    { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.4.0" },
-    { name = "coverage", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=7.4.0" },
+    { name = "coverage", marker = "extra == 'test'", specifier = ">=7.4.0" },
+    { name = "coverage", extras = ["toml"], marker = "extra == 'test'", specifier = ">=7.4.0" },
     { name = "exceptiongroup", specifier = ">=1.2.0" },
     { name = "humanize", specifier = ">=4.9.0" },
-    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.92.1" },
-    { name = "hypothesmith", marker = "extra == 'dev'", specifier = ">=0.3.1" },
-    { name = "jinja2", marker = "extra == 'dev'", specifier = ">=3.0.0" },
+    { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6.92.1" },
+    { name = "hypothesmith", marker = "extra == 'test'", specifier = ">=0.3.1" },
+    { name = "jinja2", marker = "extra == 'test'", specifier = ">=3.0.0" },
     { name = "libcst", specifier = ">=1.8.4" },
-    { name = "pexpect", marker = "extra == 'dev'", specifier = ">=4.9.0" },
-    { name = "pygments", marker = "extra == 'dev'", specifier = ">=2.17.0" },
-    { name = "pyte", marker = "extra == 'dev'", specifier = ">=0.8.2" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
-    { name = "pytest-trio", marker = "extra == 'dev'", specifier = ">=0.8.0" },
-    { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.5.0" },
+    { name = "pexpect", marker = "extra == 'test'", specifier = ">=4.9.0" },
+    { name = "pygments", marker = "extra == 'test'", specifier = ">=2.17.0" },
+    { name = "pyte", marker = "extra == 'test'", specifier = ">=0.8.2" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.21.0" },
+    { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=4.1.0" },
+    { name = "pytest-trio", marker = "extra == 'test'", specifier = ">=0.8.0" },
+    { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.5.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
-    { name = "syrupy", marker = "extra == 'dev'", specifier = ">=5.0.0" },
+    { name = "shrinkray", extras = ["test"], marker = "extra == 'dev'" },
+    { name = "syrupy", marker = "extra == 'test'", specifier = ">=5.0.0" },
     { name = "textual", specifier = ">=8.0.0" },
     { name = "textual-plotext", specifier = ">=1.0.1" },
     { name = "tree-sitter", specifier = ">=0.26.0" },
     { name = "tree-sitter-language-pack", specifier = ">=1.12.2" },
     { name = "trio", specifier = ">=0.28.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["test", "dev"]
 
 [[package]]
 name = "sniffio"

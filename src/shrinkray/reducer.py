@@ -53,7 +53,10 @@ from shrinkray.passes.patching import PatchApplier, Patches
 from shrinkray.passes.python import is_python, python_reducer_command
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
-from shrinkray.passes.treesitter import language_for_filename, treesitter_passes
+from shrinkray.passes.treesitter import (
+    loadable_language_for_filename,
+    treesitter_passes,
+)
 from shrinkray.problem import (
     ReductionProblem,
     ReductionStats,
@@ -749,7 +752,7 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
                     key_log_dir = None
                 key_shrinkray = ShrinkRay(
                     enable_cpp_passes=any(k.endswith(s) for s in C_FILE_EXTENSIONS),
-                    treesitter_language=language_for_filename(k),
+                    treesitter_language=loadable_language_for_filename(k),
                     target=key_problem,
                     external_reducers=self.external_reducers,
                     python_reducer=self.python_reducer,

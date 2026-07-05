@@ -359,10 +359,21 @@ main()
 
 
 class Problem:
-    def __init__(self, initial: bytes, predicate, *, cpp: bool = False):
+    def __init__(
+        self,
+        initial: bytes,
+        predicate,
+        *,
+        cpp: bool = False,
+        treesitter_language: str | None = None,
+    ):
         self.initial = initial
         self.predicate = predicate
         self.cpp = cpp
+        # When set, the reducer runs its grammar-aware tree-sitter passes
+        # for this language (as it does when reducing a file with the
+        # matching extension), so their efficiency is measured too.
+        self.treesitter_language = treesitter_language
 
 
 def _corpus_file(entry: str, filename: str) -> bytes:
@@ -438,6 +449,16 @@ def build_problems() -> dict[str, Problem]:
             _corpus_file("minisat-dimacs-int-overflow", "original.cnf"),
             contains_all(b"2147483648"),
         ),
+        # Tree-sitter (Go): keeps the generic ~bool constraint and a
+        # comparison (the untyped-bool ICE trigger) while letting the rest
+        # of the module — and the imports coupled to it — be deleted, so the
+        # grammar-aware passes (delete_orphaned_declarations in particular)
+        # are exercised and measured.
+        "corpus_go": Problem(
+            _corpus_file("go11810-generic-untyped-bool-ice", "original.go"),
+            contains_all(b"~bool", b"=="),
+            treesitter_language="go",
+        ),
     }
     return problems
 
@@ -471,7 +492,11 @@ def run_problem(name: str, problem: Problem) -> dict:
             )
 
         reduction_problem.on_reduce(record)
-        reducer = ShrinkRay(target=reduction_problem, enable_cpp_passes=problem.cpp)
+        reducer = ShrinkRay(
+            target=reduction_problem,
+            enable_cpp_passes=problem.cpp,
+            treesitter_language=problem.treesitter_language,
+        )
         await reducer.run()
         return reduction_problem.current_test_case, reduction_problem, reducer
 

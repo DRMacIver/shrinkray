@@ -1,2785 +1,2945 @@
 {
- "results": [
-  {
-   "name": "deep_parens",
-   "initial_size": 3794,
-   "final_size": 800,
-   "calls": 12866,
-   "c90": 9469,
-   "c99": 10131,
-   "tail": 2666,
-   "reductions": 1122,
-   "seconds": 97.96,
-   "pass_stats": [
+  "results": [
     {
-     "pass": "cut_comment_like_things",
-     "runs": 3,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 27
+      "name": "deep_parens",
+      "initial_size": 3794,
+      "final_size": 800,
+      "calls": 12880,
+      "c90": 9465,
+      "c99": 10138,
+      "tail": 2666,
+      "reductions": 1124,
+      "seconds": 5.72,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 3,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 27
+        },
+        {
+          "pass": "hollow",
+          "runs": 7,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 15
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 6,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 6
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 8,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 16
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 5,
+          "calls": 19,
+          "reductions": 2,
+          "bytes_deleted": 118
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 5,
+          "calls": 656,
+          "reductions": 200,
+          "bytes_deleted": 400
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 4,
+          "calls": 788,
+          "reductions": 514,
+          "bytes_deleted": 1211
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 3,
+          "calls": 1,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 3,
+          "calls": 402,
+          "reductions": 4,
+          "bytes_deleted": 801
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 3,
+          "calls": 35,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 2,
+          "calls": 8544,
+          "reductions": 400,
+          "bytes_deleted": 400
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 1,
+          "calls": 24,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 1,
+          "calls": 2400,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "hollow",
-     "runs": 7,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 15
+      "name": "keep_markers",
+      "initial_size": 174747,
+      "final_size": 50,
+      "calls": 1232,
+      "c90": 74,
+      "c99": 132,
+      "tail": 887,
+      "reductions": 113,
+      "seconds": 9.76,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 3,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 20890
+        },
+        {
+          "pass": "hollow",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 4,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 36000
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 2,
+          "calls": 183,
+          "reductions": 100,
+          "bytes_deleted": 117781
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 5,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 5,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 4
+        },
+        {
+          "pass": "python",
+          "runs": 3,
+          "calls": 7,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 3,
+          "calls": 7,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 4,
+          "calls": 132,
+          "reductions": 4,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 3,
+          "calls": 3,
+          "reductions": 3,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 2,
+          "calls": 4,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 2,
+          "calls": 17,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 2,
+          "calls": 11,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 2,
+          "calls": 21,
+          "reductions": 2,
+          "bytes_deleted": 6
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 1,
+          "calls": 360,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 1,
+          "calls": 233,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 1,
+          "calls": 243,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 6,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 6
+      "name": "already_minimal",
+      "initial_size": 37,
+      "final_size": 34,
+      "calls": 847,
+      "c90": 101,
+      "c99": 101,
+      "tail": 746,
+      "reductions": 3,
+      "seconds": 0.55,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "hollow",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "python",
+          "runs": 3,
+          "calls": 1,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 3,
+          "calls": 3,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 4,
+          "calls": 87,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 3,
+          "calls": 4,
+          "reductions": 1,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 2,
+          "calls": 9,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 2,
+          "calls": 9,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 2,
+          "calls": 18,
+          "reductions": 2,
+          "bytes_deleted": 3
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 1,
+          "calls": 236,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 1,
+          "calls": 229,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 1,
+          "calls": 244,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
+      "name": "python_syntax",
+      "initial_size": 10078,
+      "final_size": 13,
+      "calls": 547,
+      "c90": 19,
+      "c99": 86,
+      "tail": 380,
+      "reductions": 23,
+      "seconds": 11.46,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 4,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 45
+        },
+        {
+          "pass": "hollow",
+          "runs": 6,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 6,
+          "calls": 5,
+          "reductions": 3,
+          "bytes_deleted": 3424
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 3,
+          "calls": 46,
+          "reductions": 8,
+          "bytes_deleted": 6388
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 6,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 7,
+          "calls": 6,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 6,
+          "calls": 12,
+          "reductions": 3,
+          "bytes_deleted": 23
+        },
+        {
+          "pass": "python",
+          "runs": 6,
+          "calls": 5,
+          "reductions": 3,
+          "bytes_deleted": 58
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 4,
+          "calls": 6,
+          "reductions": 2,
+          "bytes_deleted": 105
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 3,
+          "calls": 52,
+          "reductions": 1,
+          "bytes_deleted": 5
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 3,
+          "calls": 2,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 3,
+          "calls": 9,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 3,
+          "calls": 2,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 3,
+          "calls": 25,
+          "reductions": 1,
+          "bytes_deleted": 2
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 2,
+          "calls": 2,
+          "reductions": 1,
+          "bytes_deleted": 15
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 1,
+          "calls": 70,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 1,
+          "calls": 212,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 1,
+          "calls": 85,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "lift_braces",
-     "runs": 7,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
+      "name": "corpus_mypy",
+      "initial_size": 2537,
+      "final_size": 34,
+      "calls": 3457,
+      "c90": 530,
+      "c99": 774,
+      "tail": 928,
+      "reductions": 71,
+      "seconds": 42.07,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 9,
+          "calls": 13,
+          "reductions": 6,
+          "bytes_deleted": 910
+        },
+        {
+          "pass": "hollow",
+          "runs": 14,
+          "calls": 60,
+          "reductions": 9,
+          "bytes_deleted": 357
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 13,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 32
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 6,
+          "calls": 271,
+          "reductions": 1,
+          "bytes_deleted": 618
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 14,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 15,
+          "calls": 45,
+          "reductions": 2,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 11,
+          "calls": 163,
+          "reductions": 9,
+          "bytes_deleted": 63
+        },
+        {
+          "pass": "python",
+          "runs": 12,
+          "calls": 22,
+          "reductions": 11,
+          "bytes_deleted": 284
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 8,
+          "calls": 53,
+          "reductions": 2,
+          "bytes_deleted": 152
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 8,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 8,
+          "calls": 32,
+          "reductions": 3,
+          "bytes_deleted": 6
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 9,
+          "calls": 270,
+          "reductions": 15,
+          "bytes_deleted": 47
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 5,
+          "calls": 34,
+          "reductions": 4,
+          "bytes_deleted": 4
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 5,
+          "calls": 34,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 5,
+          "calls": 112,
+          "reductions": 3,
+          "bytes_deleted": 4
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 5,
+          "calls": 7,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 5,
+          "calls": 537,
+          "reductions": 2,
+          "bytes_deleted": 16
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 3,
+          "calls": 9,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 3,
+          "calls": 3,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 3,
+          "calls": 746,
+          "reductions": 2,
+          "bytes_deleted": 2
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 4,
+          "calls": 522,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 2,
+          "calls": 516,
+          "reductions": 1,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "remove_indents",
-     "runs": 8,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 16
+      "name": "corpus_pylint",
+      "initial_size": 2403,
+      "final_size": 44,
+      "calls": 2019,
+      "c90": 198,
+      "c99": 408,
+      "tail": 1057,
+      "reductions": 58,
+      "seconds": 21.71,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 6,
+          "calls": 28,
+          "reductions": 9,
+          "bytes_deleted": 1139
+        },
+        {
+          "pass": "hollow",
+          "runs": 10,
+          "calls": 33,
+          "reductions": 10,
+          "bytes_deleted": 447
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 9,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 18
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 4,
+          "calls": 131,
+          "reductions": 1,
+          "bytes_deleted": 418
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 10,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 11,
+          "calls": 8,
+          "reductions": 3,
+          "bytes_deleted": 16
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 9,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 28
+        },
+        {
+          "pass": "python",
+          "runs": 9,
+          "calls": 7,
+          "reductions": 7,
+          "bytes_deleted": 126
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 6,
+          "calls": 21,
+          "reductions": 2,
+          "bytes_deleted": 75
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 6,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 6,
+          "calls": 28,
+          "reductions": 2,
+          "bytes_deleted": 4
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 7,
+          "calls": 252,
+          "reductions": 9,
+          "bytes_deleted": 52
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 5,
+          "calls": 5,
+          "reductions": 1,
+          "bytes_deleted": 1
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 5,
+          "calls": 36,
+          "reductions": 2,
+          "bytes_deleted": 2
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 4,
+          "calls": 6,
+          "reductions": 2,
+          "bytes_deleted": 6
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 4,
+          "calls": 47,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 4,
+          "calls": 52,
+          "reductions": 5,
+          "bytes_deleted": 23
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 4,
+          "calls": 2,
+          "reductions": 2,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 2,
+          "calls": 668,
+          "reductions": 1,
+          "bytes_deleted": 4
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 2,
+          "calls": 8,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 1,
+          "calls": 197,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 1,
+          "calls": 237,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 1,
+          "calls": 244,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "remove_whitespace",
-     "runs": 4,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
+      "name": "corpus_ujson",
+      "initial_size": 826,
+      "final_size": 42,
+      "calls": 1280,
+      "c90": 64,
+      "c99": 68,
+      "tail": 800,
+      "reductions": 23,
+      "seconds": 0.13,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 3,
+          "calls": 1,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "hollow",
+          "runs": 4,
+          "calls": 111,
+          "reductions": 18,
+          "bytes_deleted": 682
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 4,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 60
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 4,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "JSON/delete_identifiers",
+          "runs": 4,
+          "calls": 3,
+          "reductions": 1,
+          "bytes_deleted": 32
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 3,
+          "calls": 8,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 3,
+          "calls": 27,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 3,
+          "calls": 4,
+          "reductions": 1,
+          "bytes_deleted": 1
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 2,
+          "calls": 2,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 2,
+          "calls": 6,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 2,
+          "calls": 670,
+          "reductions": 1,
+          "bytes_deleted": 1
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 1,
+          "calls": 4,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 1,
+          "calls": 197,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 1,
+          "calls": 238,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 5,
-     "calls": 19,
-     "reductions": 2,
-     "bytes_deleted": 118
+      "name": "corpus_udlit_cpp",
+      "initial_size": 834,
+      "final_size": 22,
+      "calls": 1036,
+      "c90": 61,
+      "c99": 134,
+      "tail": 594,
+      "reductions": 45,
+      "seconds": 0.08,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 5,
+          "calls": 2,
+          "reductions": 2,
+          "bytes_deleted": 308
+        },
+        {
+          "pass": "hollow",
+          "runs": 8,
+          "calls": 13,
+          "reductions": 7,
+          "bytes_deleted": 190
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 9,
+          "calls": 2,
+          "reductions": 2,
+          "bytes_deleted": 82
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 2,
+          "calls": 3,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 7,
+          "calls": 1,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 8,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 1
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 7,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 3
+        },
+        {
+          "pass": "replace_function_bodies",
+          "runs": 7,
+          "calls": 4,
+          "reductions": 4,
+          "bytes_deleted": 46
+        },
+        {
+          "pass": "delete_function_definitions",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_namespaces",
+          "runs": 7,
+          "calls": 2,
+          "reductions": 1,
+          "bytes_deleted": 18
+        },
+        {
+          "pass": "remove_base_classes",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_constructor_initializers",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_template_parts",
+          "runs": 7,
+          "calls": 14,
+          "reductions": 3,
+          "bytes_deleted": 27
+        },
+        {
+          "pass": "simplify_call_expressions",
+          "runs": 7,
+          "calls": 4,
+          "reductions": 4,
+          "bytes_deleted": 33
+        },
+        {
+          "pass": "replace_type_with_int",
+          "runs": 7,
+          "calls": 2,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 7,
+          "calls": 21,
+          "reductions": 2,
+          "bytes_deleted": 34
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 7,
+          "calls": 8,
+          "reductions": 2,
+          "bytes_deleted": 2
+        },
+        {
+          "pass": "debracket",
+          "runs": 5,
+          "calls": 1,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 5,
+          "calls": 148,
+          "reductions": 10,
+          "bytes_deleted": 64
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 5,
+          "calls": 5,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 5,
+          "calls": 11,
+          "reductions": 1,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 5,
+          "calls": 5,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 5,
+          "calls": 3,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 5,
+          "calls": 27,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 5,
+          "calls": 2,
+          "reductions": 2,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 3,
+          "calls": 73,
+          "reductions": 2,
+          "bytes_deleted": 3
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 2,
+          "calls": 274,
+          "reductions": 1,
+          "bytes_deleted": 1
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 1,
+          "calls": 233,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 1,
+          "calls": 169,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 5,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
+      "name": "coupled_count_json",
+      "initial_size": 3831,
+      "final_size": 143,
+      "calls": 5325,
+      "c90": 35,
+      "c99": 361,
+      "tail": 3083,
+      "reductions": 45,
+      "seconds": 165.57,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "hollow",
+          "runs": 3,
+          "calls": 82,
+          "reductions": 38,
+          "bytes_deleted": 3454
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 3,
+          "calls": 4,
+          "reductions": 2,
+          "bytes_deleted": 48
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 2,
+          "calls": 279,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 3,
+          "calls": 3,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 3,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 134
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "python",
+          "runs": 3,
+          "calls": 1,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "JSON/delete_identifiers",
+          "runs": 3,
+          "calls": 5,
+          "reductions": 1,
+          "bytes_deleted": 49
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 2,
+          "calls": 8,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 3,
+          "calls": 100,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 2,
+          "calls": 16,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 2,
+          "calls": 8,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 2,
+          "calls": 26,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 2,
+          "calls": 40,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 2,
+          "calls": 3520,
+          "reductions": 3,
+          "bytes_deleted": 3
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 1,
+          "calls": 26,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 1,
+          "calls": 4,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 1,
+          "calls": 329,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 1,
+          "calls": 408,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 1,
+          "calls": 418,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "debracket",
-     "runs": 5,
-     "calls": 656,
-     "reductions": 200,
-     "bytes_deleted": 400
+      "name": "coupled_total_text",
+      "initial_size": 602,
+      "final_size": 350,
+      "calls": 27532,
+      "c90": 2846,
+      "c99": 2859,
+      "tail": 8800,
+      "reductions": 356,
+      "seconds": 9.21,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 4,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 62
+        },
+        {
+          "pass": "hollow",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 7,
+          "calls": 9,
+          "reductions": 1,
+          "bytes_deleted": 3
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 1,
+          "calls": 299,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 6,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 7,
+          "calls": 791,
+          "reductions": 2,
+          "bytes_deleted": 13
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 7,
+          "calls": 733,
+          "reductions": 44,
+          "bytes_deleted": 75
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 6,
+          "calls": 407,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 5,
+          "calls": 888,
+          "reductions": 4,
+          "bytes_deleted": 41
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 5,
+          "calls": 156,
+          "reductions": 3,
+          "bytes_deleted": 58
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 6,
+          "calls": 233,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 6,
+          "calls": 1225,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 4,
+          "calls": 238,
+          "reductions": 238,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 3,
+          "calls": 4718,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 3,
+          "calls": 127,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 3,
+          "calls": 112,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 3,
+          "calls": 5715,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 2,
+          "calls": 7624,
+          "reductions": 1,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 2,
+          "calls": 4047,
+          "reductions": 62,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "delete_byte_spans",
-     "runs": 4,
-     "calls": 787,
-     "reductions": 514,
-     "bytes_deleted": 1211
+      "name": "coupled_arity_python",
+      "initial_size": 947,
+      "final_size": 52,
+      "calls": 11043,
+      "c90": 296,
+      "c99": 435,
+      "tail": 1198,
+      "reductions": 60,
+      "seconds": 40.7,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 8,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "hollow",
+          "runs": 12,
+          "calls": 46,
+          "reductions": 9,
+          "bytes_deleted": 182
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 12,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 10
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 4,
+          "calls": 102,
+          "reductions": 1,
+          "bytes_deleted": 335
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 12,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 13,
+          "calls": 16,
+          "reductions": 3,
+          "bytes_deleted": 12
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 11,
+          "calls": 29,
+          "reductions": 7,
+          "bytes_deleted": 33
+        },
+        {
+          "pass": "python",
+          "runs": 11,
+          "calls": 17,
+          "reductions": 7,
+          "bytes_deleted": 141
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 9,
+          "calls": 5,
+          "reductions": 1,
+          "bytes_deleted": 88
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 8,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 8,
+          "calls": 26,
+          "reductions": 1,
+          "bytes_deleted": 2
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 8,
+          "calls": 287,
+          "reductions": 11,
+          "bytes_deleted": 48
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 6,
+          "calls": 3,
+          "reductions": 2,
+          "bytes_deleted": 1
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 6,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 4
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 6,
+          "calls": 53,
+          "reductions": 3,
+          "bytes_deleted": 5
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 6,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 6,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 6,
+          "calls": 30,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 6,
+          "calls": 71,
+          "reductions": 6,
+          "bytes_deleted": 33
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 5,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 5,
+          "calls": 1149,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 4,
+          "calls": 43,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 4,
+          "calls": 1,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 6,
+          "calls": 1175,
+          "reductions": 1,
+          "bytes_deleted": 1
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 6,
+          "calls": 6460,
+          "reductions": 3,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 5,
+          "calls": 1508,
+          "reductions": 2,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
+      "name": "corpus_minisat",
+      "initial_size": 2326,
+      "final_size": 10,
+      "calls": 1207,
+      "c90": 795,
+      "c99": 795,
+      "tail": 375,
+      "reductions": 4,
+      "seconds": 0.33,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "hollow",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 2,
+          "calls": 789,
+          "reductions": 2,
+          "bytes_deleted": 2308
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "DimacsCNF/sort_clauses",
+          "runs": 2,
+          "calls": 1,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "DimacsCNF/force_literals",
+          "runs": 2,
+          "calls": 6,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "DimacsCNF/pass_to_component",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "DimacsCNF/unit_propagate",
+          "runs": 2,
+          "calls": 2,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "DimacsCNF/delete_literals",
+          "runs": 2,
+          "calls": 2,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "DimacsCNF/delete_single_terms",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "DimacsCNF/delete_elements",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "DimacsCNF/flip_literal_signs",
+          "runs": 2,
+          "calls": 2,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "DimacsCNF/combine_clauses",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "DimacsCNF/merge_literals",
+          "runs": 2,
+          "calls": 5,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "DimacsCNF/renumber_variables",
+          "runs": 2,
+          "calls": 25,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 2,
+          "calls": 21,
+          "reductions": 2,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 1,
+          "calls": 61,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 1,
+          "calls": 2,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 1,
+          "calls": 43,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 1,
+          "calls": 186,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 1,
+          "calls": 55,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
     },
     {
-     "pass": "reduce_integer_literals",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 3,
-     "calls": 1,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 3,
-     "calls": 432,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 3,
-     "calls": 3,
-     "reductions": 2,
-     "bytes_deleted": 801
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 2,
-     "calls": 8533,
-     "reductions": 400,
-     "bytes_deleted": 400
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 1,
-     "calls": 24,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 1,
-     "calls": 2400,
-     "reductions": 0,
-     "bytes_deleted": 0
+      "name": "corpus_go",
+      "initial_size": 2288,
+      "final_size": 7,
+      "calls": 327,
+      "c90": 17,
+      "c99": 69,
+      "tail": 203,
+      "reductions": 35,
+      "seconds": 0.04,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 4,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 392
+        },
+        {
+          "pass": "hollow",
+          "runs": 5,
+          "calls": 22,
+          "reductions": 16,
+          "bytes_deleted": 1790
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 5,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 5,
+          "calls": 2,
+          "reductions": 2,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "treesitter(go)/delete_children",
+          "runs": 6,
+          "calls": 57,
+          "reductions": 11,
+          "bytes_deleted": 69
+        },
+        {
+          "pass": "treesitter(go)/delete_orphaned_declarations",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "treesitter(go)/lift_nodes",
+          "runs": 5,
+          "calls": 20,
+          "reductions": 2,
+          "bytes_deleted": 11
+        },
+        {
+          "pass": "treesitter(go)/substitute_nodes",
+          "runs": 4,
+          "calls": 1,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 3,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 2
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 2,
+          "calls": 10,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 2,
+          "calls": 2,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 2,
+          "calls": 4,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 2,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 2,
+          "calls": 12,
+          "reductions": 1,
+          "bytes_deleted": 1
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 1,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 1,
+          "calls": 14,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 1,
+          "calls": 141,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 1,
+          "calls": 32,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
     }
-   ]
-  },
-  {
-   "name": "keep_markers",
-   "initial_size": 174747,
-   "final_size": 50,
-   "calls": 1231,
-   "c90": 74,
-   "c99": 132,
-   "tail": 886,
-   "reductions": 113,
-   "seconds": 27.34,
-   "pass_stats": [
-    {
-     "pass": "cut_comment_like_things",
-     "runs": 3,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 20890
-    },
-    {
-     "pass": "hollow",
-     "runs": 4,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 4,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 36000
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 2,
-     "calls": 183,
-     "reductions": 100,
-     "bytes_deleted": 117781
-    },
-    {
-     "pass": "lift_braces",
-     "runs": 4,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_indents",
-     "runs": 5,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 8
-    },
-    {
-     "pass": "remove_whitespace",
-     "runs": 5,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 4
-    },
-    {
-     "pass": "replace_bodies_with_ellipsis",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "strip_annotations",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lift_indented_constructs",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_statements",
-     "runs": 3,
-     "calls": 3,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_statements_with_pass",
-     "runs": 3,
-     "calls": 4,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 3,
-     "calls": 7,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "debracket",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_byte_spans",
-     "runs": 4,
-     "calls": 132,
-     "reductions": 4,
-     "bytes_deleted": 8
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "reduce_integer_literals",
-     "runs": 3,
-     "calls": 3,
-     "reductions": 3,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 2,
-     "calls": 17,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 2,
-     "calls": 14,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 2,
-     "calls": 21,
-     "reductions": 2,
-     "bytes_deleted": 6
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 1,
-     "calls": 360,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 1,
-     "calls": 233,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 1,
-     "calls": 243,
-     "reductions": 0,
-     "bytes_deleted": 0
-    }
-   ]
-  },
-  {
-   "name": "already_minimal",
-   "initial_size": 37,
-   "final_size": 34,
-   "calls": 844,
-   "c90": 102,
-   "c99": 102,
-   "tail": 742,
-   "reductions": 3,
-   "seconds": 4.14,
-   "pass_stats": [
-    {
-     "pass": "cut_comment_like_things",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "hollow",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lift_braces",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_indents",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_whitespace",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_bodies_with_ellipsis",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "strip_annotations",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lift_indented_constructs",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_statements",
-     "runs": 3,
-     "calls": 2,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_statements_with_pass",
-     "runs": 3,
-     "calls": 3,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 3,
-     "calls": 3,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "debracket",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_byte_spans",
-     "runs": 4,
-     "calls": 86,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "reduce_integer_literals",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 3,
-     "calls": 6,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 3,
-     "calls": 17,
-     "reductions": 1,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 2,
-     "calls": 16,
-     "reductions": 2,
-     "bytes_deleted": 3
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 1,
-     "calls": 236,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 1,
-     "calls": 227,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 1,
-     "calls": 241,
-     "reductions": 0,
-     "bytes_deleted": 0
-    }
-   ]
-  },
-  {
-   "name": "python_syntax",
-   "initial_size": 10078,
-   "final_size": 13,
-   "calls": 540,
-   "c90": 19,
-   "c99": 89,
-   "tail": 379,
-   "reductions": 24,
-   "seconds": 15.81,
-   "pass_stats": [
-    {
-     "pass": "cut_comment_like_things",
-     "runs": 4,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 45
-    },
-    {
-     "pass": "hollow",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 6,
-     "calls": 5,
-     "reductions": 3,
-     "bytes_deleted": 3424
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 3,
-     "calls": 46,
-     "reductions": 8,
-     "bytes_deleted": 6388
-    },
-    {
-     "pass": "lift_braces",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_indents",
-     "runs": 7,
-     "calls": 6,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_whitespace",
-     "runs": 6,
-     "calls": 12,
-     "reductions": 3,
-     "bytes_deleted": 23
-    },
-    {
-     "pass": "replace_bodies_with_ellipsis",
-     "runs": 6,
-     "calls": 1,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "strip_annotations",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lift_indented_constructs",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_statements",
-     "runs": 6,
-     "calls": 4,
-     "reductions": 3,
-     "bytes_deleted": 46
-    },
-    {
-     "pass": "replace_statements_with_pass",
-     "runs": 5,
-     "calls": 3,
-     "reductions": 1,
-     "bytes_deleted": 12
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 4,
-     "calls": 6,
-     "reductions": 2,
-     "bytes_deleted": 105
-    },
-    {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "debracket",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_byte_spans",
-     "runs": 3,
-     "calls": 52,
-     "reductions": 1,
-     "bytes_deleted": 5
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "reduce_integer_literals",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 3,
-     "calls": 2,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 3,
-     "calls": 2,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 3,
-     "calls": 24,
-     "reductions": 1,
-     "bytes_deleted": 2
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 2,
-     "calls": 2,
-     "reductions": 1,
-     "bytes_deleted": 15
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 1,
-     "calls": 70,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 1,
-     "calls": 212,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 1,
-     "calls": 85,
-     "reductions": 0,
-     "bytes_deleted": 0
-    }
-   ]
-  },
-  {
-   "name": "corpus_mypy",
-   "initial_size": 2537,
-   "final_size": 34,
-   "calls": 3386,
-   "c90": 403,
-   "c99": 667,
-   "tail": 933,
-   "reductions": 75,
-   "seconds": 19.69,
-   "pass_stats": [
-    {
-     "pass": "cut_comment_like_things",
-     "runs": 6,
-     "calls": 13,
-     "reductions": 6,
-     "bytes_deleted": 910
-    },
-    {
-     "pass": "hollow",
-     "runs": 11,
-     "calls": 45,
-     "reductions": 9,
-     "bytes_deleted": 357
-    },
-    {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 10,
-     "calls": 2,
-     "reductions": 1,
-     "bytes_deleted": 32
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 3,
-     "calls": 261,
-     "reductions": 1,
-     "bytes_deleted": 618
-    },
-    {
-     "pass": "lift_braces",
-     "runs": 11,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_indents",
-     "runs": 13,
-     "calls": 32,
-     "reductions": 2,
-     "bytes_deleted": 8
-    },
-    {
-     "pass": "remove_whitespace",
-     "runs": 9,
-     "calls": 96,
-     "reductions": 8,
-     "bytes_deleted": 57
-    },
-    {
-     "pass": "replace_bodies_with_ellipsis",
-     "runs": 8,
-     "calls": 3,
-     "reductions": 3,
-     "bytes_deleted": 187
-    },
-    {
-     "pass": "strip_annotations",
-     "runs": 8,
-     "calls": 12,
-     "reductions": 7,
-     "bytes_deleted": 82
-    },
-    {
-     "pass": "lift_indented_constructs",
-     "runs": 8,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_statements",
-     "runs": 8,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 21
-    },
-    {
-     "pass": "replace_statements_with_pass",
-     "runs": 8,
-     "calls": 3,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 8,
-     "calls": 50,
-     "reductions": 2,
-     "bytes_deleted": 152
-    },
-    {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 8,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "debracket",
-     "runs": 8,
-     "calls": 32,
-     "reductions": 3,
-     "bytes_deleted": 6
-    },
-    {
-     "pass": "delete_byte_spans",
-     "runs": 9,
-     "calls": 293,
-     "reductions": 15,
-     "bytes_deleted": 47
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "reduce_integer_literals",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 6,
-     "calls": 40,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 6,
-     "calls": 172,
-     "reductions": 7,
-     "bytes_deleted": 8
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 5,
-     "calls": 6,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 5,
-     "calls": 536,
-     "reductions": 2,
-     "bytes_deleted": 16
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 3,
-     "calls": 12,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 3,
-     "calls": 3,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 3,
-     "calls": 726,
-     "reductions": 2,
-     "bytes_deleted": 2
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 4,
-     "calls": 527,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 2,
-     "calls": 514,
-     "reductions": 6,
-     "bytes_deleted": 0
-    }
-   ]
-  },
-  {
-   "name": "corpus_pylint",
-   "initial_size": 2403,
-   "final_size": 44,
-   "calls": 3009,
-   "c90": 187,
-   "c99": 398,
-   "tail": 1068,
-   "reductions": 58,
-   "seconds": 16.67,
-   "pass_stats": [
-    {
-     "pass": "cut_comment_like_things",
-     "runs": 5,
-     "calls": 26,
-     "reductions": 9,
-     "bytes_deleted": 1139
-    },
-    {
-     "pass": "hollow",
-     "runs": 9,
-     "calls": 29,
-     "reductions": 10,
-     "bytes_deleted": 447
-    },
-    {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 8,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 18
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 3,
-     "calls": 131,
-     "reductions": 1,
-     "bytes_deleted": 418
-    },
-    {
-     "pass": "lift_braces",
-     "runs": 9,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_indents",
-     "runs": 10,
-     "calls": 8,
-     "reductions": 3,
-     "bytes_deleted": 16
-    },
-    {
-     "pass": "remove_whitespace",
-     "runs": 8,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 28
-    },
-    {
-     "pass": "replace_bodies_with_ellipsis",
-     "runs": 8,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "strip_annotations",
-     "runs": 8,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lift_indented_constructs",
-     "runs": 8,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_statements",
-     "runs": 8,
-     "calls": 5,
-     "reductions": 5,
-     "bytes_deleted": 116
-    },
-    {
-     "pass": "replace_statements_with_pass",
-     "runs": 7,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 10
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 6,
-     "calls": 23,
-     "reductions": 2,
-     "bytes_deleted": 75
-    },
-    {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "debracket",
-     "runs": 6,
-     "calls": 32,
-     "reductions": 2,
-     "bytes_deleted": 4
-    },
-    {
-     "pass": "delete_byte_spans",
-     "runs": 7,
-     "calls": 258,
-     "reductions": 10,
-     "bytes_deleted": 52
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 5,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "reduce_integer_literals",
-     "runs": 5,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 5,
-     "calls": 5,
-     "reductions": 1,
-     "bytes_deleted": 1
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 5,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 5,
-     "calls": 6,
-     "reductions": 2,
-     "bytes_deleted": 6
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 5,
-     "calls": 41,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 5,
-     "calls": 61,
-     "reductions": 5,
-     "bytes_deleted": 25
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 5,
-     "calls": 2,
-     "reductions": 2,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 4,
-     "calls": 793,
-     "reductions": 1,
-     "bytes_deleted": 4
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 2,
-     "calls": 8,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 3,
-     "calls": 525,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 3,
-     "calls": 482,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 2,
-     "calls": 564,
-     "reductions": 2,
-     "bytes_deleted": 0
-    }
-   ]
-  },
-  {
-   "name": "corpus_ujson",
-   "initial_size": 826,
-   "final_size": 42,
-   "calls": 1280,
-   "c90": 64,
-   "c99": 68,
-   "tail": 800,
-   "reductions": 23,
-   "seconds": 4.63,
-   "pass_stats": [
-    {
-     "pass": "cut_comment_like_things",
-     "runs": 3,
-     "calls": 1,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "hollow",
-     "runs": 4,
-     "calls": 111,
-     "reductions": 18,
-     "bytes_deleted": 682
-    },
-    {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 4,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 60
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lift_braces",
-     "runs": 4,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_indents",
-     "runs": 4,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 8
-    },
-    {
-     "pass": "remove_whitespace",
-     "runs": 4,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "JSON/delete_identifiers",
-     "runs": 4,
-     "calls": 3,
-     "reductions": 1,
-     "bytes_deleted": 32
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "debracket",
-     "runs": 3,
-     "calls": 8,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_byte_spans",
-     "runs": 3,
-     "calls": 27,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "reduce_integer_literals",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 3,
-     "calls": 4,
-     "reductions": 1,
-     "bytes_deleted": 1
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 2,
-     "calls": 2,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 2,
-     "calls": 6,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 2,
-     "calls": 670,
-     "reductions": 1,
-     "bytes_deleted": 1
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 1,
-     "calls": 4,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 1,
-     "calls": 197,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 1,
-     "calls": 238,
-     "reductions": 0,
-     "bytes_deleted": 0
-    }
-   ]
-  },
-  {
-   "name": "corpus_udlit_cpp",
-   "initial_size": 834,
-   "final_size": 22,
-   "calls": 904,
-   "c90": 61,
-   "c99": 134,
-   "tail": 591,
-   "reductions": 46,
-   "seconds": 3.11,
-   "pass_stats": [
-    {
-     "pass": "cut_comment_like_things",
-     "runs": 4,
-     "calls": 2,
-     "reductions": 2,
-     "bytes_deleted": 308
-    },
-    {
-     "pass": "hollow",
-     "runs": 8,
-     "calls": 13,
-     "reductions": 7,
-     "bytes_deleted": 190
-    },
-    {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 9,
-     "calls": 2,
-     "reductions": 2,
-     "bytes_deleted": 82
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 2,
-     "calls": 3,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lift_braces",
-     "runs": 7,
-     "calls": 1,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_indents",
-     "runs": 9,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 1
-    },
-    {
-     "pass": "remove_whitespace",
-     "runs": 7,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 3
-    },
-    {
-     "pass": "replace_function_bodies",
-     "runs": 7,
-     "calls": 4,
-     "reductions": 4,
-     "bytes_deleted": 46
-    },
-    {
-     "pass": "delete_function_definitions",
-     "runs": 7,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_namespaces",
-     "runs": 7,
-     "calls": 2,
-     "reductions": 1,
-     "bytes_deleted": 18
-    },
-    {
-     "pass": "remove_base_classes",
-     "runs": 7,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_constructor_initializers",
-     "runs": 7,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_template_parts",
-     "runs": 7,
-     "calls": 14,
-     "reductions": 3,
-     "bytes_deleted": 27
-    },
-    {
-     "pass": "simplify_call_expressions",
-     "runs": 7,
-     "calls": 4,
-     "reductions": 4,
-     "bytes_deleted": 33
-    },
-    {
-     "pass": "replace_type_with_int",
-     "runs": 7,
-     "calls": 2,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 7,
-     "calls": 24,
-     "reductions": 2,
-     "bytes_deleted": 34
-    },
-    {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 7,
-     "calls": 8,
-     "reductions": 2,
-     "bytes_deleted": 2
-    },
-    {
-     "pass": "debracket",
-     "runs": 5,
-     "calls": 1,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_byte_spans",
-     "runs": 5,
-     "calls": 149,
-     "reductions": 11,
-     "bytes_deleted": 65
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 5,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "reduce_integer_literals",
-     "runs": 5,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 5,
-     "calls": 5,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 5,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 5,
-     "calls": 5,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 5,
-     "calls": 6,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 5,
-     "calls": 30,
-     "reductions": 1,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 5,
-     "calls": 3,
-     "reductions": 3,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 2,
-     "calls": 79,
-     "reductions": 2,
-     "bytes_deleted": 3
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 1,
-     "calls": 136,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 1,
-     "calls": 233,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 1,
-     "calls": 169,
-     "reductions": 0,
-     "bytes_deleted": 0
-    }
-   ]
-  },
-  {
-   "name": "corpus_minisat",
-   "initial_size": 2326,
-   "final_size": 10,
-   "calls": 1207,
-   "c90": 795,
-   "c99": 795,
-   "tail": 375,
-   "reductions": 4,
-   "seconds": 11.37,
-   "pass_stats": [
-    {
-     "pass": "cut_comment_like_things",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "hollow",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 2,
-     "calls": 789,
-     "reductions": 2,
-     "bytes_deleted": 2308
-    },
-    {
-     "pass": "lift_braces",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_indents",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_whitespace",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "DimacsCNF/sort_clauses",
-     "runs": 2,
-     "calls": 1,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "DimacsCNF/force_literals",
-     "runs": 2,
-     "calls": 6,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "DimacsCNF/pass_to_component",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "DimacsCNF/unit_propagate",
-     "runs": 2,
-     "calls": 2,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "DimacsCNF/delete_literals",
-     "runs": 2,
-     "calls": 2,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "DimacsCNF/delete_single_terms",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "DimacsCNF/delete_elements",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "DimacsCNF/flip_literal_signs",
-     "runs": 2,
-     "calls": 2,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "DimacsCNF/combine_clauses",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "DimacsCNF/merge_literals",
-     "runs": 2,
-     "calls": 5,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "DimacsCNF/renumber_variables",
-     "runs": 2,
-     "calls": 25,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "debracket",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_byte_spans",
-     "runs": 2,
-     "calls": 21,
-     "reductions": 2,
-     "bytes_deleted": 8
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "reduce_integer_literals",
-     "runs": 1,
-     "calls": 61,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 1,
-     "calls": 2,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 1,
-     "calls": 43,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 1,
-     "calls": 186,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 1,
-     "calls": 55,
-     "reductions": 0,
-     "bytes_deleted": 0
-    }
-   ]
-  },
-  {
-   "name": "coupled_count_json",
-   "initial_size": 3831,
-   "final_size": 143,
-   "calls": 5325,
-   "c90": 35,
-   "c99": 361,
-   "tail": 3083,
-   "reductions": 45,
-   "seconds": 165.57,
-   "pass_stats": [
-    {
-     "pass": "cut_comment_like_things",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "hollow",
-     "runs": 3,
-     "calls": 82,
-     "reductions": 38,
-     "bytes_deleted": 3454
-    },
-    {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 3,
-     "calls": 4,
-     "reductions": 2,
-     "bytes_deleted": 48
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 2,
-     "calls": 279,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lift_braces",
-     "runs": 3,
-     "calls": 3,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_indents",
-     "runs": 3,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 134
-    },
-    {
-     "pass": "remove_whitespace",
-     "runs": 3,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "python",
-     "runs": 3,
-     "calls": 1,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "JSON/delete_identifiers",
-     "runs": 3,
-     "calls": 5,
-     "reductions": 1,
-     "bytes_deleted": 49
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "debracket",
-     "runs": 2,
-     "calls": 8,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_byte_spans",
-     "runs": 3,
-     "calls": 100,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "reduce_integer_literals",
-     "runs": 2,
-     "calls": 16,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_identifiers_with_zero",
-     "runs": 2,
-     "calls": 8,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 2,
-     "calls": 26,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 2,
-     "calls": 40,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 2,
-     "calls": 3520,
-     "reductions": 3,
-     "bytes_deleted": 3
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 1,
-     "calls": 26,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 1,
-     "calls": 4,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 1,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 1,
-     "calls": 329,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 1,
-     "calls": 408,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 1,
-     "calls": 418,
-     "reductions": 0,
-     "bytes_deleted": 0
-    }
-   ]
-  },
-  {
-   "name": "coupled_total_text",
-   "initial_size": 602,
-   "final_size": 350,
-   "calls": 27532,
-   "c90": 2846,
-   "c99": 2859,
-   "tail": 8800,
-   "reductions": 356,
-   "seconds": 9.21,
-   "pass_stats": [
-    {
-     "pass": "cut_comment_like_things",
-     "runs": 4,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 62
-    },
-    {
-     "pass": "hollow",
-     "runs": 7,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 7,
-     "calls": 9,
-     "reductions": 1,
-     "bytes_deleted": 3
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 1,
-     "calls": 299,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lift_braces",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_indents",
-     "runs": 7,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_whitespace",
-     "runs": 5,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 7,
-     "calls": 791,
-     "reductions": 2,
-     "bytes_deleted": 13
-    },
-    {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 5,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "debracket",
-     "runs": 5,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "delete_byte_spans",
-     "runs": 7,
-     "calls": 733,
-     "reductions": 44,
-     "bytes_deleted": 75
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 6,
-     "calls": 407,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "reduce_integer_literals",
-     "runs": 5,
-     "calls": 888,
-     "reductions": 4,
-     "bytes_deleted": 41
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 4,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_identifiers_with_zero",
-     "runs": 5,
-     "calls": 156,
-     "reductions": 3,
-     "bytes_deleted": 58
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 4,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 4,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 6,
-     "calls": 233,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 6,
-     "calls": 1225,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 4,
-     "calls": 238,
-     "reductions": 238,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 3,
-     "calls": 4718,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 3,
-     "calls": 127,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 3,
-     "calls": 112,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 2,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 3,
-     "calls": 5715,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 2,
-     "calls": 7624,
-     "reductions": 1,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 2,
-     "calls": 4047,
-     "reductions": 62,
-     "bytes_deleted": 0
-    }
-   ]
-  },
-  {
-   "name": "coupled_arity_python",
-   "initial_size": 947,
-   "final_size": 52,
-   "calls": 11043,
-   "c90": 296,
-   "c99": 435,
-   "tail": 1198,
-   "reductions": 60,
-   "seconds": 40.7,
-   "pass_stats": [
-    {
-     "pass": "cut_comment_like_things",
-     "runs": 8,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "hollow",
-     "runs": 12,
-     "calls": 46,
-     "reductions": 9,
-     "bytes_deleted": 182
-    },
-    {
-     "pass": "split(b'\\n')/delete_duplicates",
-     "runs": 12,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 10
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(10, 100)",
-     "runs": 4,
-     "calls": 102,
-     "reductions": 1,
-     "bytes_deleted": 335
-    },
-    {
-     "pass": "lift_braces",
-     "runs": 12,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "remove_indents",
-     "runs": 13,
-     "calls": 16,
-     "reductions": 3,
-     "bytes_deleted": 12
-    },
-    {
-     "pass": "remove_whitespace",
-     "runs": 11,
-     "calls": 29,
-     "reductions": 7,
-     "bytes_deleted": 33
-    },
-    {
-     "pass": "python",
-     "runs": 11,
-     "calls": 17,
-     "reductions": 7,
-     "bytes_deleted": 141
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(1, 10)",
-     "runs": 9,
-     "calls": 5,
-     "reductions": 1,
-     "bytes_deleted": 88
-    },
-    {
-     "pass": "split(b';')/block_deletion(1, 10)",
-     "runs": 8,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "debracket",
-     "runs": 8,
-     "calls": 26,
-     "reductions": 1,
-     "bytes_deleted": 2
-    },
-    {
-     "pass": "delete_byte_spans",
-     "runs": 8,
-     "calls": 287,
-     "reductions": 11,
-     "bytes_deleted": 48
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(11, 20)",
-     "runs": 7,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "reduce_integer_literals",
-     "runs": 6,
-     "calls": 3,
-     "reductions": 2,
-     "bytes_deleted": 1
-    },
-    {
-     "pass": "replace_falsey_with_zero",
-     "runs": 6,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 4
-    },
-    {
-     "pass": "replace_identifiers_with_zero",
-     "runs": 6,
-     "calls": 53,
-     "reductions": 3,
-     "bytes_deleted": 5
-    },
-    {
-     "pass": "combine_expressions",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "merge_adjacent_strings",
-     "runs": 6,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lexeme_based_deletions",
-     "runs": 6,
-     "calls": 30,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "normalize_identifiers",
-     "runs": 6,
-     "calls": 71,
-     "reductions": 6,
-     "bytes_deleted": 33
-    },
-    {
-     "pass": "line_sorter",
-     "runs": 5,
-     "calls": 1,
-     "reductions": 1,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "tokenize/block_deletion(1, 20)",
-     "runs": 5,
-     "calls": 1149,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "split(b'\\n')/block_deletion(21, 100)",
-     "runs": 4,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "replace_space_with_newlines",
-     "runs": 4,
-     "calls": 43,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "simplify_brackets",
-     "runs": 4,
-     "calls": 1,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "standard_substitutions",
-     "runs": 4,
-     "calls": 0,
-     "reductions": 0,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "short_deletions",
-     "runs": 6,
-     "calls": 1175,
-     "reductions": 1,
-     "bytes_deleted": 1
-    },
-    {
-     "pass": "lower_bytes",
-     "runs": 6,
-     "calls": 6460,
-     "reductions": 3,
-     "bytes_deleted": 0
-    },
-    {
-     "pass": "lower_individual_bytes",
-     "runs": 5,
-     "calls": 1508,
-     "reductions": 2,
-     "bytes_deleted": 0
-    }
-   ]
-  }
- ]
+  ]
 }

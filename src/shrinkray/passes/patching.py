@@ -59,8 +59,9 @@ class PatchApplier[PatchType, TargetType]:
         self.__patches = patches
         self.__problem = problem
 
-        self.__tick = 0
-        self.__merge_queue = []
+        self.__merge_queue: list[
+            tuple[PatchType, trio.MemorySendChannel[bool]]
+        ] = []
         self.__merge_lock = trio.Lock()
 
         self.__current_patch = self.__patches.empty
@@ -86,7 +87,7 @@ class PatchApplier[PatchType, TargetType]:
                     try:
                         attempted_patch = self.__patches.combine(
                             base_patch,
-                            *[p for _, p, _ in self.__merge_queue[:k]],
+                            *[p for p, _ in self.__merge_queue[:k]],
                         )
                         with_patch_applied = self.__patches.apply(
                             attempted_patch, self.__initial_test_case
@@ -106,12 +107,12 @@ class PatchApplier[PatchType, TargetType]:
 
                 assert merged <= to_merge
 
-                for _, _, send_result in self.__merge_queue[:merged]:
+                for _, send_result in self.__merge_queue[:merged]:
                     send_result.send_nowait(True)
 
                 assert merged <= to_merge
                 if merged < to_merge:
-                    self.__merge_queue[merged][-1].send_nowait(False)
+                    self.__merge_queue[merged][1].send_nowait(False)
                     del self.__merge_queue[: merged + 1]
                 else:
                     del self.__merge_queue[:to_merge]
@@ -120,7 +121,7 @@ class PatchApplier[PatchType, TargetType]:
             # otherwise wait forever for a result that no one is going to
             # send. Report their patches as not applied; a later pass can
             # still retry them.
-            for _, _, send_result in self.__merge_queue:
+            for _, send_result in self.__merge_queue:
                 send_result.send_nowait(False)
             del self.__merge_queue[:]
             self.__merge_lock.release()
@@ -145,12 +146,9 @@ class PatchApplier[PatchType, TargetType]:
             return True
         if not await self.__problem.is_interesting(with_patch_applied):
             return False
-        send_merge_result, receive_merge_result = trio.open_memory_channel(1)
+        send_merge_result, receive_merge_result = trio.open_memory_channel[bool](1)
 
-        sort_key = (self.__tick, self.__problem.sort_key(with_patch_applied))
-        self.__tick += 1
-
-        self.__merge_queue.append((sort_key, patch, send_merge_result))
+        self.__merge_queue.append((patch, send_merge_result))
 
         # If nobody else is merging the queue, that's our job now. This will
         # run until the queue is fully cleared, including the job we just

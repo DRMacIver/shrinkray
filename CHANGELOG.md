@@ -1,11 +1,7 @@
 # Changelog
 
 This is the changelog for [Shrink Ray](https://github.com/DRMacIver/shrinkray), a
-fast multi-format test-case reducer. It describes changes that are visible to
-people using Shrink Ray. Versions are calendar-based (`YY.M.D.N`).
-
-Each release is assembled from the `RELEASE.md` files that ship with the changes
-going into it. See the "Changelog" section of `CLAUDE.md` if you are contributing.
+fast multi-format test-case reducer. Versions are calendar-based (`YY.M.D.N`).
 
 ## 26.7.5.0 — 2026-07-05
 

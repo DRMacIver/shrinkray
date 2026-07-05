@@ -46,6 +46,12 @@ If you encounter a case where suppression seems genuinely necessary and principl
 - Use the `/checkpoint` skill to ensure consistent quality at each commit
 - **Always use `git add` with specific file paths** - Never use `git add -A`, `git add .`, or `git add <directory>`. Always list the specific files you intend to stage. This prevents accidentally committing unrelated files (test scripts, debug files, etc.).
 
+### Pull Requests
+
+- **Wrap any AI-generated PR description in a `<details></details>` block** (with a
+  short `<summary>` line), so the PR page stays compact and it's clear which prose
+  is machine-written.
+
 ### No Backward Compatibility
 
 Shrink Ray is a standalone application, not a library. Do not add backward compatibility shims, re-exports, or compatibility layers when refactoring. When moving code between modules, update all imports directly rather than re-exporting from the old location.
@@ -146,7 +152,10 @@ Shrink Ray is a multiformat test-case reducer built on Trio for async/parallelis
 1. **initial_cuts**: Fast high-value passes (comments, hollow, large blocks) with timeout-based cancellation
 2. **great_passes**: Core loop (line and semicolon-split deletion, hollow, lift_braces, debracket) - loops until no progress
 3. **ok_passes**: Run when great_passes stop making progress
-4. **last_ditch_passes**: Expensive or low-yield passes (byte lowering, substitutions)
+4. **last_ditch_passes**: Expensive or low-yield passes (token block deletion, substitutions)
+5. **polish_passes**: Very expensive, mostly-normalising passes (short_deletions, byte lowering), run only after everything else converges
+
+Pass scheduling is adaptive (see `notes/reduction-passes.md`): fruitless completed runs are fingerprinted and skipped until the test case changes, passes with a fruitless record run under a probation call budget, and budget-aborted passes are re-run in full before termination so final results are unaffected. Changes to scheduling should be measured with `evaluation/benchmark.py` (judge by interestingness calls, never wall-clock).
 
 ### Parallelism Model
 

@@ -1787,3 +1787,379 @@ async def test_reducer_continues_when_passes_skipped():
 
     # Should have run at least twice (once skipped, once full)
     assert run_count[0] >= 2
+
+
+# === Adaptive pass scheduling tests ===
+
+
+async def test_pass_call_monitor_called_after_each_real_evaluation():
+    """The monitor fires once per real evaluation: not for cache hits or
+    for candidates equal to the current test case."""
+
+    async def is_interesting(x):
+        return x == b"hello world"
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+
+    monitor_calls = [0]
+
+    def monitor():
+        monitor_calls[0] += 1
+
+    problem.pass_call_monitor = monitor
+
+    await problem.is_interesting(b"x")
+    assert monitor_calls[0] == 1
+
+    # Cache hit: no new evaluation, no monitor call.
+    await problem.is_interesting(b"x")
+    assert monitor_calls[0] == 1
+
+    # Current test case: answered without evaluation.
+    await problem.is_interesting(b"hello world")
+    assert monitor_calls[0] == 1
+
+
+async def test_run_pass_skips_fruitless_pass_on_unchanged_input():
+    """A pass that completed without progress is not re-run until the
+    test case changes: re-running it is a deterministic no-op."""
+
+    async def is_interesting(x):
+        return x in (b"aaaa", b"aa")
+
+    problem = BasicReductionProblem(
+        initial=b"aaaa",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = ShrinkRay(target=problem)
+
+    invocations = [0]
+
+    async def fruitless(p):
+        invocations[0] += 1
+        await p.is_interesting(b"zzzz")
+
+    fruitless.__name__ = "fruitless"
+
+    await reducer.run_pass(fruitless)
+    assert invocations[0] == 1
+    assert reducer.pass_fingerprints["fruitless"] == b"aaaa"
+
+    await reducer.run_pass(fruitless)
+    assert invocations[0] == 1
+
+    # After the test case changes the pass runs again.
+    assert await problem.is_interesting(b"aa")
+    await reducer.run_pass(fruitless)
+    assert invocations[0] == 2
+
+
+async def test_run_pass_clears_fingerprint_when_pass_makes_progress():
+    async def is_interesting(x):
+        return x in (b"aaaa", b"aaa", b"aa")
+
+    problem = BasicReductionProblem(
+        initial=b"aaaa",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = ShrinkRay(target=problem)
+
+    async def sometimes_reduces(p):
+        if p.current_test_case == b"aaa":
+            await p.is_interesting(b"aa")
+        else:
+            await p.is_interesting(b"zzzz")
+
+    sometimes_reduces.__name__ = "sometimes_reduces"
+
+    await reducer.run_pass(sometimes_reduces)
+    assert "sometimes_reduces" in reducer.pass_fingerprints
+    assert reducer.pass_probation["sometimes_reduces"]
+
+    assert await problem.is_interesting(b"aaa")
+    await reducer.run_pass(sometimes_reduces)
+    assert "sometimes_reduces" not in reducer.pass_fingerprints
+    assert not reducer.pass_probation["sometimes_reduces"]
+
+
+async def test_run_pass_probation_budget_aborts_repeat_fruitless_run():
+    """After a fruitless run, a pass gets only a small call budget on its
+    next run. Exceeding it aborts the pass and records it as incomplete,
+    without counting as a user skip."""
+
+    async def is_interesting(x):
+        return x in (b"aaaa", b"aa")
+
+    problem = BasicReductionProblem(
+        initial=b"aaaa",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = ShrinkRay(target=problem)
+    reducer.probation_budget = 5
+
+    attempts = [0]
+    counter = [0]
+
+    async def junk_generator(p):
+        for _ in range(50):
+            attempts[0] += 1
+            counter[0] += 1
+            await p.is_interesting(b"z%d" % counter[0])
+
+    junk_generator.__name__ = "junk_generator"
+
+    # First run is never budgeted: all 50 candidates are tried.
+    await reducer.run_pass(junk_generator)
+    assert attempts[0] == 50
+    assert reducer.pass_probation["junk_generator"]
+
+    assert await problem.is_interesting(b"aa")
+
+    # Second run is on probation and gets aborted after the budget.
+    await reducer.run_pass(junk_generator)
+    assert attempts[0] - 50 <= reducer.probation_budget + 2
+    assert "junk_generator" in reducer.incomplete_passes
+    assert not reducer._passes_were_skipped
+
+
+async def test_run_pass_probation_cleared_when_aborted_run_made_progress():
+    async def is_interesting(x):
+        return x in (b"aaaaaa", b"aaaa", b"aa")
+
+    problem = BasicReductionProblem(
+        initial=b"aaaaaa",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = ShrinkRay(target=problem)
+    reducer.probation_budget = 3
+
+    counter = [0]
+
+    async def reduces_then_churns(p):
+        if p.current_test_case == b"aaaa":
+            await p.is_interesting(b"aa")
+        for _ in range(20):
+            counter[0] += 1
+            await p.is_interesting(b"z%d" % counter[0])
+
+    reduces_then_churns.__name__ = "reduces_then_churns"
+
+    await reducer.run_pass(reduces_then_churns)
+    assert reducer.pass_probation["reduces_then_churns"]
+
+    assert await problem.is_interesting(b"aaaa")
+
+    await reducer.run_pass(reduces_then_churns)
+    assert "reduces_then_churns" in reducer.incomplete_passes
+    # It reduced during the aborted run, so it comes off probation.
+    assert not reducer.pass_probation["reduces_then_churns"]
+
+
+async def test_run_verifies_aborted_passes_before_finishing():
+    """A reduction hiding beyond the probation budget is still found:
+    incomplete passes are re-run without a budget before termination."""
+
+    A, B1, B2, C = b"aaaaaaaa", b"aaaaaa", b"aaaa", b"aa"
+
+    async def is_interesting(x):
+        return x in (A, B1, B2, C)
+
+    problem = BasicReductionProblem(
+        initial=A,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = ShrinkRay(target=problem)
+    reducer.probation_budget = 3
+    counter = [0]
+
+    async def stepper(p):
+        if p.current_test_case == A:
+            await p.is_interesting(B1)
+        elif p.current_test_case == B1:
+            await p.is_interesting(B2)
+
+    stepper.__name__ = "stepper"
+
+    async def late_bloomer(p):
+        junk_count = 10 if p.current_test_case == B2 else 3
+        for _ in range(junk_count):
+            counter[0] += 1
+            await p.is_interesting(b"z%d" % counter[0])
+        if p.current_test_case == B2:
+            await p.is_interesting(C)
+
+    late_bloomer.__name__ = "late_bloomer"
+
+    reducer.initial_cuts = []
+    reducer.great_passes = [stepper, late_bloomer]
+    reducer.ok_passes = []
+    reducer.last_ditch_passes = []
+    reducer.polish_passes = []
+
+    await reducer.run()
+
+    assert problem.current_test_case == C
+    assert not reducer.incomplete_passes
+
+
+async def test_run_terminates_when_verification_finds_nothing():
+    A, B, C = b"aaaaaaaa", b"aaaaaa", b"aaaa"
+
+    async def is_interesting(x):
+        return x in (A, B, C)
+
+    problem = BasicReductionProblem(
+        initial=A,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = ShrinkRay(target=problem)
+    reducer.probation_budget = 3
+    counter = [0]
+
+    async def stepper(p):
+        if p.current_test_case == A:
+            await p.is_interesting(B)
+        elif p.current_test_case == B:
+            await p.is_interesting(C)
+
+    stepper.__name__ = "stepper"
+
+    async def churner(p):
+        for _ in range(10):
+            counter[0] += 1
+            await p.is_interesting(b"z%d" % counter[0])
+
+    churner.__name__ = "churner"
+
+    reducer.initial_cuts = []
+    reducer.great_passes = [stepper, churner]
+    reducer.ok_passes = []
+    reducer.last_ditch_passes = []
+    reducer.polish_passes = []
+
+    await reducer.run()
+
+    # churner went on probation after its first fruitless run, was
+    # budget-aborted on a later input, and its verification re-run found
+    # nothing: the reduction still terminates with a clean slate.
+    assert problem.current_test_case == C
+    assert not reducer.incomplete_passes
+
+
+async def test_run_repeats_cycle_after_user_skip():
+    """A user-skipped pass forces another full cycle so it gets re-run."""
+
+    async def is_interesting(x):
+        return x == b"aaaa"
+
+    problem = BasicReductionProblem(
+        initial=b"aaaa",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = ShrinkRay(target=problem)
+
+    invocations = [0]
+
+    async def self_skipping(p):
+        invocations[0] += 1
+        if invocations[0] == 1:
+            reducer.skip_current_pass()
+            await p.is_interesting(b"zzzz")
+
+    self_skipping.__name__ = "self_skipping"
+
+    reducer.initial_cuts = []
+    reducer.great_passes = [self_skipping]
+    reducer.ok_passes = []
+    reducer.last_ditch_passes = []
+    reducer.polish_passes = []
+
+    await reducer.run()
+
+    # First invocation was skipped, so the loop ran the pass again.
+    assert invocations[0] == 2
+
+
+async def test_polish_passes_run_only_after_other_passes_stall():
+    A, B, C = b"aaaaaaaa", b"aaaa", b"aa"
+
+    async def is_interesting(x):
+        return x in (A, B, C)
+
+    problem = BasicReductionProblem(
+        initial=A,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = ShrinkRay(target=problem)
+
+    events = []
+
+    async def great(p):
+        events.append("great")
+        if p.current_test_case == A:
+            await p.is_interesting(B)
+
+    great.__name__ = "great"
+
+    async def polish(p):
+        events.append("polish")
+        if p.current_test_case == B:
+            await p.is_interesting(C)
+
+    polish.__name__ = "polish"
+
+    reducer.initial_cuts = []
+    reducer.great_passes = [great]
+    reducer.ok_passes = []
+    reducer.last_ditch_passes = []
+    reducer.polish_passes = [polish]
+
+    await reducer.run()
+
+    assert problem.current_test_case == C
+    # Polish only starts once the other passes have stalled.
+    assert "polish" in events
+    first_polish = events.index("polish")
+    assert "great" in events[:first_polish]
+
+
+def test_default_tiers_reflect_measured_pass_value():
+    """Guards the benchmark-driven tier assignment: expensive low-yield
+    passes are deferred to the polish tier, and fine-grained token block
+    deletion runs as a last-ditch pass rather than an ok pass."""
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = ShrinkRay(target=problem)
+
+    polish_names = {p.__name__ for p in reducer.polish_passes}
+    ok_names = {p.__name__ for p in reducer.ok_passes}
+    last_ditch_names = {p.__name__ for p in reducer.last_ditch_passes}
+
+    assert polish_names == {
+        "short_deletions",
+        "lower_bytes",
+        "lower_individual_bytes",
+    }
+    assert not (polish_names & ok_names)
+    assert not (polish_names & last_ditch_names)
+    assert "tokenize/block_deletion(1, 20)" in last_ditch_names
+    assert "tokenize/block_deletion(1, 20)" not in ok_names

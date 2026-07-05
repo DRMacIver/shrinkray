@@ -68,7 +68,7 @@ def test_byte_reduction_example_1(parallelism):
         reduce_with(
             [lower_bytes],
             b"\x00\x03",
-            lambda x: (len(x) == 2 and x[1] >= 2),
+            lambda x: len(x) == 2 and x[1] >= 2,
             parallelism=parallelism,
             sort_key=shortlex,
         )
@@ -82,7 +82,7 @@ def test_byte_reduction_example_2(parallelism):
         reduce_with(
             [lower_bytes, lower_individual_bytes],
             b"\x03\x00",
-            lambda x: (len(x) == 2 and x[0] >= 2),
+            lambda x: len(x) == 2 and x[0] >= 2,
             parallelism=parallelism,
             sort_key=shortlex,
         )

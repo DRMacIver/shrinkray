@@ -45,6 +45,7 @@ from shrinkray.passes.genericlanguages import (
     normalize_identifiers,
     reduce_integer_literals,
     replace_falsey_with_zero,
+    replace_identifiers_with_zero,
     simplify_brackets,
 )
 from shrinkray.passes.json import JSON, JSON_PASSES
@@ -237,6 +238,7 @@ class ShrinkRay(Reducer[bytes]):
             remove_whitespace,
             reduce_integer_literals,
             replace_falsey_with_zero,
+            replace_identifiers_with_zero,
             combine_expressions,
             merge_adjacent_strings,
             lexeme_based_deletions,

@@ -259,6 +259,11 @@ class SubprocessClient:
                 yield update
             except TimeoutError:
                 continue
+        # The worker emits a final ProgressUpdate immediately before its
+        # 'completed' Response. If completion was noticed first, that
+        # update is still queued; deliver it rather than dropping it.
+        while not self._progress_queue.empty():
+            yield self._progress_queue.get_nowait()
 
     @property
     def is_completed(self) -> bool:

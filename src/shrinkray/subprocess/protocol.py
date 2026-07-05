@@ -45,6 +45,11 @@ class ProgressUpdate:
     effective_parallelism: float = 0.0
     # Time since last reduction
     time_since_last_reduction: float = 0.0
+    # Current adaptive timeout for test runs in seconds (None if timeouts
+    # are disabled or unknown)
+    current_timeout: float | None = None
+    # Fraction of recent test runs that timed out
+    timeout_rate: float = 0.0
     # Content preview (truncated for large files)
     content_preview: str = ""
     # Whether content is hex mode
@@ -112,6 +117,8 @@ def serialize(msg: Request | Response | ProgressUpdate) -> str:
                 "average_parallelism": msg.average_parallelism,
                 "effective_parallelism": msg.effective_parallelism,
                 "time_since_last_reduction": msg.time_since_last_reduction,
+                "current_timeout": msg.current_timeout,
+                "timeout_rate": msg.timeout_rate,
                 "content_preview": msg.content_preview,
                 "hex_mode": msg.hex_mode,
                 "pass_stats": [
@@ -175,6 +182,8 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
             average_parallelism=d.get("average_parallelism", 0.0),
             effective_parallelism=d.get("effective_parallelism", 0.0),
             time_since_last_reduction=d.get("time_since_last_reduction", 0.0),
+            current_timeout=d.get("current_timeout"),
+            timeout_rate=d.get("timeout_rate", 0.0),
             content_preview=d.get("content_preview", ""),
             hex_mode=d.get("hex_mode", False),
             pass_stats=pass_stats_data,

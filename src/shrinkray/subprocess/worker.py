@@ -628,6 +628,13 @@ class ReducerWorker:
             history_dir = self.state.history_manager.history_dir
             target_basename = self.state.history_manager.target_basename
 
+        # Adaptive timeout stats
+        current_timeout: float | None = None
+        timeout_rate = 0.0
+        if self.state is not None and self.state.timeout_policy.enabled:
+            current_timeout = self.state.timeout_policy.current_timeout()
+            timeout_rate = self.state.timeout_policy.recent_timeout_rate
+
         return ProgressUpdate(
             status=self.reducer.status if self.reducer else "",
             size=stats.current_test_case_size,
@@ -641,6 +648,8 @@ class ReducerWorker:
             average_parallelism=average_parallelism,
             effective_parallelism=effective_parallelism,
             time_since_last_reduction=stats.time_since_last_reduction(),
+            current_timeout=current_timeout,
+            timeout_rate=timeout_rate,
             content_preview=content_preview,
             hex_mode=hex_mode,
             pass_stats=pass_stats_list,

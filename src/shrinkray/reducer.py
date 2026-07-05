@@ -561,7 +561,11 @@ class ShrinkRay(Reducer[bytes]):
             # Only terminate if no passes were skipped
             # If passes were skipped, we need another full run to be sure
             if not self._passes_were_skipped:
-                break
+                # Give the problem a chance to change something (e.g.
+                # raise an adaptive timeout) that makes another round
+                # worth trying before we give up for good.
+                if not await self.target.attempt_unstick():
+                    break
 
 
 class UpdateKeys(Patches[dict[str, bytes], dict[str, bytes]]):
@@ -625,11 +629,13 @@ class KeyProblem(ReductionProblem[bytes]):
 @define
 class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     async def run(self):
-        prev = None
-        while prev != self.target.current_test_case:
+        while True:
             prev = self.target.current_test_case
             await self.delete_keys()
             await self.shrink_values()
+            if self.target.current_test_case == prev:
+                if not await self.target.attempt_unstick():
+                    break
 
     async def delete_keys(self):
         target = self.target.current_test_case

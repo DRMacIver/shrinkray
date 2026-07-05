@@ -548,6 +548,17 @@ class ReductionProblem[T](ABC):
     @abstractmethod
     def display(self, value: T) -> str: ...
 
+    async def attempt_unstick(self) -> bool:
+        """Called by reducers when a full round of reduction made no progress.
+
+        Returns True if something changed (e.g. the test timeout was raised,
+        invalidating cached timeout-failures) such that another round of
+        reduction might now make progress. The default implementation has
+        nothing to change.
+        """
+        await trio.lowlevel.checkpoint()
+        return False
+
     def backtrack(self, new_test_case: T) -> "ReductionProblem[T]":
         """Create a new problem starting from a different test case.
 
@@ -578,6 +589,21 @@ class ReductionProblem[T](ABC):
 
 class InvalidInitialExample(ValueError):
     pass
+
+
+@define
+class InterestingnessResult:
+    """The result of running the interestingness test on a candidate.
+
+    Interestingness predicates may return one of these instead of a plain
+    bool when the result should only be cached conditionally: `cache_valid`
+    is consulted on each cache hit and the result is re-tested once it
+    returns False. This is used for candidates that timed out, which might
+    succeed if retried under a larger timeout.
+    """
+
+    interesting: bool
+    cache_valid: Callable[[], bool] | None = None
 
 
 def default_cache_key(value: Any) -> str:
@@ -611,13 +637,14 @@ class BasicReductionProblem(ReductionProblem[T]):
     def __init__(
         self,
         initial: T,
-        is_interesting: Callable[[T], Awaitable[bool]],
+        is_interesting: Callable[[T], Awaitable[bool | InterestingnessResult]],
         work: WorkContext,
         sort_key: Callable[[T], Any] = default_sort_key,
         size: Callable[[T], int] = default_size,
         display: Callable[[T], str] = default_display,
         stats: ReductionStats | None = None,
         cache_key: Callable[[Any], str] = default_cache_key,
+        unstick: Callable[[], Awaitable[bool]] | None = None,
     ):
         super().__init__(work=work)
         self.__current = initial
@@ -631,9 +658,14 @@ class BasicReductionProblem(ReductionProblem[T]):
         else:
             self._stats = stats
 
-        self.__is_interesting_cache: dict[str, bool] = {}
+        # Maps cache keys to (result, cache_valid). Entries with a
+        # cache_valid function are only served while it returns True.
+        self.__is_interesting_cache: dict[
+            str, tuple[bool, Callable[[], bool] | None]
+        ] = {}
         self.__cache_key = cache_key
         self.__is_interesting = is_interesting
+        self.__unstick = unstick
         self.__on_reduce_callbacks: list[Callable[[T], Awaitable[None]]] = []
         self.__current = initial
         self.__has_set_up = False
@@ -642,10 +674,20 @@ class BasicReductionProblem(ReductionProblem[T]):
         if self.__has_set_up:
             return
         self.__has_set_up = True
-        if not await self.__is_interesting(self.current_test_case):
+        result, _ = await self.__run_is_interesting(self.current_test_case)
+        if not result:
             raise InvalidInitialExample(
                 f"Initial example ({self.display(self.current_test_case)}) does not satisfy interestingness test."
             )
+
+    async def __run_is_interesting(
+        self, test_case: T
+    ) -> tuple[bool, Callable[[], bool] | None]:
+        """Run the underlying predicate and normalize its result."""
+        outcome = await self.__is_interesting(test_case)
+        if isinstance(outcome, InterestingnessResult):
+            return outcome.interesting, outcome.cache_valid
+        return outcome, None
 
     def display(self, value: T) -> str:
         return self.__display(value)
@@ -665,6 +707,12 @@ class BasicReductionProblem(ReductionProblem[T]):
         call `fn` with the new value. Note that these are called outside the lock."""
         self.__on_reduce_callbacks.append(callback)
 
+    async def attempt_unstick(self) -> bool:
+        await trio.lowlevel.checkpoint()
+        if self.__unstick is None:
+            return False
+        return await self.__unstick()
+
     async def is_interesting(self, test_case: T) -> bool:
         """Returns true if this test_case is interesting."""
         await trio.lowlevel.checkpoint()
@@ -672,11 +720,13 @@ class BasicReductionProblem(ReductionProblem[T]):
             return True
         cache_key = self.__cache_key(test_case)
         try:
-            return self.__is_interesting_cache[cache_key]
+            cached_result, cache_valid = self.__is_interesting_cache[cache_key]
+            if cache_valid is None or cache_valid():
+                return cached_result
         except KeyError:
             pass
-        result = await self.__is_interesting(test_case)
-        self.__is_interesting_cache[cache_key] = result
+        result, cache_valid = await self.__run_is_interesting(test_case)
+        self.__is_interesting_cache[cache_key] = (result, cache_valid)
         self.stats.failed_reductions += 1
         self.stats.calls += 1
 
@@ -774,6 +824,9 @@ class View[S, T](ReductionProblem[T]):
             return await self.__problem.is_interesting(self.__dump(test_case))
         except DumpError:
             return False
+
+    async def attempt_unstick(self) -> bool:
+        return await self.__problem.attempt_unstick()
 
     def sort_key(self, test_case: T) -> Any:
         if self.__sort_key is not None:

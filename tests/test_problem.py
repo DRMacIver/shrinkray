@@ -8,6 +8,7 @@ from shrinkray.problem import (
     BasicReductionProblem,
     DumpError,
     Format,
+    InterestingnessResult,
     InvalidInitialExample,
     ReductionProblem,
     ReductionStats,
@@ -932,3 +933,142 @@ async def test_abstract_method_default_implementations():
     # Test that is_interesting() calls base implementation (which is pass)
     result = await problem.is_interesting(b"hello")
     assert result is True  # Our implementation returns True after calling super
+
+
+# =============================================================================
+# InterestingnessResult caching tests
+# =============================================================================
+
+
+async def test_outcome_true_is_adopted_as_reduction():
+    async def is_interesting(x):
+        return InterestingnessResult(interesting=True)
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    assert await problem.is_interesting(b"hi") is True
+    assert problem.current_test_case == b"hi"
+
+
+async def test_outcome_false_is_cached_while_valid():
+    calls = [0]
+    valid = [True]
+
+    async def is_interesting(x):
+        calls[0] += 1
+        return InterestingnessResult(interesting=False, cache_valid=lambda: valid[0])
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    assert await problem.is_interesting(b"hi") is False
+    assert await problem.is_interesting(b"hi") is False
+    assert calls[0] == 1  # Cached while valid
+
+    valid[0] = False
+    assert await problem.is_interesting(b"hi") is False
+    assert calls[0] == 2  # Invalidated: re-tested
+
+
+async def test_invalidated_outcome_is_replaced_in_cache():
+    calls = [0]
+
+    async def is_interesting(x):
+        calls[0] += 1
+        if calls[0] == 1:
+            # First run: conditionally cacheable and immediately invalid.
+            return InterestingnessResult(interesting=False, cache_valid=lambda: False)
+        # Second run: unconditionally cacheable.
+        return InterestingnessResult(interesting=False)
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    assert await problem.is_interesting(b"hi") is False
+    assert await problem.is_interesting(b"hi") is False
+    assert calls[0] == 2
+    # The replacement entry is unconditional, so no further calls.
+    assert await problem.is_interesting(b"hi") is False
+    assert calls[0] == 2
+
+
+async def test_plain_bool_results_are_cached_unconditionally():
+    calls = [0]
+
+    async def is_interesting(x):
+        calls[0] += 1
+        return False
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    assert await problem.is_interesting(b"hi") is False
+    assert await problem.is_interesting(b"hi") is False
+    assert calls[0] == 1
+
+
+# =============================================================================
+# attempt_unstick tests
+# =============================================================================
+
+
+async def test_attempt_unstick_default_is_false():
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    assert await problem.attempt_unstick() is False
+
+
+async def test_attempt_unstick_calls_callback():
+    results = [True, False]
+
+    async def unstick():
+        return results.pop(0)
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        unstick=unstick,
+    )
+    assert await problem.attempt_unstick() is True
+    assert await problem.attempt_unstick() is False
+    assert results == []
+
+
+async def test_view_attempt_unstick_delegates():
+    unstick_calls = [0]
+
+    async def unstick():
+        unstick_calls[0] += 1
+        return True
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        unstick=unstick,
+    )
+    view = View(problem=problem, parse=lambda x: x, dump=lambda x: x)
+    assert await view.attempt_unstick() is True
+    assert unstick_calls[0] == 1

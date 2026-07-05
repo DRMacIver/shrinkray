@@ -7,7 +7,13 @@ import trio
 
 from shrinkray.passes.cpp import CPP_PASSES, CPP_PUMPS
 from shrinkray.passes.patching import PatchApplier
-from shrinkray.problem import BasicReductionProblem, Format, ParseError, shortlex
+from shrinkray.problem import (
+    BasicReductionProblem,
+    Format,
+    InterestingnessResult,
+    ParseError,
+    shortlex,
+)
 from shrinkray.reducer import (
     DirectoryShrinkRay,
     KeyProblem,
@@ -2163,3 +2169,110 @@ def test_default_tiers_reflect_measured_pass_value():
     assert not (polish_names & last_ditch_names)
     assert "tokenize/block_deletion(1, 20)" in last_ditch_names
     assert "tokenize/block_deletion(1, 20)" not in ok_names
+
+
+# =============================================================================
+# attempt_unstick integration tests
+# =============================================================================
+
+
+async def test_shrinkray_retries_after_successful_unstick():
+    """When the reducer runs out of progress, a successful attempt_unstick
+    causes another full round of reduction, which can then succeed."""
+    gate = [False]
+    unstick_calls = [0]
+
+    initial = b"hello world"
+
+    async def is_interesting(x):
+        if x == initial:
+            return True
+        if gate[0] and bool(x) and initial.startswith(x):
+            return True
+        # Like a timed-out run, this result may change if the gate opens,
+        # so it must only be cached while the gate stays as it was.
+        gate_at_run = gate[0]
+        return InterestingnessResult(
+            interesting=False, cache_valid=lambda: gate[0] == gate_at_run
+        )
+
+    async def unstick():
+        unstick_calls[0] += 1
+        if not gate[0]:
+            gate[0] = True
+            return True
+        return False
+
+    problem = BasicReductionProblem(
+        initial=initial,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        unstick=unstick,
+    )
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    assert problem.current_test_case == b"h"
+    # Called once to open the gate, then at least once more before
+    # terminating for real.
+    assert unstick_calls[0] >= 2
+
+
+async def test_shrinkray_terminates_when_unstick_fails():
+    unstick_calls = [0]
+
+    async def is_interesting(x):
+        return x == b"hello"
+
+    async def unstick():
+        unstick_calls[0] += 1
+        return False
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        unstick=unstick,
+    )
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    assert problem.current_test_case == b"hello"
+    assert unstick_calls[0] == 1
+
+
+async def test_directory_shrinkray_retries_after_successful_unstick():
+    gate = [False]
+    unstick_calls = [0]
+
+    initial = {"a.txt": b"aaa", "b.txt": b"bbb"}
+
+    async def is_interesting(x):
+        if x == initial:
+            return True
+        if gate[0] and x == {"a.txt": b"aaa"}:
+            return True
+        gate_at_run = gate[0]
+        return InterestingnessResult(
+            interesting=False, cache_valid=lambda: gate[0] == gate_at_run
+        )
+
+    async def unstick():
+        unstick_calls[0] += 1
+        if not gate[0]:
+            gate[0] = True
+            return True
+        return False
+
+    problem = BasicReductionProblem(
+        initial=initial,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        size=lambda d: sum(len(v) for v in d.values()),
+        unstick=unstick,
+    )
+    reducer = DirectoryShrinkRay(target=problem)
+    await reducer.run()
+
+    assert problem.current_test_case == {"a.txt": b"aaa"}
+    assert unstick_calls[0] >= 2

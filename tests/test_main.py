@@ -91,6 +91,10 @@ except AssertionError:
         ]
     )
 
+    # With parallelism > 1, speculative execution races can land the reducer
+    # in different final fixed points (e.g. deleting a.py entirely and
+    # reducing c.py to "assert 0"), so the exact-output assertions below need
+    # a deterministic single-threaded reduction.
     if in_place:
         subprocess.check_call(
             [
@@ -102,6 +106,7 @@ except AssertionError:
                 str(target),
                 "--ui=basic",
                 "--no-history",
+                "--parallelism=1",
             ],
         )
     else:
@@ -114,6 +119,7 @@ except AssertionError:
                 str(target),
                 "--ui=basic",
                 "--no-history",
+                "--parallelism=1",
             ],
         )
 

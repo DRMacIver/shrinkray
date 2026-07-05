@@ -199,7 +199,7 @@ Main Process (asyncio/textual)     Subprocess (trio)
 ### Key Design Decisions
 
 1. **Natural ordering**: Ensures reproducibility - same minimal result regardless of reduction path. Uses a multi-tier heuristic for text (length, average squared line length, line count, then character ordering) and shortlex for binary data.
-2. **Cache clearing on reduction**: When a smaller test case is found, old cached results are no longer useful (derived from old test case)
+2. **Persistent interestingness cache**: Results are cached by content hash for the whole reduction. Ordinary reduction rarely retries a candidate, but the restart phase replays earlier rounds' attempts and answers them from the cache. (The cache used to be cleared on every reduction; restarts made keeping it worthwhile.)
 3. **View caching**: `problem.view(format)` caches parsed views to avoid redundant parsing
 4. **Speculative parallelism**: Multiple candidates tested concurrently; first success wins, others are "wasted" but harmless
 

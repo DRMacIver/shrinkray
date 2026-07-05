@@ -596,12 +596,12 @@ class BasicReductionProblem(ReductionProblem[T]):
     - Caching of interestingness results (by content hash)
     - Statistics tracking (calls, cache hits, timing)
     - Callbacks for reduction events
-    - Automatic cache clearing when a reduction succeeds
 
-    The cache clearing is a practical choice: when we find a smaller test case,
-    cached results for candidates derived from the old test case are no longer
-    useful (we're now reducing from a different starting point). Clearing the
-    cache saves memory and avoids serving stale cache entries that won't help.
+    Cached results are kept for the whole reduction (the cache holds only
+    small content hashes, so this is cheap). Ordinary reduction rarely
+    retries a candidate, but the restart phase deliberately replays earlier
+    rounds' attempts, and those replays are answered from the cache instead
+    of re-running the interestingness test.
     """
 
     def __init__(
@@ -683,7 +683,6 @@ class BasicReductionProblem(ReductionProblem[T]):
         if result:
             self.stats.interesting_calls += 1
             if self.sort_key(test_case) < self.sort_key(self.current_test_case):
-                self.__is_interesting_cache.clear()
                 self.stats.failed_reductions -= 1
                 self.stats.reductions += 1
                 self.stats.time_of_last_reduction = time.time()

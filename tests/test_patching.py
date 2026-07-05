@@ -266,6 +266,53 @@ async def test_apply_patches_early_abort_deterministic_across_parallelism(
     assert await run(parallelism) == await run(1)
 
 
+async def test_merge_master_rejects_probes_past_queue_end():
+    """When a full merge fails, the search for the largest mergeable prefix
+    probes sizes that can exceed the queue length; those probes must be
+    rejected rather than merging patches that arrived after the pass
+    started. Ten patches whose merges are interesting up to nine removals
+    drive the doubling search from eight past the nine queued patches."""
+    n = 10
+    target = bytes(range(n))
+    release = trio.Event()
+    pending = 0
+
+    async def is_interesting(candidate: bytes) -> bool:
+        # Hold every individual patch check until all of them are in
+        # flight, so all ten patches join the same merge queue.
+        nonlocal pending
+        if len(candidate) == n - 1:
+            pending += 1
+            if pending == n:
+                release.set()
+            await release.wait()
+        return len(candidate) >= 1
+
+    problem = BasicReductionProblem(
+        initial=target,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=n),
+    )
+    applier = PatchApplier(
+        SetPatches(lambda patch, t: bytes(b for b in t if b not in patch)),
+        problem,
+    )
+    results = []
+
+    async with trio.open_nursery() as nursery:
+        for i in range(n):
+
+            async def attempt(i=i):
+                results.append(await applier.try_apply_patch(frozenset({i})))
+
+            nursery.start_soon(attempt)
+
+    # Nine of the ten patches merge (all ten together would empty the test
+    # case, which is not interesting); the last one is reported unapplied.
+    assert sorted(results) == [False] + [True] * (n - 1)
+    assert len(problem.current_test_case) == 1
+
+
 async def test_apply_patches_no_early_abort_by_default():
     """Without early_abort a hopeless pass still tries every candidate."""
     monkeypatch_free_initial = bytes(range(30))

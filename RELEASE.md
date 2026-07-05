@@ -19,3 +19,9 @@
 - Reduction passes that give up early when making no progress now attempt
   the same candidates at every parallelism level, making results more
   reproducible across different `--parallelism` settings.
+- Reduction is significantly faster on text inputs: the internal reformatter
+  used by the reduction ordering is around 10x faster on realistic files, and
+  byte replacement passes apply their candidates much more cheaply.
+- Interestingness test results are now cached for the whole reduction rather
+  than being discarded after every successful reduction, so the restart phase
+  answers replayed candidates from the cache instead of re-running the test.

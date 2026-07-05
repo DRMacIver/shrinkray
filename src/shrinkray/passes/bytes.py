@@ -502,10 +502,10 @@ class ByteReplacement(Patches[ReplacementPatch, bytes]):
         return result
 
     def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
-        result = bytearray()
-        for c in target:
-            result.append(patch.get(c, c))
-        return bytes(result)
+        table = bytearray(range(256))
+        for source, replacement in patch.items():
+            table[source] = replacement
+        return target.translate(bytes(table))
 
     def size(self, patch: ReplacementPatch) -> int:
         return 0
@@ -591,9 +591,11 @@ class IndividualByteReplacement(Patches[ReplacementPatch, bytes]):
         return result
 
     def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
-        result = bytearray()
-        for i, c in enumerate(target):
-            result.append(patch.get(i, c))
+        # Patches are generated from and applied to the same test case, so
+        # every position is in range.
+        result = bytearray(target)
+        for i, replacement in patch.items():
+            result[i] = replacement
         return bytes(result)
 
     def size(self, patch: ReplacementPatch) -> int:

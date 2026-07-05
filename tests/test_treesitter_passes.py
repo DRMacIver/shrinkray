@@ -172,11 +172,11 @@ def test_orphan_names_from_dotted_import_paths():
     # The usable name of this import ("yaml.v2") is not a plain word
     # token, exercising the slow-path occurrence search.
     source = (
-        b'package main\n'
+        b"package main\n"
         b'import "gopkg.in/yaml.v2"\n'
         b'import "fmt"\n'
-        b'func dump(v any) { fmt.Println(yaml.Marshal(v)) }\n'
-        b'func main() { dump(1) }\n'
+        b"func dump(v any) { fmt.Println(yaml.Marshal(v)) }\n"
+        b"func main() { dump(1) }\n"
     )
     tree = parse_tree("go", source)
     cuts = orphaned_declaration_cuts(tree, source)
@@ -204,8 +204,7 @@ def test_orphan_cascade_collects_transitively_dead_declarations():
     cuts = orphaned_declaration_cuts(tree, source)
     results = {apply_cuts(source, cut) for cut in cuts}
     assert any(
-        b"util" not in r and b"helper" not in r and b"unused0" in r
-        for r in results
+        b"util" not in r and b"helper" not in r and b"unused0" in r for r in results
     )
 
 
@@ -214,10 +213,10 @@ def test_orphan_extent_can_end_inside_an_anonymous_token():
     # occurrence outside the import is a bare keyword token; the
     # covering-chain walk descends into that unnamed token.
     source = (
-        b'package main\n'
+        b"package main\n"
         b'import "x/return"\n'
-        b'func f() int { return 2 }\n'
-        b'func main() { println(f()) }\n'
+        b"func f() int { return 2 }\n"
+        b"func main() { println(f()) }\n"
     )
     tree = parse_tree("go", source)
     cuts = orphaned_declaration_cuts(tree, source)

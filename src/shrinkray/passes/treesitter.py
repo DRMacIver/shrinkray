@@ -198,9 +198,7 @@ def lift_cuts(tree: tree_sitter.Tree, source: bytes) -> list[CutPatch]:
             descendant, depth = stack.pop()
             d_span = (descendant.start_byte, descendant.end_byte)
             same_type = (
-                descendant.is_named
-                and d_span != span
-                and descendant.type == node.type
+                descendant.is_named and d_span != span and descendant.type == node.type
             )
             if descendant.is_named and d_span != span:
                 if same_type or depth <= MAX_PROMOTION_DEPTH:
@@ -310,9 +308,7 @@ def _names_defined(node: tree_sitter.Node, source: bytes) -> frozenset[bytes]:
     return _names_mentioned(node, source)
 
 
-def _covering_chain(
-    tree: tree_sitter.Tree, lo: int, hi: int
-) -> list[tuple[int, int]]:
+def _covering_chain(tree: tree_sitter.Tree, lo: int, hi: int) -> list[tuple[int, int]]:
     """Spans of the named nodes whose span covers [lo, hi).
 
     Nodes covering an interval always form a chain from the root down,
@@ -342,9 +338,7 @@ def _covering_chain(
             return spans
 
 
-def orphaned_declaration_cuts(
-    tree: tree_sitter.Tree, source: bytes
-) -> list[CutPatch]:
+def orphaned_declaration_cuts(tree: tree_sitter.Tree, source: bytes) -> list[CutPatch]:
     """Cuts deleting a node plus declarations it leaves unreferenced.
 
     Deleting a node X orphans an eligible declaration when all the
@@ -380,10 +374,18 @@ def orphaned_declaration_cuts(
                 hi = positions[-1] if hi is None else max(hi, positions[-1])
             first_after = bisect.bisect_left(positions, span[1])
             if first_after < len(positions):
-                lo = positions[first_after] if lo is None else min(lo, positions[first_after])
+                lo = (
+                    positions[first_after]
+                    if lo is None
+                    else min(lo, positions[first_after])
+                )
             last_before = bisect.bisect_left(positions, span[0]) - 1
             if last_before >= 0:
-                hi = positions[last_before] if hi is None else max(hi, positions[last_before])
+                hi = (
+                    positions[last_before]
+                    if hi is None
+                    else max(hi, positions[last_before])
+                )
         if lo is None or hi is None:
             return None
         return lo, hi + 1
@@ -501,9 +503,7 @@ def treesitter_passes(language: str) -> list[ReductionPass[bytes]]:
     """Grammar-aware passes for a language, in rough order of value."""
     return [
         _cut_pass(language, "delete_children", child_deletion_cuts),
-        _cut_pass(
-            language, "delete_orphaned_declarations", orphaned_declaration_cuts
-        ),
+        _cut_pass(language, "delete_orphaned_declarations", orphaned_declaration_cuts),
         _cut_pass(language, "lift_nodes", lift_cuts),
         _substitution_pass(language),
     ]

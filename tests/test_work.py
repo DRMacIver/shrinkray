@@ -100,6 +100,10 @@ async def test_worker_map_consumer_can_stop_early(p: int, autojump_clock) -> Non
                 async for x in aiter:
                     consumed.append(x)
                     if len(consumed) == 2:
+                        # Give the producer time to fill the channel and
+                        # block mid-send, so that closing the channel
+                        # exercises the worst case deterministically.
+                        await trio.sleep(1)
                         break
 
     assert consumed == [0, 1]

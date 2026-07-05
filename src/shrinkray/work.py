@@ -80,6 +80,14 @@ class WorkContext:
 
             @nursery.start_soon
             async def do_map():
+                try:
+                    await produce()
+                except trio.BrokenResourceError:
+                    # The consumer closed the receive channel (stopped
+                    # reading early); there is nobody left to produce for.
+                    pass
+
+            async def produce():
                 if self.parallelism > 1:
                     it = iter(ls)
 

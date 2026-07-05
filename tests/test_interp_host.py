@@ -7,8 +7,10 @@ import threading
 from unittest.mock import patch
 
 import pytest
+import trio
 
 from shrinkray.interp.host import (
+    SocketSendStream,
     TuiThread,
     create_tui_interpreter,
     redirected_stdio,
@@ -124,6 +126,31 @@ def test_redirected_stdio_restores_streams_on_error(tmp_path):
                 raise ValueError("boom")
     assert sys.stdout is original_stdout
     assert sys.stderr is original_stderr
+
+
+# === SocketSendStream ===
+
+
+async def test_socket_send_stream_serialises_concurrent_sends():
+    """The worker emits from several tasks at once (progress updates,
+    command responses, completion); trio's SocketStream forbids
+    concurrent send_all calls, so the adapter must serialise them."""
+    a, b = socket.socketpair()
+    stream = SocketSendStream(trio.SocketStream(trio.socket.from_stdlib_socket(a)))
+
+    messages = [f"message-{i}\n".encode() for i in range(20)]
+    async with trio.open_nursery() as nursery:
+        for message in messages:
+            nursery.start_soon(stream.send, message)
+
+    b.settimeout(5)
+    received = b""
+    while received.count(b"\n") < len(messages):
+        received += b.recv(4096)
+    b.close()
+
+    # Every line arrives exactly once and intact.
+    assert sorted(received.splitlines()) == sorted(m.strip() for m in messages)
 
 
 # === run_with_tui_interpreter ===

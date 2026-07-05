@@ -125,13 +125,21 @@ def redirected_stdio(log_file: TextIO) -> Iterator[None]:
 
 
 class SocketSendStream:
-    """Adapts a trio stream to the worker's OutputStream protocol."""
+    """Adapts a trio stream to the worker's OutputStream protocol.
+
+    The worker emits messages from several tasks at once (progress
+    updates, command responses, completion), and trio streams forbid
+    concurrent send_all calls, so sends are serialised with a lock —
+    which also keeps each protocol line intact on the wire.
+    """
 
     def __init__(self, stream: trio.SocketStream) -> None:
         self._stream = stream
+        self._lock = trio.Lock()
 
     async def send(self, data: bytes) -> None:
-        await self._stream.send_all(data)
+        async with self._lock:
+            await self._stream.send_all(data)
 
 
 async def _run_worker(worker_sock: socket.socket) -> None:

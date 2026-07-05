@@ -18,8 +18,10 @@ shrink ray dispatches for that format.
 evaluation/
 ├── run.py        # reduce entries with shrink ray, write result.json
 ├── report.py     # regenerate the tables in RESULTS.md
+├── benchmark.py  # measure reducer efficiency (interestingness calls) against cheap in-process oracles
 ├── RESULTS.md    # generated tables + hand-written analysis
 ├── corpus/<id>/  # one directory per bug
+├── sortkey/      # sort-key tuning corpus (see sortkey/README.md)
 └── creduce/      # c-reduce comparison driver (C/C++ entries)
 ```
 
@@ -116,7 +118,7 @@ python3 evaluation/run.py --check
 python3 evaluation/run.py
 
 # Reduce / check specific entries
-python3 evaluation/run.py mypy-0971-crash-example
+python3 evaluation/run.py mypy-0.942-match-union-tuple-crash
 
 # Regenerate the tables in RESULTS.md
 python3 evaluation/report.py
@@ -152,10 +154,10 @@ also exercises the generic passes on deep nesting.
 
 ## Comparing against c-reduce
 
-`creduce/` holds a driver that reduces the C/C++ entries with c-reduce
-2.11.0 (and its bundled `clang_delta`) against the identical
-compiler-in-Docker oracle, so the two tools are compared on equal
-footing. Build the c-reduce host image once, then run the driver:
+`creduce/` holds a driver that reduces the C/C++ entries with the
+Debian-packaged c-reduce (2.11.0 on bookworm, with its bundled
+`clang_delta`) against the identical compiler-in-Docker oracle, so the
+two tools are compared on equal footing. Build the c-reduce host image once, then run the driver:
 
 ```bash
 docker build --platform linux/amd64 -t creduce-host \

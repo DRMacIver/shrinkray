@@ -51,9 +51,10 @@ looking at when deciding how a new sort key should behave.
    result *should* be a strict shrink under the sort key. It records every
    violation (`sort_key(format(delete(f))) > sort_key(f)`), split by byte vs
    line deletion, grouped by instance, to `corpus/_deletion_shrink/<lang>.json`.
-   `SR_DEL_KINDS=line` isolates one deletion kind. Finding: violated by every
-   formatter except JSON's `indent=2` (which is monotonic); black and ruff
-   behave identically (magic trailing comma + line wrapping).
+   `SR_DEL_KINDS=line` isolates one deletion kind. Finding (measured against
+   the pre-reflow legacy key): violated by every formatter except JSON's
+   `indent=2` (which is monotonic); black and ruff behave identically (magic
+   trailing comma + line wrapping).
 
 ## Formatters chosen
 
@@ -76,7 +77,8 @@ testbed for tuning one. Pairs are tagged by `kind` (`formatting`, `content`,
 `cosmetic`, `quirk`) and `confidence`, and include both cases the current key
 gets right and wrong — the real cramped-vs-readable C/C++ examples, the
 magic-trailing-comma content cases, natural-order cosmetics, formatter/parser
-corruptions (as guards), and an `avg_sq_line` helps/hurts set (see below). Built
+corruptions (as guards), an `avg_sq_line` helps/hurts set (see below), and
+`split-*` oversplit pairs (single constructs wrongly broken across lines). Built
 by `build_ordering_pairs.py` (which pulls the real C/C++ pairs from
 `evaluation/corpus/*/shrinkray_reduced.{c,cpp}`).
 
@@ -85,15 +87,19 @@ length** pairs, so `avg_sq_line` is the deciding criterion. They capture where
 that criterion (which always prefers more, shorter lines) is *right* — a
 line-break at a statement/element boundary — and where it is *wrong* — a break
 mid-construct or a blank line inside a body. A good order should get both; the
-current key gets the four helps right and the four hurts wrong.
+legacy length-first key gets the four helps right and the four hurts wrong,
+while the shipped reflow key gets all eight right.
 
-`ordering_eval.py` scores a sort order against it — by default shrink ray's
-current key, or any `str -> comparable` function via `evaluate(key)`. The current
-key scores **20/33**: `cosmetic` 5/5, `quirk` 4/4, `content` 5/7 (misses the
-magic-comma cases), `formatting` 6/17 (misses every readable-code case and the
-four `avg_sq` hurts). The `length`-decided misses want a cheaper-whitespace
-primary length; the `avg_sq`-decided misses want a structure signal that is not
-fooled by blank lines / mid-construct splits.
+`ordering_eval.py` scores a sort order against it — by default the legacy
+length-first natural chain (its `current` key), or any `str -> comparable`
+function via `evaluate(key)`. `reflow_key.py` scores the production
+`reflow_sort_key` that the shipped reducer actually uses. Current scores: the
+legacy chain gets **22/37** (`cosmetic` 5/5, `quirk` 4/4, `content` 5/7 —
+misses the magic-comma cases — `formatting` 8/21, missing every readable-code
+case, the four `avg_sq` hurts, and two oversplit pairs); the production reflow
+key gets **35/37** (`content` 7/7, `cosmetic` 5/5, `quirk` 4/4, `formatting`
+19/21, missing only the compact-JSON pair and the low-confidence inline-comment
+pair).
 
 ## Running
 
@@ -109,16 +115,23 @@ uv run $DEPS python evaluation/sortkey/inversions.py       # find inversions
 uv run $DEPS python evaluation/sortkey/report.py           # render REPORT.md
 
 uv run python evaluation/sortkey/build_ordering_pairs.py   # rebuild labelled pairs
-uv run python evaluation/sortkey/ordering_eval.py          # score sort key vs pairs
+uv run python evaluation/sortkey/ordering_eval.py          # score the legacy chain / candidates
+uv run python evaluation/sortkey/reflow_key.py             # score the production reflow key
+uv run $DEPS python evaluation/sortkey/avg_sq_reversals.py # pairs whose order flips without avg_sq_line
 ```
 
 Each stage takes an optional list of languages, e.g. `... gather.py python json`.
 
-## Findings & open direction (2026-07-04)
+## Findings (2026-07-04) & resolution (2026-07-05)
+
+**Note:** the findings below were measured against the *legacy* length-first
+sort key, which was the shipped key at the time. See the resolution at the end:
+the reflow-canonicalisation key that replaced it addresses the central problem
+found here.
 
 The `deletion_shrink` audit (delete a byte/line from a formatted instance,
-reformat, check it shrinks) found the **current sort key is essentially never
-badly wrong**: >99% of the ~6000 violations are formatter/parser quirks where
+reformat, check it shrinks) found the **then-current sort key was essentially
+never badly wrong**: >99% of the ~6000 violations are formatter/parser quirks where
 the reformatted deleted version genuinely *is* worse — escaping (`>`→`&gt;`),
 `html5lib` injecting empty elements, `sqlglot` re-inserting an implied
 `SELECT *`, `black`'s magic trailing comma exploding an argument list, two
@@ -128,11 +141,12 @@ to reject the result.
 The one genuine ordering tension found is the **inline-comment merge**: deleting
 the newline before a standalone comment (`x\n# c` → `x  # c`) yields −1 line but
 +1 byte — a cleaner, tidier form the key nonetheless rejects. The cause is
-structural: the sort key (`LazyChainedSortKey` over `NATURAL_ORDERING_FUNCTIONS`
-in `problem.py`) is a **strict lexicographic chain** that short-circuits on the
-first differing criterion, and **length is criterion #1** — so one extra byte is
-decisive and the lower criteria (line count, balance, …) only break *exact-length*
-ties, which almost never occur.
+structural: the legacy key (`LazyChainedSortKey` over `NATURAL_ORDERING_FUNCTIONS`
+in `problem.py`, still available as `ordering_eval.py`'s `current` baseline) is a
+**strict lexicographic chain** that short-circuits on the first differing
+criterion, and **length is criterion #1** — so one extra byte is decisive and the
+lower criteria (line count, balance, …) only break *exact-length* ties, which
+almost never occur.
 
 A sharper, genuinely-bad symptom of the same root cause: the sort key
 **systematically rates formatted code as worse than cramped code**, because
@@ -148,11 +162,14 @@ the reduced C/C++ examples come out as dense unreadable blobs: the reducer is
 actively driven toward them. NB for future work: comparisons that involve a
 formatter should strip comments first.
 
-**Deferred idea (not yet actioned — wants a bigger/better corpus first):**
-replace strict byte-length with some **per-character weighting** (let different
-characters cost different amounts). This directly targets the symptom above: if
-newlines and indentation spaces are cheap, formatting barely changes the score,
-so the ordering stops preferring cramped over readable. Other candidate levers
-noted: blend `bytes + k·lines` into one scalar; or normalize away
-formatter-discretion noise (trailing commas, comment placement) before comparing.
-**Do not change the sort key until the corpus is more complete.**
+**Resolution (2026-07-05):** rather than the per-character weighting idea that
+was floated at the time, the fix that shipped is the **reflow-canonicalisation
+key** (`reflow_sort_key` in `problem.py`, now the default text ordering):
+compare the whitespace-canonicalised (`basic_format`) forms by the natural
+chain *first*, so a cramped one-liner and its readable form tie on the primary
+criterion, then break ties toward the layout closest to canonical. This
+directly removes the formatted-code penalty measured above and scores **35/37**
+on the ordering corpus (`reflow_key.py`), versus 22/37 for the legacy chain.
+Note that the `gather.py`/`inversions.py`/`deletion_shrink.py` pipeline calls
+`sort_key_for_initial`, so re-running it now measures the reflow key; the
+prose findings above describe the pre-reflow key.

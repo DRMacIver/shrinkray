@@ -62,7 +62,7 @@ class RegionReplacingPatches(Patches[dict[int, AnyStr], AnyStr]):
         raise AssertionError(f"expected nonempty {patch=}")
 
 
-def regex_pass(
+def regex_pass[AnyStr: (bytes, str)](
     pattern: AnyStr | re.Pattern[AnyStr],
     flags: re.RegexFlag = re.RegexFlag.NOFLAG,
 ) -> Callable[[ReductionPass[AnyStr]], ReductionPass[AnyStr]]:

@@ -12,7 +12,7 @@ import tempfile
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from typing import IO, Any
@@ -51,7 +51,7 @@ from shrinkray.work import Volume, WorkContext
 
 
 @contextmanager
-def stdin_source(input_type: InputType, working: str) -> Iterator[IO[bytes] | int]:
+def stdin_source(input_type: InputType, working: str) -> Generator[IO[bytes] | int]:
     """The stdin to give an interestingness-test subprocess.
 
     When the stdin input type is enabled, this is the working file itself,

@@ -77,9 +77,7 @@ def child_preexec(memory_limit: int | None) -> Callable[[], None]:
         os.setsid()
         if memory_limit is not None and memory_limit > 0:
             try:
-                resource.setrlimit(
-                    resource.RLIMIT_AS, (memory_limit, memory_limit)
-                )
+                resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_limit))
             except (ValueError, OSError):
                 pass
 

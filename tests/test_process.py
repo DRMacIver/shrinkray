@@ -78,9 +78,7 @@ def test_child_preexec_sets_memory_rlimit():
     ):
         child_preexec(4 * 1024**3)()
     setsid.assert_called_once_with()
-    setrlimit.assert_called_once_with(
-        resource.RLIMIT_AS, (4 * 1024**3, 4 * 1024**3)
-    )
+    setrlimit.assert_called_once_with(resource.RLIMIT_AS, (4 * 1024**3, 4 * 1024**3))
 
 
 @pytest.mark.parametrize("limit", [None, 0, -1])

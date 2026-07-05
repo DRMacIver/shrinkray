@@ -210,7 +210,9 @@ def test_is_python_returns_false_for_invalid_python():
     assert is_python(invalid_code) is False
 
 
-@pytest.mark.parametrize("source", [b"[" * 5000 + b"1" + b"]" * 5000, "(" * 5000 + ")" * 5000])
+@pytest.mark.parametrize(
+    "source", [b"[" * 5000 + b"1" + b"]" * 5000, "(" * 5000 + ")" * 5000]
+)
 def test_is_python_does_not_crash_on_deeply_nested_brackets(source):
     """Deeply bracket-nested input must not crash is_python.
 

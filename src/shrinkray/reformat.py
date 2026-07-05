@@ -42,10 +42,23 @@ def _is_word(c: str) -> bool:
     """
     return c.isalnum() or c == "_"
 
+
 # HTML void elements have no close tag; do not increase depth for them.
 VOID = {
-    "area", "base", "br", "col", "embed", "hr", "img", "input",
-    "link", "meta", "param", "source", "track", "wbr",
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
 }
 
 _TAG = re.compile(r"<(/?)([A-Za-z][\w:-]*)?", re.S)
@@ -231,7 +244,12 @@ def _reflow_brace(s: str) -> str:
         if c == ";":
             # keep a semicolon attached to a preceding "}" on the same line
             # (e.g. a struct/class/enum declaration: "};")
-            if not line_started and len(out) >= 2 and out[-1] == "\n" and out[-2] == "}":
+            if (
+                not line_started
+                and len(out) >= 2
+                and out[-1] == "\n"
+                and out[-2] == "}"
+            ):
                 out.pop()
                 out.append(";")
             else:

@@ -72,9 +72,7 @@ def test_effective_memory_limit_first_call_is_generous(simple_state):
 
 def test_raise_if_initial_over_memory_raises_when_over(simple_state):
     simple_state.memory_limit = 50 * 1024**2
-    with patch(
-        "shrinkray.state.peak_child_rss_bytes", return_value=100 * 1024**2
-    ):
+    with patch("shrinkray.state.peak_child_rss_bytes", return_value=100 * 1024**2):
         with pytest.raises(MemoryLimitExceededOnInitial):
             simple_state.raise_if_initial_over_memory()
 
@@ -99,9 +97,7 @@ def _memory_hog_state(tmp_path):
     # RLIMIT_AS enforcement itself is a no-op (macOS).
     script = tmp_path / "hog.sh"
     script.write_text(
-        "#!/usr/bin/env python3\n"
-        "b = bytearray(200 * 1024 * 1024)\n"
-        "assert b[0] == 0\n"
+        "#!/usr/bin/env python3\nb = bytearray(200 * 1024 * 1024)\nassert b[0] == 0\n"
     )
     script.chmod(0o755)
     target = tmp_path / "target.txt"
@@ -131,9 +127,7 @@ async def test_run_script_raises_when_initial_exceeds_memory(tmp_path):
     # wrapped in an ExceptionGroup, exactly as the worker's
     # `except* InvalidInitialExample` handler expects.
     with pytest.raises(BaseExceptionGroup) as exc_info:
-        await state.run_script_on_file(
-            working=str(state.filename), cwd=str(tmp_path)
-        )
+        await state.run_script_on_file(working=str(state.filename), cwd=str(tmp_path))
     assert exc_info.value.subgroup(MemoryLimitExceededOnInitial) is not None
 
 

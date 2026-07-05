@@ -10,9 +10,7 @@ from shrinkray.reformat import basic_format, canonical_distance, detect_family
 
 # An alphabet rich in the structural characters the formatter dispatches on, so
 # random inputs exercise the brace / tag / indent branches.
-STRUCTURAL = st.text(
-    alphabet="{}[]()<>;#/*=+!&|,:\"'\\ \t\n" + "abcAB012", max_size=80
-)
+STRUCTURAL = st.text(alphabet="{}[]()<>;#/*=+!&|,:\"'\\ \t\n" + "abcAB012", max_size=80)
 
 
 # === family detection ===

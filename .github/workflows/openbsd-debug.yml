@@ -1,9 +1,6 @@
 name: OpenBSD debugging (issue 56)
 
 on:
-  push:
-    branches:
-      - DRMacIver/bsd-debugging
   workflow_dispatch:
 
 jobs:

@@ -16,8 +16,12 @@ probes each layer independently:
   trio_setsid               trio.run_process with shrinkray's preexec_fn
   trio_stdin_unread         big stdin the child never reads
   trio_stdin_read           big stdin the child consumes
-  trio_shrinkray_like       the exact spawn pattern from run_script_on_file
-                            (nursery.start + setsid + big stdin + DEVNULL)
+  trio_stdin_fd             stdin passed as a file descriptor (fix pattern)
+  trio_shrinkray_like       the spawn pattern from run_script_on_file BEFORE
+                            the fix (nursery.start + setsid + piped stdin);
+                            expected to hang on OpenBSD
+  trio_shrinkray_fixed      the spawn pattern from run_script_on_file AFTER
+                            the fix (stdin is a file descriptor)
 
 Run `python3 scripts/openbsd_debug.py` to run every test, each in its own
 subprocess with a hard kill timeout so one hang can't block the rest.

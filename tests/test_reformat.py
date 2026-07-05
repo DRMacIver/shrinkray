@@ -4,6 +4,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from shrinkray.formatting import default_reformat_data
 from shrinkray.reformat import basic_format, canonical_distance, detect_family
 
 
@@ -65,6 +66,16 @@ def test_brace_braces_and_semicolons():
     assert out == "struct S {\n  int a;\n  int b;\n}\n;\n"
 
 
+def test_brace_nested_indentation():
+    # closing braces dedent correctly (indentation reflects depth after dedent)
+    assert basic_format("{ { x; } }") == "{\n  {\n    x;\n  }\n}\n"
+
+
+def test_brace_empty_braces_stay_together():
+    assert basic_format("function() {}") == "function() {}\n"
+    assert basic_format("f() { }") == "f() {}\n"
+
+
 def test_brace_preserves_string_literal_with_specials():
     # braces / ; / operators inside a string are untouched
     out = basic_format('x = "a{b;c+d}"')
@@ -87,9 +98,11 @@ def test_brace_block_comment_preserved():
     assert "/* c ; { } */" in out
 
 
-def test_brace_unclosed_block_comment_terminated():
+def test_brace_unclosed_block_comment_preserved():
+    # an unterminated block comment is kept verbatim (the formatter never adds
+    # non-whitespace content such as a closing "*/")
     out = basic_format("a /* unclosed")
-    assert out.endswith("*/\n")
+    assert "/* unclosed" in out and out.endswith("unclosed\n")
 
 
 def test_brace_operator_spacing():
@@ -224,8 +237,6 @@ def test_property_robust_and_deterministic(s):
     assert isinstance(out, str)
     assert out.endswith("\n")
     assert basic_format(s) == out  # deterministic
-    # non-whitespace content is preserved (only whitespace/op-spacing changes)
-    assert "".join(out.split()) or not "".join(s.split())
 
 
 @given(STRUCTURAL, STRUCTURAL)
@@ -233,6 +244,64 @@ def test_property_distance_nonnegative(a, b):
     d = canonical_distance(a, b)
     assert d >= 0
     assert (d == 0) == (a == b)
+
+
+# === robustness against ARBITRARY textual input ===
+#
+# basic_format must behave sanely on any input, even text that corresponds to
+# none of the known families (prose, unicode, binary-ish, control characters).
+# These properties use unrestricted st.text()/st.binary(), not the structural
+# alphabet, to hammer the formatter with inputs it was not designed around.
+
+ARBITRARY = st.text(max_size=200)
+
+
+@given(ARBITRARY)
+def test_property_arbitrary_text_never_crashes(s):
+    out = basic_format(s)
+    assert isinstance(out, str)
+    assert out.endswith("\n")
+
+
+@given(ARBITRARY)
+def test_property_arbitrary_text_deterministic(s):
+    assert basic_format(s) == basic_format(s)
+
+
+@given(ARBITRARY)
+def test_property_arbitrary_text_is_idempotent(s):
+    once = basic_format(s)
+    assert basic_format(once) == once
+
+
+@given(ARBITRARY)
+def test_property_arbitrary_text_preserves_non_whitespace(s):
+    # The formatter only ever rewrites whitespace (and inserts spacing around
+    # operators): the sequence of non-whitespace characters is never changed,
+    # so no content is dropped, added, or reordered -- including for unicode
+    # letters, which must not be merged across a space.
+    assert "".join(basic_format(s).split()) == "".join(s.split())
+
+
+@given(ARBITRARY, ARBITRARY)
+def test_property_distance_arbitrary_text(a, b):
+    d = canonical_distance(a, b)
+    assert d >= 0
+    assert (d == 0) == (a == b)
+
+
+@given(st.binary(max_size=200))
+def test_property_binary_reformat_never_crashes(data):
+    # default_reformat_data is the language-agnostic output formatter; it must
+    # accept arbitrary bytes (undecodable data is returned unchanged).
+    out = default_reformat_data(data)
+    assert isinstance(out, bytes)
+
+
+def test_unicode_words_are_not_merged():
+    # a space between two unicode identifier characters is significant
+    assert basic_format("café résumé") == "café résumé\n"
+    assert basic_format("день ночь") == "день ночь\n"
 
 
 # extra targeted branches
@@ -252,7 +321,8 @@ def test_brace_space_and_op_before_brace():
 
 
 def test_brace_op_after_newline():
-    assert basic_format("a;==b") == "a;\n == b\n"
+    # an operator at the start of a line is not given a spurious leading space
+    assert basic_format("a;==b") == "a;\n== b\n"
 
 
 def test_brace_double_op_pops_trailing_space():

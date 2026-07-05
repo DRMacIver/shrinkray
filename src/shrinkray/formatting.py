@@ -6,6 +6,8 @@ from shutil import which
 
 import chardet
 
+from shrinkray.reformat import basic_format
+
 
 def find_python_command(name: str) -> str | None:
     """Find a Python command, checking both PATH and the current Python's bin directory."""
@@ -46,53 +48,19 @@ def default_formatter_command_for(filename: str) -> list[str] | str | None:
 
 
 def default_reformat_data(data: bytes) -> bytes:
-    """Apply a simple language-agnostic reformatting to data."""
+    """Apply a simple language-agnostic reformatting to data.
+
+    Delegates to the reflow formatter (``reformat.basic_format``), which
+    canonicalises whitespace per language family (Python indentation, HTML/XML
+    tags, and a brace/`;` default). This is the same canonicalisation the sort
+    key orders by, so reformatting the final result only ever makes the layout
+    match what the reducer was already preferring. Binary (undecodable) data is
+    returned unchanged.
+    """
     encoding, decoded = try_decode(data)
     if encoding is None:
         return data
-    result = []
-    indent = 0
-
-    def newline() -> None:
-        result.append("\n" + indent * " ")
-
-    start_of_newline = True
-    for i, c in enumerate(decoded):
-        if c == "\n":
-            start_of_newline = True
-            newline()
-            continue
-        elif c == " ":
-            if start_of_newline:
-                continue
-        else:
-            start_of_newline = False
-        if c == "{":
-            result.append(c)
-            indent += 4
-            if i + 1 == len(decoded) or decoded[i + 1] != "}":
-                newline()
-        elif c == "}":
-            if len(result) > 1 and result[-1].endswith("    "):
-                result[-1] = result[-1][:-4]
-            result.append(c)
-            indent -= 4
-            newline()
-        elif c == ";":
-            result.append(c)
-            newline()
-        else:
-            result.append(c)
-
-    output = "".join(result)
-    prev = None
-    while prev != output:
-        prev = output
-
-        output = output.replace(" \n", "\n")
-        output = output.replace("\n\n", "\n")
-
-    return output.encode(encoding)
+    return basic_format(decoded).encode(encoding)
 
 
 def determine_formatter_command(formatter: str, filename: str) -> list[str] | None:

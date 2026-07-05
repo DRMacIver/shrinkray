@@ -28,9 +28,19 @@ from __future__ import annotations
 import re
 
 
-WORD = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
 OPS = ["==", "!=", "<=", ">=", "+=", "-=", "&&", "||", "+", "="]
 INDENT = "  "
+
+
+def _is_word(c: str) -> bool:
+    """Whether ``c`` is an identifier character (unicode-aware).
+
+    Used to decide when whitespace between two tokens is significant (a space
+    between two identifier characters must be kept; whitespace next to
+    punctuation can be dropped). Accepts unicode letters/digits so arbitrary,
+    non-ASCII text is not mangled by merging adjacent words.
+    """
+    return c.isalnum() or c == "_"
 
 # HTML void elements have no close tag; do not increase depth for them.
 VOID = {
@@ -84,7 +94,7 @@ def _inline(s: str) -> str:
                 j += 1
             prev = out[-1][-1] if out and out[-1] else ""
             nxt = s[j] if j < n else ""
-            if prev in WORD and nxt in WORD:
+            if _is_word(prev) and _is_word(nxt):
                 out.append(" ")
             i = j
             continue
@@ -109,102 +119,117 @@ def _inline(s: str) -> str:
 def _reflow_brace(s: str) -> str:
     out: list[str] = []
     depth = 0
+    line_started = False  # has real content been emitted on the current line?
     i, n = 0, len(s)
 
-    def at_line_start() -> bool:
-        k = len(out) - 1
-        while k >= 0 and out[k] == " ":
-            k -= 1
-        return k < 0 or out[k] == "\n"
+    def emit(text: str) -> None:
+        # Indentation is applied lazily, when content first arrives on a line,
+        # so it reflects the depth *after* any dedent from a leading '}'.
+        nonlocal line_started
+        if not line_started:
+            if depth:
+                out.append(INDENT * depth)
+            line_started = True
+        out.append(text)
 
     def newline() -> None:
+        nonlocal line_started
         while out and out[-1] == " ":
             out.pop()
         out.append("\n")
-        out.append(INDENT * depth)
+        line_started = False
+
+    def last_char() -> str:
+        return out[-1][-1] if out and out[-1] else ""
 
     while i < n:
         c = s[i]
         if c in "\"'":
-            q = c
-            out.append(c)
-            i += 1
-            while i < n:
-                out.append(s[i])
-                if s[i] == "\\" and i + 1 < n:
-                    out.append(s[i + 1])
-                    i += 2
+            j = i + 1
+            while j < n:
+                if s[j] == "\\" and j + 1 < n:
+                    j += 2
                     continue
-                if s[i] == q:
-                    i += 1
+                if s[j] == c:
+                    j += 1
                     break
-                i += 1
+                j += 1
+            emit(s[i:j])
+            i = j
             continue
         if c == "/" and i + 1 < n and s[i + 1] == "/":
-            while i < n and s[i] != "\n":
-                out.append(s[i])
-                i += 1
+            j = i
+            while j < n and s[j] != "\n":
+                j += 1
+            emit(s[i:j])
             newline()
+            i = j
             continue
         if c == "/" and i + 1 < n and s[i + 1] == "*":
-            while i < n and not (s[i] == "*" and i + 1 < n and s[i + 1] == "/"):
-                out.append(s[i])
-                i += 1
-            out.append("*/")
-            i += 2
+            j = s.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            emit(s[i:j])
+            i = j
             continue
         if c.isspace():
             j = i
             while j < n and s[j].isspace():
                 j += 1
-            prev = out[-1] if out else ""
             nxt = s[j] if j < n else ""
-            if prev in WORD and nxt in WORD:
+            if line_started and _is_word(last_char()) and _is_word(nxt):
                 out.append(" ")
             i = j
             continue
         if c == "{":
-            if not at_line_start() and out and out[-1] != " ":
+            # empty braces stay together on one line: "{}"
+            j = i + 1
+            while j < n and s[j].isspace():
+                j += 1
+            if line_started and last_char() not in ("", " "):
                 out.append(" ")
-            out.append("{")
-            depth += 1
-            i += 1
+            if j < n and s[j] == "}":
+                emit("{}")
+                i = j + 1
+            else:
+                emit("{")
+                depth += 1
+                i += 1
             newline()
             continue
         if c == "}":
             depth = max(0, depth - 1)
-            if not at_line_start():
+            if line_started:
                 newline()
-            out.append("}")
-            i += 1
+            emit("}")
             newline()
+            i += 1
             continue
         if c == ";":
-            out.append(";")
-            i += 1
+            emit(";")
             newline()
+            i += 1
             continue
         if c == "#":  # preprocessor directive: one per line
-            if not at_line_start():
+            if line_started:
                 newline()
-            out.append("#")
+            emit("#")
             i += 1
             continue
         if c == ",":
-            out.append(", ")
+            emit(", ")
             i += 1
             continue
         op = next((o for o in OPS if s.startswith(o, i)), None)
         if op is not None:
             while out and out[-1] == " ":
                 out.pop()
-            if out and out[-1] != "\n":
+            if line_started:
                 out.append(" ")
-            out.append(op)
+            emit(op)
             out.append(" ")
             i += len(op)
             continue
-        out.append(c)
+        emit(c)
         i += 1
     return _finish(out)
 

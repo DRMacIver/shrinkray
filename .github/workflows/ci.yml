@@ -279,6 +279,11 @@ jobs:
             export TMPDIR=/home/tmp
             export CARGO_HOME=/home/tmp/cargo
             export XDG_CACHE_HOME="$PWD/.ts-cache"
+            # The workspace is rsync'd in preserving the host runner's
+            # uid, but we run as root, and pip silently disables a cache
+            # dir it does not own. Create the cache dirs and own them.
+            mkdir -p .pip-cache .ts-cache
+            chown -R root:wheel .pip-cache .ts-cache
             python3 -m venv /home/venv
             /home/venv/bin/pip install --quiet --upgrade pip
             /home/venv/bin/pip install --cache-dir "$PWD/.pip-cache" ".[test]"

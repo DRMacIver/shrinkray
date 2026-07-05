@@ -237,20 +237,22 @@ jobs:
         with:
           persist-credentials: false
       # The pip cache lives inside the workspace so it is synced into the
-      # VM and (via copyback) out again. On a hit it holds the wheels that
+      # VM and (via copyback) out again. On a hit it holds the Python
+      # 3.14 build (OpenBSD 7.9 packages only 3.13) and the wheels that
       # pip otherwise builds from source (libcst, maturin,
-      # tree-sitter-language-pack, ...), skipping several minutes of rust
-      # and C compilation.
-      - name: Restore pip and grammar caches
+      # tree-sitter-language-pack, ...), skipping the CPython build and
+      # several minutes of rust and C compilation.
+      - name: Restore Python, pip and grammar caches
         id: pip-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
+            .python314
             .pip-cache
             .ts-cache
-          key: openbsd-7.9-pip-${{ hashFiles('uv.lock') }}
+          key: openbsd-7.9-py314-pip-${{ hashFiles('uv.lock') }}
           restore-keys: |
-            openbsd-7.9-pip-
+            openbsd-7.9-py314-pip-
       - name: Run fast tests in an OpenBSD VM
         uses: vmactions/openbsd-vm@18edb32f4e48dae5865d7b8b3a9587bc01218a20 # v1.4.4
         with:
@@ -262,13 +264,14 @@ jobs:
           copyback: false
           mem: 8192
           # rust is needed to build libcst (setuptools-rust) and maturin
-          # from source; zstd unpacks the tree-sitter parser sources.
+          # from source; zstd unpacks the tree-sitter parser sources;
+          # gmake and openssl build CPython (the python3 package is only
+          # 3.13, but still pulls in libffi for ctypes).
           prepare: |
-            pkg_add python3 py3-pip rust minisat zstd
+            pkg_add python3 rust minisat zstd gmake openssl%3.5
           run: |
             set -ex
             uname -a
-            python3 --version
             df -h
             # Everything sizeable must stay off the 1GB root partition:
             # the venv, pip build dirs, and cargo's registry (maturin's
@@ -284,7 +287,32 @@ jobs:
             # dir it does not own. Create the cache dirs and own them.
             mkdir -p .pip-cache .ts-cache
             chown -R root:wheel .pip-cache .ts-cache
-            python3 -m venv /home/venv
+            # OpenBSD 7.9 packages only Python 3.13 and shrink ray needs
+            # 3.14+, so build CPython from source into the workspace
+            # (where the cache persists it between runs). CPython's ssl
+            # module needs real OpenSSL rather than the base system's
+            # LibreSSL; the openssl package installs under an eopenssl35
+            # prefix, so mirror it into the include/ + lib/ layout that
+            # --with-openssl expects.
+            PY_PREFIX="$PWD/.python314"
+            if [ ! -x "$PY_PREFIX/bin/python3.14" ]; then
+              mkdir -p /home/ssl/include /home/ssl/lib
+              ln -sf /usr/local/include/eopenssl35/openssl /home/ssl/include/openssl
+              ln -sf /usr/local/lib/eopenssl35/* /home/ssl/lib/
+              (
+                cd /home/tmp
+                ftp -o Python-3.14.2.tgz https://www.python.org/ftp/python/3.14.2/Python-3.14.2.tgz
+                tar xzf Python-3.14.2.tgz
+                cd Python-3.14.2
+                ./configure --prefix="$PY_PREFIX" \
+                  --with-openssl=/home/ssl \
+                  --with-openssl-rpath=/usr/local/lib/eopenssl35
+                gmake -j"$(sysctl -n hw.ncpu)"
+                gmake install
+              )
+            fi
+            "$PY_PREFIX/bin/python3.14" --version
+            "$PY_PREFIX/bin/python3.14" -m venv /home/venv
             /home/venv/bin/pip install --quiet --upgrade pip
             /home/venv/bin/pip install --cache-dir "$PWD/.pip-cache" ".[test]"
             # tree-sitter-language-pack has no OpenBSD grammar binaries
@@ -294,21 +322,24 @@ jobs:
             df -h
             /home/venv/bin/python -m pytest tests/ -m "not slow" -q
       # vmactions only syncs the workspace back on success, so pull the
-      # caches out of the VM explicitly: seeding the expensive from-source
-      # wheel and grammar builds must not depend on a green run.
+      # caches out of the VM explicitly: seeding the expensive CPython,
+      # from-source wheel and grammar builds must not depend on a green
+      # run.
       - name: Fetch caches from VM
         if: always() && steps.pip-cache.outputs.cache-hit != 'true'
         run: |
+          rsync -a "openbsd:${GITHUB_WORKSPACE}/.python314/" .python314/ || true
           rsync -a "openbsd:${GITHUB_WORKSPACE}/.pip-cache/" .pip-cache/ || true
           rsync -a "openbsd:${GITHUB_WORKSPACE}/.ts-cache/" .ts-cache/ || true
-      - name: Save pip and grammar caches
+      - name: Save Python, pip and grammar caches
         if: always() && steps.pip-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
+            .python314
             .pip-cache
             .ts-cache
-          key: openbsd-7.9-pip-${{ hashFiles('uv.lock') }}
+          key: openbsd-7.9-py314-pip-${{ hashFiles('uv.lock') }}
 
   coverage:
     permissions:

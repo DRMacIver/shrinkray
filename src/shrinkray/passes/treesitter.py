@@ -26,6 +26,7 @@ so these passes keep working on the syntactically-broken intermediate
 states other passes produce.
 """
 
+import bisect
 import os
 import re
 from collections.abc import Iterator
@@ -136,29 +137,32 @@ def child_deletion_cuts(tree: tree_sitter.Tree, source: bytes) -> list[CutPatch]
     cuts: list[CutPatch] = []
     for node in iter_nodes(tree):
         children = node.children
-        named = [c for c in children if c.is_named]
-        for i, child in enumerate(named):
+        # Positions of the named children within the full child list, so
+        # adjacent anonymous tokens can be found without rescanning.
+        named_indices = [j for j, c in enumerate(children) if c.is_named]
+        for i, idx_first in enumerate(named_indices):
+            child = children[idx_first]
             for run in range(1, MAX_CHILD_RUN + 1):
-                if i + run > len(named):
+                if i + run > len(named_indices):
                     break
-                last = named[i + run - 1]
+                idx_last = named_indices[i + run - 1]
+                last = children[idx_last]
                 start, end = child.start_byte, last.end_byte
                 if end == start:
                     continue
                 cuts.append([(start, end)])
                 # A variant extending to the next named sibling's start,
                 # eating the whitespace/newlines between them.
-                if i + run < len(named):
-                    cuts.append([(start, named[i + run].start_byte)])
+                if i + run < len(named_indices):
+                    after_run = children[named_indices[i + run]]
+                    cuts.append([(start, after_run.start_byte)])
                 # Variants that also eat a separator token next to the
                 # run, so deleting `bbb` from `f(aaa, bbb)` can remove
                 # the now-dangling comma too.
-                idx_last = children.index(last)
                 if idx_last + 1 < len(children):
                     after = children[idx_last + 1]
                     if source[after.start_byte : after.end_byte] in SEPARATOR_TOKENS:
                         cuts.append([(start, after.end_byte)])
-                idx_first = children.index(child)
                 if idx_first > 0:
                     before = children[idx_first - 1]
                     if source[before.start_byte : before.end_byte] in SEPARATOR_TOKENS:
@@ -167,19 +171,22 @@ def child_deletion_cuts(tree: tree_sitter.Tree, source: bytes) -> list[CutPatch]
 
 
 # How deep below a node to look for arbitrary named descendants to
-# promote into its place. Same-type descendants are hoisted from any
-# depth; for arbitrary descendants an unbounded search would generate
-# quadratically many mostly-nonsensical candidates.
+# promote into its place. Same-type descendants are hoisted from
+# arbitrarily far down (but only the nearest one along each path — the
+# pass reapplies, so deeper ones are reached stepwise); for arbitrary
+# descendants an unbounded search would generate quadratically many
+# mostly-nonsensical candidates.
 MAX_PROMOTION_DEPTH = 2
 
 
 def lift_cuts(tree: tree_sitter.Tree, source: bytes) -> list[CutPatch]:
     """Cuts replacing a node with one of its named descendants.
 
-    A descendant of the same node type is lifted from any depth (e.g.
-    replacing an `if` with an `if` nested inside it); any named
-    descendant is promoted from within MAX_PROMOTION_DEPTH levels (e.g.
-    replacing a parenthesized expression with its contents).
+    The nearest descendant of the same node type along each path is
+    lifted regardless of depth (e.g. replacing an `if` with an `if`
+    nested inside it); any named descendant is promoted from within
+    MAX_PROMOTION_DEPTH levels (e.g. replacing a parenthesized
+    expression with its contents).
     """
     cuts: list[CutPatch] = []
     for node in iter_nodes(tree):
@@ -190,12 +197,20 @@ def lift_cuts(tree: tree_sitter.Tree, source: bytes) -> list[CutPatch]:
         while stack:
             descendant, depth = stack.pop()
             d_span = (descendant.start_byte, descendant.end_byte)
-            if d_span != span and descendant.is_named:
-                same_type = descendant.type == node.type
+            same_type = (
+                descendant.is_named
+                and d_span != span
+                and descendant.type == node.type
+            )
+            if descendant.is_named and d_span != span:
                 if same_type or depth <= MAX_PROMOTION_DEPTH:
                     cut = [(span[0], d_span[0]), (d_span[1], span[1])]
                     cuts.append([t for t in cut if t[0] < t[1]])
-            stack.extend((child, depth + 1) for child in descendant.children)
+            # Stop below a same-type descendant: hoisting past it is
+            # reachable by applying the pass repeatedly, and descending
+            # regardless would make same-type chains quadratic.
+            if not same_type:
+                stack.extend((child, depth + 1) for child in descendant.children)
     return [c for c in cuts if c]
 
 
@@ -215,7 +230,13 @@ def _names_mentioned(node: tree_sitter.Node, source: bytes) -> frozenset[bytes]:
         if "string" in n.type:
             text = source[n.start_byte : n.end_byte].strip(b"\"'`")
             if text:
-                names.add(text.rsplit(b"/", 1)[-1])
+                basename = text.rsplit(b"/", 1)[-1]
+                names.add(basename)
+                # A dotted basename like "yaml.v2" is referenced by its
+                # leading word (Go imports gopkg.in/yaml.v2 as yaml).
+                word = _WORD.match(basename)
+                if word is not None:
+                    names.add(word.group())
         elif n.child_count == 0 and "identifier" in n.type:
             names.add(source[n.start_byte : n.end_byte])
         else:
@@ -223,14 +244,28 @@ def _names_mentioned(node: tree_sitter.Node, source: bytes) -> frozenset[bytes]:
     return frozenset(names)
 
 
-def _occurs_outside(
-    name: bytes, source: bytes, spans: list[tuple[int, int]]
-) -> bool:
-    pattern = rb"(?<![A-Za-z0-9_])" + re.escape(name) + rb"(?![A-Za-z0-9_])"
-    for match in re.finditer(pattern, source):
-        if not any(u <= match.start() < v for u, v in spans):
-            return True
-    return False
+_WORD = re.compile(rb"[A-Za-z0-9_]+")
+
+
+def _name_occurrences(source: bytes, names: set[bytes]) -> dict[bytes, list[int]]:
+    """Start offsets of each name's whole-word occurrences in source.
+
+    Names that are single word tokens (nearly all of them) are looked
+    up in one tokenizing scan of the source; anything else (e.g. an
+    import path basename like "yaml.v2") falls back to its own search.
+    """
+    tokens: dict[bytes, list[int]] = {}
+    for match in _WORD.finditer(source):
+        tokens.setdefault(match.group(), []).append(match.start())
+
+    occurrences: dict[bytes, list[int]] = {}
+    for name in names:
+        if _WORD.fullmatch(name):
+            occurrences[name] = tokens.get(name, [])
+        else:
+            pattern = rb"(?<![A-Za-z0-9_])" + re.escape(name) + rb"(?![A-Za-z0-9_])"
+            occurrences[name] = [m.start() for m in re.finditer(pattern, source)]
+    return occurrences
 
 
 def _gc_candidates(tree: tree_sitter.Tree) -> list[tree_sitter.Node]:
@@ -258,43 +293,156 @@ def _gc_candidates(tree: tree_sitter.Tree) -> list[tree_sitter.Node]:
     return result
 
 
+def _names_defined(node: tree_sitter.Node, source: bytes) -> frozenset[bytes]:
+    """The names a declaration binds, as far as we can tell.
+
+    Grammars conventionally expose a `name` field on declarations;
+    references to that name are what should keep the declaration
+    alive. Nodes without one (import entries in particular) fall back
+    to every name they mention, which is conservative in the right
+    direction: an import's mentioned names are exactly the names it
+    binds, while for odd declaration shapes it just means fewer orphan
+    candidates.
+    """
+    name_child = node.child_by_field_name("name")
+    if name_child is not None:
+        return frozenset({source[name_child.start_byte : name_child.end_byte]})
+    return _names_mentioned(node, source)
+
+
+def _covering_chain(
+    tree: tree_sitter.Tree, lo: int, hi: int
+) -> list[tuple[int, int]]:
+    """Spans of the named nodes whose span covers [lo, hi).
+
+    Nodes covering an interval always form a chain from the root down,
+    so this descends rather than scanning the whole tree.
+    """
+    spans = []
+    node = tree.root_node
+    while True:
+        # Package/module headers are excluded for the same reason they
+        # are not GC candidates: deleting one invalidates the file, so
+        # cuts triggered by it (e.g. deleting `package main` orphans
+        # `func main`) are wasted attempts.
+        if (
+            node.is_named
+            and "package" not in node.type
+            and node.start_byte <= lo
+            and hi <= node.end_byte
+        ):
+            span = (node.start_byte, node.end_byte)
+            if not spans or spans[-1] != span:
+                spans.append(span)
+        for child in node.children:
+            if child.start_byte <= lo and hi <= child.end_byte:
+                node = child
+                break
+        else:
+            return spans
+
+
 def orphaned_declaration_cuts(
     tree: tree_sitter.Tree, source: bytes
 ) -> list[CutPatch]:
     """Cuts deleting a node plus declarations it leaves unreferenced.
 
-    For every named node, tentatively delete it, then repeatedly delete
-    any eligible declaration none of whose names still occur outside
-    the deleted regions. Only combinations that collect at least one
-    extra declaration are returned: the plain single deletion is
-    already generated by other passes. This is what makes dead code
-    deletable in languages like Go that hard-error on unused imports.
+    Deleting a node X orphans an eligible declaration when all the
+    positions where the declaration's names occur (outside the
+    declaration itself) fall inside X; the orphan can then be deleted
+    along with X, cascading if that in turn orphans more declarations.
+    Declarations that are unreferenced to begin with are not collected:
+    a plain single cut, which other passes already generate, deletes
+    those. This joint deletion is what makes dead code deletable in
+    languages like Go that hard-error on unused imports.
     """
-    gc_nodes = [(n, _names_mentioned(n, source)) for n in _gc_candidates(tree)]
+    gc_nodes = [(n, _names_defined(n, source)) for n in _gc_candidates(tree)]
+    occurrences = _name_occurrences(
+        source, {name for _, names in gc_nodes for name in names}
+    )
+
+    def external_extent(index: int) -> tuple[int, int] | None:
+        """Smallest interval containing every position where the
+        candidate's names occur outside its own span, or None if it is
+        not referenced anywhere else at all."""
+        candidate, names = gc_nodes[index]
+        span = (candidate.start_byte, candidate.end_byte)
+        lo: int | None = None
+        hi: int | None = None
+        for name in names:
+            positions = occurrences[name]
+            # Positions inside the candidate's own span are contiguous
+            # in the sorted list; the external extremes sit just
+            # outside that region.
+            if positions and positions[0] < span[0]:
+                lo = positions[0] if lo is None else min(lo, positions[0])
+            if positions and positions[-1] >= span[1]:
+                hi = positions[-1] if hi is None else max(hi, positions[-1])
+            first_after = bisect.bisect_left(positions, span[1])
+            if first_after < len(positions):
+                lo = positions[first_after] if lo is None else min(lo, positions[first_after])
+            last_before = bisect.bisect_left(positions, span[0]) - 1
+            if last_before >= 0:
+                hi = positions[last_before] if hi is None else max(hi, positions[last_before])
+        if lo is None or hi is None:
+            return None
+        return lo, hi + 1
+
+    def is_orphaned(index: int, spans: list[tuple[int, int]]) -> bool:
+        """Whether every external reference to the candidate's names
+        lies within the deleted spans."""
+        candidate, names = gc_nodes[index]
+        own = (candidate.start_byte, candidate.end_byte)
+        for name in names:
+            for position in occurrences[name]:
+                if own[0] <= position < own[1]:
+                    continue
+                if not any(u <= position < v for u, v in spans):
+                    return False
+        return True
+
+    # The nodes whose deletion orphans a candidate in one step are
+    # exactly those whose span covers all its external references —
+    # a chain from the root down.
+    triggers: dict[tuple[int, int], list[int]] = {}
+    extents: list[tuple[int, int] | None] = []
+    for index in range(len(gc_nodes)):
+        extent = external_extent(index)
+        extents.append(extent)
+        if extent is None:
+            # Unreferenced to begin with: a plain single cut, which
+            # other passes already generate, deletes it.
+            continue
+        for span in _covering_chain(tree, *extent):
+            triggers.setdefault(span, []).append(index)
 
     cuts: list[CutPatch] = []
-    seen: set[tuple[tuple[int, int], ...]] = set()
-    for node in iter_nodes(tree):
-        if not node.is_named or node.start_byte == node.end_byte:
+    for x_span, indices in sorted(triggers.items()):
+        spans = [x_span]
+        spans.extend(
+            (g.start_byte, g.end_byte)
+            for i in indices
+            for g in [gc_nodes[i][0]]
+            # A candidate overlapping the deleted node is already gone.
+            if not (g.start_byte < x_span[1] and x_span[0] < g.end_byte)
+        )
+        if len(spans) < 2:
             continue
-        spans = [(node.start_byte, node.end_byte)]
+        # Cascade: deleting these regions may orphan further
+        # declarations whose references lived inside them.
         changed = True
         while changed:
             changed = False
-            for candidate, names in gc_nodes:
+            for index, (candidate, _) in enumerate(gc_nodes):
                 span = (candidate.start_byte, candidate.end_byte)
+                if extents[index] is None:
+                    continue
                 if any(u < span[1] and span[0] < v for u, v in spans):
                     continue
-                if not any(
-                    _occurs_outside(name, source, [*spans, span]) for name in names
-                ):
+                if is_orphaned(index, spans):
                     spans.append(span)
                     changed = True
-        if len(spans) > 1:
-            key = tuple(sorted(spans))
-            if key not in seen:
-                seen.add(key)
-                cuts.append(sorted(spans))
+        cuts.append(sorted(set(spans)))
     return cuts
 
 

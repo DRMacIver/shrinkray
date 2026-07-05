@@ -1,5 +1,6 @@
 from shrinkray.passes.treesitter import (
     EXTENSION_LANGUAGES,
+    _names_mentioned,
     child_deletion_cuts,
     language_for_filename,
     lift_cuts,
@@ -165,6 +166,71 @@ def test_orphan_names_ignore_empty_string_literals():
     cuts = orphaned_declaration_cuts(tree, source)
     results = {apply_cuts(source, cut) for cut in cuts}
     assert b"package main\n\n\n" in results
+
+
+def test_orphan_names_from_dotted_import_paths():
+    # The usable name of this import ("yaml.v2") is not a plain word
+    # token, exercising the slow-path occurrence search.
+    source = (
+        b'package main\n'
+        b'import "gopkg.in/yaml.v2"\n'
+        b'import "fmt"\n'
+        b'func dump(v any) { fmt.Println(yaml.Marshal(v)) }\n'
+        b'func main() { dump(1) }\n'
+    )
+    tree = parse_tree("go", source)
+    cuts = orphaned_declaration_cuts(tree, source)
+    results = {apply_cuts(source, cut) for cut in cuts}
+    # Deleting the dump function orphans both imports (the call site in
+    # main survives; only the definition and imports are deleted).
+    assert any(
+        b"func dump" not in r and b"import" not in r and b"func main" in r
+        for r in results
+    )
+
+
+def test_orphan_cascade_collects_transitively_dead_declarations():
+    # Deleting the const statement orphans helper; helper's body plus
+    # the const statement together hold every reference to util, so the
+    # cascade collects util as well even though no single node covers
+    # all of util's references.
+    source = (
+        b"function util(x) { return x + 1; }\n"
+        b"function helper(y) { return util(y); }\n"
+        b"function unused0() {}\n"
+        b"const out = helper(util(2));\n"
+    )
+    tree = parse_tree("javascript", source)
+    cuts = orphaned_declaration_cuts(tree, source)
+    results = {apply_cuts(source, cut) for cut in cuts}
+    assert any(
+        b"util" not in r and b"helper" not in r and b"unused0" in r
+        for r in results
+    )
+
+
+def test_orphan_extent_can_end_inside_an_anonymous_token():
+    # The import's usable name is the keyword `return`, whose only
+    # occurrence outside the import is a bare keyword token; the
+    # covering-chain walk descends into that unnamed token.
+    source = (
+        b'package main\n'
+        b'import "x/return"\n'
+        b'func f() int { return 2 }\n'
+        b'func main() { println(f()) }\n'
+    )
+    tree = parse_tree("go", source)
+    cuts = orphaned_declaration_cuts(tree, source)
+    results = {apply_cuts(source, cut) for cut in cuts}
+    assert any(b"import" not in r and b"func main" in r for r in results)
+
+
+def test_names_mentioned_handles_wordless_strings():
+    source = b'x = "-";\n'
+    tree = parse_tree("javascript", source)
+    names = _names_mentioned(tree.root_node, source)
+    assert b"-" in names
+    assert b"x" in names
 
 
 def test_orphan_cuts_empty_when_there_are_no_declarations():

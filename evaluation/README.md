@@ -17,6 +17,7 @@ shrink ray dispatches for that format.
 ```
 evaluation/
 ├── run.py        # reduce entries with shrink ray, write result.json
+├── watch.py      # run one entry interactively in the TUI (records nothing)
 ├── report.py     # regenerate the tables in RESULTS.md
 ├── benchmark.py  # measure reducer efficiency (interestingness calls) against cheap in-process oracles
 ├── benchmark_baseline.json  # committed benchmark metrics for main (compare with benchmark.py --baseline)
@@ -123,6 +124,18 @@ python3 evaluation/run.py mypy-0.942-match-union-tuple-crash
 
 # Regenerate the tables in RESULTS.md
 python3 evaluation/report.py
+```
+
+To *watch* a reduction in shrink ray's normal interactive TUI, use
+`watch.py`. It sets up the entry's oracle exactly as run.py would, but
+always restarts from the original input, runs attached to your terminal,
+and records nothing (it reduces `<entry>/work/watch<ext>`, leaving
+run.py's resumable state and the committed results untouched). Unknown
+arguments are forwarded to shrinkray:
+
+```bash
+python3 evaluation/watch.py ruff-0.0.277-isort-skip-block-panic
+python3 evaluation/watch.py pylint-2.17.4-duplicate-bases-mro-crash --parallelism 4
 ```
 
 The C/C++ entries use amd64-only compiler images which run under

@@ -18,11 +18,13 @@ a timeout from them:
 
 - When reduction stalls while a significant fraction of runs are timing
   out, the policy explores upwards: it doubles the timeout (up to the
-  user-specified maximum, or a hardcoded cap if none was given) to see
-  whether the timeouts were hiding progress. Each doubling gets a budget
-  of runs; if raising the timeout stops producing timeouts without
-  producing reductions, or we run out of headroom, the timeout drops back
-  down and exploration is paused until the next successful reduction.
+  user-specified maximum, or a hardcoded cap if none was given; a
+  user-specified timeout of infinity means there is no bound and
+  exploration can always climb further) to see whether the timeouts were
+  hiding progress. Each doubling gets a budget of runs; if raising the
+  timeout stops producing timeouts without producing reductions, or we
+  run out of headroom, the timeout drops back down and exploration is
+  paused until the next successful reduction.
 
 - When the reducer runs out of things to try (`attempt_unstick`), any
   timeouts seen since the last reduction trigger the same upward
@@ -90,9 +92,10 @@ class AdaptiveTimeoutPolicy:
         default_cap: float = DEFAULT_TIMEOUT_CAP,
         rung_budget: int = RUNG_RUN_BUDGET,
     ) -> None:
-        # A user timeout of infinity means timeouts are disabled entirely,
-        # in which case there is nothing to adapt.
-        self.__enabled = user_timeout != math.inf
+        # A user timeout of infinity means no upper bound: the timeout
+        # still adapts to measured runtimes, and exploration may raise it
+        # indefinitely, so no candidate is ever permanently lost to a
+        # timeout.
         if user_timeout is None:
             self.__cap = default_cap
         else:
@@ -120,10 +123,6 @@ class AdaptiveTimeoutPolicy:
         self.__last_progress = clock()
 
     @property
-    def enabled(self) -> bool:
-        return self.__enabled
-
-    @property
     def cap(self) -> float:
         return self.__cap
 
@@ -136,15 +135,11 @@ class AdaptiveTimeoutPolicy:
 
     def current_timeout(self) -> float:
         """The timeout to use for the next test run."""
-        if not self.__enabled:
-            return math.inf
         self.__evaluate_exploration()
         return self.__rung_timeout(self.__level)
 
     def record_completion(self, runtime: float, *, interesting: bool) -> None:
         """Record a test run that finished (however it exited)."""
-        if not self.__enabled:
-            return
         self.__runtimes.append(runtime)
         if interesting:
             self.__interesting_runtimes.append(runtime)
@@ -154,8 +149,6 @@ class AdaptiveTimeoutPolicy:
 
     def record_timeout(self, timeout_used: float) -> None:
         """Record a test run that was killed at `timeout_used` seconds."""
-        if not self.__enabled:
-            return
         self.__timed_out_flags.append(True)
         if timeout_used < self.__cap:
             self.__timeouts_below_cap += 1
@@ -165,8 +158,6 @@ class AdaptiveTimeoutPolicy:
 
     def note_reduction(self) -> None:
         """Record that a successful reduction happened."""
-        if not self.__enabled:
-            return
         self.__last_progress = self.__clock()
         self.__timeouts_below_cap = 0
         self.__exploration_exhausted = False
@@ -179,7 +170,7 @@ class AdaptiveTimeoutPolicy:
         round of reduction may now make progress (previously cached
         timeout-failures become invalid and will be retried).
         """
-        if not self.__enabled or self.__exploration_exhausted:
+        if self.__exploration_exhausted:
             return False
         if self.__timeouts_below_cap > 0 and self.__rung_timeout(
             self.__level + 1
@@ -199,8 +190,6 @@ class AdaptiveTimeoutPolicy:
         A run that timed out at `timeout_used` would still time out at any
         timeout no larger than that, but might succeed at a larger one.
         """
-        if not self.__enabled:
-            return True
         return self.current_timeout() <= timeout_used
 
     def reset(self) -> None:

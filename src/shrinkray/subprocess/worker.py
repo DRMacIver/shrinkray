@@ -1,5 +1,6 @@
 """Worker subprocess that runs the reducer with trio and communicates via JSON protocol."""
 
+import math
 import os
 import shutil
 import signal
@@ -628,11 +629,14 @@ class ReducerWorker:
             history_dir = self.state.history_manager.history_dir
             target_basename = self.state.history_manager.target_basename
 
-        # Adaptive timeout stats
+        # Adaptive timeout stats. An infinite timeout (no runtime data yet,
+        # or timeouts unbounded and unraised) is reported as "unknown".
         current_timeout: float | None = None
         timeout_rate = 0.0
-        if self.state is not None and self.state.timeout_policy.enabled:
-            current_timeout = self.state.timeout_policy.current_timeout()
+        if self.state is not None:
+            policy_timeout = self.state.timeout_policy.current_timeout()
+            if math.isfinite(policy_timeout):
+                current_timeout = policy_timeout
             timeout_rate = self.state.timeout_policy.recent_timeout_rate
 
         return ProgressUpdate(

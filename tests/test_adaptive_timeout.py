@@ -55,22 +55,31 @@ def trigger_exploration(policy, clock):
 # === basic configuration ===
 
 
-def test_disabled_when_user_timeout_is_infinite():
+def test_infinite_user_timeout_still_adapts():
     policy, _ = make_policy(user_timeout=math.inf)
-    assert not policy.enabled
+    assert policy.cap == math.inf
+    # No data yet: no timeout at all.
     assert policy.current_timeout() == math.inf
-    # Records are accepted but have no effect
+    # But once we have runtime measurements, the timeout adapts as usual.
     policy.record_completion(1.0, interesting=True)
-    policy.record_timeout(5.0)
-    policy.note_reduction()
-    assert policy.current_timeout() == math.inf
-    assert not policy.attempt_unstick()
-    assert policy.cached_timeout_valid(2.0)
+    assert policy.current_timeout() == 10.0
+
+
+def test_unstick_climbs_without_bound_when_uncapped():
+    policy, _ = make_policy(user_timeout=math.inf)
+    policy.record_completion(0.5, interesting=True)  # base 5.0
+    # With no cap, exploration never runs out of headroom: a timed-out
+    # candidate is never permanently lost.
+    expected = 5.0
+    for _ in range(12):
+        policy.record_timeout(policy.current_timeout())
+        assert policy.attempt_unstick()
+        expected *= 2
+        assert policy.current_timeout() == expected
 
 
 def test_default_cap_when_no_user_timeout():
     policy, _ = make_policy(user_timeout=None)
-    assert policy.enabled
     assert policy.cap == DEFAULT_TIMEOUT_CAP
     # No data yet: be maximally generous
     assert policy.current_timeout() == DEFAULT_TIMEOUT_CAP
@@ -399,7 +408,11 @@ def policy_events(draw):
 
 
 @given(
-    user_timeout=st.one_of(st.none(), st.floats(min_value=0.5, max_value=1000.0)),
+    user_timeout=st.one_of(
+        st.none(),
+        st.just(math.inf),
+        st.floats(min_value=0.5, max_value=1000.0),
+    ),
     events=policy_events(),
 )
 @example(

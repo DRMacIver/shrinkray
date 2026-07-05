@@ -8,6 +8,8 @@
   again if they don't. Reduction no longer ends while a raised timeout might
   still make progress.
 - `--timeout` now sets the maximum the adaptive timeout may reach rather than
-  a fixed timeout; `--timeout` <= 0 still disables timeouts entirely.
+  a fixed timeout. With `--timeout` <= 0 the adaptive timeout has no upper
+  bound: tests still get killed once they run well past recent runtimes, but
+  the timeout can always be raised again, so no candidate is permanently lost.
 - The TUI now shows the current test timeout and the fraction of recent test
   runs that timed out.

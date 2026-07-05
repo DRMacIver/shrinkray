@@ -1680,6 +1680,7 @@ async def test_build_progress_update_with_reducer_none():
 
     # Set up state for parallel workers calculation
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None  # No test output capture
 
@@ -1721,6 +1722,7 @@ async def test_build_progress_update_with_reducer_pass_stats_none():
 
     # Set up state
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None  # No test output capture
 
@@ -1759,6 +1761,7 @@ async def test_build_progress_update_with_reducer_no_disabled_passes_attr():
 
     # Set up state
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None  # No test output capture
 
@@ -1791,6 +1794,7 @@ async def test_build_progress_update_periodic_size_history():
     worker.problem.current_test_case = b"test content"
 
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None
 
@@ -3088,6 +3092,7 @@ async def test_build_progress_update_includes_adaptive_timeout():
     worker.problem.current_test_case = b"test content"
 
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None
     worker.state.history_manager = None
@@ -3101,7 +3106,7 @@ async def test_build_progress_update_includes_adaptive_timeout():
 
 
 @pytest.mark.trio
-async def test_build_progress_update_timeout_none_when_disabled():
+async def test_build_progress_update_timeout_none_when_unbounded_with_no_data():
     worker = ReducerWorker()
     worker.reducer = None
     worker.problem = Mock()
@@ -3117,6 +3122,7 @@ async def test_build_progress_update_timeout_none_when_disabled():
     worker.problem.current_test_case = b"test content"
 
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None
     worker.state.history_manager = None

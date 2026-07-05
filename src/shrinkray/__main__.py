@@ -93,9 +93,9 @@ async def run_shrink_ray(
         "Shrink Ray adapts the actual timeout to measured test runtimes over "
         "the course of the run, never exceeding this value (or 5 minutes if "
         "not specified), and temporarily raises it again when reduction "
-        "stalls with tests timing out. If set to <= 0 then no timeout will "
-        "be used. Any commands that time out will be treated as failing the "
-        "test"
+        "stalls with tests timing out. If set to <= 0 the adaptive timeout "
+        "has no upper bound. Any commands that time out will be treated as "
+        "failing the test"
     ),
 )
 @click.option(

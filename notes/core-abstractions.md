@@ -106,6 +106,13 @@ ShrinkRay organizes byte passes into tiers:
 2. **great_passes**: Core passes run in a loop until no progress
 3. **ok_passes**: Run when great passes stop making progress
 4. **last_ditch_passes**: Expensive or low-value passes run at the end
+5. **polish_passes**: Very expensive, mostly-normalising passes run only after everything else converges
+
+Scheduling is also adaptive per pass: completed fruitless runs are
+fingerprinted (the pass is skipped until the test case changes), passes
+with a fruitless record run under a small probation budget, and any
+budget-aborted pass is re-run in full before the reduction finishes so
+final results are unaffected. See `notes/reduction-passes.md`.
 
 ## ReductionPump[T]
 

@@ -454,6 +454,10 @@ class ReductionProblem[T](ABC):
     work: WorkContext
     # Track current pass stats for real-time updates (set by reducer)
     current_pass_stats: PassStatsProtocol | None = None
+    # Called after every real evaluation of the interestingness test (not
+    # cache hits), letting the reducer observe a running pass's progress
+    # (set by the reducer for the duration of a pass run).
+    pass_call_monitor: Callable[[], None] | None = None
 
     def __attrs_post_init__(self) -> None:
         # Cache of View objects for each Format, to avoid re-parsing
@@ -700,6 +704,8 @@ class BasicReductionProblem(ReductionProblem[T]):
                     await f(test_case)
             else:
                 self.stats.wasted_interesting_calls += 1
+        if self.pass_call_monitor is not None:
+            self.pass_call_monitor()
         return result
 
     @property

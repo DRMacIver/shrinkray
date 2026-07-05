@@ -38,7 +38,27 @@ The `ShrinkRay` reducer organises passes into stages:
 
 1. **initial_cuts**: Fast, high-value passes (comments, hollow, large blocks) with timeout-based cancellation
 2. **great_passes**: Core loop (line and semicolon-split deletion, hollow, lift_braces, debracket) - runs until no progress
-3. **ok_passes**: Run when great_passes plateau (token deletion, smaller blocks, normalisation)
-4. **last_ditch_passes**: Expensive or low-yield passes (byte lowering, brackets)
+3. **ok_passes**: Run when great_passes plateau (smaller blocks, normalisation)
+4. **last_ditch_passes**: Expensive or low-yield passes (token block deletion, brackets)
+5. **polish_passes**: Very expensive, very low-yield passes (short_deletions, byte lowering) that mostly normalise rather than shrink. They only run once every other stage has converged.
 
 Great passes loop until no progress, tracking which passes succeeded to prioritise them on subsequent iterations.
+
+### Adaptive scheduling
+
+`run_pass` adapts to each pass's recent record (all of this was tuned
+against `evaluation/benchmark.py`, which measures interestingness calls on
+a fixed problem suite):
+
+- **Fingerprints**: a pass that ran to completion without making progress
+  is skipped for free until the test case changes. Pass candidate
+  generation is deterministic given the test case (randomness only affects
+  order), so re-running it would be a no-op.
+- **Probation budgets**: a pass whose previous completed run was fruitless
+  gets only `probation_budget` consecutive failed calls on its next run
+  before being abandoned for now.
+- **Targeted verification**: abandoned passes are recorded in
+  `incomplete_passes` and re-run without a budget before the reducer
+  finishes, so the final result is a fixpoint of every pass, exactly as if
+  no budgets existed. Budgets only move work later (usually onto much
+  smaller test cases); they never skip it entirely.

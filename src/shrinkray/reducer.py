@@ -210,13 +210,11 @@ class ShrinkRay(Reducer[bytes]):
             compose(Split(b"\n"), block_deletion(11, 20)),
             remove_indents,
             remove_whitespace,
-            compose(Tokenize(), block_deletion(1, 20)),
             reduce_integer_literals,
             replace_falsey_with_zero,
             combine_expressions,
             merge_adjacent_strings,
             lexeme_based_deletions,
-            short_deletions,
             normalize_identifiers,
             line_sorter,
         ]
@@ -224,11 +222,13 @@ class ShrinkRay(Reducer[bytes]):
 
     last_ditch_passes: list[ReductionPass[bytes]] = attrs.Factory(
         lambda: [
+            # Fine-grained token block deletion generates a very large
+            # candidate set with a low success rate; benchmarking shows it
+            # is much cheaper run late, on already-reduced test cases.
+            compose(Tokenize(), block_deletion(1, 20)),
             compose(Split(b"\n"), block_deletion(21, 100)),
             replace_space_with_newlines,
             delete_byte_spans,
-            lower_bytes,
-            lower_individual_bytes,
             simplify_brackets,
             standard_substitutions,
             # This is in last ditch because it's probably not useful
@@ -236,6 +236,41 @@ class ShrinkRay(Reducer[bytes]):
             cut_comment_like_things,
         ]
     )
+
+    # Expensive passes with very low success rates, mostly valuable for
+    # normalising the final result rather than shrinking it. They only run
+    # once everything else has converged: benchmarking showed they consumed
+    # a large fraction of all interestingness calls when interleaved with
+    # the productive passes, for almost no reductions.
+    polish_passes: list[ReductionPass[bytes]] = attrs.Factory(
+        lambda: [
+            short_deletions,
+            lower_bytes,
+            lower_individual_bytes,
+        ]
+    )
+
+    # Number of consecutive failed calls after which a pass on probation
+    # (one whose previous completed run made no progress) is abandoned for
+    # now. Abandoned passes are recorded in incomplete_passes and re-run
+    # without a budget before the reducer finishes, so this only affects
+    # when their work happens, not whether it does.
+    probation_budget: int = 25
+
+    # Passes whose previous completed run made no progress. Such a pass
+    # gets only probation_budget consecutive failures on its next run.
+    pass_probation: dict[str, bool] = attrs.Factory(dict)
+
+    # Passes whose most recent run was cut short by the probation budget,
+    # keyed by name. They must be re-run to completion before finishing.
+    incomplete_passes: dict[str, ReductionPass[bytes]] = attrs.Factory(dict)
+
+    # For each pass that ran to completion without making progress, the
+    # test case it ran against. Re-running a pass on an identical test
+    # case is a deterministic no-op (randomness only affects the order in
+    # which candidates are tried, not which candidates are generated), so
+    # such runs are skipped entirely.
+    pass_fingerprints: dict[str, bytes] = attrs.Factory(dict)
 
     def __attrs_post_init__(self) -> None:
         if is_python(self.target.current_test_case):
@@ -278,12 +313,42 @@ class ShrinkRay(Reducer[bytes]):
             else:
                 return f"Running reduction pump {self.current_pump.__name__}"
 
-    async def run_pass(self, rp: ReductionPass[bytes]) -> None:
+    async def run_pass(
+        self, rp: ReductionPass[bytes], *, budgeted: bool = True
+    ) -> None:
         pass_name = rp.__name__
 
         # Skip if pass is disabled
         if self.is_pass_disabled(pass_name):
             return
+
+        problem = self.target
+
+        # A pass that ran to completion without making progress cannot make
+        # progress on an identical test case, so skip it for free.
+        if self.pass_fingerprints.get(pass_name) == problem.current_test_case:
+            return
+
+        use_budget = budgeted and self.pass_probation.get(pass_name, False)
+        scope = trio.CancelScope()
+        last_seen = problem.current_test_case
+        consecutive_failures = 0
+        budget_exhausted = False
+        made_progress = False
+
+        def monitor() -> None:
+            nonlocal last_seen, consecutive_failures, budget_exhausted
+            nonlocal made_progress
+            current = problem.current_test_case
+            if current is not last_seen:
+                last_seen = current
+                made_progress = True
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                if use_budget and consecutive_failures > self.probation_budget:
+                    budget_exhausted = True
+                    scope.cancel()
 
         try:
             assert self.current_reduction_pass is None
@@ -296,20 +361,37 @@ class ShrinkRay(Reducer[bytes]):
             stats_entry.run_count += 1
 
             # Set current pass stats on the problem for real-time updates
-            self.target.current_pass_stats = stats_entry
+            problem.current_pass_stats = stats_entry
+            problem.pass_call_monitor = monitor
 
             # Run the pass with a cancel scope that can be externally cancelled
-            with trio.CancelScope() as scope:
+            with scope:
                 self._current_pass_scope = scope
                 await rp(self.target)
 
-            # If the pass was cancelled/skipped, mark that passes were skipped
-            if scope.cancelled_caught:
+            if budget_exhausted:
+                # The pass was abandoned by its probation budget. It still
+                # has untried candidates, so it must be re-run before the
+                # reduction can finish.
+                self.incomplete_passes[pass_name] = rp
+                if made_progress:
+                    self.pass_probation[pass_name] = False
+            elif scope.cancelled_caught:
+                # The pass was skipped externally; mark that passes were
+                # skipped so the main loop runs it again later.
                 self._passes_were_skipped = True
+            else:
+                self.incomplete_passes.pop(pass_name, None)
+                self.pass_probation[pass_name] = not made_progress
+                if made_progress:
+                    self.pass_fingerprints.pop(pass_name, None)
+                else:
+                    self.pass_fingerprints[pass_name] = problem.current_test_case
 
         finally:
             self.current_reduction_pass = None
-            self.target.current_pass_stats = None
+            problem.current_pass_stats = None
+            problem.pass_call_monitor = None
             self._current_pass_scope = None
             self._skip_requested = False
 
@@ -443,7 +525,6 @@ class ShrinkRay(Reducer[bytes]):
         if await self.target.is_interesting(b""):
             return
 
-        prev = 0
         for c in [0, 1, ord(b"\n"), ord(b"0"), ord(b"z"), 255]:
             if await self.target.is_interesting(bytes([c])):
                 await self.__minimize_single_byte(c)
@@ -461,11 +542,26 @@ class ShrinkRay(Reducer[bytes]):
                 continue
             for pump in self.pumps:
                 await self.pump(pump)
-            if self.target.current_test_case == prev:
-                # Only terminate if no passes were skipped
-                # If passes were skipped, we need another full run to be sure
-                if not self._passes_were_skipped:
-                    break
+            if self.target.current_test_case != prev:
+                continue
+            # Only once everything else has converged do the expensive,
+            # rarely-productive polish passes run.
+            for rp in self.polish_passes:
+                await self.run_pass(rp)
+            if self.target.current_test_case != prev:
+                continue
+            # Passes abandoned by a probation budget may have missed
+            # reductions. Re-run them without a budget before concluding,
+            # so the final result is a fixpoint of every pass.
+            if self.incomplete_passes:
+                for name in sorted(self.incomplete_passes):
+                    await self.run_pass(self.incomplete_passes[name], budgeted=False)
+                if self.target.current_test_case != prev:
+                    continue
+            # Only terminate if no passes were skipped
+            # If passes were skipped, we need another full run to be sure
+            if not self._passes_were_skipped:
+                break
 
 
 class UpdateKeys(Patches[dict[str, bytes], dict[str, bytes]]):

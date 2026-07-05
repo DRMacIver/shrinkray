@@ -2,6 +2,8 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from contextlib import contextmanager
+from itertools import takewhile
+from random import Random
 from typing import Any
 
 import attrs
@@ -58,11 +60,13 @@ from shrinkray.passes.treesitter import (
     treesitter_passes,
 )
 from shrinkray.problem import (
+    BasicReductionProblem,
     ReductionProblem,
     ReductionStats,
     shortlex,
     sort_key_for_initial,
 )
+from shrinkray.work import WorkContext
 
 
 @define
@@ -150,6 +154,11 @@ class ShrinkRay(Reducer[bytes]):
     # Enables the C/C++ specific passes and pumps. Set when the test
     # case's file name suggests it's C or C++.
     enable_cpp_passes: bool = False
+
+    # Whether to re-run reduction from the original input when a fixpoint
+    # is reached, constrained to sort below it (see run). Disabled for the
+    # restarted sub-reductions themselves so they don't recurse.
+    restart_at_fixpoint: bool = True
 
     # Enables grammar-aware passes for the named tree-sitter language.
     # Set from the test case's file extension.
@@ -580,17 +589,18 @@ class ShrinkRay(Reducer[bytes]):
             if self.target.current_size >= 0.99 * prev:
                 return
 
-    async def __minimize_single_byte(self, c: int) -> None:
-        """Try to replace the current single-byte test case with a smaller
-        interesting byte, scanning upwards from zero. Interesting bytes are
-        adopted by is_interesting as a side effect only if they sort below
-        the current test case, so the scan only stops once one is adopted."""
-        for i in range(c):
-            candidate = bytes([i])
-            if (
-                await self.target.is_interesting(candidate)
-                and self.target.current_test_case == candidate
-            ):
+    async def __minimize_single_byte(self) -> None:
+        """Try to replace the current single-byte test case with the smallest
+        interesting single byte. Candidates are scanned in sort-key order
+        (which for text problems differs from numeric byte order), so the
+        first interesting candidate is the minimal one and is adopted by
+        is_interesting as a side effect."""
+        current_key = self.target.sort_key(self.target.current_test_case)
+        candidates = sorted((bytes([i]) for i in range(256)), key=self.target.sort_key)
+        for candidate in takewhile(
+            lambda c: self.target.sort_key(c) < current_key, candidates
+        ):
+            if await self.target.is_interesting(candidate):
                 return
 
     async def run(self) -> None:
@@ -600,15 +610,93 @@ class ShrinkRay(Reducer[bytes]):
             await self.close_external_reducers()
 
     async def _run(self) -> None:
-        await self.target.setup()
+        initial = self.target.current_test_case
+        initial_random_state = self.target.work.random.getstate()
+        await self.__reduce()
 
-        if await self.target.is_interesting(b""):
+        if not self.restart_at_fixpoint:
             return
 
+        # Greedy reduction can paint itself into a corner: adopting one
+        # improvement can make a smaller final result unreachable, because
+        # no pass proposes the coupled edit that would get there from the
+        # new state. Re-reducing from the original input, constrained to
+        # results that sort below the fixpoint, excludes the basin the
+        # previous run descended into and can find a better one. Repeat
+        # while it keeps improving; each round strictly decreases the
+        # fixpoint, so this terminates.
+        while True:
+            fixpoint = self.target.current_test_case
+            if fixpoint == initial:
+                return
+            await self.__restart_reduction(initial, initial_random_state)
+            if self.target.current_test_case == fixpoint:
+                return
+
+    async def __restart_reduction(
+        self, initial: bytes, initial_random_state: Any
+    ) -> None:
+        problem = self.target
+        fixpoint_key = problem.sort_key(problem.current_test_case)
+
+        async def is_interesting(candidate: bytes) -> bool:
+            if candidate == initial:
+                return True
+            if problem.sort_key(candidate) >= fixpoint_key:
+                return False
+            # Any hit is an improvement on the fixpoint and is adopted by
+            # the real problem as a side effect of this call.
+            return await problem.is_interesting(candidate)
+
+        # Replaying the original run's random state makes the restarted
+        # run attempt the same candidates in the same order (shuffles and
+        # early-abort budgets included) until its first improvement. In
+        # particular a restart that finds nothing has re-attempted every
+        # candidate of the original run, so anything the original run
+        # ever tried remains reachable as a final result.
+        restart_random = Random()
+        restart_random.setstate(initial_random_state)
+        restarted: BasicReductionProblem[bytes] = BasicReductionProblem(
+            initial=initial,
+            is_interesting=is_interesting,
+            work=WorkContext(
+                random=restart_random,
+                parallelism=problem.work.parallelism,
+                volume=problem.work.volume,
+            ),
+            sort_key=problem.sort_key,
+        )
+        reducer = ShrinkRay(
+            target=restarted,
+            enable_cpp_passes=self.enable_cpp_passes,
+            treesitter_language=self.treesitter_language,
+            external_reducers=self.external_reducers,
+            python_reducer=self.python_reducer,
+            reducer_log_dir=self.reducer_log_dir,
+            restart_at_fixpoint=False,
+        )
+        await reducer.run()
+
+    async def __reduce(self) -> None:
+        await self.target.setup()
+
+        # is_interesting adopts b"" as a side effect only if it sorts below
+        # the current test case; under a sort key where empty is not minimal
+        # it can be interesting without being adopted, and reduction must
+        # then carry on rather than stopping with no progress.
+        if await self.target.is_interesting(b"") and not self.target.current_test_case:
+            return
+
+        # If some single byte is interesting, the result is probably a single
+        # byte, so scan those first. This is only a shortcut, not an answer:
+        # an interesting single byte may not be adopted (an undecodable byte
+        # sorts above every decodable test case), and even an adopted one can
+        # sort above longer test cases under orderings that are not
+        # length-monotone, so the main loop still runs afterwards.
         for c in [0, 1, ord(b"\n"), ord(b"0"), ord(b"z"), 255]:
             if await self.target.is_interesting(bytes([c])):
-                await self.__minimize_single_byte(c)
-                return
+                await self.__minimize_single_byte()
+                break
 
         await self.initial_cut()
 

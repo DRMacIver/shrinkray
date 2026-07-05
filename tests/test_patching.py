@@ -16,7 +16,7 @@ from shrinkray.passes.patching import (
     SetPatches,
     apply_patches,
 )
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.problem import BasicReductionProblem, Format
 from shrinkray.work import WorkContext
 
 
@@ -232,6 +232,120 @@ async def test_apply_patches_early_abort_gives_up(monkeypatch):
     # give_up_after == 5, so it must stop well before trying all 50 patches.
     assert problem.stats.calls < 50
     assert problem.current_test_case == initial
+
+
+@pytest.mark.parametrize("parallelism", [2, 4])
+async def test_apply_patches_early_abort_deterministic_across_parallelism(
+    parallelism, monkeypatch
+):
+    """With early_abort and no successful reductions, the set of candidates
+    attempted must not depend on parallelism: the budget must cut off at a
+    fixed position in the (deterministically shuffled) patch queue rather
+    than at a scheduling-dependent count of completed attempts."""
+    monkeypatch.setattr("shrinkray.passes.patching.MIN_PATCH_ATTEMPTS", 10)
+    monkeypatch.setattr("shrinkray.passes.patching.EARLY_ABORT_SIZE_FACTOR", 0)
+
+    initial = bytes(range(60))
+    patches = [[(i, i + 1)] for i in range(60)]
+
+    async def run(par):
+        attempted = set()
+
+        async def is_interesting(x):
+            attempted.add(x)
+            return x == initial
+
+        problem = BasicReductionProblem(
+            initial=initial,
+            is_interesting=is_interesting,
+            work=WorkContext(parallelism=par),
+        )
+        await apply_patches(problem, Cuts(), patches, early_abort=True)
+        return attempted
+
+    assert await run(parallelism) == await run(1)
+
+
+async def test_apply_patches_stops_when_combined_shortcut_adopts_via_view():
+    """When the all-patches shortcut succeeds through a view, the view can
+    re-parse the dumped result into something different from the combined
+    patch application. That still counts as the shortcut succeeding: the
+    remaining patches were computed against the old parse and must not be
+    applied to the new, shorter one (regression test: this crashed
+    directory reduction with a Cuts length assertion)."""
+
+    class NormalizingLines(Format[bytes, list[bytes]]):
+        # parse keeps empty lines; dumps drops them, so a round trip does
+        # not preserve the parsed representation.
+        def parse(self, input: bytes) -> list[bytes]:
+            return input.split(b"\n")
+
+        def dumps(self, input: list[bytes]) -> bytes:
+            return b"\n".join(line for line in input if line)
+
+    async def is_interesting(x):
+        return b"b" in x
+
+    problem = BasicReductionProblem(
+        initial=b"a\n\nb\nb",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    view = problem.view(NormalizingLines())
+
+    # Both cuts together leave [b"", b"b"], which dumps to b"b" and is
+    # adopted; the re-parsed view is then [b"b"], against which the
+    # individual cuts would be out of range.
+    await apply_patches(view, Cuts(), [[(0, 1)], [(3, 4)]])
+
+    assert problem.current_test_case == b"b"
+
+
+async def test_merge_master_rejects_probes_past_queue_end():
+    """When a full merge fails, the search for the largest mergeable prefix
+    probes sizes that can exceed the queue length; those probes must be
+    rejected rather than merging patches that arrived after the pass
+    started. Ten patches whose merges are interesting up to nine removals
+    drive the doubling search from eight past the nine queued patches."""
+    n = 10
+    target = bytes(range(n))
+    release = trio.Event()
+    pending = 0
+
+    async def is_interesting(candidate: bytes) -> bool:
+        # Hold every individual patch check until all of them are in
+        # flight, so all ten patches join the same merge queue.
+        nonlocal pending
+        if len(candidate) == n - 1:
+            pending += 1
+            if pending == n:
+                release.set()
+            await release.wait()
+        return len(candidate) >= 1
+
+    problem = BasicReductionProblem(
+        initial=target,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=n),
+    )
+    applier = PatchApplier(
+        SetPatches(lambda patch, t: bytes(b for b in t if b not in patch)),
+        problem,
+    )
+    results = []
+
+    async with trio.open_nursery() as nursery:
+        for i in range(n):
+
+            async def attempt(i=i):
+                results.append(await applier.try_apply_patch(frozenset({i})))
+
+            nursery.start_soon(attempt)
+
+    # Nine of the ten patches merge (all ten together would empty the test
+    # case, which is not interesting); the last one is reported unapplied.
+    assert sorted(results) == [False] + [True] * (n - 1)
+    assert len(problem.current_test_case) == 1
 
 
 async def test_apply_patches_no_early_abort_by_default():

@@ -100,6 +100,19 @@ def _finish(out: list[str]) -> str:
 # --- shared inline normaliser (never emits a newline) ----------------------
 
 
+# Operators bucketed by first character, preserving OPS's longest-first
+# matching order, so _inline only scans candidates when the current
+# character can actually start one.
+_OPS_BY_FIRST: dict[str, list[str]] = {}
+for _op in OPS:
+    _OPS_BY_FIRST.setdefault(_op[0], []).append(_op)
+
+# A run of characters _inline copies through verbatim: anything that is not
+# a quote, whitespace (\s matches exactly str.isspace), or the start of an
+# operator. Batching these runs into slices is what makes _inline fast.
+_INLINE_PLAIN_RUN = re.compile(r"""[^"'\s=!<>+\-&|]+""")
+
+
 def _inline(s: str) -> str:
     """Collapse whitespace and canonicalise operator spacing on a single line.
 
@@ -109,24 +122,17 @@ def _inline(s: str) -> str:
     out: list[str] = []
     i, n = 0, len(s)
     while i < n:
+        run = _INLINE_PLAIN_RUN.match(s, i)
+        if run is not None:
+            out.append(run.group())
+            i = run.end()
+            continue
         c = s[i]
         if c in "\"'":
-            q = c
-            out.append(c)
-            i += 1
-            while i < n:
-                out.append(s[i])
-                if s[i] == "\\" and i + 1 < n:
-                    out.append(s[i + 1])
-                    i += 2
-                    continue
-                if s[i] == q:
-                    i += 1
-                    break
-                i += 1
+            i = _scan_literal(s, i, out)
             continue
         if c.isspace():
-            j = i
+            j = i + 1
             while j < n and s[j].isspace():
                 j += 1
             prev = out[-1][-1] if out and out[-1] else ""
@@ -135,7 +141,11 @@ def _inline(s: str) -> str:
                 out.append(" ")
             i = j
             continue
-        op = next((o for o in OPS if s.startswith(o, i)), None)
+        op = None
+        for candidate in _OPS_BY_FIRST.get(c, ()):
+            if s.startswith(candidate, i):
+                op = candidate
+                break
         if op is not None:
             while out and out[-1] == " ":
                 out.pop()
@@ -363,19 +373,34 @@ def _reflow_tag(s: str) -> str:
 
 
 def _scan_literal(s: str, i: int, cur: list[str]) -> int:
+    """Copy the string literal starting at ``s[i]`` into ``cur``.
+
+    Returns the index just past the closing quote (or the end of the string
+    for an unterminated literal). Jumps between backslashes and quotes with
+    str.find and appends a single slice rather than walking per character.
+    """
     q = s[i]
-    cur.append(q)
+    start = i
     i += 1
     n = len(s)
     while i < n:
-        cur.append(s[i])
-        if s[i] == "\\" and i + 1 < n:
-            cur.append(s[i + 1])
+        c = s[i]
+        if c == "\\":
             i += 2
-            continue
-        if s[i] == q:
-            return i + 1
-        i += 1
+        elif c == q:
+            i += 1
+            break
+        else:
+            next_quote = s.find(q, i)
+            next_backslash = s.find("\\", i)
+            if next_quote == -1:
+                i = n if next_backslash == -1 else next_backslash
+            elif next_backslash == -1:
+                i = next_quote
+            else:
+                i = min(next_quote, next_backslash)
+    i = min(i, n)
+    cur.append(s[start:i])
     return i
 
 
@@ -471,6 +496,12 @@ def detect_family(s: str) -> str:
 
 
 def basic_format(s: str) -> str:
+    # The empty string is its own canonical form. Mapping it to "\n" (as the
+    # family reflows do for whitespace-only input) would rank "" above
+    # whitespace-only strings in the reflow sort key, so the empty test case
+    # would not be the global minimum of the reduction ordering.
+    if not s:
+        return ""
     fam = detect_family(s)
     if fam == "tag":
         return _reflow_tag(s)

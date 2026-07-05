@@ -190,9 +190,19 @@ async def apply_patches[PatchType, TargetType](
     every remaining candidate. It must NOT be set for deletion passes, whose
     useful patches can be sparse and would then be skipped, losing size.
     """
+    # Shortcut: if applying every patch at once works, there's nothing to
+    # merge. The shortcut counts as succeeding whenever the attempt changed
+    # the current test case (through a view the adopted parse can differ
+    # from `combined`); the individual patches were computed against the
+    # old test case and must not be applied to the new one. An interesting
+    # result that changed nothing (it can sort above the current test case)
+    # falls through to trying the patches individually.
+    before = problem.current_test_case
     try:
-        if await problem.is_interesting(
-            patch_info.apply(patch_info.combine(*patches), problem.current_test_case)
+        combined = patch_info.apply(patch_info.combine(*patches), before)
+        if combined == before or (
+            await problem.is_interesting(combined)
+            and problem.current_test_case != before
         ):
             return
     except Conflict:
@@ -205,14 +215,13 @@ async def apply_patches[PatchType, TargetType](
     patches = list(patches)
     problem.work.random.shuffle(patches)
     patches.sort(key=patch_info.size, reverse=True)
-    for patch in patches:
-        send_patches.send_nowait(patch)
+    for i, patch in enumerate(patches):
+        send_patches.send_nowait((i, patch))
     send_patches.close()
 
     give_up_after = max(
         MIN_PATCH_ATTEMPTS, EARLY_ABORT_SIZE_FACTOR * problem.current_size
     )
-    attempts = 0
     any_success = False
 
     async with trio.open_nursery() as nursery:
@@ -220,18 +229,21 @@ async def apply_patches[PatchType, TargetType](
 
             @nursery.start_soon
             async def worker() -> None:
-                nonlocal attempts, any_success
+                nonlocal any_success
                 while True:
                     try:
-                        patch = await receive_patches.receive()
+                        i, patch = await receive_patches.receive()
                     except trio.EndOfChannel:
                         break
+                    # The give-up decision is by queue position, not by a
+                    # count of completed attempts: which patches fall inside
+                    # the budget must not depend on parallelism or
+                    # scheduling, so a pass attempts the same candidates at
+                    # every parallelism level when nothing is succeeding.
+                    if early_abort and not any_success and i >= give_up_after:
+                        return
                     if await applier.try_apply_patch(patch):
                         any_success = True
-                    attempts += 1
-                    if early_abort and not any_success and attempts >= give_up_after:
-                        nursery.cancel_scope.cancel()
-                        return
 
 
 ReplacementPatch = tuple[tuple[int, int, bytes], ...]

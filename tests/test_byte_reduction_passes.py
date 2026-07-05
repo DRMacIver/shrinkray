@@ -16,7 +16,12 @@ from shrinkray.passes.bytes import (
 from shrinkray.passes.patching import apply_patches
 from shrinkray.problem import BasicReductionProblem, shortlex
 from shrinkray.work import WorkContext
-from tests.helpers import assert_reduces_to, direct_reductions, reduce_with
+from tests.helpers import (
+    assert_reduces_to,
+    direct_reductions,
+    latin1_text_sort_key,
+    reduce_with,
+)
 
 
 def is_hello(data: bytes) -> bool:
@@ -57,12 +62,15 @@ def test_debracket():
 
 @pytest.mark.parametrize("parallelism", [1, 2])
 def test_byte_reduction_example_1(parallelism):
+    # Uses shortlex so the expected minimum is the numerically lowered
+    # byte; under natural text ordering whitespace replacements sort lower.
     assert (
         reduce_with(
             [lower_bytes],
             b"\x00\x03",
             lambda x: (len(x) == 2 and x[1] >= 2),
             parallelism=parallelism,
+            sort_key=shortlex,
         )
         == b"\x00\x02"
     )
@@ -76,6 +84,7 @@ def test_byte_reduction_example_2(parallelism):
             b"\x03\x00",
             lambda x: (len(x) == 2 and x[0] >= 2),
             parallelism=parallelism,
+            sort_key=shortlex,
         )
         == b"\x02\x00"
     )
@@ -88,6 +97,83 @@ def test_byte_reduction_example_3(parallelism):
         target=b"120",
         parallelism=parallelism,
         sort_key=shortlex,
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_lower_individual_bytes_descends_in_sort_key_order(parallelism):
+    """Natural text ordering ranks b"z" below b"\\x00", so lowering must be
+    able to move a byte to a numerically larger but lower-sorting value,
+    converging on the smallest interesting one."""
+    sort_key = latin1_text_sort_key
+    assert (
+        reduce_with(
+            [lower_individual_bytes],
+            b"a\x00",
+            lambda x: sort_key(x) >= sort_key(b"az"),
+            parallelism=parallelism,
+            sort_key=sort_key,
+        )
+        == b"az"
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_lower_bytes_descends_in_sort_key_order(parallelism):
+    """As above, but for the pass that replaces all occurrences of a byte."""
+    sort_key = latin1_text_sort_key
+    assert (
+        reduce_with(
+            [lower_bytes],
+            b"\x00\x00",
+            lambda x: sort_key(x) >= sort_key(b"zz"),
+            parallelism=parallelism,
+            sort_key=sort_key,
+        )
+        == b"zz"
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_restart_phase_escapes_greedy_corner(parallelism):
+    """Greedy reduction from this origin deletes bytes first and wanders
+    into whitespace-layout states from which the pair-replacement target
+    cannot be reached by any single edit. The restart phase re-reduces from
+    the original input constrained below the fixpoint, which excludes that
+    basin and finds the target."""
+    assert_reduces_to(
+        origin=b"\x93\xe3.\xc5",
+        target=b"\x93\t\t\xc5",
+        parallelism=parallelism,
+        language_restrictions=False,
+        sort_key=latin1_text_sort_key,
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_can_reach_whitespace_padded_target(parallelism):
+    """The reflow text ordering is not length-monotone: b"\\t\\t" sorts below
+    the single byte b"0", so reduction can adopt a state from which the
+    target is only reachable by temporarily growing the test case. The
+    restart phase must recover this."""
+    assert_reduces_to(
+        origin=b"ab",
+        target=b"\t\t",
+        parallelism=parallelism,
+        language_restrictions=False,
+    )
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+def test_can_reach_content_preserving_padded_target(parallelism):
+    """As above, but the padded target keeps some of the original content:
+    b"a\\t\\t" is longer than the intermediate state b"ab" yet sorts below
+    it, so it needs padding followed by byte lowering."""
+    assert_reduces_to(
+        origin=b"abc",
+        target=b"a\t\t",
+        parallelism=parallelism,
+        language_restrictions=False,
     )
 
 

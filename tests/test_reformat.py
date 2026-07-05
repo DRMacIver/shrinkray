@@ -235,7 +235,7 @@ def test_distance_non_whitespace_mismatch_and_tails():
 
 @pytest.mark.parametrize(
     "text",
-    ["", "\n\n", "   ", "{{{", "}}}", '"unclosed', "/* unclosed", "a<b", "\x00x"],
+    ["\n\n", "   ", "{{{", "}}}", '"unclosed', "/* unclosed", "a<b", "\x00x"],
 )
 def test_never_crashes_and_ends_with_newline(text):
     out = basic_format(text)
@@ -247,7 +247,10 @@ def test_never_crashes_and_ends_with_newline(text):
 def test_property_robust_and_deterministic(s):
     out = basic_format(s)
     assert isinstance(out, str)
-    assert out.endswith("\n")
+    if s:
+        assert out.endswith("\n")
+    else:
+        assert out == ""
     assert basic_format(s) == out  # deterministic
 
 
@@ -272,7 +275,18 @@ ARBITRARY = st.text(max_size=200)
 def test_property_arbitrary_text_never_crashes(s):
     out = basic_format(s)
     assert isinstance(out, str)
-    assert out.endswith("\n")
+    if s:
+        assert out.endswith("\n")
+    else:
+        assert out == ""
+
+
+def test_empty_input_formats_to_empty():
+    # The empty string must be its own canonical form: if it mapped to "\n"
+    # (like whitespace-only inputs do), the reflow sort key would rank ""
+    # *above* whitespace-only strings, and the empty test case would no
+    # longer be the global minimum of the reduction ordering.
+    assert basic_format("") == ""
 
 
 @given(ARBITRARY)

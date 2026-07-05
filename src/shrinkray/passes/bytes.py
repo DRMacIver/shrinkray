@@ -11,7 +11,7 @@ Key passes:
 - delete_byte_spans: Deletes contiguous byte ranges
 - short_deletions: Deletes small (1-10 byte) sequences
 - remove_indents/remove_whitespace: Whitespace normalization
-- lower_bytes: Reduces byte values toward 0
+- lower_bytes/lower_individual_bytes: Replace bytes with lower-sorting ones
 - lexeme_based_deletions: Deletes between repeated patterns
 
 Formats:
@@ -502,36 +502,72 @@ class ByteReplacement(Patches[ReplacementPatch, bytes]):
         return result
 
     def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
-        result = bytearray()
-        for c in target:
-            result.append(patch.get(c, c))
-        return bytes(result)
+        table = bytearray(range(256))
+        for source, replacement in patch.items():
+            table[source] = replacement
+        return target.translate(bytes(table))
 
     def size(self, patch: ReplacementPatch) -> int:
         return 0
 
 
+class ByteRanks:
+    """Every byte value ranked by the problem's ordering of single bytes.
+
+    Rank 0 is the byte whose one-byte test case sorts lowest. Numeric byte
+    order and the problem's ordering can disagree (natural text ordering
+    ranks b"z" below b"\\x00"), so lowering passes descend in this rank
+    space rather than assuming smaller byte values are better.
+    """
+
+    def __init__(self, problem: ReductionProblem[bytes]):
+        self.order = sorted(range(256), key=lambda i: problem.sort_key(bytes([i])))
+        self.rank = [0] * 256
+        for rank, byte in enumerate(self.order):
+            self.rank[byte] = rank
+
+    def is_lower(self, replacement: int, c: int) -> bool:
+        """Whether `replacement` is plausibly lower than `c`.
+
+        A candidate counts if it is lower in either ordering: single-byte
+        ranks are only a proxy for how a byte sorts in context (b"\\n" is
+        the lowest byte on its own but the highest whitespace within a
+        line), so numerically lower bytes stay in play too.
+        """
+        return self.rank[replacement] < self.rank[c] or replacement < c
+
+    def lowering_candidates(self, c: int) -> list[int]:
+        """Candidate replacements for byte `c`.
+
+        The classic numeric candidates (0, 1, half, predecessor) plus a
+        small set of preferred characters (whitespace, "0", "a", "z") that
+        the natural text ordering ranks below most bytes even when they are
+        numerically larger, so e.g. a control character can become a letter.
+        """
+        candidates = {0, 1, c // 2, c - 1} | set(b" \t\r\n0az")
+        return sorted(x for x in candidates if 0 <= x and self.is_lower(x, c))
+
+
 async def lower_bytes(problem: ReductionProblem[bytes]) -> None:
-    """Globally replace byte values with smaller ones.
+    """Globally replace byte values with lower-sorting ones.
 
     For each distinct byte value in the input, tries replacing all
-    occurrences with smaller values (0, 1, half, value-1, whitespace).
-    Also tries replacing pairs of bytes with the same smaller value.
+    occurrences with values that sort below it (see
+    ByteRanks.lowering_candidates). Also tries replacing pairs of bytes
+    with the same value.
     """
+    ranks = ByteRanks(problem)
     sources = sorted(set(problem.current_test_case))
 
-    patches = [
-        {c: r}
-        for c in sources
-        for r in sorted({0, 1, c // 2, c - 1} | set(b" \t\r\n"))
-        if r < c and r >= 0
-    ] + [
+    patches = [{c: r} for c in sources for r in ranks.lowering_candidates(c)] + [
         {c: r, d: r}
         for c in sources
         for d in sources
         if c != d
-        for r in sorted({0, 1, c // 2, c - 1, d // 2, d - 1} | set(b" \t\r\n"))
-        if (r < c or r < d) and r >= 0
+        for r in sorted(
+            set(ranks.lowering_candidates(c)) | set(ranks.lowering_candidates(d))
+        )
+        if ranks.is_lower(r, c) or ranks.is_lower(r, d)
     ]
 
     await apply_patches(problem, ByteReplacement(), patches, early_abort=True)
@@ -553,9 +589,11 @@ class IndividualByteReplacement(Patches[ReplacementPatch, bytes]):
         return result
 
     def apply(self, patch: ReplacementPatch, target: bytes) -> bytes:
-        result = bytearray()
-        for i, c in enumerate(target):
-            result.append(patch.get(i, c))
+        # Patches are generated from and applied to the same test case, so
+        # every position is in range.
+        result = bytearray(target)
+        for i, replacement in patch.items():
+            result[i] = replacement
         return bytes(result)
 
     def size(self, patch: ReplacementPatch) -> int:
@@ -563,18 +601,17 @@ class IndividualByteReplacement(Patches[ReplacementPatch, bytes]):
 
 
 async def lower_individual_bytes(problem: ReductionProblem[bytes]) -> None:
-    """Replace individual bytes at specific positions with smaller values.
+    """Replace individual bytes at specific positions with lower-sorting
+    values.
 
     Unlike lower_bytes (which replaces all occurrences of a byte value),
     this tries reducing individual byte positions. Also handles carry-like
     patterns where decrementing one byte allows the next to become 255.
     """
+    ranks = ByteRanks(problem)
     initial = problem.current_test_case
-    patches = [
-        {i: r}
-        for i, c in enumerate(initial)
-        for r in sorted({0, 1, c // 2, c - 1} | set(b" \t\r\n"))
-        if r < c and r >= 0
+    patches: list[dict[int, int]] = [
+        {i: r} for i, c in enumerate(initial) for r in ranks.lowering_candidates(c)
     ] + [
         {i - 1: initial[i - 1] - 1, i: 255}
         for i, c in enumerate(initial)

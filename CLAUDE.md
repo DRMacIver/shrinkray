@@ -212,7 +212,7 @@ Main Process (asyncio/textual)     Subprocess (trio)
 ### Key Design Decisions
 
 1. **Natural ordering**: Ensures reproducibility - same minimal result regardless of reduction path. For text, ordering is canonicalisation-based (`reflow_sort_key`): compare the whitespace-canonicalised forms by a multi-tier natural key (length, average squared line length, line count, line-length list, then character ordering), breaking ties toward the layout closest to canonical. Binary data uses shortlex.
-2. **Cache clearing on reduction**: When a smaller test case is found, old cached results are no longer useful (derived from old test case)
+2. **Persistent interestingness cache**: Results are cached by content hash for the whole reduction. Ordinary reduction rarely retries a candidate, but the restart phase replays earlier rounds' attempts and answers them from the cache. (The cache used to be cleared on every reduction; restarts made keeping it worthwhile.)
 3. **View caching**: `problem.view(format)` caches parsed views to avoid redundant parsing
 4. **Speculative parallelism**: Multiple candidates tested concurrently; first success wins, others are "wasted" but harmless
 5. **Adaptive timeouts**: `AdaptiveTimeoutPolicy` (`adaptive_timeout.py`) chooses each test run's timeout from recent measured runtimes (user `--timeout` is the maximum). When reduction stalls with tests timing out it raises the timeout to look for slow reductions; cached timeout-failures carry a validity condition so they are retried after a raise, and reducers call `problem.attempt_unstick()` before terminating so a raised timeout can trigger another round.

@@ -24,7 +24,7 @@ from shrinkray.reducer import (
     UpdateKeys,
 )
 from shrinkray.work import WorkContext
-from tests.helpers import BasicReducer
+from tests.helpers import BasicReducer, ascii_text_sort_key, latin1_text_sort_key
 
 
 # =============================================================================
@@ -931,11 +931,109 @@ async def test_shrinkray_run_single_byte_skips_non_adopted_bytes():
     assert problem.current_test_case == b"a"
 
 
-async def test_shrinkray_run_single_byte_no_smaller():
-    """Test ShrinkRay.run when c=0 is interesting (branch 474->477).
+async def test_shrinkray_run_continues_when_empty_interesting_but_not_adopted():
+    """run() must not stop after testing b"" unless b"" was actually adopted.
 
-    The branch 474->477 happens when range(c) is empty, i.e., c=0.
-    """
+    With a sort key under which the empty string is not the global minimum,
+    b"" can be interesting without being an improvement; reduction must
+    still proceed rather than returning with the initial test case."""
+
+    def sort_key(x: bytes):
+        return shortlex(x if x else b"\xff\xff\xff\xff")
+
+    async def is_interesting(x):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"ab",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        sort_key=sort_key,
+    )
+
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    assert problem.current_test_case == b"\x00"
+
+
+async def test_shrinkray_run_reaches_adjacent_control_char():
+    """Regression test for a case found by the generic shrinking properties:
+    reducing b"\\x1f" while required to stay >= b"\\x1e" (natural text
+    ordering) must reach b"\\x1e" instead of making no progress."""
+
+    sort_key = latin1_text_sort_key
+
+    async def is_interesting(x):
+        return sort_key(x) >= sort_key(b"\x1e")
+
+    problem = BasicReductionProblem(
+        initial=b"\x1f",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        sort_key=sort_key,
+    )
+
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    assert problem.current_test_case == b"\x1e"
+
+
+async def test_shrinkray_run_not_stopped_by_unadopted_single_byte():
+    """Regression test: b"\\xff" does not decode as ASCII, so under an
+    ASCII text ordering it sorts above every decodable test case and is
+    therefore "interesting" for any text target. That must not abort the
+    reduction before the main passes run: reaching the target needs the
+    main byte lowering passes."""
+
+    sort_key = ascii_text_sort_key
+
+    async def is_interesting(x):
+        return sort_key(x) >= sort_key(b"qq")
+
+    problem = BasicReductionProblem(
+        initial=b"qr",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        sort_key=sort_key,
+    )
+
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    assert problem.current_test_case == b"qq"
+
+
+async def test_shrinkray_run_single_byte_uses_sort_key_order():
+    """Regression test: the single-byte scan must consider candidates in
+    sort-key order, not numeric byte order.
+
+    Under the natural text ordering b"z" sorts below b"\\x00", so a
+    reduction constrained to stay >= b"z" must reach b"z" rather than
+    getting stuck at b"\\x00" (which has no numerically smaller bytes)."""
+
+    sort_key = latin1_text_sort_key
+
+    async def is_interesting(x):
+        return sort_key(x) >= sort_key(b"z")
+
+    problem = BasicReductionProblem(
+        initial=b"\x02",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        sort_key=sort_key,
+    )
+
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    assert problem.current_test_case == b"z"
+
+
+async def test_shrinkray_run_single_byte_no_smaller():
+    """Test ShrinkRay.run when the first candidate in sort-key order is
+    already the current test case, so the single-byte scan stops at once."""
 
     async def is_interesting(x):
         # Empty is not interesting
@@ -955,9 +1053,6 @@ async def test_shrinkray_run_single_byte_no_smaller():
     reducer = ShrinkRay(target=problem)
     await reducer.run()
 
-    # Should have reduced to bytes([0]) since:
-    # - bytes([0]) is interesting
-    # - The inner loop range(0) is empty, so we return immediately
     assert problem.current_test_case == bytes([0])
 
 

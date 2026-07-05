@@ -199,7 +199,7 @@ Main Process (asyncio/textual)     Subprocess (trio)
 **Why subprocess?** Textual requires asyncio, but the reducer uses trio. They're incompatible in the same process.
 
 **Protocol** (`subprocess/protocol.py`):
-- `Request`: Commands sent to worker (start, cancel, status)
+- `Request`: Commands sent to worker (start, cancel, restart_from, pass control)
 - `Response`: Command acknowledgments with results
 - `ProgressUpdate`: Periodic stats (size, calls, reductions, parallelism, content preview)
 

@@ -148,8 +148,6 @@ class ReducerWorker:
         match request.command:
             case "start":
                 return await self._handle_start(request.id, request.params)
-            case "status":
-                return self._handle_status(request.id)
             case "cancel":
                 return self._handle_cancel(request.id)
             case "disable_pass":
@@ -287,24 +285,6 @@ class ReducerWorker:
             await self.problem.setup()
 
         self.running = True
-
-    def _handle_status(self, request_id: str) -> Response:
-        """Get current status."""
-        if not self.running or self.problem is None:
-            return Response(id=request_id, result={"running": False})
-
-        stats = self.problem.stats
-        return Response(
-            id=request_id,
-            result={
-                "running": True,
-                "status": self.reducer.status if self.reducer else "",
-                "size": stats.current_test_case_size,
-                "original_size": stats.initial_test_case_size,
-                "calls": stats.calls,
-                "reductions": stats.reductions,
-            },
-        )
 
     def _handle_cancel(self, request_id: str) -> Response:
         """Cancel the reduction."""

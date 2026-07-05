@@ -963,37 +963,6 @@ class ShrinkRayState[TestCase](ABC):
             self.can_format = False
             return data
 
-    async def check_formatter(self):
-        if self.formatter_command is None:
-            return
-        formatter_result = await self.run_formatter_command(
-            self.formatter_command, self.initial
-        )
-
-        if formatter_result.returncode != 0:
-            print(
-                "Formatter exited unexpectedly on initial test case. If this is expected, please run with --formatter=none.",
-                file=sys.stderr,
-            )
-            print(
-                formatter_result.stderr.decode("utf-8").strip(),
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        reformatted = formatter_result.stdout
-        if not await self.is_interesting(reformatted) and await self.is_interesting(
-            self.initial
-        ):
-            print(
-                "Formatting initial test case made it uninteresting. If this is expected, please run with --formatter=none.",
-                file=sys.stderr,
-            )
-            print(
-                formatter_result.stderr.decode("utf-8").strip(),
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
     async def build_error_message(self, e: Exception) -> str:
         """Build a detailed error message for an invalid initial example.
 
@@ -1078,11 +1047,6 @@ class ShrinkRayState[TestCase](ABC):
                 )
 
         return "\n".join(lines)
-
-    async def report_error(self, e):
-        error_message = await self.build_error_message(e)
-        print(error_message, file=sys.stderr)
-        sys.exit(1)
 
     def check_trivial_result(self, problem) -> str | None:
         """Check if the result is trivially small and return error message if so.

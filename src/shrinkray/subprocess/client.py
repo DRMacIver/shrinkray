@@ -189,10 +189,6 @@ class SubprocessClient:
         """Approve the background downloads, opting out of `disabled` items."""
         return await self.send_command("start_downloads", {"disabled": disabled})
 
-    async def get_status(self) -> Response:
-        """Get current reduction status."""
-        return await self.send_command("status")
-
     async def cancel(self) -> Response:
         """Cancel the reduction."""
         if self._completed:

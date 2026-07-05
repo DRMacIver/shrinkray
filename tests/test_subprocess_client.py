@@ -153,16 +153,6 @@ def test_subprocess_client_context_manager():
     asyncio.run(run())
 
 
-def test_subprocess_client_get_status_before_start():
-    async def run():
-        async with SubprocessClient() as client:
-            response = await client.get_status()
-            assert response.result is not None
-            assert response.result.get("running") is False
-
-    asyncio.run(run())
-
-
 def test_subprocess_client_close_handles_already_closed():
     async def run():
         client = SubprocessClient()

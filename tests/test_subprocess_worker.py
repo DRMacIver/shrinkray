@@ -97,17 +97,6 @@ async def test_worker_emit_progress_update():
 # === handle_command tests ===
 
 
-async def test_worker_handle_command_status_not_running():
-    worker = ReducerWorker()
-    request = Request(id="test-1", command="status", params={})
-
-    response = await worker.handle_command(request)
-
-    assert response.id == "test-1"
-    assert response.result == {"running": False}
-    assert response.error is None
-
-
 async def test_worker_handle_command_cancel():
     worker = ReducerWorker()
     request = Request(id="test-2", command="cancel", params={})
@@ -138,39 +127,6 @@ async def test_worker_handle_command_start_already_running():
 
     assert response.id == "test-4"
     assert response.error == "Already running"
-
-
-# === _handle_status tests ===
-
-
-def test_worker_handle_status_with_running_problem():
-    worker = ReducerWorker()
-    worker.running = True
-
-    # Mock the problem with stats
-    mock_stats = MagicMock()
-    mock_stats.current_test_case_size = 100
-    mock_stats.initial_test_case_size = 200
-    mock_stats.calls = 50
-    mock_stats.reductions = 10
-
-    mock_problem = MagicMock()
-    mock_problem.stats = mock_stats
-    worker.problem = mock_problem
-
-    mock_reducer = MagicMock()
-    mock_reducer.status = "Reducing bytes"
-    worker.reducer = mock_reducer
-
-    response = worker._handle_status("test-id")
-
-    assert response.id == "test-id"
-    assert response.result["running"] is True
-    assert response.result["status"] == "Reducing bytes"
-    assert response.result["size"] == 100
-    assert response.result["original_size"] == 200
-    assert response.result["calls"] == 50
-    assert response.result["reductions"] == 10
 
 
 # === _handle_cancel tests ===
@@ -279,11 +235,11 @@ async def test_worker_handle_line_valid_request():
     output = io.StringIO()
 
     with patch.object(sys, "stdout", output):
-        await worker.handle_line('{"id": "test", "command": "status", "params": {}}')
+        await worker.handle_line('{"id": "test", "command": "cancel", "params": {}}')
 
     written = output.getvalue()
     assert "test" in written
-    assert "running" in written
+    assert "cancelled" in written
 
 
 async def test_worker_handle_line_invalid_json():
@@ -391,8 +347,8 @@ async def test_worker_emit_with_injected_output_stream():
 
 async def test_worker_read_commands_with_injected_input_stream():
     """Test read_commands reads from injected input stream."""
-    # Create a status request
-    request = Request(id="req-1", command="status", params={})
+    # Create a cancel request
+    request = Request(id="req-1", command="cancel", params={})
     input_data = serialize(request) + "\n"
 
     output = MemoryOutputStream()
@@ -406,7 +362,7 @@ async def test_worker_read_commands_with_injected_input_stream():
 
     # Verify response was written
     assert b"req-1" in output.data
-    assert b"running" in output.data
+    assert b"cancelled" in output.data
 
 
 async def test_worker_read_commands_with_stream_parameter():
@@ -428,7 +384,7 @@ async def test_worker_read_commands_with_stream_parameter():
 
 async def test_worker_read_commands_handles_multiple_commands():
     """Test read_commands processes multiple commands."""
-    req1 = Request(id="a", command="status", params={})
+    req1 = Request(id="a", command="cancel", params={})
     req2 = Request(id="b", command="cancel", params={})
     input_data = serialize(req1) + "\n" + serialize(req2) + "\n"
 
@@ -729,8 +685,8 @@ async def test_worker_handle_start_error(tmp_path):
 async def test_worker_read_commands_empty_lines():
     """Test read_commands handles empty lines between commands."""
     # Create commands with empty line between them
-    req1 = Request(id="a", command="status", params={})
-    req2 = Request(id="b", command="status", params={})
+    req1 = Request(id="a", command="cancel", params={})
+    req2 = Request(id="b", command="cancel", params={})
     input_data = serialize(req1) + "\n\n" + serialize(req2) + "\n"
 
     output = MemoryOutputStream()
@@ -1070,8 +1026,8 @@ async def test_worker_read_commands_uses_stdin_when_no_stream():
     # Create a pipe to simulate stdin
     read_fd, write_fd = os.pipe()
 
-    # Write a status command to the pipe
-    request = Request(id="stdin-test", command="status", params={})
+    # Write a cancel command to the pipe
+    request = Request(id="stdin-test", command="cancel", params={})
     os.write(write_fd, (serialize(request) + "\n").encode("utf-8"))
     os.close(write_fd)
 

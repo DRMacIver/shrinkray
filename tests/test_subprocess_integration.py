@@ -42,8 +42,8 @@ def test_worker_module_runs_as_main():
         stderr=subprocess.PIPE,
     )
 
-    # Send a status command
-    command = b'{"id":"test-1","command":"status","params":{}}\n'
+    # Send a cancel command
+    command = b'{"id":"test-1","command":"cancel","params":{}}\n'
     assert proc.stdin is not None
     assert proc.stdout is not None
     proc.stdin.write(command)
@@ -53,10 +53,7 @@ def test_worker_module_runs_as_main():
     if ready:
         response = proc.stdout.readline()
         assert b'"id":"test-1"' in response
-        assert (
-            b'"running":false' in response.lower()
-            or b'"running": false' in response.lower()
-        )
+        assert b"cancelled" in response
 
     # Clean up
     proc.terminate()
@@ -80,7 +77,6 @@ def test_subprocess_client_has_expected_methods():
     assert hasattr(client, "close")
     assert hasattr(client, "send_command")
     assert hasattr(client, "start_reduction")
-    assert hasattr(client, "get_status")
     assert hasattr(client, "cancel")
     assert hasattr(client, "get_progress_updates")
 

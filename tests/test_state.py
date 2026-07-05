@@ -993,11 +993,11 @@ async def test_print_exit_message_reduced(tmp_path, capsys):
     assert "Deleted" in captured.out
 
 
-# === report_error tests ===
+# === build_error_message tests ===
 
 
-async def test_report_error_timeout_exceeded(tmp_path, capsys):
-    """Test report_error with TimeoutExceededOnInitial."""
+async def test_build_error_message_timeout_exceeded(tmp_path):
+    """Test build_error_message with TimeoutExceededOnInitial."""
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
@@ -1022,11 +1022,9 @@ async def test_report_error_timeout_exceeded(tmp_path, capsys):
     )
 
     exc = TimeoutExceededOnInitial(runtime=5.5, timeout=1.0)
-    with pytest.raises(SystemExit):
-        await state.report_error(exc)
-    captured = capsys.readouterr()
-    assert "timeout" in captured.err.lower()
-    assert "5.5" in captured.err or "5.50" in captured.err
+    message = await state.build_error_message(exc)
+    assert "timeout" in message.lower()
+    assert "5.5" in message or "5.50" in message
 
 
 async def test_run_for_result_no_input_type_arg(tmp_path):
@@ -1246,8 +1244,8 @@ async def test_cleanup_when_process_never_started(tmp_path):
 # === Additional error path tests ===
 
 
-async def test_report_error_non_timeout_rerun_fails(tmp_path, capsys):
-    """Test report_error when initial test fails with non-zero exit.
+async def test_build_error_message_non_timeout_rerun_fails(tmp_path):
+    """Test build_error_message when initial test fails with non-zero exit.
 
     Exercises the debug rerun path where the script produces a non-zero exit code.
     """
@@ -1275,16 +1273,14 @@ async def test_report_error_non_timeout_rerun_fails(tmp_path, capsys):
     )
 
     # Pass a non-timeout exception to trigger the else branch
-    with pytest.raises(SystemExit):
-        await state.report_error(ValueError("test error"))
-    captured = capsys.readouterr()
-    assert "exit" in captured.err.lower() or "debug" in captured.err.lower()
+    message = await state.build_error_message(ValueError("test error"))
+    assert "exit" in message.lower() or "debug" in message.lower()
 
 
-async def test_report_error_cwd_dependent(tmp_path, capsys, monkeypatch):
-    """Test report_error when test fails in temp dir but works locally.
+async def test_build_error_message_cwd_dependent(tmp_path, monkeypatch):
+    """Test build_error_message when test fails in temp dir but works locally.
 
-    Exercises the cwd dependency detection in report_error.
+    Exercises the cwd dependency detection in build_error_message.
     """
     call_count = {"value": 0}
 
@@ -1318,17 +1314,15 @@ async def test_report_error_cwd_dependent(tmp_path, capsys, monkeypatch):
     async def mock_run_for_result(test_case, debug=False):
         call_count["value"] += 1
         if call_count["value"] == 1:
-            # First call in report_error should fail
+            # First call in build_error_message should fail
             return ScriptRunResult(exit_code=1)
         return await original_run_for_result(test_case, debug)
 
     monkeypatch.setattr(state, "run_for_result", mock_run_for_result)
 
-    with pytest.raises(SystemExit):
-        await state.report_error(ValueError("test error"))
-    captured = capsys.readouterr()
+    message = await state.build_error_message(ValueError("test error"))
     # Should mention running in directory
-    assert "directory" in captured.err.lower()
+    assert "directory" in message.lower()
 
 
 async def test_print_exit_message_trivial_error(tmp_path, capsys):
@@ -1449,85 +1443,6 @@ async def test_run_script_on_file_nonexistent(tmp_path):
             debug=False,
             cwd=str(tmp_path),
         )
-
-
-async def test_check_formatter_failure(tmp_path, capsys):
-    """Test check_formatter when formatter exits non-zero.
-
-    Exercises the formatter failure path in check_formatter.
-    """
-    # Create a formatter that always fails
-    formatter = tmp_path / "bad_formatter.sh"
-    formatter.write_text("#!/bin/sh\necho 'error' >&2\nexit 1")
-    formatter.chmod(0o755)
-
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/sh\nexit 0")
-    script.chmod(0o755)
-
-    target = tmp_path / "test.txt"
-    target.write_text("hello")
-
-    state = ShrinkRayStateSingleFile(
-        input_type=InputType.arg,
-        in_place=False,
-        test=[str(script)],
-        filename=str(target),
-        timeout=5.0,
-        base="test.txt",
-        parallelism=1,
-        initial=b"hello",
-        formatter=str(formatter),
-        trivial_is_error=True,
-        seed=0,
-        volume=Volume.quiet,
-        history_enabled=False,
-    )
-
-    with pytest.raises(SystemExit):
-        await state.check_formatter()
-    captured = capsys.readouterr()
-    assert "formatter" in captured.err.lower() or "unexpected" in captured.err.lower()
-
-
-async def test_check_formatter_makes_uninteresting(tmp_path, capsys):
-    """Test check_formatter when formatting makes test case uninteresting.
-
-    Exercises the uninteresting-after-format path in check_formatter.
-    """
-    # Create a formatter that outputs different content
-    formatter = tmp_path / "formatter.sh"
-    formatter.write_text("#!/bin/sh\necho 'different'")
-    formatter.chmod(0o755)
-
-    # Script that only accepts 'hello'
-    script = tmp_path / "test.sh"
-    script.write_text('#!/bin/sh\ngrep -q "hello" "$1" && exit 0 || exit 1')
-    script.chmod(0o755)
-
-    target = tmp_path / "test.txt"
-    target.write_text("hello")
-
-    state = ShrinkRayStateSingleFile(
-        input_type=InputType.arg,
-        in_place=False,
-        test=[str(script)],
-        filename=str(target),
-        timeout=5.0,
-        base="test.txt",
-        parallelism=1,
-        initial=b"hello",
-        formatter=str(formatter),
-        trivial_is_error=True,
-        seed=0,
-        volume=Volume.quiet,
-        history_enabled=False,
-    )
-
-    with pytest.raises(SystemExit):
-        await state.check_formatter()
-    captured = capsys.readouterr()
-    assert "uninteresting" in captured.err.lower()
 
 
 async def test_default_formatter_fallback(tmp_path):
@@ -1698,44 +1613,11 @@ async def test_run_for_result_in_place_basename(tmp_path):
         os.chdir(original_cwd)
 
 
-async def test_check_formatter_none(tmp_path):
-    """Test check_formatter returns immediately when formatter is None.
+async def test_build_error_message_flaky_test(tmp_path):
+    """Test build_error_message when test is flaky (different exit codes).
 
-    Exercises the early return path in check_formatter when no formatter is set.
-    """
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/sh\nexit 0")
-    script.chmod(0o755)
-
-    target = tmp_path / "test.txt"
-    target.write_text("hello")
-
-    state = ShrinkRayStateSingleFile(
-        input_type=InputType.arg,
-        in_place=False,
-        test=[str(script)],
-        filename=str(target),
-        timeout=5.0,
-        base="test.txt",
-        parallelism=1,
-        initial=b"hello",
-        formatter="none",  # No formatter
-        trivial_is_error=True,
-        seed=0,
-        volume=Volume.quiet,
-        history_enabled=False,
-    )
-
-    # check_formatter should return immediately without doing anything
-    # (no exception, no side effects)
-    await state.check_formatter()
-
-
-async def test_report_error_flaky_test(tmp_path, capsys):
-    """Test report_error when test is flaky (different exit codes).
-
-    Exercises the flaky test detection in report_error when the script
-    returns different exit codes on repeated runs.
+    Exercises the flaky test detection in build_error_message when the
+    script returns different exit codes on repeated runs.
     """
     # Create a script that returns different exit codes
     counter_file = tmp_path / "counter"
@@ -1786,18 +1668,16 @@ fi
     state.initial_exit_code = 0
     state.first_call = False
 
-    with pytest.raises(SystemExit):
-        await state.report_error(ValueError("test error"))
-    captured = capsys.readouterr()
+    message = await state.build_error_message(ValueError("test error"))
     # Should mention flaky
-    assert "flaky" in captured.err.lower()
+    assert "flaky" in message.lower()
 
 
-async def test_report_error_nondeterministic(tmp_path, capsys):
-    """Test report_error when initial was non-zero but now exits 0.
+async def test_build_error_message_nondeterministic(tmp_path):
+    """Test build_error_message when initial was non-zero but now exits 0.
 
-    Exercises the nondeterministic behavior detection in report_error when
-    the test now succeeds but previously failed.
+    Exercises the nondeterministic behavior detection in build_error_message
+    when the test now succeeds but previously failed.
     """
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/sh\nexit 0")  # Always succeeds now
@@ -1827,11 +1707,9 @@ async def test_report_error_nondeterministic(tmp_path, capsys):
     state.initial_exit_code = 1
     state.first_call = False
 
-    with pytest.raises(SystemExit):
-        await state.report_error(ValueError("test error"))
-    captured = capsys.readouterr()
+    message = await state.build_error_message(ValueError("test error"))
     # Should mention nondeterministic
-    assert "nondeterministic" in captured.err.lower()
+    assert "nondeterministic" in message.lower()
 
 
 async def test_print_exit_message_reformatted_is_interesting(tmp_path, capsys):
@@ -1879,44 +1757,6 @@ async def test_print_exit_message_reformatted_is_interesting(tmp_path, capsys):
     # Check the file was updated with formatted content
     content = target.read_bytes()
     assert b"formatted" in content or content == b"hello"
-
-
-async def test_check_formatter_reformatted_is_interesting(tmp_path):
-    """Test check_formatter when reformatted result IS interesting.
-
-    This covers branch 299->exit (formatter passes - condition is False).
-    """
-    # Create a formatter that transforms content
-    formatter = tmp_path / "formatter.sh"
-    formatter.write_text("#!/bin/sh\ncat")  # Just passes through
-    formatter.chmod(0o755)
-
-    # Script accepts anything
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/sh\nexit 0")
-    script.chmod(0o755)
-
-    target = tmp_path / "test.txt"
-    target.write_text("hello")
-
-    state = ShrinkRayStateSingleFile(
-        input_type=InputType.arg,
-        in_place=False,
-        test=[str(script)],
-        filename=str(target),
-        timeout=5.0,
-        base="test.txt",
-        parallelism=1,
-        initial=b"hello",
-        formatter=str(formatter),
-        trivial_is_error=True,
-        seed=0,
-        volume=Volume.quiet,
-        history_enabled=False,
-    )
-
-    # check_formatter should pass without error (formatter works and result is interesting)
-    await state.check_formatter()
 
 
 async def test_timeout_on_first_call(tmp_path):

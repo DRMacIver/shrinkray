@@ -65,11 +65,12 @@ test for every patch).
 Shrink Ray gives you an option of how much parallelism to use, though defaults to the number of cores available.
 
 The way that this is implemented is that internally Shrink Ray is written as if it had access to unlimited
-parallelism and just spawns as many tasks (using trio, so these are light weight tasks rather than OS threads),
-which rather than calling the underlying interestingness test directly instead communicate with a number of
-worker tasks, each of which reads a result off the queue, runs the underlying interestingness test, and then
-replies. This means that most of Shrink Ray can be written in a way that is agnostic to the amount of parallelism
-it's actually been given (although it does have access to this information when useful).
+parallelism and just spawns as many tasks as it likes (using trio, so these are light weight tasks rather than
+OS threads). The actual concurrency of the underlying interestingness test is bounded by a `trio.CapacityLimiter`:
+every call to the interestingness test acquires the limiter before running the test script, so at most the
+configured number of test invocations run at once. This means that most of Shrink Ray can be written in a way
+that is agnostic to the amount of parallelism it's actually been given (although it does have access to this
+information when useful).
 
 
 [^1]: It is possibly currently the best test-case reducer for making effective use of parallelism. It should be,

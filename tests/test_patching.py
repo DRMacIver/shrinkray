@@ -16,7 +16,7 @@ from shrinkray.passes.patching import (
     SetPatches,
     apply_patches,
 )
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.problem import BasicReductionProblem, Format
 from shrinkray.work import WorkContext
 
 
@@ -264,6 +264,41 @@ async def test_apply_patches_early_abort_deterministic_across_parallelism(
         return attempted
 
     assert await run(parallelism) == await run(1)
+
+
+async def test_apply_patches_stops_when_combined_shortcut_adopts_via_view():
+    """When the all-patches shortcut succeeds through a view, the view can
+    re-parse the dumped result into something different from the combined
+    patch application. That still counts as the shortcut succeeding: the
+    remaining patches were computed against the old parse and must not be
+    applied to the new, shorter one (regression test: this crashed
+    directory reduction with a Cuts length assertion)."""
+
+    class NormalizingLines(Format[bytes, list[bytes]]):
+        # parse keeps empty lines; dumps drops them, so a round trip does
+        # not preserve the parsed representation.
+        def parse(self, input: bytes) -> list[bytes]:
+            return input.split(b"\n")
+
+        def dumps(self, input: list[bytes]) -> bytes:
+            return b"\n".join(line for line in input if line)
+
+    async def is_interesting(x):
+        return b"b" in x
+
+    problem = BasicReductionProblem(
+        initial=b"a\n\nb\nb",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    view = problem.view(NormalizingLines())
+
+    # Both cuts together leave [b"", b"b"], which dumps to b"b" and is
+    # adopted; the re-parsed view is then [b"b"], against which the
+    # individual cuts would be out of range.
+    await apply_patches(view, Cuts(), [[(0, 1)], [(3, 4)]])
+
+    assert problem.current_test_case == b"b"
 
 
 async def test_merge_master_rejects_probes_past_queue_end():

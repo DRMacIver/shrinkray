@@ -191,16 +191,18 @@ async def apply_patches[PatchType, TargetType](
     useful patches can be sparse and would then be skipped, losing size.
     """
     # Shortcut: if applying every patch at once works, there's nothing to
-    # merge. Only valid if the combined result was actually adopted — it can
-    # be interesting yet sort above the current test case, in which case the
-    # individual patches still need trying.
+    # merge. The shortcut counts as succeeding whenever the attempt changed
+    # the current test case (through a view the adopted parse can differ
+    # from `combined`); the individual patches were computed against the
+    # old test case and must not be applied to the new one. An interesting
+    # result that changed nothing (it can sort above the current test case)
+    # falls through to trying the patches individually.
+    before = problem.current_test_case
     try:
-        combined = patch_info.apply(
-            patch_info.combine(*patches), problem.current_test_case
-        )
-        if (
+        combined = patch_info.apply(patch_info.combine(*patches), before)
+        if combined == before or (
             await problem.is_interesting(combined)
-            and problem.current_test_case == combined
+            and problem.current_test_case != before
         ):
             return
     except Conflict:

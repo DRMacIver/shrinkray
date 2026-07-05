@@ -22,7 +22,7 @@ from shrinkray.cli import (
 
 def test_validate_command_existing_file(tmp_path):
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\necho hello")
+    script.write_text("#!/bin/sh\necho hello")
     script.chmod(0o755)
 
     result = validate_command(None, None, str(script))
@@ -31,7 +31,7 @@ def test_validate_command_existing_file(tmp_path):
 
 def test_validate_command_with_args(tmp_path):
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\necho hello")
+    script.write_text("#!/bin/sh\necho hello")
     script.chmod(0o755)
 
     result = validate_command(None, None, f"{script} arg1 arg2")

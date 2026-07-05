@@ -226,7 +226,7 @@ def basic_shrink_target(tmpdir):
     script = tmpdir / "test.sh"
     script.write_text(
         """
-#!/usr/bin/env bash
+#!/bin/sh
 
 set -e
 
@@ -268,7 +268,7 @@ def test_errors_on_bad_parallelism_when_in_place(tmpdir):
     script = tmpdir / "test.sh"
     script.write_text(
         f"""
-#!/usr/bin/env bash
+#!/bin/sh
 
 set -e
 
@@ -302,7 +302,7 @@ def test_gives_good_error_when_initial_test_case_invalid(tmpdir):
     script = tmpdir / "test.sh"
     script.write_text(
         """
-#!/usr/bin/env bash
+#!/bin/sh
 
 exit 1
     """.strip(),
@@ -333,7 +333,7 @@ def test_reducing_c_file_to_trivial_is_an_error(tmp_path):
     target.write_text("int main() { return 0; }")
 
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     runner = CliRunner(catch_exceptions=False)
@@ -349,7 +349,7 @@ def test_error_when_test_not_executable(tmpdir):
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    script.write_text("#!/bin/sh\nexit 0", encoding="utf-8")
     # Note: NOT setting executable permission
 
     runner = CliRunner(catch_exceptions=False)
@@ -395,7 +395,7 @@ def test_memory_limit_warns_only_when_not_enforceable(tmpdir, enforceable):
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")  # not executable
+    script.write_text("#!/bin/sh\nexit 0", encoding="utf-8")  # not executable
 
     runner = CliRunner(catch_exceptions=False)
     with patch("shrinkray.__main__.MEMORY_LIMIT_ENFORCEABLE", enforceable):
@@ -411,7 +411,7 @@ def test_memory_limit_disabled_gives_no_warning(tmpdir):
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")  # not executable
+    script.write_text("#!/bin/sh\nexit 0", encoding="utf-8")  # not executable
 
     runner = CliRunner(catch_exceptions=False)
     with patch("shrinkray.__main__.MEMORY_LIMIT_ENFORCEABLE", False):
@@ -431,10 +431,10 @@ def test_crashing_formatter_is_disabled_not_fatal(tmpdir):
     target = tmpdir / "hello.txt"
     target.write_text("hello", encoding="utf-8")
     script = tmpdir / "test.sh"
-    script.write_text('#!/bin/bash\n[ "$(cat "$1")" = "hello" ]\n', encoding="utf-8")
+    script.write_text('#!/bin/sh\n[ "$(cat "$1")" = "hello" ]\n', encoding="utf-8")
     script.chmod(0o777)
     formatter = tmpdir / "fmt.sh"
-    formatter.write_text("#!/bin/bash\nexit 1\n", encoding="utf-8")  # crashes
+    formatter.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")  # crashes
     formatter.chmod(0o777)
 
     runner = CliRunner(catch_exceptions=False)
@@ -482,7 +482,7 @@ def test_parallelism_defaults_to_one_for_basename_inplace(tmpdir, monkeypatch):
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    script.write_text("#!/bin/sh\nexit 0", encoding="utf-8")
     script.chmod(0o777)
 
     captured_parallelism = []
@@ -521,7 +521,7 @@ def test_explicit_parallelism_skips_default_logic(tmpdir, monkeypatch):
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    script.write_text("#!/bin/sh\nexit 0", encoding="utf-8")
     script.chmod(0o777)
 
     captured_parallelism = []
@@ -562,7 +562,7 @@ def test_in_place_basename_sets_parallelism_to_one(tmpdir, monkeypatch):
     # In basename mode, the file is in the cwd with its basename
     script.write_text(
         """
-#!/usr/bin/env bash
+#!/bin/sh
 grep hello hello.txt
     """.strip(),
         encoding="utf-8",
@@ -599,7 +599,7 @@ def test_directory_mode_stdin_error(tmp_path):
     (target / "test.txt").write_text("hello")
 
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     runner = CliRunner(catch_exceptions=False)
@@ -655,7 +655,7 @@ def test_directory_mode_with_basic_ui(tmp_path):
 
     script = tmp_path / "test.sh"
     script.write_text(
-        """#!/bin/bash
+        """#!/bin/sh
 test -f "$1/a.txt" && grep hello "$1/a.txt"
 """
     )
@@ -786,7 +786,7 @@ def test_timeout_zero_converts_to_infinity(tmpdir, monkeypatch):
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    script.write_text("#!/bin/sh\nexit 0", encoding="utf-8")
     script.chmod(0o777)
 
     captured_timeout = []
@@ -827,7 +827,7 @@ def test_default_backup_filename_calculation(tmpdir, monkeypatch):
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    script.write_text("#!/bin/sh\nexit 0", encoding="utf-8")
     script.chmod(0o777)
 
     # Track if os.remove was called with the default backup path
@@ -874,7 +874,7 @@ def test_custom_backup_path_is_used(tmpdir, monkeypatch):
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0", encoding="utf-8")
+    script.write_text("#!/bin/sh\nexit 0", encoding="utf-8")
     script.chmod(0o777)
 
     custom_backup = str(tmpdir / "my_custom.bak")
@@ -924,7 +924,7 @@ def test_directory_mode_setup(tmp_path, monkeypatch):
     (target / "b.txt").write_text("world")
 
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     # Track what was passed to ShrinkRayDirectoryState
@@ -997,7 +997,7 @@ def test_timeout_exceeded_on_initial_shows_error_message_basic(tmp_path):
     # Script that sleeps longer than the timeout
     script = tmp_path / "test.sh"
     script.write_text(
-        """#!/bin/bash
+        """#!/bin/sh
 sleep 0.5
 exit 0
 """
@@ -1042,7 +1042,7 @@ def test_timeout_exceeded_on_initial_shows_error_message_tui(tmp_path):
     # Script that sleeps longer than the timeout
     script = tmp_path / "test.sh"
     script.write_text(
-        """#!/bin/bash
+        """#!/bin/sh
 sleep 0.5
 exit 0
 """
@@ -1085,7 +1085,7 @@ def test_invalid_initial_shows_error_message_basic(tmp_path):
 
     # Script that always fails
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 1\n")
+    script.write_text("#!/bin/sh\nexit 1\n")
     script.chmod(0o755)
 
     result = subprocess.run(
@@ -1116,7 +1116,7 @@ def test_invalid_initial_shows_error_message_tui(tmp_path):
 
     # Script that always fails
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 1\n")
+    script.write_text("#!/bin/sh\nexit 1\n")
     script.chmod(0o755)
 
     result = subprocess.run(
@@ -1392,7 +1392,7 @@ def test_trivial_is_not_error_basic_ui(tmp_path):
 
     # This test accepts everything including empty files
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0\n")
+    script.write_text("#!/bin/sh\nexit 0\n")
     script.chmod(0o755)
 
     runner = CliRunner(catch_exceptions=False)
@@ -1420,7 +1420,7 @@ def test_trivial_is_error_basic_ui(tmp_path):
 
     # This test accepts everything including empty files
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0\n")
+    script.write_text("#!/bin/sh\nexit 0\n")
     script.chmod(0o755)
 
     runner = CliRunner(catch_exceptions=False)
@@ -1449,7 +1449,7 @@ def test_trivial_is_not_error_tui(tmp_path, monkeypatch):
     target.write_text("hello")
 
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0\n")
+    script.write_text("#!/bin/sh\nexit 0\n")
     script.chmod(0o755)
 
     mock_run_textual_ui = MagicMock()
@@ -1505,7 +1505,7 @@ def test_happy_path_in_place_single_file(tmp_path, monkeypatch):
 
     script = tmp_path / "test.sh"
     script.write_text(
-        """#!/bin/bash
+        """#!/bin/sh
 [ "$(wc -c < "$1")" -gt 1 ]
 """
     )
@@ -1561,7 +1561,7 @@ def test_also_interesting_zero_disables_feature(tmp_path):
     """Test that --also-interesting=0 disables the feature."""
     # Create a simple test script that always exits 0 (interesting)
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1588,7 +1588,7 @@ def test_no_history_without_explicit_also_interesting_disables_both(tmp_path):
     """Test that --no-history without explicit --also-interesting disables both."""
     # Create a test script that exits 0 (interesting)
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/bash\nexit 0")
+    script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1815,7 +1815,7 @@ if __name__ == "__main__":
     log_file = tmp_path / "hello.log"
     script.write_text(
         f"""\
-#!/bin/bash
+#!/bin/sh
 set -eux
 python "$1" > "{log_file}"
 grep "hello" "{log_file}"

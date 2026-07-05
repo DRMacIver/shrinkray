@@ -234,3 +234,27 @@ def test_serialize_invalid_type():
 def test_serialize_dict_raises():
     with pytest.raises(TypeError):
         serialize({"id": "123"})  # type: ignore
+
+
+def test_progress_update_timeout_fields_roundtrip():
+    original = ProgressUpdate(
+        status="Working",
+        size=500,
+        original_size=1000,
+        calls=25,
+        reductions=5,
+        current_timeout=2.5,
+        timeout_rate=0.125,
+    )
+    deserialized = deserialize(serialize(original))
+    assert isinstance(deserialized, ProgressUpdate)
+    assert deserialized.current_timeout == 2.5
+    assert deserialized.timeout_rate == 0.125
+
+
+def test_progress_update_timeout_fields_default():
+    line = '{"type":"progress","data":{"status":"test","size":100,"original_size":200,"calls":5,"reductions":2}}'
+    result = deserialize(line)
+    assert isinstance(result, ProgressUpdate)
+    assert result.current_timeout is None
+    assert result.timeout_rate == 0.0

@@ -7429,3 +7429,35 @@ def test_history_modal_highlighted_skipped_during_refresh(tmp_path):
     modal.set_timer.assert_not_called()
     # Selection path should remain unchanged
     assert modal._selected_reductions_path == str(entry_dir)
+
+
+def test_stats_display_shows_adaptive_timeout():
+    widget = StatsDisplay()
+    update = ProgressUpdate(
+        status="Testing",
+        size=500,
+        original_size=1000,
+        calls=20,
+        reductions=8,
+        runtime=5.0,
+        current_timeout=2.5,
+        timeout_rate=0.25,
+    )
+    widget.update_stats(update)
+    rendered = widget.render()
+    assert "Test timeout: 2.5s" in rendered
+    assert "25%" in rendered
+
+
+def test_stats_display_hides_timeout_when_unknown():
+    widget = StatsDisplay()
+    update = ProgressUpdate(
+        status="Testing",
+        size=500,
+        original_size=1000,
+        calls=20,
+        reductions=8,
+        runtime=5.0,
+    )
+    widget.update_stats(update)
+    assert "Test timeout" not in widget.render()

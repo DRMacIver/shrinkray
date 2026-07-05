@@ -2,6 +2,7 @@
 
 import io
 import json
+import math
 import os
 import runpy
 import signal
@@ -14,6 +15,7 @@ import trio
 import trio.testing
 
 import shrinkray.subprocess.worker
+from shrinkray.adaptive_timeout import AdaptiveTimeoutPolicy
 from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import ShrinkRayDirectoryState, ShrinkRayStateSingleFile
 from shrinkray.subprocess.protocol import (
@@ -471,6 +473,7 @@ async def test_worker_emit_progress_updates_loop():
     mock_state.parallel_tasks_running = 2
     mock_state.output_manager = None  # No test output capture in this mock
     mock_state.history_manager = None  # No history in this mock
+    mock_state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state = mock_state
 
     # Run for a short time then stop
@@ -720,9 +723,10 @@ async def test_worker_emit_progress_updates_no_parallel_attr():
     worker.reducer = mock_reducer
 
     # State without parallel_tasks_running attribute
-    mock_state = MagicMock(spec=["output_manager", "history_manager"])
+    mock_state = MagicMock(spec=["output_manager", "history_manager", "timeout_policy"])
     mock_state.output_manager = None  # No test output capture
     mock_state.history_manager = None  # No history
+    mock_state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state = mock_state
 
     # Run for a short time then stop
@@ -1676,6 +1680,7 @@ async def test_build_progress_update_with_reducer_none():
 
     # Set up state for parallel workers calculation
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None  # No test output capture
 
@@ -1717,6 +1722,7 @@ async def test_build_progress_update_with_reducer_pass_stats_none():
 
     # Set up state
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None  # No test output capture
 
@@ -1755,6 +1761,7 @@ async def test_build_progress_update_with_reducer_no_disabled_passes_attr():
 
     # Set up state
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None  # No test output capture
 
@@ -1787,6 +1794,7 @@ async def test_build_progress_update_periodic_size_history():
     worker.problem.current_test_case = b"test content"
 
     worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
     worker.state.parallel_tasks_running = 2
     worker.state.output_manager = None
 
@@ -3065,3 +3073,62 @@ async def test_restart_integration_status_updates(tmp_path):
     finally:
         os.chdir(old_cwd)
         await input_stream.aclose()
+
+
+@pytest.mark.trio
+async def test_build_progress_update_includes_adaptive_timeout():
+    worker = ReducerWorker()
+    worker.reducer = None
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 100
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = time.time()
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.5)
+    worker.problem.current_test_case = b"test content"
+
+    worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
+    worker.state.parallel_tasks_running = 2
+    worker.state.output_manager = None
+    worker.state.history_manager = None
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=50.0)
+    worker.state.timeout_policy.record_completion(0.1, interesting=True)
+
+    update = await worker._build_progress_update()
+    assert update is not None
+    assert update.current_timeout == pytest.approx(1.0)  # 10x the runtime
+    assert update.timeout_rate == 0.0
+
+
+@pytest.mark.trio
+async def test_build_progress_update_timeout_none_when_unbounded_with_no_data():
+    worker = ReducerWorker()
+    worker.reducer = None
+    worker.problem = Mock()
+    worker.problem.stats = Mock()
+    worker.problem.stats.current_test_case_size = 100
+    worker.problem.stats.initial_test_case_size = 1000
+    worker.problem.stats.calls = 10
+    worker.problem.stats.reductions = 2
+    worker.problem.stats.interesting_calls = 5
+    worker.problem.stats.wasted_interesting_calls = 1
+    worker.problem.stats.start_time = time.time()
+    worker.problem.stats.time_since_last_reduction = Mock(return_value=0.5)
+    worker.problem.current_test_case = b"test content"
+
+    worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
+    worker.state.parallel_tasks_running = 2
+    worker.state.output_manager = None
+    worker.state.history_manager = None
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
+
+    update = await worker._build_progress_update()
+    assert update is not None
+    assert update.current_timeout is None
+    assert update.timeout_rate == 0.0

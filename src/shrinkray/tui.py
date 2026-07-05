@@ -161,6 +161,8 @@ class StatsDisplay(Static):
     average_parallelism = reactive(0.0)
     effective_parallelism = reactive(0.0)
     time_since_last_reduction = reactive(0.0)
+    current_timeout: reactive[float | None] = reactive(None)
+    timeout_rate = reactive(0.0)
 
     def update_stats(self, update: ProgressUpdate) -> None:
         self.current_status = update.status
@@ -175,6 +177,8 @@ class StatsDisplay(Static):
         self.average_parallelism = update.average_parallelism
         self.effective_parallelism = update.effective_parallelism
         self.time_since_last_reduction = update.time_since_last_reduction
+        self.current_timeout = update.current_timeout
+        self.timeout_rate = update.timeout_rate
         self.refresh(layout=True)
 
     def render(self) -> str:
@@ -218,6 +222,13 @@ class StatsDisplay(Static):
             )
         else:
             lines.append("Not yet called interestingness test")
+
+        # Adaptive test timeout
+        if self.current_timeout is not None:
+            lines.append(
+                f"Test timeout: {self.current_timeout:.1f}s "
+                f"({self.timeout_rate * 100.0:.0f}% of recent tests timed out)"
+            )
 
         # Time since last reduction
         if self.reduction_count > 0 and self.runtime > 0:

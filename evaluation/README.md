@@ -19,6 +19,7 @@ evaluation/
 ├── run.py        # reduce entries with shrink ray, write result.json
 ├── report.py     # regenerate the tables in RESULTS.md
 ├── benchmark.py  # measure reducer efficiency (interestingness calls) against cheap in-process oracles
+├── benchmark_baseline.json  # committed benchmark metrics for main (compare with benchmark.py --baseline)
 ├── RESULTS.md    # generated tables + hand-written analysis
 ├── corpus/<id>/  # one directory per bug
 ├── sortkey/      # sort-key tuning corpus (see sortkey/README.md)

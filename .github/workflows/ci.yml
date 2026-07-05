@@ -257,7 +257,7 @@ jobs:
           # bootstrap needs a newer rustc than 7.7's 1.86.
           release: "7.9"
           usesh: true
-          copyback: true
+          copyback: false
           mem: 8192
           # rust is needed to build libcst (setuptools-rust) and maturin
           # from source.
@@ -268,17 +268,25 @@ jobs:
             uname -a
             python3 --version
             df -h
-            # /tmp is a small partition on OpenBSD's default disk layout;
-            # the venv and pip's build directories need the roomier /home.
-            mkdir -p /home/tmp
+            # Everything sizeable must stay off the 1GB root partition:
+            # the venv, pip build dirs, cargo's registry (maturin's build
+            # writes ~800MB there), and the XDG cache that tree-sitter
+            # grammars extract into. /home has >100GB.
+            mkdir -p /home/tmp /home/tmp/cargo /home/tmp/cache
             export TMPDIR=/home/tmp
+            export CARGO_HOME=/home/tmp/cargo
+            export XDG_CACHE_HOME=/home/tmp/cache
             python3 -m venv /home/venv
             /home/venv/bin/pip install --quiet --upgrade pip
             /home/venv/bin/pip install --cache-dir "$PWD/.pip-cache" ".[test]"
             df -h
             /home/venv/bin/python -m pytest tests/ -m "not slow" -q
-      # Save the cache even when tests fail: seeding the expensive
+      # vmactions only syncs the workspace back on success, so pull the
+      # pip cache out of the VM explicitly: seeding the expensive
       # from-source wheel builds must not depend on a green run.
+      - name: Fetch pip cache from VM
+        if: always() && steps.pip-cache.outputs.cache-hit != 'true'
+        run: rsync -a "openbsd:${GITHUB_WORKSPACE}/.pip-cache/" .pip-cache/ || true
       - name: Save pip cache
         if: always() && steps.pip-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

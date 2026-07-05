@@ -3,6 +3,11 @@
 This is the changelog for [Shrink Ray](https://github.com/DRMacIver/shrinkray), a
 fast multi-format test-case reducer. Versions are calendar-based (`YY.M.D.N`).
 
+## 26.7.5.1 — 2026-07-05
+
+- Fixed the package's metadata links: removed a dead documentation URL and
+  pointed the changelog link at the actual changelog.
+
 ## 26.7.5.0 — 2026-07-05
 
 - The final reduced file is now tidied up for readability: Shrink Ray re-indents

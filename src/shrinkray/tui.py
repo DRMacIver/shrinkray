@@ -262,7 +262,7 @@ class StatsDisplay(Static):
         return "\n".join(lines)
 
 
-def test_run_header(test_id: int | None, return_code: int | None) -> tuple[str, str]:
+def format_test_run_header(test_id: int | None, return_code: int | None) -> tuple[str, str]:
     """Header text and style describing the state of a captured test run.
 
     Returns ("", "") when there is no test to describe.
@@ -673,7 +673,7 @@ class OutputPreview(Static):
     def render(self) -> Text:
         # Header line - use return_code to determine if test is running
         # (return_code is None means still running, has value means completed)
-        header_text, header_style = test_run_header(
+        header_text, header_style = format_test_run_header(
             self.active_test_id, self.last_return_code
         )
         if not header_text and not (self._has_seen_output or self.output_content):
@@ -949,7 +949,7 @@ class ExpandedBoxModal(ModalScreen[None]):
         )
         has_seen_output = output_preview._has_seen_output
 
-        header_text, header_style = test_run_header(test_id, return_code)
+        header_text, header_style = format_test_run_header(test_id, return_code)
 
         if raw_content:
             result = Text()

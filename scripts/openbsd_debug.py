@@ -261,6 +261,42 @@ def test_trio_shrinkray_like() -> Result:
     return trio.run(main)
 
 
+def test_trio_shrinkray_fixed() -> Result:
+    """run_script_on_file's pattern after the fix: fd stdin, no pipe."""
+    import trio
+
+    async def main() -> Result:
+        result: Result = False, "nursery exited without running the test"
+        async with trio.open_nursery() as nursery:
+
+            def start_process(stdin, task_status=trio.TASK_STATUS_IGNORED):  # type: ignore[no-untyped-def]
+                return trio.run_process(
+                    ["sh", "-c", "grep -c bug words"],
+                    check=False,
+                    cwd=os.getcwd(),
+                    preexec_fn=os.setsid,
+                    stdin=stdin,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    task_status=task_status,
+                )
+
+            with open(os.path.join(os.getcwd(), "words"), "rb") as stdin:
+                sp = await nursery.start(start_process, stdin)
+            start = time.time()
+            with trio.move_on_after(TIMEOUT) as scope:
+                await sp.wait()
+            elapsed = time.time() - start
+            if scope.cancelled_caught:
+                result = False, f"sp.wait() hung for {elapsed:.1f}s"
+                sp.kill()
+            else:
+                result = True, f"sp.wait() returned {sp.returncode} after {elapsed:.3f}s"
+        return result
+
+    return trio.run(main)
+
+
 TESTS = {
     name.removeprefix("test_"): fn
     for name, fn in sorted(globals().items())

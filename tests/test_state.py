@@ -2,6 +2,7 @@
 
 import os
 import re
+import sys
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -544,6 +545,88 @@ async def test_run_for_result_with_stdin_input_type(tmp_path):
     # Should exit 1 because stdin doesn't contain 'magic'
     exit_code = (await state.run_for_result(b"other word")).exit_code
     assert exit_code == 1
+
+
+# Regression tests for https://github.com/DRMacIver/shrinkray/issues/56:
+# on OpenBSD, kqueue never reports a pipe's write end as writable once the
+# read end is closed, so feeding test-case bytes to the script through a
+# pipe deadlocks trio's stdin-feeder task whenever the test case exceeds
+# the pipe buffer and the script exits without reading stdin. Test-case
+# stdin must therefore be a real file descriptor, not a pipe.
+
+STDIN_IS_REGULAR_FILE = (
+    "import os, stat, sys; sys.exit(0 if stat.S_ISREG(os.fstat(0).st_mode) else 1)"
+)
+
+
+def _stdin_check_state(tmp_path):
+    target = tmp_path / "test.txt"
+    target.write_bytes(b"hello")
+    return ShrinkRayStateSingleFile(
+        input_type=InputType.stdin,
+        in_place=False,
+        test=[sys.executable, "-c", STDIN_IS_REGULAR_FILE],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+    )
+
+
+async def test_stdin_is_a_regular_file_not_a_pipe(tmp_path):
+    state = _stdin_check_state(tmp_path)
+    assert (await state.run_for_result(b"hello")).exit_code == 0
+
+
+async def test_stdin_is_a_regular_file_not_a_pipe_in_debug_mode(tmp_path):
+    state = _stdin_check_state(tmp_path)
+    assert (await state.run_for_result(b"hello", debug=True)).exit_code == 0
+
+
+async def test_large_unread_stdin_does_not_deadlock(tmp_path):
+    # The script never reads stdin and the test case is much larger than a
+    # pipe buffer; with file-descriptor stdin there is no pipe to deadlock.
+    content = b"x" * (1 << 20)
+    target = tmp_path / "test.txt"
+    target.write_bytes(content)
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=["true"],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=content,
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+    )
+    assert (await state.run_for_result(content)).exit_code == 0
+
+
+async def test_formatter_stdin_is_a_regular_file(simple_state):
+    # The formatter gets its input the same way, so a formatter that exits
+    # without draining stdin must not deadlock either.
+    result = await simple_state.run_formatter_command(
+        [
+            sys.executable,
+            "-c",
+            "import os, stat, sys; assert stat.S_ISREG(os.fstat(0).st_mode); "
+            "sys.stdout.write(sys.stdin.read())",
+        ],
+        b"hello",
+    )
+    assert result.returncode == 0
+    assert result.stdout == b"hello"
 
 
 async def test_run_for_result_in_place_mode(tmp_path):

@@ -12,8 +12,10 @@ import tempfile
 import time
 from abc import ABC, abstractmethod
 from collections import deque
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
-from typing import Any
+from typing import IO, Any
 
 import attrs
 import humanize
@@ -46,6 +48,27 @@ from shrinkray.process import (
 )
 from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
 from shrinkray.work import Volume, WorkContext
+
+
+@contextmanager
+def stdin_source(input_type: InputType, working: str) -> Iterator[IO[bytes] | int]:
+    """The stdin to give an interestingness-test subprocess.
+
+    When the stdin input type is enabled, this is the working file itself,
+    opened for reading, rather than its contents fed through a pipe. Piped
+    bytes deadlock on OpenBSD when the test case is bigger than the pipe
+    buffer and the script exits without reading stdin: OpenBSD's kqueue
+    never reports the pipe's write end as writable once the read end is
+    closed, so trio's stdin-feeder task blocks forever
+    (https://github.com/DRMacIver/shrinkray/issues/56). A real file
+    descriptor involves no feeder task at all, and also avoids copying the
+    whole test case through a pipe on every call.
+    """
+    if input_type.enabled(InputType.stdin) and not os.path.isdir(working):
+        with open(working, "rb") as f:
+            yield f
+    else:
+        yield subprocess.DEVNULL
 
 
 class TimeoutExceededOnInitial(InvalidInitialExample):
@@ -452,18 +475,15 @@ class ShrinkRayState[TestCase](ABC):
             "cwd": cwd,
             "check": False,
         }
-        if self.input_type.enabled(InputType.stdin) and not os.path.isdir(working):
-            with open(working, "rb") as i:
-                kwargs["stdin"] = i.read()
-        else:
-            kwargs["stdin"] = b""
 
         # For debug mode, use simpler approach to capture output
         if debug:
             kwargs["capture_stdout"] = True
             kwargs["capture_stderr"] = True
             start_time = time.time()
-            completed = await trio.run_process(command, **kwargs)
+            with stdin_source(self.input_type, working) as stdin:
+                kwargs["stdin"] = stdin
+                completed = await trio.run_process(command, **kwargs)
             runtime = time.time() - start_time
 
             # Check for timeout violation (only when timeout is explicitly set)
@@ -521,7 +541,11 @@ class ShrinkRayState[TestCase](ABC):
                     return trio.run_process(command, **kwargs, task_status=task_status)
 
                 start_time = time.time()
-                sp = await nursery.start(call_with_kwargs)
+                # nursery.start returns once the child has been spawned and
+                # inherited the stdin descriptor, so it can be closed then.
+                with stdin_source(self.input_type, working) as stdin:
+                    kwargs["stdin"] = stdin
+                    sp = await nursery.start(call_with_kwargs)
 
                 try:
                     # Determine effective timeout for this call
@@ -1045,13 +1069,19 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
     async def run_formatter_command(
         self, command: str | list[str], input: bytes
     ) -> subprocess.CompletedProcess:
-        return await trio.run_process(
-            command,
-            stdin=input,
-            capture_stdout=True,
-            capture_stderr=True,
-            check=False,
-        )
+        # The formatter reads its input from a temp file rather than piped
+        # bytes for the same reason as stdin_source: a formatter that exits
+        # without draining stdin would deadlock the pipe feeder on OpenBSD.
+        with tempfile.TemporaryFile() as stdin:
+            stdin.write(input)
+            stdin.seek(0)
+            return await trio.run_process(
+                command,
+                stdin=stdin,
+                capture_stdout=True,
+                capture_stderr=True,
+                check=False,
+            )
 
     async def write_test_case_to_file_impl(self, working: str, test_case: bytes):
         async with await trio.open_file(working, "wb") as o:

@@ -126,6 +126,31 @@ def test_trio_stdin_unread() -> Result:
     return trio.run(main)
 
 
+def test_trio_stdin_fd() -> Result:
+    """The fix pattern: stdin is a real file descriptor, not fed via pipe."""
+    import trio
+
+    async def main() -> Result:
+        path = os.path.join(os.getcwd(), "words")
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            with trio.move_on_after(TIMEOUT):
+                completed = await trio.run_process(
+                    ["sleep", "0.3"],
+                    check=False,
+                    stdin=fd,
+                    capture_stdout=True,
+                    capture_stderr=True,
+                    preexec_fn=os.setsid,
+                )
+                return True, f"run_process returned {completed.returncode}"
+            return False, f"run_process with fd stdin hung for {TIMEOUT}s"
+        finally:
+            os.close(fd)
+
+    return trio.run(main)
+
+
 def test_trio_stdin_read() -> Result:
     """run_process where the child consumes a bigger-than-pipe-buffer stdin."""
     import trio
@@ -279,7 +304,7 @@ def main() -> int:
         return 2
     # A "words" file for the shrinkray-like test's grep to scan.
     with open(os.path.join(os.getcwd(), "words"), "w") as f:
-        f.write("bugseed\nbugweed\nbugwort\n" * 1000)
+        f.write("bugseed\nbugweed\nbugwort\n" * 10000)  # > pipe buffer
     ok, detail = TESTS[name]()
     print(f"{'PASS' if ok else 'FAIL'}: {detail}", flush=True)
     return 0 if ok else 1

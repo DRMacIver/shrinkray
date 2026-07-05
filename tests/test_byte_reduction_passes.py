@@ -14,9 +14,14 @@ from shrinkray.passes.bytes import (
     short_deletions,
 )
 from shrinkray.passes.patching import apply_patches
-from shrinkray.problem import BasicReductionProblem, shortlex, sort_key_for_initial
+from shrinkray.problem import BasicReductionProblem, shortlex
 from shrinkray.work import WorkContext
-from tests.helpers import assert_reduces_to, direct_reductions, reduce_with
+from tests.helpers import (
+    assert_reduces_to,
+    direct_reductions,
+    latin1_text_sort_key,
+    reduce_with,
+)
 
 
 def is_hello(data: bytes) -> bool:
@@ -100,7 +105,7 @@ def test_lower_individual_bytes_descends_in_sort_key_order(parallelism):
     """Natural text ordering ranks b"z" below b"\\x00", so lowering must be
     able to move a byte to a numerically larger but lower-sorting value,
     converging on the smallest interesting one."""
-    sort_key = sort_key_for_initial(b"a\x00")
+    sort_key = latin1_text_sort_key
     assert (
         reduce_with(
             [lower_individual_bytes],
@@ -116,7 +121,7 @@ def test_lower_individual_bytes_descends_in_sort_key_order(parallelism):
 @pytest.mark.parametrize("parallelism", [1, 2])
 def test_lower_bytes_descends_in_sort_key_order(parallelism):
     """As above, but for the pass that replaces all occurrences of a byte."""
-    sort_key = sort_key_for_initial(b"\x00\x00")
+    sort_key = latin1_text_sort_key
     assert (
         reduce_with(
             [lower_bytes],
@@ -141,6 +146,7 @@ def test_restart_phase_escapes_greedy_corner(parallelism):
         target=b"\x93\t\t\xc5",
         parallelism=parallelism,
         language_restrictions=False,
+        sort_key=latin1_text_sort_key,
     )
 
 

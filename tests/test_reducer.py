@@ -13,7 +13,6 @@ from shrinkray.problem import (
     InterestingnessResult,
     ParseError,
     shortlex,
-    sort_key_for_initial,
 )
 from shrinkray.reducer import (
     DirectoryShrinkRay,
@@ -25,7 +24,7 @@ from shrinkray.reducer import (
     UpdateKeys,
 )
 from shrinkray.work import WorkContext
-from tests.helpers import BasicReducer
+from tests.helpers import BasicReducer, ascii_text_sort_key, latin1_text_sort_key
 
 
 # =============================================================================
@@ -963,7 +962,7 @@ async def test_shrinkray_run_reaches_adjacent_control_char():
     reducing b"\\x1f" while required to stay >= b"\\x1e" (natural text
     ordering) must reach b"\\x1e" instead of making no progress."""
 
-    sort_key = sort_key_for_initial(b"\x1f")
+    sort_key = latin1_text_sort_key
 
     async def is_interesting(x):
         return sort_key(x) >= sort_key(b"\x1e")
@@ -982,19 +981,19 @@ async def test_shrinkray_run_reaches_adjacent_control_char():
 
 
 async def test_shrinkray_run_not_stopped_by_unadopted_single_byte():
-    """Regression test: b"\\xff" does not decode in the initial test case's
-    encoding, so it sorts above every decodable test case and is therefore
-    "interesting" for any text target. That must not abort the reduction
-    before the main passes run: here reaching the target needs lower_bytes
-    (b"\\xea\\xdf" is ISO-8859-7 text and the target lowers its last byte)."""
+    """Regression test: b"\\xff" does not decode as ASCII, so under an
+    ASCII text ordering it sorts above every decodable test case and is
+    therefore "interesting" for any text target. That must not abort the
+    reduction before the main passes run: reaching the target needs the
+    main byte lowering passes."""
 
-    sort_key = sort_key_for_initial(b"\xea\xdf")
+    sort_key = ascii_text_sort_key
 
     async def is_interesting(x):
-        return sort_key(x) >= sort_key(b"\xea\xde")
+        return sort_key(x) >= sort_key(b"qq")
 
     problem = BasicReductionProblem(
-        initial=b"\xea\xdf",
+        initial=b"qr",
         is_interesting=is_interesting,
         work=WorkContext(parallelism=1),
         sort_key=sort_key,
@@ -1003,7 +1002,7 @@ async def test_shrinkray_run_not_stopped_by_unadopted_single_byte():
     reducer = ShrinkRay(target=problem)
     await reducer.run()
 
-    assert problem.current_test_case == b"\xea\xde"
+    assert problem.current_test_case == b"qq"
 
 
 async def test_shrinkray_run_single_byte_uses_sort_key_order():
@@ -1014,7 +1013,7 @@ async def test_shrinkray_run_single_byte_uses_sort_key_order():
     reduction constrained to stay >= b"z" must reach b"z" rather than
     getting stuck at b"\\x00" (which has no numerically smaller bytes)."""
 
-    sort_key = sort_key_for_initial(b"\x02")
+    sort_key = latin1_text_sort_key
 
     async def is_interesting(x):
         return sort_key(x) >= sort_key(b"z")

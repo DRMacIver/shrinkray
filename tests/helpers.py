@@ -1,13 +1,13 @@
 import random
 from collections.abc import Callable, Iterable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 import trio
 from attrs import define
 
 from shrinkray.passes.definitions import ReductionPass, ReductionPump
 from shrinkray.passes.python import is_python
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.problem import BasicReductionProblem, reflow_sort_key, shortlex
 from shrinkray.reducer import Reducer, ShrinkRay
 from shrinkray.state import sort_key_for_initial
 from shrinkray.work import WorkContext
@@ -56,6 +56,29 @@ class BasicReducer[T](Reducer[T]):
 
 
 T = TypeVar("T")
+
+
+def latin1_text_sort_key(data: bytes) -> Any:
+    """The reflow text ordering with a fixed encoding.
+
+    For tests that need the natural text ordering without depending on
+    encoding detection: chardet versions differ across CI jobs and can
+    classify short binary-ish inputs differently, which changes the
+    ordering sort_key_for_initial builds.
+    """
+    return reflow_sort_key(data.decode("latin-1"))
+
+
+def ascii_text_sort_key(data: bytes) -> Any:
+    """The reflow text ordering for ASCII, with undecodable bytes above.
+
+    Mirrors the shape sort_key_for_initial gives text problems: test cases
+    that fail to decode sort above every decodable one.
+    """
+    try:
+        return (0, reflow_sort_key(data.decode("ascii")))
+    except UnicodeDecodeError:
+        return (1, shortlex(data))
 
 
 def reduce_with(

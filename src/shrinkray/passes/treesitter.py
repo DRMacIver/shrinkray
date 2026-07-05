@@ -30,6 +30,7 @@ import bisect
 import os
 import re
 import sys
+import traceback
 from collections.abc import Iterator
 
 import tree_sitter
@@ -125,6 +126,7 @@ def loadable_language_for_filename(filename: str) -> str | None:
         # The exception type says what failed: DownloadError for a
         # fetch, LanguageNotFoundError for a grammar this platform does
         # not have, DynamicLoadError for a broken build, and so on.
+        traceback.print_exc()
         print(
             f"WARNING: could not load the tree-sitter grammar {language!r} "
             f"for {filename} ({type(e).__name__}: {e}); "

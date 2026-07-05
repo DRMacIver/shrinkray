@@ -10,7 +10,7 @@ readme = "README.md"
 classifiers = [
     "Development Status :: 4 - Beta",
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 dependencies = [
     # The test suite uses CliRunner(catch_exceptions=...), added in click
     # 8.2.0; 8.2.0's CliRunner fails to capture writes to sys.stderr,
@@ -88,7 +88,7 @@ show_missing = true
 
 [tool.ruff]
 line-length = 88
-target-version = "py312"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "C4", "UP"]

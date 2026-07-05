@@ -17,14 +17,14 @@ if TYPE_CHECKING:
 class ShrinkRayUI[TestCase](ABC):
     """Base class for shrink ray UI implementations."""
 
-    state: "ShrinkRayState[TestCase]"
+    state: ShrinkRayState[TestCase]
 
     @property
     def reducer(self):
         return self.state.reducer
 
     @property
-    def problem(self) -> "BasicReductionProblem":
+    def problem(self) -> BasicReductionProblem:
         return self.reducer.target  # type: ignore
 
     def install_into_nursery(self, nursery: trio.Nursery):  # noqa: B027

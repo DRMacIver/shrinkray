@@ -55,7 +55,7 @@ class ProgressUpdate:
     # Whether content is hex mode
     hex_mode: bool = False
     # Pass statistics (only passes with test evaluations)
-    pass_stats: list["PassStatsData"] = field(default_factory=list)
+    pass_stats: list[PassStatsData] = field(default_factory=list)
     # Currently running pass name (for highlighting)
     current_pass_name: str = ""
     # List of disabled pass names

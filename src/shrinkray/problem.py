@@ -463,7 +463,7 @@ class ReductionProblem[T](ABC):
         # Cache of View objects for each Format, to avoid re-parsing
         self.__view_cache: dict[Any, ReductionProblem[Any]] = {}
 
-    def view(self, format: Format[T, S] | type[Format[T, S]]) -> "ReductionProblem[S]":
+    def view(self, format: Format[T, S] | type[Format[T, S]]) -> ReductionProblem[S]:
         """Create a view of this problem through a Format.
 
         A View wraps this problem, parsing the current test case through
@@ -559,7 +559,7 @@ class ReductionProblem[T](ABC):
         await trio.lowlevel.checkpoint()
         return False
 
-    def backtrack(self, new_test_case: T) -> "ReductionProblem[T]":
+    def backtrack(self, new_test_case: T) -> ReductionProblem[T]:
         """Create a new problem starting from a different test case.
 
         This is used by reduction pumps to try larger test cases temporarily.

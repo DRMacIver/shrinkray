@@ -244,7 +244,7 @@ class SubprocessClient:
             traceback.print_exc()
             return Response(id="", error="Failed to send restart command")
 
-    async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
+    async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate]:
         """Yield progress updates as they arrive."""
         while not self._completed:
             try:
@@ -320,7 +320,7 @@ class SubprocessClient:
             except Exception:
                 pass
 
-    async def __aenter__(self) -> "SubprocessClient":
+    async def __aenter__(self) -> SubprocessClient:
         await self.start()
         return self
 

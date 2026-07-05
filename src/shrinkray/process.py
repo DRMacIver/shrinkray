@@ -101,7 +101,7 @@ def peak_child_rss_bytes() -> int:
     return ru_maxrss * 1024
 
 
-def signal_group(sp: "trio.Process", sig: int) -> None:
+def signal_group(sp: trio.Process, sig: int) -> None:
     """Send a signal to the process group led by sp.
 
     Test subprocesses are started with setsid (see child_preexec), so the
@@ -116,7 +116,7 @@ def signal_group(sp: "trio.Process", sig: int) -> None:
     os.killpg(sp.pid, sig)
 
 
-def _close_pipes_sync(sp: "trio.Process") -> None:
+def _close_pipes_sync(sp: trio.Process) -> None:
     """Close all pipes on a process synchronously.
 
     Trio process pipes are FdStream instances which have a fileno() method,
@@ -134,7 +134,7 @@ def _close_pipes_sync(sp: "trio.Process") -> None:
                 pass
 
 
-def kill_process_group(sp: "trio.Process") -> None:
+def kill_process_group(sp: trio.Process) -> None:
     """Synchronously kill a process group.
 
     Sends SIGKILL to the entire process group to clean up child processes.
@@ -151,7 +151,7 @@ def kill_process_group(sp: "trio.Process") -> None:
         pass
 
 
-async def interrupt_wait_and_kill(sp: "trio.Process", delay: float = 0.1) -> None:
+async def interrupt_wait_and_kill(sp: trio.Process, delay: float = 0.1) -> None:
     """Interrupt a process, wait for it to exit, and kill it if necessary."""
     await trio.lowlevel.checkpoint()
     if sp.returncode is None:

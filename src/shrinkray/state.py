@@ -303,7 +303,7 @@ class ShrinkRayState[TestCase](ABC):
     @abstractmethod
     def setup_formatter(self): ...
 
-    def stale_working_file_pattern(self) -> "tuple[str, re.Pattern[str]] | None":
+    def stale_working_file_pattern(self) -> tuple[str, re.Pattern[str]] | None:
         """Directory and filename regex for the temporary candidate
         files this state writes next to the target during in-place
         reduction, or None when no such files are created.

@@ -1,0 +1,1 @@
+- Shrink Ray now requires Python 3.14 or later.

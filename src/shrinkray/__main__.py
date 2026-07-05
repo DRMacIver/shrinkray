@@ -36,7 +36,7 @@ from shrinkray.work import Volume
 
 
 def _validate_memory_limit(
-    ctx: "click.Context", param: "click.Parameter", value: str | None
+    ctx: click.Context, param: click.Parameter, value: str | None
 ) -> int | None:
     """Click callback: parse --memory-limit, defaulting to physical RAM."""
     if value is None:

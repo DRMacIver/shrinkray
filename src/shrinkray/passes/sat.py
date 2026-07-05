@@ -289,7 +289,7 @@ class UnionFind[T]:
 
 
 class BooleanEquivalence(UnionFind[int]):
-    table: "NegatingMap"  # type: ignore[reportIncompatibleVariableOverride]
+    table: NegatingMap  # type: ignore[reportIncompatibleVariableOverride]
 
     def __init__(self, initial_merges: Iterable[tuple[int, int]] = ()) -> None:
         super().__init__(initial_merges, key=abs)

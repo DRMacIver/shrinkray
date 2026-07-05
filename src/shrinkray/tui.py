@@ -142,7 +142,7 @@ class ReductionClientProtocol(Protocol):
 
     @property
     def error_message(self) -> str | None: ...
-    def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]: ...
+    def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate]: ...
     @property
     def is_completed(self) -> bool: ...
 
@@ -801,7 +801,7 @@ class ExpandedBoxModal(ModalScreen[None]):
                 with VerticalScroll():
                     yield Static("", id="expanded-content")
 
-    def _get_graph_content(self, app: "ShrinkRayApp") -> None:
+    def _get_graph_content(self, app: ShrinkRayApp) -> None:
         """Copy graph data from main graph to expanded graph."""
         main_graphs = list(app.query("#size-graph").results(SizeGraph))
         expanded_graphs = list(self.query("#expanded-graph").results(SizeGraph))
@@ -814,14 +814,14 @@ class ExpandedBoxModal(ModalScreen[None]):
         expanded_graph._current_runtime = main_graph._current_runtime
         expanded_graph._setup_plot()
 
-    def _get_stats_content(self, app: "ShrinkRayApp") -> str:
+    def _get_stats_content(self, app: ShrinkRayApp) -> str:
         """Get stats content from the stats display widget."""
         stats_displays = list(app.query("#stats-display").results(StatsDisplay))
         if not stats_displays:
             return "Statistics not available"
         return stats_displays[0].render()
 
-    def _get_file_content(self, app: "ShrinkRayApp") -> str | Text:
+    def _get_file_content(self, app: ShrinkRayApp) -> str | Text:
         """Get content from file or preview widget."""
         if self._file_path:
             return self._read_file(self._file_path)
@@ -830,7 +830,7 @@ class ExpandedBoxModal(ModalScreen[None]):
             return "Content preview not available"
         return Text(content_previews[0].preview_content)
 
-    def _get_output_content(self, app: "ShrinkRayApp") -> str | Text:
+    def _get_output_content(self, app: ShrinkRayApp) -> str | Text:
         """Get output content from the output preview widget."""
         output_previews = list(app.query("#output-preview").results(OutputPreview))
         if not output_previews:
@@ -937,7 +937,7 @@ class PassStatsScreen(ModalScreen[None]):
     current_pass_name: reactive[str] = reactive("")
     disabled_passes: reactive[set[str]] = reactive(set)
 
-    def __init__(self, app: "ShrinkRayApp") -> None:
+    def __init__(self, app: ShrinkRayApp) -> None:
         super().__init__()
         self._app = app
         self.pass_stats = app._latest_pass_stats.copy()

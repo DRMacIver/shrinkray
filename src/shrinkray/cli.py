@@ -74,7 +74,7 @@ class InputType(IntEnum):
     arg = 2
     basename = 3
 
-    def enabled(self, value: "InputType") -> bool:
+    def enabled(self, value: InputType) -> bool:
         if self == InputType.all:
             return True
         return self == value

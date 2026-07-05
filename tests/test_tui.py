@@ -128,7 +128,7 @@ class FakeReductionClient:
         self._closed = True
         self._cancelled = True
 
-    async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
+    async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate]:
         for update in self._updates:
             if self._cancelled:
                 break
@@ -2826,7 +2826,7 @@ def test_loop_breaks_on_first_iteration():
         def __init__(self):
             super().__init__(updates=[])
 
-        async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
+        async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate]:
             # Mark as completed BEFORE yielding
             self._completed = True
             yield ProgressUpdate(
@@ -2933,7 +2933,7 @@ def test_cancel_exception_is_caught():
         async def cancel(self) -> Response:
             raise ConnectionError("Process already dead")
 
-        async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
+        async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate]:
             # Yield many updates with delays
             for i in range(100):
                 if self._cancelled:
@@ -3034,7 +3034,7 @@ def test_completed_flag_during_iteration_breaks_loop():
             super().__init__(updates=[])
             self._yield_count = 0
 
-        async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate, None]:
+        async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate]:
             for i in range(10):
                 self._yield_count += 1
                 yield ProgressUpdate(

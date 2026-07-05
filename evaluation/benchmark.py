@@ -24,8 +24,10 @@ Metrics per problem:
   reduction the run eventually achieved (how front-loaded progress is).
 - tail: calls after the last successful reduction (pure stopping cost).
 
-Runs at parallelism 1, which is deterministic (WorkContext seeds its own
-Random(0)), so results are exactly reproducible run to run.
+Runs at parallelism 1 with a fixed random seed (WorkContext seeds its own
+Random(0)), so call counts are reproducible to within a couple of calls
+run to run; judge changes by call counts, not the informational seconds
+column, which varies with machine load.
 
     python3 evaluation/benchmark.py                 # run all, print a table
     python3 evaluation/benchmark.py NAME ...        # run selected problems

@@ -21,7 +21,7 @@ each removed.
 | gcc49-pr64382-genlambda-template-member | cpp | gcc (gcc:4.9) | 879 | 128 | 119 | 85.4% | — |
 | gcc49-pr77739-variadic-auto-lambda | cpp | gcc (gcc:4.9) | 1004 | 166 | 160 | 83.5% | — |
 | gcc49-udlit-char-pack-template | cpp | gcc (gcc:4.9) | 834 | 126 | 122 | 84.9% | — |
-| go11810-generic-untyped-bool-ice | go | go 1.18.10 (gc) | 2288 | 220 | 181 | 90.4% | 936.6 |
+| go11810-generic-untyped-bool-ice | go | go 1.18.10 (gc) | 2288 | 220 | 181 | 90.4% | 906.2 |
 | jq-1.5-cve-2016-4074-deep-nest-segfault | json | jq 1.5 | 120426 | — | — | — | — |
 | kissat402-decide-disconnected | cnf | kissat 4.0.2 | 4295 | 536 | 349 | 87.5% | 918.2 |
 | minisat-dimacs-int-overflow | cnf | minisat 2.2 (git 37dc6c6, ASan) | 2326 | 14 | 12 | 99.4% | 1555.9 |
@@ -29,7 +29,7 @@ each removed.
 | pylint-2.17.4-duplicate-bases-mro-crash | python | pylint 2.17.4 (astroid 2.15.5) | 2403 | 51 | 34 | 97.9% | 109.0 |
 | python-rapidjson-10-deep-nest-segfault | json | python-rapidjson 1.0 | 200426 | — | — | — | — |
 | ruff-0.0.277-isort-skip-block-panic | python | ruff 0.0.277 | 2774 | 56 | 38 | 98.0% | 10.0 |
-| rustc-1941-gce-braced-const-arg-ice | rust | rustc 1.94.1 | 2480 | 141 | 111 | 94.3% | 76.9 |
+| rustc-1941-gce-braced-const-arg-ice | rust | rustc 1.94.1 | 2480 | 141 | 111 | 94.3% | 61.0 |
 | shrinkray-json-deep-nesting | json | python json (deep-nesting regression) | 1495 | 608 | 602 | 59.3% | 55.8 |
 | shrinkray-libcst-deep-nesting | python | libcst 1.8.6 (deep-nesting regression) | 4378 | 800 | 800 | 81.7% | 1125.9 |
 | splr0172-eliminate-assert | cnf | splr 0.17.2 (debug-assertions) | 3148 | 329 | 209 | 89.5% | — |

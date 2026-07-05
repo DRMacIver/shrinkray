@@ -1162,16 +1162,9 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
             formatting_increase = max(0, len(reformatted) - len(final_result))
             final_result = reformatted
 
-        if len(problem.current_test_case) <= 1 and self.trivial_is_error:
-            print(
-                f"Reduced to a trivial test case of size {len(problem.current_test_case)}"
-            )
-            print(
-                "This probably wasn't what you intended. If so, please modify your interestingness test "
-                "to be more restrictive.\n"
-                "If you intended this behaviour, you can run with '--trivial-is-not-error' to "
-                "suppress this message."
-            )
+        trivial_message = self.check_trivial_result(problem)
+        if trivial_message is not None:
+            print(trivial_message)
             sys.exit(1)
 
         else:

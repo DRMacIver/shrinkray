@@ -19,6 +19,7 @@ from shrinkray.cli import (
     validate_ui,
 )
 from shrinkray.formatting import determine_formatter_command
+from shrinkray.interp.host import run_with_tui_interpreter
 from shrinkray.process import (
     MEMORY_LIMIT_ENFORCEABLE,
     default_memory_limit,
@@ -29,7 +30,7 @@ from shrinkray.state import (
     ShrinkRayState,
     ShrinkRayStateSingleFile,
 )
-from shrinkray.tui import run_textual_ui
+from shrinkray.tui import run_tui_in_interpreter
 from shrinkray.ui import BasicUI, ShrinkRayUI
 from shrinkray.validation import run_validation
 from shrinkray.work import Volume
@@ -424,25 +425,30 @@ def main(
         state = ShrinkRayStateSingleFile(initial=initial, **state_kwargs)
 
     if ui_type == UIType.textual:
-        run_textual_ui(
-            file_path=filename,
-            test=test,
-            parallelism=parallelism,
-            timeout=timeout,
-            memory_limit=memory_limit,
-            seed=seed,
-            input_type=input_type.name,
-            in_place=in_place,
-            formatter=formatter,
-            volume=volume.name,
-            trivial_is_error=trivial_is_error,
-            exit_on_completion=exit_on_completion,
-            theme=theme,  # type: ignore[arg-type]
-            history_enabled=history,
-            also_interesting_code=also_interesting_code,
-            external_reducers=reduce_with,
-            python_reducer=python_reducer,
+        exit_code = run_with_tui_interpreter(
+            run_tui_in_interpreter,
+            {
+                "file_path": filename,
+                "test": test,
+                "parallelism": parallelism,
+                "timeout": timeout,
+                "memory_limit": memory_limit,
+                "seed": seed,
+                "input_type": input_type.name,
+                "in_place": in_place,
+                "formatter": formatter,
+                "volume": volume.name,
+                "trivial_is_error": trivial_is_error,
+                "exit_on_completion": exit_on_completion,
+                "theme": theme,
+                "history_enabled": history,
+                "also_interesting_code": also_interesting_code,
+                "external_reducers": reduce_with,
+                "python_reducer": python_reducer,
+            },
         )
+        if exit_code:
+            sys.exit(exit_code)
         return
 
     # At this point, ui_type must be UIType.basic since textual returned above
@@ -463,16 +469,6 @@ def main(
         raise eg.exceptions[0]
     except* KeyboardInterrupt as eg:
         raise eg.exceptions[0]
-
-
-def worker_main() -> None:
-    """Entry point for the worker subprocess."""
-    # Lazy import to avoid loading worker module in main process (fast CLI startup)
-    from shrinkray.interp.worker import (  # noqa: I001, no-import-in-function
-        main as worker_entry,
-    )
-
-    worker_entry()
 
 
 if __name__ == "__main__":  # pragma: no cover

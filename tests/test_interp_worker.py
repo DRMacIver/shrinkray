@@ -1,12 +1,9 @@
-"""Tests for ReducerWorker subprocess."""
+"""Tests for the ReducerWorker."""
 
-import io
 import json
 import math
 import os
-import runpy
 import signal
-import sys
 import time
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
@@ -14,7 +11,6 @@ import pytest
 import trio
 import trio.testing
 
-import shrinkray.interp.worker
 from shrinkray.adaptive_timeout import AdaptiveTimeoutPolicy
 from shrinkray.interp.protocol import (
     ProgressUpdate,
@@ -26,320 +22,9 @@ from shrinkray.interp.protocol import (
 from shrinkray.interp.worker import (
     InputStream,
     ReducerWorker,
-    main,
 )
 from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import ShrinkRayDirectoryState, ShrinkRayStateSingleFile
-
-
-# === ReducerWorker initialization tests ===
-
-
-def test_worker_initial_state():
-    worker = ReducerWorker()
-    assert worker.running is False
-    assert worker.reducer is None
-    assert worker.problem is None
-    assert worker.state is None
-    assert worker._cancel_scope is None
-    assert worker._restart_requested is False
-    assert worker._parallel_samples == 0
-    assert worker._parallel_total == 0
-
-
-# === emit tests ===
-
-
-async def test_worker_emit_writes_to_stdout():
-    worker = ReducerWorker()
-    output = io.StringIO()
-
-    with patch.object(sys, "stdout", output):
-        response = Response(id="test-123", result={"status": "ok"})
-        await worker.emit(response)
-
-    written = output.getvalue()
-    assert "test-123" in written
-    assert "ok" in written
-    assert written.endswith("\n")
-
-
-async def test_worker_emit_progress_update():
-    worker = ReducerWorker()
-    output = io.StringIO()
-
-    with patch.object(sys, "stdout", output):
-        update = ProgressUpdate(
-            status="running",
-            size=100,
-            original_size=200,
-            calls=10,
-            reductions=5,
-            interesting_calls=8,
-            wasted_calls=2,
-            runtime=1.5,
-            parallel_workers=2,
-            average_parallelism=1.5,
-            effective_parallelism=1.2,
-            time_since_last_reduction=0.5,
-            content_preview="test",
-            hex_mode=False,
-        )
-        await worker.emit(update)
-
-    written = output.getvalue()
-    assert "progress" in written
-    assert "running" in written
-    assert written.endswith("\n")
-
-
-# === handle_command tests ===
-
-
-async def test_worker_handle_command_status_not_running():
-    worker = ReducerWorker()
-    request = Request(id="test-1", command="status", params={})
-
-    response = await worker.handle_command(request)
-
-    assert response.id == "test-1"
-    assert response.result == {"running": False}
-    assert response.error is None
-
-
-async def test_worker_handle_command_cancel():
-    worker = ReducerWorker()
-    request = Request(id="test-2", command="cancel", params={})
-
-    response = await worker.handle_command(request)
-
-    assert response.id == "test-2"
-    assert response.result == {"status": "cancelled"}
-    assert worker.running is False
-
-
-async def test_worker_handle_command_unknown():
-    worker = ReducerWorker()
-    request = Request(id="test-3", command="unknown_cmd", params={})
-
-    response = await worker.handle_command(request)
-
-    assert response.id == "test-3"
-    assert response.error == "Unknown command: unknown_cmd"
-
-
-async def test_worker_handle_command_start_already_running():
-    worker = ReducerWorker()
-    worker.running = True
-    request = Request(id="test-4", command="start", params={})
-
-    response = await worker.handle_command(request)
-
-    assert response.id == "test-4"
-    assert response.error == "Already running"
-
-
-# === _handle_status tests ===
-
-
-def test_worker_handle_status_with_running_problem():
-    worker = ReducerWorker()
-    worker.running = True
-
-    # Mock the problem with stats
-    mock_stats = MagicMock()
-    mock_stats.current_test_case_size = 100
-    mock_stats.initial_test_case_size = 200
-    mock_stats.calls = 50
-    mock_stats.reductions = 10
-
-    mock_problem = MagicMock()
-    mock_problem.stats = mock_stats
-    worker.problem = mock_problem
-
-    mock_reducer = MagicMock()
-    mock_reducer.status = "Reducing bytes"
-    worker.reducer = mock_reducer
-
-    response = worker._handle_status("test-id")
-
-    assert response.id == "test-id"
-    assert response.result["running"] is True
-    assert response.result["status"] == "Reducing bytes"
-    assert response.result["size"] == 100
-    assert response.result["original_size"] == 200
-    assert response.result["calls"] == 50
-    assert response.result["reductions"] == 10
-
-
-# === _handle_cancel tests ===
-
-
-def test_worker_handle_cancel_without_cancel_scope():
-    worker = ReducerWorker()
-    worker.running = True
-
-    response = worker._handle_cancel("test-id")
-
-    assert response.id == "test-id"
-    assert response.result == {"status": "cancelled"}
-    assert worker.running is False
-
-
-def test_worker_handle_cancel_with_cancel_scope():
-    worker = ReducerWorker()
-    worker.running = True
-
-    mock_scope = MagicMock()
-    worker._cancel_scope = mock_scope
-
-    response = worker._handle_cancel("test-id")
-
-    assert response.id == "test-id"
-    assert response.result == {"status": "cancelled"}
-    assert worker.running is False
-    mock_scope.cancel.assert_called_once()
-
-
-# === _get_content_preview tests ===
-
-
-def test_worker_get_content_preview_no_problem():
-    worker = ReducerWorker()
-    worker.problem = None
-
-    preview, hex_mode = worker._get_content_preview()
-
-    assert preview == ""
-    assert hex_mode is False
-
-
-def test_worker_get_content_preview_text_file():
-    worker = ReducerWorker()
-    mock_problem = MagicMock()
-    mock_problem.current_test_case = b"hello world\nthis is text"
-    worker.problem = mock_problem
-
-    preview, hex_mode = worker._get_content_preview()
-
-    assert preview == "hello world\nthis is text"
-    assert hex_mode is False
-
-
-def test_worker_get_content_preview_binary_file():
-    worker = ReducerWorker()
-    mock_problem = MagicMock()
-    # Binary content (high bytes)
-    mock_problem.current_test_case = bytes(range(256))
-    worker.problem = mock_problem
-
-    preview, hex_mode = worker._get_content_preview()
-
-    assert hex_mode is True
-    # Should contain hex dump format
-    assert "00000000" in preview  # Address prefix
-
-
-def test_worker_get_content_preview_directory_mode():
-    worker = ReducerWorker()
-    mock_problem = MagicMock()
-    mock_problem.current_test_case = {
-        "file1.txt": b"content1",
-        "file2.txt": b"content2content2",
-    }
-    worker.problem = mock_problem
-
-    preview, hex_mode = worker._get_content_preview()
-
-    assert hex_mode is False
-    assert "file1.txt: 8 bytes" in preview
-    assert "file2.txt: 16 bytes" in preview
-
-
-def test_worker_get_content_preview_truncates_large_text():
-    worker = ReducerWorker()
-    mock_problem = MagicMock()
-    # Create text larger than 100KB limit
-    large_text = "x" * 150_000
-    mock_problem.current_test_case = large_text.encode("utf-8")
-    worker.problem = mock_problem
-
-    preview, hex_mode = worker._get_content_preview()
-
-    assert hex_mode is False
-    assert len(preview) == 100_000
-
-
-# === handle_line tests ===
-
-
-async def test_worker_handle_line_valid_request():
-    worker = ReducerWorker()
-    output = io.StringIO()
-
-    with patch.object(sys, "stdout", output):
-        await worker.handle_line('{"id": "test", "command": "status", "params": {}}')
-
-    written = output.getvalue()
-    assert "test" in written
-    assert "running" in written
-
-
-async def test_worker_handle_line_invalid_json():
-    worker = ReducerWorker()
-    output = io.StringIO()
-
-    with patch.object(sys, "stdout", output):
-        await worker.handle_line("not valid json")
-
-    written = output.getvalue()
-    assert "error" in written.lower()
-
-
-async def test_worker_handle_line_non_request():
-    worker = ReducerWorker()
-    output = io.StringIO()
-
-    # Send a valid JSON but not a Request (e.g., a Response)
-    with patch.object(sys, "stdout", output):
-        await worker.handle_line('{"id": "x", "result": {}, "error": null}')
-
-    written = output.getvalue()
-    assert "Expected a request" in written
-
-
-# === run_reducer tests ===
-
-
-async def test_worker_run_reducer_no_reducer():
-    worker = ReducerWorker()
-    worker.reducer = None
-
-    # Should return immediately without error
-    await worker.run_reducer()
-
-    assert worker.running is False
-
-
-async def test_worker_run_reducer_with_mock_reducer():
-    worker = ReducerWorker()
-    worker.running = True
-
-    mock_reducer = MagicMock()
-
-    async def mock_run():
-        pass
-
-    mock_reducer.run = mock_run
-    worker.reducer = mock_reducer
-
-    await worker.run_reducer()
-
-    assert worker.running is False
-    assert worker._cancel_scope is None
-
-
-# === Injectable stream tests ===
 
 
 class MemoryInputStream:
@@ -375,10 +60,318 @@ class MemoryOutputStream:
         self.data += data
 
 
+def make_worker(
+    input_stream: InputStream | None = None,
+    output_stream: MemoryOutputStream | None = None,
+) -> ReducerWorker:
+    """Factory for tests: a worker with in-memory streams by default."""
+    return ReducerWorker(
+        input_stream=(
+            input_stream if input_stream is not None else MemoryInputStream(b"")
+        ),
+        output_stream=(
+            output_stream if output_stream is not None else MemoryOutputStream()
+        ),
+    )
+
+
+# === ReducerWorker initialization tests ===
+
+
+def test_worker_initial_state():
+    worker = make_worker()
+    assert worker.running is False
+    assert worker.reducer is None
+    assert worker.problem is None
+    assert worker.state is None
+    assert worker._cancel_scope is None
+    assert worker._restart_requested is False
+    assert worker._parallel_samples == 0
+    assert worker._parallel_total == 0
+
+
+# === emit tests ===
+
+
+async def test_worker_emit_progress_update():
+    output = MemoryOutputStream()
+    worker = make_worker(output_stream=output)
+
+    if True:
+        update = ProgressUpdate(
+            status="running",
+            size=100,
+            original_size=200,
+            calls=10,
+            reductions=5,
+            interesting_calls=8,
+            wasted_calls=2,
+            runtime=1.5,
+            parallel_workers=2,
+            average_parallelism=1.5,
+            effective_parallelism=1.2,
+            time_since_last_reduction=0.5,
+            content_preview="test",
+            hex_mode=False,
+        )
+        await worker.emit(update)
+
+    written = output.data.decode("utf-8")
+    assert "progress" in written
+    assert "running" in written
+    assert written.endswith("\n")
+
+
+# === handle_command tests ===
+
+
+async def test_worker_handle_command_status_not_running():
+    worker = make_worker()
+    request = Request(id="test-1", command="status", params={})
+
+    response = await worker.handle_command(request)
+
+    assert response.id == "test-1"
+    assert response.result == {"running": False}
+    assert response.error is None
+
+
+async def test_worker_handle_command_cancel():
+    worker = make_worker()
+    request = Request(id="test-2", command="cancel", params={})
+
+    response = await worker.handle_command(request)
+
+    assert response.id == "test-2"
+    assert response.result == {"status": "cancelled"}
+    assert worker.running is False
+
+
+async def test_worker_handle_command_unknown():
+    worker = make_worker()
+    request = Request(id="test-3", command="unknown_cmd", params={})
+
+    response = await worker.handle_command(request)
+
+    assert response.id == "test-3"
+    assert response.error == "Unknown command: unknown_cmd"
+
+
+async def test_worker_handle_command_start_already_running():
+    worker = make_worker()
+    worker.running = True
+    request = Request(id="test-4", command="start", params={})
+
+    response = await worker.handle_command(request)
+
+    assert response.id == "test-4"
+    assert response.error == "Already running"
+
+
+# === _handle_status tests ===
+
+
+def test_worker_handle_status_with_running_problem():
+    worker = make_worker()
+    worker.running = True
+
+    # Mock the problem with stats
+    mock_stats = MagicMock()
+    mock_stats.current_test_case_size = 100
+    mock_stats.initial_test_case_size = 200
+    mock_stats.calls = 50
+    mock_stats.reductions = 10
+
+    mock_problem = MagicMock()
+    mock_problem.stats = mock_stats
+    worker.problem = mock_problem
+
+    mock_reducer = MagicMock()
+    mock_reducer.status = "Reducing bytes"
+    worker.reducer = mock_reducer
+
+    response = worker._handle_status("test-id")
+
+    assert response.id == "test-id"
+    assert response.result["running"] is True
+    assert response.result["status"] == "Reducing bytes"
+    assert response.result["size"] == 100
+    assert response.result["original_size"] == 200
+    assert response.result["calls"] == 50
+    assert response.result["reductions"] == 10
+
+
+# === _handle_cancel tests ===
+
+
+def test_worker_handle_cancel_without_cancel_scope():
+    worker = make_worker()
+    worker.running = True
+
+    response = worker._handle_cancel("test-id")
+
+    assert response.id == "test-id"
+    assert response.result == {"status": "cancelled"}
+    assert worker.running is False
+
+
+def test_worker_handle_cancel_with_cancel_scope():
+    worker = make_worker()
+    worker.running = True
+
+    mock_scope = MagicMock()
+    worker._cancel_scope = mock_scope
+
+    response = worker._handle_cancel("test-id")
+
+    assert response.id == "test-id"
+    assert response.result == {"status": "cancelled"}
+    assert worker.running is False
+    mock_scope.cancel.assert_called_once()
+
+
+# === _get_content_preview tests ===
+
+
+def test_worker_get_content_preview_no_problem():
+    worker = make_worker()
+    worker.problem = None
+
+    preview, hex_mode = worker._get_content_preview()
+
+    assert preview == ""
+    assert hex_mode is False
+
+
+def test_worker_get_content_preview_text_file():
+    worker = make_worker()
+    mock_problem = MagicMock()
+    mock_problem.current_test_case = b"hello world\nthis is text"
+    worker.problem = mock_problem
+
+    preview, hex_mode = worker._get_content_preview()
+
+    assert preview == "hello world\nthis is text"
+    assert hex_mode is False
+
+
+def test_worker_get_content_preview_binary_file():
+    worker = make_worker()
+    mock_problem = MagicMock()
+    # Binary content (high bytes)
+    mock_problem.current_test_case = bytes(range(256))
+    worker.problem = mock_problem
+
+    preview, hex_mode = worker._get_content_preview()
+
+    assert hex_mode is True
+    # Should contain hex dump format
+    assert "00000000" in preview  # Address prefix
+
+
+def test_worker_get_content_preview_directory_mode():
+    worker = make_worker()
+    mock_problem = MagicMock()
+    mock_problem.current_test_case = {
+        "file1.txt": b"content1",
+        "file2.txt": b"content2content2",
+    }
+    worker.problem = mock_problem
+
+    preview, hex_mode = worker._get_content_preview()
+
+    assert hex_mode is False
+    assert "file1.txt: 8 bytes" in preview
+    assert "file2.txt: 16 bytes" in preview
+
+
+def test_worker_get_content_preview_truncates_large_text():
+    worker = make_worker()
+    mock_problem = MagicMock()
+    # Create text larger than 100KB limit
+    large_text = "x" * 150_000
+    mock_problem.current_test_case = large_text.encode("utf-8")
+    worker.problem = mock_problem
+
+    preview, hex_mode = worker._get_content_preview()
+
+    assert hex_mode is False
+    assert len(preview) == 100_000
+
+
+# === handle_line tests ===
+
+
+async def test_worker_handle_line_valid_request():
+    output = MemoryOutputStream()
+    worker = make_worker(output_stream=output)
+
+    await worker.handle_line('{"id": "test", "command": "status", "params": {}}')
+
+    written = output.data.decode("utf-8")
+    assert "test" in written
+    assert "running" in written
+
+
+async def test_worker_handle_line_invalid_json():
+    output = MemoryOutputStream()
+    worker = make_worker(output_stream=output)
+
+    await worker.handle_line("not valid json")
+
+    written = output.data.decode("utf-8")
+    assert "error" in written.lower()
+
+
+async def test_worker_handle_line_non_request():
+    output = MemoryOutputStream()
+    worker = make_worker(output_stream=output)
+
+    # Send a valid JSON but not a Request (e.g., a Response)
+    await worker.handle_line('{"id": "x", "result": {}, "error": null}')
+
+    written = output.data.decode("utf-8")
+    assert "Expected a request" in written
+
+
+# === run_reducer tests ===
+
+
+async def test_worker_run_reducer_no_reducer():
+    worker = make_worker()
+    worker.reducer = None
+
+    # Should return immediately without error
+    await worker.run_reducer()
+
+    assert worker.running is False
+
+
+async def test_worker_run_reducer_with_mock_reducer():
+    worker = make_worker()
+    worker.running = True
+
+    mock_reducer = MagicMock()
+
+    async def mock_run():
+        pass
+
+    mock_reducer.run = mock_run
+    worker.reducer = mock_reducer
+
+    await worker.run_reducer()
+
+    assert worker.running is False
+    assert worker._cancel_scope is None
+
+
+# === Injectable stream tests ===
+
+
 async def test_worker_emit_with_injected_output_stream():
     """Test emit writes to injected output stream."""
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     response = Response(id="test-123", result={"status": "ok"})
     await worker.emit(response)
@@ -408,23 +401,6 @@ async def test_worker_read_commands_with_injected_input_stream():
     assert b"running" in output.data
 
 
-async def test_worker_read_commands_with_stream_parameter():
-    """Test read_commands accepts stream as parameter."""
-    request = Request(id="req-2", command="cancel", params={})
-    input_data = serialize(request) + "\n"
-
-    output = MemoryOutputStream()
-    input_stream = MemoryInputStream(input_data.encode("utf-8"))
-
-    worker = ReducerWorker(output_stream=output)
-
-    with trio.move_on_after(1):
-        await worker.read_commands(input_stream=input_stream)
-
-    assert b"req-2" in output.data
-    assert b"cancelled" in output.data
-
-
 async def test_worker_read_commands_handles_multiple_commands():
     """Test read_commands processes multiple commands."""
     req1 = Request(id="a", command="status", params={})
@@ -446,7 +422,7 @@ async def test_worker_read_commands_handles_multiple_commands():
 async def test_worker_emit_progress_updates_loop():
     """Test emit_progress_updates emits updates while running."""
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
     worker.running = True
 
     # Mock the problem and state
@@ -508,7 +484,7 @@ async def test_worker_start_reduction_single_file(tmp_path):
     script.chmod(0o755)
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     params = {
         "file_path": str(target),
@@ -540,7 +516,7 @@ async def test_worker_start_reduction_reads_external_reducer_params(tmp_path):
     script.write_text("#!/bin/bash\nexit 0")
     script.chmod(0o755)
 
-    worker = ReducerWorker(output_stream=MemoryOutputStream())
+    worker = make_worker()
     params = {
         "file_path": str(target),
         "test": [str(script)],
@@ -569,7 +545,7 @@ async def test_worker_start_reduction_default_external_reducer_params(tmp_path):
     script.write_text("#!/bin/bash\nexit 0")
     script.chmod(0o755)
 
-    worker = ReducerWorker(output_stream=MemoryOutputStream())
+    worker = make_worker()
     params = {
         "file_path": str(target),
         "test": [str(script)],
@@ -600,7 +576,7 @@ async def test_worker_start_reduction_skip_validation(tmp_path):
     script.chmod(0o755)
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     params = {
         "file_path": str(target),
@@ -638,7 +614,7 @@ async def test_worker_start_reduction_directory(tmp_path):
     script.chmod(0o755)
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     params = {
         "file_path": str(target),
@@ -675,7 +651,7 @@ async def test_worker_handle_start_success(tmp_path):
     script.chmod(0o755)
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     params = {
         "file_path": str(target),
@@ -695,7 +671,7 @@ async def test_worker_handle_start_success(tmp_path):
 async def test_worker_handle_start_error(tmp_path):
     """Test _handle_start returns error on failure."""
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     # Invalid params - missing file
     params = {
@@ -735,7 +711,7 @@ async def test_worker_read_commands_empty_lines():
 async def test_worker_emit_progress_updates_no_problem():
     """Test emit_progress_updates continues when problem is None."""
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
     worker.running = True
     worker.problem = None
 
@@ -755,7 +731,7 @@ async def test_worker_emit_progress_updates_no_problem():
 async def test_worker_emit_progress_updates_no_parallel_attr():
     """Test emit_progress_updates handles state without parallel_tasks_running attribute."""
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
     worker.running = True
 
     # Mock the problem
@@ -801,7 +777,7 @@ async def test_worker_emit_progress_updates_no_parallel_attr():
 async def test_worker_emit_progress_updates_zero_samples():
     """Test emit_progress_updates with zero parallel samples."""
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
     worker.running = True
     # Explicitly set samples to 0
     worker._parallel_samples = 0
@@ -845,7 +821,7 @@ async def test_worker_emit_progress_updates_zero_samples():
 
 def test_worker_get_content_preview_decode_exception():
     """Test _get_content_preview handles decode exceptions gracefully."""
-    worker = ReducerWorker()
+    worker = make_worker()
 
     class FailingDecodeBytes(bytes):
         """Bytes subclass that fails on decode."""
@@ -883,7 +859,7 @@ async def test_worker_start_reduction_with_c_file(tmp_path):
     script.chmod(0o755)
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     params = {
         "file_path": str(target),
@@ -952,21 +928,6 @@ async def test_worker_full_run_with_mock(tmp_path):
     assert b"started" in output.data
 
 
-def test_worker_main_function():
-    """Test the main() function is callable."""
-
-    # We can't easily test the actual main() since it blocks on trio.run
-    # But we can verify it exists and is callable
-    assert callable(main)
-
-
-def test_worker_main_guard():
-    """Test that the module has a main function."""
-
-    # The module exists and can be imported
-    assert hasattr(shrinkray.interp.worker, "main")
-
-
 @pytest.mark.serial
 async def test_worker_run_waits_for_start(tmp_path):
     """Test that run() waits for start command before proceeding."""
@@ -1033,68 +994,6 @@ async def test_worker_run_waits_for_start(tmp_path):
     assert b"started" in output.data
 
 
-def test_worker_main_runs_trio():
-    """Test main() function creates worker and runs trio."""
-
-    # Mock trio.run and ReducerWorker to verify the flow
-    with patch("shrinkray.interp.worker.trio.run") as mock_trio_run:
-        with patch("shrinkray.interp.worker.ReducerWorker") as mock_worker_class:
-            mock_worker = MagicMock()
-            mock_worker_class.return_value = mock_worker
-
-            main()
-
-            mock_worker_class.assert_called_once()
-            mock_trio_run.assert_called_once_with(mock_worker.run)
-
-
-async def test_worker_read_commands_uses_stdin_when_no_stream():
-    """Test read_commands uses stdin when no stream is provided."""
-
-    output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
-
-    # Create a pipe to simulate stdin
-    read_fd, write_fd = os.pipe()
-
-    # Write a status command to the pipe
-    request = Request(id="stdin-test", command="status", params={})
-    os.write(write_fd, (serialize(request) + "\n").encode("utf-8"))
-    os.close(write_fd)
-
-    # Mock sys.stdin.fileno() to return our read pipe
-    with patch.object(sys, "stdin") as mock_stdin:
-        mock_stdin.fileno.return_value = read_fd
-
-        # Run with no input_stream parameter (uses stdin path)
-        with trio.move_on_after(1):
-            await worker.read_commands()
-
-    os.close(read_fd)
-
-    # Should have received response
-    assert b"stdin-test" in output.data
-
-
-def test_worker_main_module_entry_point():
-    """Test the __name__ == '__main__' guard."""
-
-    # Mock trio.run to prevent it from actually running
-    with patch("shrinkray.interp.worker.trio.run") as mock_trio_run:
-        # Use runpy to execute the module with __name__ == "__main__"
-        try:
-            runpy.run_module(
-                "shrinkray.interp.worker",
-                run_name="__main__",
-                alter_sys=True,
-            )
-        except SystemExit:
-            pass  # Module might call sys.exit
-
-    # trio.run should have been called via main()
-    assert mock_trio_run.called
-
-
 # === Tests for startup error conditions ===
 
 
@@ -1115,7 +1014,7 @@ async def test_worker_start_with_failing_interestingness_test(tmp_path):
     script.chmod(0o755)
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     params = {
         "file_path": str(target),
@@ -1150,7 +1049,7 @@ async def test_worker_start_validates_initial_example(tmp_path):
     target.write_text("hello world")
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     params = {
         "file_path": str(target),
@@ -1231,7 +1130,7 @@ async def test_worker_timeout_on_initial_test(tmp_path):
     script.chmod(0o755)
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     params = {
         "file_path": str(target),
@@ -1268,7 +1167,7 @@ async def test_worker_error_message_is_detailed(tmp_path):
     script.chmod(0o755)
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     params = {
         "file_path": str(target),
@@ -1309,7 +1208,7 @@ async def test_worker_trivial_result_error(tmp_path):
     script.chmod(0o755)
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     params = {
         "file_path": str(target),
@@ -1359,7 +1258,7 @@ async def test_worker_trivial_result_no_error_when_disabled(tmp_path):
     script.chmod(0o755)
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     params = {
         "file_path": str(target),
@@ -1403,7 +1302,7 @@ async def test_worker_handle_start_invalid_initial_example_without_state():
     """Test error handling when InvalidInitialExample is raised before state is set."""
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     async def mock_start_reduction(params):
         raise InvalidInitialExample("Test error without state")
@@ -1418,7 +1317,7 @@ async def test_worker_handle_start_invalid_initial_example_without_state():
 async def test_worker_run_reducer_exception_handling():
     """Test that run_reducer catches and emits generic exceptions."""
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     class MockReducer:
         async def run(self):
@@ -1438,7 +1337,7 @@ async def test_worker_run_reducer_invalid_initial_example_without_state():
     """Test run_reducer handles InvalidInitialExample when state is None."""
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     class MockReducer:
         async def run(self):
@@ -1459,7 +1358,7 @@ async def test_worker_run_reducer_invalid_initial_example_with_state():
     """Test run_reducer builds error message when state is available."""
 
     output = MemoryOutputStream()
-    worker = ReducerWorker(output_stream=output)
+    worker = make_worker(output_stream=output)
 
     class MockReducer:
         async def run(self):
@@ -1532,7 +1431,7 @@ async def test_worker_run_with_none_progress_update():
 
 def test_worker_handle_disable_pass_no_pass_name():
     """Test disable_pass handler with missing pass_name."""
-    worker = ReducerWorker()
+    worker = make_worker()
 
     response = worker._handle_disable_pass("test-id", {})
     assert response.error == "pass_name is required"
@@ -1540,7 +1439,7 @@ def test_worker_handle_disable_pass_no_pass_name():
 
 def test_worker_handle_disable_pass_empty_pass_name():
     """Test disable_pass handler with empty pass_name."""
-    worker = ReducerWorker()
+    worker = make_worker()
 
     response = worker._handle_disable_pass("test-id", {"pass_name": ""})
     assert response.error == "pass_name is required"
@@ -1548,7 +1447,7 @@ def test_worker_handle_disable_pass_empty_pass_name():
 
 def test_worker_handle_disable_pass_no_reducer():
     """Test disable_pass handler when reducer is None."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = None
 
     response = worker._handle_disable_pass("test-id", {"pass_name": "hollow"})
@@ -1558,7 +1457,7 @@ def test_worker_handle_disable_pass_no_reducer():
 def test_worker_handle_disable_pass_success():
     """Test disable_pass handler success case."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = Mock()
     worker.reducer.disable_pass = Mock()
     # Mock pass_stats with the pass name in _stats
@@ -1572,7 +1471,7 @@ def test_worker_handle_disable_pass_success():
 def test_worker_handle_disable_pass_unknown_pass():
     """Test disable_pass handler with unknown pass name."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = Mock()
     worker.reducer.disable_pass = Mock()
     # Mock pass_stats with only known passes
@@ -1587,7 +1486,7 @@ def test_worker_handle_disable_pass_unknown_pass():
 
 def test_worker_handle_enable_pass_no_pass_name():
     """Test enable_pass handler with missing pass_name."""
-    worker = ReducerWorker()
+    worker = make_worker()
 
     response = worker._handle_enable_pass("test-id", {})
     assert response.error == "pass_name is required"
@@ -1595,7 +1494,7 @@ def test_worker_handle_enable_pass_no_pass_name():
 
 def test_worker_handle_enable_pass_empty_pass_name():
     """Test enable_pass handler with empty pass_name."""
-    worker = ReducerWorker()
+    worker = make_worker()
 
     response = worker._handle_enable_pass("test-id", {"pass_name": ""})
     assert response.error == "pass_name is required"
@@ -1603,7 +1502,7 @@ def test_worker_handle_enable_pass_empty_pass_name():
 
 def test_worker_handle_enable_pass_no_reducer():
     """Test enable_pass handler when reducer is None."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = None
 
     response = worker._handle_enable_pass("test-id", {"pass_name": "hollow"})
@@ -1613,7 +1512,7 @@ def test_worker_handle_enable_pass_no_reducer():
 def test_worker_handle_enable_pass_success():
     """Test enable_pass handler success case."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = Mock()
     worker.reducer.enable_pass = Mock()
     # Mock pass_stats with the pass name in _stats
@@ -1627,7 +1526,7 @@ def test_worker_handle_enable_pass_success():
 def test_worker_handle_enable_pass_unknown_pass():
     """Test enable_pass handler with unknown pass name."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = Mock()
     worker.reducer.enable_pass = Mock()
     # Mock pass_stats with only known passes
@@ -1642,7 +1541,7 @@ def test_worker_handle_enable_pass_unknown_pass():
 
 def test_worker_handle_skip_pass_no_reducer():
     """Test skip_pass handler when reducer is None."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = None
 
     response = worker._handle_skip_pass("test-id")
@@ -1652,7 +1551,7 @@ def test_worker_handle_skip_pass_no_reducer():
 def test_worker_handle_skip_pass_success():
     """Test skip_pass handler success case."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = Mock()
     worker.reducer.skip_current_pass = Mock()
 
@@ -1665,7 +1564,7 @@ def test_worker_handle_skip_pass_success():
 async def test_worker_handle_command_disable_pass():
     """Test handle_command dispatches to disable_pass handler."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = Mock()
     worker.reducer.disable_pass = Mock()
     # Mock pass_stats with the pass name in _stats
@@ -1683,7 +1582,7 @@ async def test_worker_handle_command_disable_pass():
 async def test_worker_handle_command_enable_pass():
     """Test handle_command dispatches to enable_pass handler."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = Mock()
     worker.reducer.enable_pass = Mock()
     # Mock pass_stats with the pass name in _stats
@@ -1701,7 +1600,7 @@ async def test_worker_handle_command_enable_pass():
 async def test_worker_handle_command_skip_pass():
     """Test handle_command dispatches to skip_pass handler."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = Mock()
     worker.reducer.skip_current_pass = Mock()
 
@@ -1718,7 +1617,7 @@ async def test_worker_handle_command_skip_pass():
 async def test_build_progress_update_with_reducer_none():
     """Test _build_progress_update when reducer is None (346->375, 376->379)."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = None
 
     # Need to set up problem for _build_progress_update (it returns None if problem is None)
@@ -1754,7 +1653,7 @@ async def test_build_progress_update_with_reducer_none():
 async def test_build_progress_update_with_reducer_pass_stats_none():
     """Test _build_progress_update when reducer.pass_stats is None (356->375)."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
 
     # Mock reducer with pass_stats=None
     worker.reducer = Mock()
@@ -1793,7 +1692,7 @@ async def test_build_progress_update_with_reducer_pass_stats_none():
 async def test_build_progress_update_with_reducer_no_disabled_passes_attr():
     """Test _build_progress_update when reducer lacks disabled_passes attribute."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
 
     # Mock reducer without disabled_passes attribute
     worker.reducer = Mock(spec=["pass_stats", "current_reduction_pass", "status"])
@@ -1832,7 +1731,7 @@ async def test_build_progress_update_with_reducer_no_disabled_passes_attr():
 async def test_build_progress_update_periodic_size_history():
     """Test _build_progress_update records periodic size history when size unchanged (412-413)."""
 
-    worker = ReducerWorker()
+    worker = make_worker()
 
     # Set up problem with a start time that gives us control over runtime
     start_time = time.time()
@@ -1886,7 +1785,7 @@ async def test_build_progress_update_periodic_size_history():
 
 def test_get_test_output_preview_no_output_path():
     """Test _get_test_output_preview when output_path is None."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.state = MagicMock()
 
     # Output manager with no output yet
@@ -1902,7 +1801,7 @@ def test_get_test_output_preview_no_output_path():
 
 def test_get_test_output_preview_large_file(tmp_path):
     """Test _get_test_output_preview with file larger than 4KB."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.state = MagicMock()
 
     # Create a file larger than 4KB
@@ -1925,7 +1824,7 @@ def test_get_test_output_preview_large_file(tmp_path):
 
 def test_get_test_output_preview_file_read_error():
     """Test _get_test_output_preview handles OSError gracefully."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.state = MagicMock()
 
     manager = MagicMock()
@@ -1945,7 +1844,7 @@ def test_get_test_output_preview_file_read_error():
 @pytest.mark.trio
 async def test_handle_restart_from_missing_reduction_number():
     """Test restart_from handler with missing reduction_number."""
-    worker = ReducerWorker()
+    worker = make_worker()
 
     response = await worker._handle_restart_from("test-id", {})
     assert response.error == "reduction_number is required"
@@ -1954,7 +1853,7 @@ async def test_handle_restart_from_missing_reduction_number():
 @pytest.mark.trio
 async def test_handle_restart_from_no_state():
     """Test restart_from handler when state is None."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.state = None
 
     response = await worker._handle_restart_from("test-id", {"reduction_number": 1})
@@ -1964,7 +1863,7 @@ async def test_handle_restart_from_no_state():
 @pytest.mark.trio
 async def test_handle_restart_from_no_history_manager():
     """Test restart_from handler when history_manager is None."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.state = MagicMock()
     worker.state.history_manager = None
 
@@ -1975,7 +1874,7 @@ async def test_handle_restart_from_no_history_manager():
 @pytest.mark.trio
 async def test_handle_restart_from_directory_reduction():
     """Test restart_from handler returns error for directory reductions."""
-    worker = ReducerWorker()
+    worker = make_worker()
     # Mock a directory state (not ShrinkRayStateSingleFile)
     worker.state = MagicMock(spec=ShrinkRayDirectoryState)
     worker.state.history_manager = MagicMock()
@@ -1989,7 +1888,7 @@ async def test_handle_restart_from_directory_reduction():
 @pytest.mark.trio
 async def test_handle_restart_from_nonexistent_reduction():
     """Test restart_from handler with nonexistent reduction number."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
     worker.state.history_manager = MagicMock()
     worker.state.history_manager.restart_from_reduction.side_effect = (
@@ -2004,7 +1903,7 @@ async def test_handle_restart_from_nonexistent_reduction():
 @pytest.mark.trio
 async def test_handle_restart_from_success():
     """Test restart_from handler success case."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker._cancel_scope = None
     worker.running = True
 
@@ -2047,7 +1946,7 @@ async def test_handle_restart_from_write_failure_still_reports_restart():
     loop may already be executing it). Reporting it as a failed restart
     told the client the opposite of what happened. The file is rewritten
     on the next successful reduction anyway."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker._cancel_scope = None
     worker.running = True
 
@@ -2079,7 +1978,7 @@ async def test_handle_restart_from_preserves_size_history():
     This is a regression test for a bug where the graph would get confused
     after restart because size_history was reset to start at time 0.
     """
-    worker = ReducerWorker()
+    worker = make_worker()
     worker._cancel_scope = None
     worker.running = True
 
@@ -2134,7 +2033,7 @@ async def test_handle_restart_from_preserves_size_history():
 @pytest.mark.trio
 async def test_handle_command_restart_from():
     """Test handle_command dispatches restart_from correctly."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.state = None  # Will cause "History not available" error
 
     request = Request(
@@ -2148,7 +2047,7 @@ async def test_handle_command_restart_from():
 @pytest.mark.trio
 async def test_handle_restart_from_cancels_running_scope():
     """Test restart_from cancels the running cancel scope."""
-    worker = ReducerWorker()
+    worker = make_worker()
 
     # Create a mock cancel scope
     mock_cancel_scope = MagicMock()
@@ -2180,7 +2079,7 @@ async def test_handle_restart_from_cancels_running_scope():
 @pytest.mark.trio
 async def test_handle_restart_from_generic_exception():
     """Test restart_from handles generic exceptions."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker._cancel_scope = None
     worker.running = True
 
@@ -2204,7 +2103,7 @@ async def test_handle_restart_from_generic_exception():
 @pytest.mark.trio
 async def test_handle_restart_from_clears_output_manager():
     """Test restart_from clears the output manager to avoid stale output display."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker._cancel_scope = None
     worker.running = True
 
@@ -2233,7 +2132,7 @@ async def test_handle_restart_from_clears_output_manager():
 @pytest.mark.trio
 async def test_handle_restart_from_exception_after_validation():
     """Test restart_from handles exceptions that occur after initial validation."""
-    worker = ReducerWorker()
+    worker = make_worker()
     worker._cancel_scope = MagicMock()
     worker.running = True
     worker._restart_requested = False
@@ -2264,7 +2163,7 @@ async def test_handle_restart_from_exception_after_validation():
 @pytest.mark.trio
 async def test_run_loop_restarts_reducer():
     """Test that run() loop re-runs reducer when _restart_requested is True."""
-    worker = ReducerWorker()
+    worker = make_worker()
     run_reducer_calls = []
 
     async def mock_run_reducer():
@@ -2276,7 +2175,6 @@ async def test_run_loop_restarts_reducer():
         # On second call, just complete normally
 
     async def mock_read_commands(
-        input_stream: InputStream | None = None,
         task_status: trio.TaskStatus[None] = trio.TASK_STATUS_IGNORED,
     ) -> None:
         task_status.started()
@@ -2309,7 +2207,7 @@ async def test_emit_progress_updates_continues_during_restart():
     restart because emit_progress_updates exited its loop when running became
     False, and never resumed even after running was set back to True.
     """
-    worker = ReducerWorker()
+    worker = make_worker()
     updates_emitted = []
 
     async def mock_build_progress_update():
@@ -2434,7 +2332,7 @@ async def test_worker_logs_to_history_directory(tmp_path):
 
 async def test_worker_closes_log_file_on_cleanup(tmp_path):
     """Test that the log file is closed during cleanup."""
-    worker = ReducerWorker()
+    worker = make_worker()
 
     # Create a mock log file
     mock_log = MagicMock()
@@ -2650,10 +2548,10 @@ async def test_worker_shuts_down_on_stdin_eof():
 
 @pytest.mark.trio
 async def test_worker_shuts_down_gracefully_on_sigterm():
-    """Regression test: the worker had no SIGTERM handler, so the SIGTERM
-    sent by SubprocessClient.close() (e.g. when quitting the TUI) killed
-    it without unwinding, orphaning the process groups of any running
-    interestingness tests. It must instead cancel its main scope.
+    """Regression test: the worker had no SIGTERM handler, so an external
+    SIGTERM to the process killed it without unwinding, orphaning the
+    process groups of any running interestingness tests. It must
+    instead cancel its main scope.
 
     A no-op python-level handler is installed first so that, should the
     worker's handler be missing, the test fails instead of SIGTERM
@@ -3133,7 +3031,7 @@ async def test_restart_integration_status_updates(tmp_path):
 
 @pytest.mark.trio
 async def test_build_progress_update_includes_adaptive_timeout():
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = None
     worker.problem = Mock()
     worker.problem.stats = Mock()
@@ -3163,7 +3061,7 @@ async def test_build_progress_update_includes_adaptive_timeout():
 
 @pytest.mark.trio
 async def test_build_progress_update_timeout_none_when_unbounded_with_no_data():
-    worker = ReducerWorker()
+    worker = make_worker()
     worker.reducer = None
     worker.problem = Mock()
     worker.problem.stats = Mock()

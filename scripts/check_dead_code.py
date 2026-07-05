@@ -39,7 +39,6 @@ TEST_PREFIX = "tests"
 # Entry points from pyproject.toml [project.scripts]
 SOURCE_ROOTS = {
     "shrinkray.__main__.main",
-    "shrinkray.__main__.worker_main",
 }
 
 

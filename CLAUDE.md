@@ -181,33 +181,54 @@ CLI → ShrinkRayState → ReductionProblem → Reducer → Passes → Patches �
 
 Passes work by generating patches (typically `Cuts` for deletions), applying them in parallel, and updating the problem state when reductions succeed.
 
-### TUI Architecture (src/shrinkray/tui.py, src/shrinkray/subprocess/)
+### TUI Architecture (src/shrinkray/tui.py, src/shrinkray/interp/)
 
-The interactive TUI uses **textual** (not urwid) and runs in a subprocess architecture:
+The interactive TUI uses **textual** (not urwid). Everything runs in a
+single process, but on two interpreters (`concurrent.interpreters`,
+Python 3.14+), each with its own GIL and global state:
 
 ```
-Main Process (asyncio/textual)     Subprocess (trio)
-┌─────────────────────────────┐    ┌─────────────────────────────┐
-│  ShrinkRayApp (textual)     │    │  ReducerWorker              │
-│  - StatsDisplay widget      │◄───│  - Runs actual reduction    │
-│  - ContentPreview widget    │    │  - Emits ProgressUpdate     │
-│  - SubprocessClient         │───►│  - Handles start/cancel     │
-└─────────────────────────────┘    └─────────────────────────────┘
-         stdin/stdout JSON protocol
+Main interpreter (trio, main thread)   Subinterpreter (asyncio/textual, helper thread)
+┌─────────────────────────────┐        ┌─────────────────────────────┐
+│  ReducerWorker              │        │  ShrinkRayApp (textual)     │
+│  - Runs actual reduction    │───────►│  - StatsDisplay widget      │
+│  - Emits ProgressUpdate     │        │  - ContentPreview widget    │
+│  - Handles start/cancel     │◄───────│  - WorkerClient             │
+└─────────────────────────────┘        └─────────────────────────────┘
+              socketpair carrying a JSON line protocol
 ```
 
-**Why subprocess?** Textual requires asyncio, but the reducer uses trio. They're incompatible in the same process.
+**Why two interpreters?** Textual requires asyncio, but the reducer uses
+trio; they're incompatible on one event loop. The reducer must be the
+*main* interpreter because several of its native dependencies (libcst's
+Rust parser, tree-sitter, black) refuse to load in subinterpreters,
+while the TUI's dependency stack is pure Python.
 
-**Protocol** (`subprocess/protocol.py`):
+**Constraints this imposes** (see `interp/host.py` docstrings):
+- `shrinkray.tui`'s transitive imports must stay subinterpreter-safe
+  (enforced by a test in `test_interp_integration.py`).
+- Signal handlers only work in the main interpreter, so SIGWINCH etc.
+  are forwarded over a pipe to a `SignalShim` (`interp/signals.py`).
+- Interestingness tests must be spawned without `preexec_fn` (which
+  forks, and forking with a live subinterpreter crashes the child) —
+  hence `start_new_session=True` plus a `ulimit` wrapper for memory
+  limits (`process.memory_limited_command`).
+- `Interpreter.call` entry points must delegate immediately to a normal
+  module function (nested functions lose module globals) and only take
+  shareable argument types (params travel as JSON strings).
+
+**Protocol** (`interp/protocol.py`):
 - `Request`: Commands sent to worker (start, cancel, status)
 - `Response`: Command acknowledgments with results
 - `ProgressUpdate`: Periodic stats (size, calls, reductions, parallelism, content preview)
 
 **Key files**:
-- `tui.py` - Textual app with StatsDisplay and ContentPreview widgets
-- `subprocess/worker.py` - Entry point for reducer subprocess (`shrinkray-worker`)
-- `subprocess/client.py` - SubprocessClient manages communication
-- `subprocess/protocol.py` - Message dataclasses and JSON serialization
+- `tui.py` - Textual app plus `run_tui_in_interpreter`, the subinterpreter entry point
+- `interp/host.py` - Single-process orchestration: interpreter creation, socketpair, shutdown
+- `interp/worker.py` - ReducerWorker (trio, main interpreter)
+- `interp/client.py` - WorkerClient (asyncio, subinterpreter side)
+- `interp/signals.py` - Signal forwarding into the subinterpreter
+- `interp/protocol.py` - Message dataclasses and JSON serialization
 
 ### Key Design Decisions
 
@@ -219,7 +240,7 @@ Main Process (asyncio/textual)     Subprocess (trio)
 
 ## Development Process: Test-Driven Development
 
-This codebase is complex. The TUI runs in asyncio, the reducer runs in trio, they communicate via subprocess with a JSON protocol, and there are multiple layers of abstraction. **This complexity makes bugs easy to introduce and hard to find.** The tooling (tests, coverage, lints) exists to catch these bugs early. Use it properly.
+This codebase is complex. The TUI runs in asyncio on a subinterpreter, the reducer runs in trio on the main interpreter, they communicate over a socketpair with a JSON protocol, and there are multiple layers of abstraction. **This complexity makes bugs easy to introduce and hard to find.** The tooling (tests, coverage, lints) exists to catch these bugs early. Use it properly.
 
 ### The Core Principle
 
@@ -254,16 +275,16 @@ Before writing any code, you MUST identify which layers need testing:
 **Layer 2: Worker/Reducer (trio async)**
 - The `ReducerWorker` class, reduction passes, problem state
 - Test with: `pytest-trio`, `@pytest.mark.trio`, mock I/O streams
-- Example: `test_subprocess_worker.py` tests worker commands in isolation
+- Example: `test_interp_worker.py` tests worker commands in isolation
 
 **Layer 3: TUI Components (asyncio)**
 - Individual widgets like `StatsDisplay`, `ContentPreview`, modals
 - Test with: `asyncio.run()` wrapper, `FakeReductionClient`
 - Example: Testing that a modal displays correct data without spawning a real worker
 
-**Layer 4: Integration (subprocess communication)**
-- Full TUI ↔ Worker communication
-- Test with: Real subprocess spawning (mark as `@pytest.mark.slow`)
+**Layer 4: Integration (interpreter communication)**
+- Full TUI ↔ Worker communication through the subinterpreter host
+- Test with: A real subinterpreter and pty (mark as `@pytest.mark.slow`)
 - Example: `test_tui_history_modal_during_reduction`
 
 You MUST test each layer independently before testing them together. If a bug exists in the worker layer, you SHOULD be able to reproduce it with a worker-only test, not by running the full TUI.

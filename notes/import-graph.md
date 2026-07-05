@@ -7,94 +7,122 @@ External dependencies (trio, attrs, etc.) are not shown.
 ```mermaid
 flowchart TD
     n0[shrinkray]
-    n1[cli]
-    n2[formatting]
-    n3[history]
-    n4[passes]
-    n5[passes.bytes]
-    n6[passes.cpp]
-    n7[passes.definitions]
-    n8[passes.genericlanguages]
-    n9[passes.json]
-    n10[passes.patching]
-    n11[passes.python]
-    n12[passes.sat]
-    n13[passes.sequences]
-    n14[problem]
-    n15[process]
-    n16[reducer]
-    n17[reformat]
-    n18[state]
-    n19[subprocess]
-    n20[subprocess.client]
-    n21[subprocess.protocol]
-    n22[subprocess.worker]
-    n23[tui]
-    n24[ui]
-    n25[validation]
-    n26[work]
+    n1[adaptive_timeout]
+    n2[cli]
+    n3[formatting]
+    n4[history]
+    n5[interp]
+    n6[interp.client]
+    n7[interp.host]
+    n8[interp.protocol]
+    n9[interp.signals]
+    n10[interp.worker]
+    n11[passes]
+    n12[passes.bytes]
+    n13[passes.cpp]
+    n14[passes.definitions]
+    n15[passes.external]
+    n16[passes.genericlanguages]
+    n17[passes.json]
+    n18[passes.patching]
+    n19[passes.python]
+    n20[passes.sat]
+    n21[passes.sequences]
+    n22[passes.treesitter]
+    n23[problem]
+    n24[process]
+    n25[reducer]
+    n26[reducers]
+    n27[reducers.driver]
+    n28[reducers.protocol]
+    n29[reducers.python]
+    n30[reformat]
+    n31[state]
+    n32[tui]
+    n33[ui]
+    n34[validation]
+    n35[work]
 
-    n2 --> n17
-    n3 --> n1
-    n5 --> n10
-    n5 --> n14
-    n6 --> n7
-    n6 --> n10
-    n6 --> n14
-    n7 --> n14
-    n8 --> n5
-    n8 --> n7
-    n8 --> n10
-    n8 --> n14
-    n8 --> n26
-    n9 --> n7
-    n9 --> n10
-    n9 --> n14
-    n10 --> n14
-    n11 --> n14
-    n11 --> n26
-    n12 --> n7
-    n12 --> n10
-    n12 --> n13
-    n12 --> n14
-    n13 --> n7
-    n13 --> n10
+    n3 --> n30
+    n4 --> n2
+    n6 --> n8
+    n7 --> n9
+    n7 --> n10
+    n10 --> n2
+    n10 --> n8
+    n10 --> n23
+    n10 --> n31
+    n10 --> n35
+    n12 --> n18
+    n12 --> n23
     n13 --> n14
-    n14 --> n2
-    n14 --> n17
-    n14 --> n26
-    n16 --> n5
-    n16 --> n6
-    n16 --> n7
-    n16 --> n8
-    n16 --> n9
-    n16 --> n10
-    n16 --> n11
+    n13 --> n18
+    n13 --> n23
+    n14 --> n23
+    n15 --> n23
+    n15 --> n24
+    n15 --> n28
     n16 --> n12
-    n16 --> n13
     n16 --> n14
-    n18 --> n1
-    n18 --> n2
-    n18 --> n3
-    n18 --> n6
-    n18 --> n14
-    n18 --> n15
-    n18 --> n16
-    n18 --> n26
-    n19 --> n20
-    n19 --> n21
+    n16 --> n18
+    n16 --> n23
+    n16 --> n35
+    n17 --> n14
+    n17 --> n18
+    n17 --> n23
+    n18 --> n23
+    n19 --> n23
+    n19 --> n35
+    n20 --> n14
+    n20 --> n18
     n20 --> n21
-    n22 --> n1
+    n20 --> n23
+    n21 --> n14
+    n21 --> n18
+    n21 --> n23
     n22 --> n14
     n22 --> n18
-    n22 --> n21
-    n22 --> n26
-    n23 --> n2
-    n23 --> n20
-    n23 --> n21
-    n24 --> n14
-    n24 --> n18
-    n25 --> n1
+    n22 --> n23
+    n23 --> n3
+    n23 --> n30
+    n23 --> n35
+    n25 --> n4
+    n25 --> n12
+    n25 --> n13
+    n25 --> n14
+    n25 --> n15
+    n25 --> n16
+    n25 --> n17
+    n25 --> n18
+    n25 --> n19
+    n25 --> n20
+    n25 --> n21
+    n25 --> n22
+    n25 --> n23
+    n25 --> n35
+    n27 --> n14
+    n27 --> n23
+    n27 --> n28
+    n27 --> n35
+    n29 --> n19
+    n29 --> n27
+    n31 --> n1
+    n31 --> n2
+    n31 --> n3
+    n31 --> n4
+    n31 --> n13
+    n31 --> n22
+    n31 --> n23
+    n31 --> n24
+    n31 --> n25
+    n31 --> n35
+    n32 --> n3
+    n32 --> n6
+    n32 --> n8
+    n32 --> n9
+    n33 --> n23
+    n33 --> n31
+    n34 --> n2
 ```
 
 ---

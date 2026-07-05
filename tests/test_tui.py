@@ -3,6 +3,7 @@
 import asyncio
 import inspect
 import os
+import socket
 import tempfile
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
@@ -13,7 +14,7 @@ from textual.app import App
 from textual.widgets import DataTable, Label, ListView, Static, TabbedContent
 
 from shrinkray import tui
-from shrinkray.interp.client import SubprocessClient
+from shrinkray.interp.client import WorkerClient
 from shrinkray.interp.protocol import PassStatsData, ProgressUpdate, Response
 from shrinkray.tui import (
     ContentPreview,
@@ -1123,14 +1124,13 @@ def test_app_with_various_parameters():
     run_async(run_test())
 
 
-# === App without client tests ===
+# === App-driven reduction start tests ===
 
 
-def test_app_creates_own_client():
-    """Test that app creates its own client when none provided."""
+def test_app_starts_reduction_when_asked():
+    """With start_reduction=True the app starts its client and the reduction."""
 
     async def run_test():
-        # Mock SubprocessClient to avoid actually spawning subprocess
         mock_client = MagicMock()
         mock_client.start = AsyncMock()
         mock_client.start_reduction = AsyncMock(
@@ -1139,29 +1139,28 @@ def test_app_creates_own_client():
         mock_client.close = AsyncMock()
         mock_client.is_completed = True
 
-        with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
-            app = ShrinkRayApp(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-                # No client provided - app should create one
-            )
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=mock_client,
+            start_reduction=True,
+        )
 
-            async with app.run_test() as pilot:
-                await pilot.pause()
-                await asyncio.sleep(0.1)
-                await pilot.pause()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
 
-                # Client should have been created and used
-                mock_client.start.assert_called_once()
+            # Client should have been started and used
+            mock_client.start.assert_called_once()
 
     run_async(run_test())
 
 
 def test_app_successful_start_covers_no_error_branch():
-    """Test successful start covers the 'no error' branch (424->430)."""
+    """Test successful start covers the 'no error' branch."""
 
     async def run_test():
-        # Mock SubprocessClient with successful start
         mock_client = MagicMock()
         mock_client.start = AsyncMock()
         mock_client.start_reduction = AsyncMock(
@@ -1178,20 +1177,21 @@ def test_app_successful_start_covers_no_error_branch():
 
         mock_client.get_progress_updates = mock_updates
 
-        with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
-            app = ShrinkRayApp(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-            )
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=mock_client,
+            start_reduction=True,
+        )
 
-            async with app.run_test() as pilot:
-                await pilot.pause()
-                await asyncio.sleep(0.1)
-                await pilot.pause()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
 
-                # Verify reduction was started successfully
-                mock_client.start.assert_called_once()
-                mock_client.start_reduction.assert_called_once()
+            # Verify reduction was started successfully
+            mock_client.start.assert_called_once()
+            mock_client.start_reduction.assert_called_once()
 
     run_async(run_test())
 
@@ -1205,19 +1205,20 @@ def test_app_handles_exception_in_run_reduction():
         mock_client.close = AsyncMock()
         mock_client.is_completed = False
 
-        with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
-            app = ShrinkRayApp(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-            )
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=mock_client,
+            start_reduction=True,
+        )
 
-            async with app.run_test() as pilot:
-                await pilot.pause()
-                await asyncio.sleep(0.1)
-                await pilot.pause()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await asyncio.sleep(0.1)
+            await pilot.pause()
 
-                # App should have handled the error
-                mock_client.start.assert_called_once()
+            # App should have handled the error
+            mock_client.start.assert_called_once()
 
     run_async(run_test())
 
@@ -2305,12 +2306,13 @@ def temp_test_script():
         os.unlink(temp_path)
 
 
-def test_real_subprocess_communication(temp_test_file, temp_test_script):
-    """Test with a real subprocess client."""
+def test_real_worker_client_in_app(temp_test_file, temp_test_script):
+    """Test with a real WorkerClient object (no worker on the other end)."""
 
     async def run_test():
         # Create a client we can control
-        client = SubprocessClient()
+        client_sock, worker_sock = socket.socketpair()
+        client = WorkerClient(client_sock)
         app = ShrinkRayApp(
             file_path=temp_test_file,
             test=[temp_test_script],
@@ -2331,6 +2333,8 @@ def test_real_subprocess_communication(temp_test_file, temp_test_script):
 
             # Quit to clean up
             await pilot.press("q")
+
+        worker_sock.close()
 
     run_async(run_test())
 
@@ -2977,13 +2981,16 @@ def test_cancel_exception_is_caught():
 def test_run_textual_ui_creates_and_runs_app():
     """Test run_textual_ui function creates app and calls run()."""
 
+    client = FakeReductionClient(updates=[])
+
     # Patch ShrinkRayApp - validation is now done before run_textual_ui is called
     with patch("shrinkray.tui.ShrinkRayApp") as mock_app_class:
         mock_app = MagicMock()
-        mock_app.return_code = None  # Ensure no exit
+        mock_app.return_code = None
         mock_app_class.return_value = mock_app
 
-        run_textual_ui(
+        exit_code = run_textual_ui(
+            client=client,
             file_path="/tmp/test.txt",
             test=["./test.sh"],
             parallelism=4,
@@ -3005,6 +3012,8 @@ def test_run_textual_ui_creates_and_runs_app():
         mock_app_class.assert_called_once_with(
             file_path="/tmp/test.txt",
             test=["./test.sh"],
+            client=client,
+            start_reduction=True,
             parallelism=4,
             timeout=2.0,
             memory_limit=8 * 1024**3,
@@ -3023,7 +3032,8 @@ def test_run_textual_ui_creates_and_runs_app():
         )
 
         # Verify run() was called
-        mock_app.run.assert_called_once()
+        mock_app.run.assert_called_once_with(headless=False)
+        assert exit_code == 0
 
 
 def test_completed_flag_during_iteration_breaks_loop():
@@ -3076,20 +3086,20 @@ def test_completed_flag_during_iteration_breaks_loop():
     run_async(run_test())
 
 
-def test_run_textual_ui_exits_with_app_return_code():
-    """Test run_textual_ui exits with app.return_code when set."""
+def test_run_textual_ui_returns_app_return_code():
+    """Test run_textual_ui returns app.return_code when set."""
 
     mock_app = MagicMock()
     mock_app.return_code = 42  # Non-zero return code
 
     with patch("shrinkray.tui.ShrinkRayApp", return_value=mock_app):
-        with pytest.raises(SystemExit) as exc_info:
-            run_textual_ui(
-                file_path="/tmp/test.txt",
-                test=["./test.sh"],
-            )
+        exit_code = run_textual_ui(
+            client=FakeReductionClient(updates=[]),
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+        )
 
-        assert exc_info.value.code == 42
+    assert exit_code == 42
 
 
 # =============================================================================
@@ -6908,13 +6918,14 @@ def test_trigger_restart_from_no_client(tmp_path):
                 file_path=temp_file,
                 test=["true"],
                 exit_on_completion=False,
-                client=None,
+                client=FakeReductionClient(updates=[]),
             )
 
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # This should do nothing since no client
+                # action_quit clears the client; restarting then does nothing
+                app._client = None
                 app._trigger_restart_from(1)
 
                 await pilot.pause()

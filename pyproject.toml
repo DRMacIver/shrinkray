@@ -39,7 +39,6 @@ Changelog = "https://github.com/DRMacIver/shrinkray/blob/main/CHANGELOG.md"
 
 [project.scripts]
 shrinkray = "shrinkray.__main__:main"
-shrinkray-worker = "shrinkray.__main__:worker_main"
 
 [project.optional-dependencies]
 # Everything needed to run the test suite. Kept separate from dev because

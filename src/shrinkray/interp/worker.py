@@ -1,4 +1,6 @@
-"""Worker subprocess that runs the reducer with trio and communicates via JSON protocol."""
+"""The reducer worker: runs the reduction under trio in the main
+interpreter, driven over the JSON line protocol by the TUI (which runs
+in a subinterpreter; see shrinkray.interp.host)."""
 
 import math
 import os
@@ -47,12 +49,12 @@ class OutputStream(Protocol):
 
 
 class ReducerWorker:
-    """Runs the reducer in a subprocess with JSON protocol communication."""
+    """Runs the reducer, driven over the JSON line protocol."""
 
     def __init__(
         self,
-        input_stream: InputStream | None = None,
-        output_stream: OutputStream | None = None,
+        input_stream: InputStream,
+        output_stream: OutputStream,
     ):
         self.running = False
         self.reducer = None
@@ -67,7 +69,6 @@ class ReducerWorker:
         # Parallelism tracking
         self._parallel_samples = 0
         self._parallel_total = 0
-        # I/O streams - None means use stdin/stdout
         self._input_stream = input_stream
         self._output_stream = output_stream
         # Output directory for test output capture (cleaned up on shutdown)
@@ -91,31 +92,17 @@ class ReducerWorker:
     async def emit(self, msg: Response | ProgressUpdate) -> None:
         """Write a message to the output stream."""
         line = serialize(msg) + "\n"
-        if self._output_stream is not None:
-            await self._output_stream.send(line.encode("utf-8"))
-        else:
-            sys.stdout.write(line)
-            sys.stdout.flush()
+        await self._output_stream.send(line.encode("utf-8"))
 
     async def read_commands(
         self,
-        input_stream: InputStream | None = None,
         task_status: trio.TaskStatus[None] = trio.TASK_STATUS_IGNORED,
     ) -> None:
-        """Read commands from input stream and dispatch them."""
+        """Read commands from the input stream and dispatch them."""
         task_status.started()
 
-        # Use provided stream, or instance stream, or default to stdin
-        stream: InputStream
-        if input_stream is not None:
-            stream = input_stream
-        elif self._input_stream is not None:
-            stream = self._input_stream
-        else:
-            stream = trio.lowlevel.FdStream(os.dup(sys.stdin.fileno()))
-
         buffer = b""
-        async with aclosing(stream) as aiter:
+        async with aclosing(self._input_stream) as aiter:
             async for chunk in aiter:
                 buffer += chunk
                 while b"\n" in buffer:
@@ -123,8 +110,8 @@ class ReducerWorker:
                     if line:
                         await self.handle_line(line.decode("utf-8"))
 
-        # End of input means the parent process is gone (it closed our stdin
-        # or died); shut down rather than reduce for nobody.
+        # End of input means the TUI is gone (it closed its end of the
+        # socket or crashed); shut down rather than reduce for nobody.
         if self._main_cancel_scope is not None:
             self._main_cancel_scope.cancel()
 
@@ -782,13 +769,3 @@ class ReducerWorker:
                     self._log_file.close()
                 except Exception:
                     pass
-
-
-def main() -> None:
-    """Entry point for the worker subprocess."""
-    worker = ReducerWorker()
-    trio.run(worker.run)
-
-
-if __name__ == "__main__":
-    main()

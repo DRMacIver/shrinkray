@@ -1,6 +1,4 @@
 import hashlib
-import io
-import json
 import os
 import pathlib
 import re
@@ -18,8 +16,9 @@ import trio
 from attrs import define
 from click.testing import CliRunner
 
-from shrinkray.__main__ import _validate_memory_limit, main, worker_main
+from shrinkray.__main__ import _validate_memory_limit, main
 from shrinkray.process import default_memory_limit, interrupt_wait_and_kill
+from shrinkray.tui import run_tui_in_interpreter
 from shrinkray.validation import ValidationResult
 
 
@@ -584,14 +583,6 @@ grep hello hello.txt
     assert result.exit_code == 0
 
 
-def test_worker_main_can_be_imported():
-    """Test that worker_main function can be called."""
-
-    # Can't actually run it without proper stdin/stdout setup,
-    # but at least verify it's importable and callable
-    assert callable(worker_main)
-
-
 def test_directory_mode_stdin_error(tmp_path):
     """Test that directory mode rejects stdin input type."""
     target = tmp_path / "mydir"
@@ -672,24 +663,6 @@ test -f "$1/a.txt" && grep hello "$1/a.txt"
     assert result.exit_code in (0, 1)  # 1 for trivial result warning
 
 
-def test_worker_main_entry_point():
-    """Test that worker_main can be invoked (will fail without proper stdin)."""
-
-    # Capture what would happen if worker_main runs without proper input
-    old_stdin = sys.stdin
-    try:
-        sys.stdin = io.StringIO("")  # Empty input
-        # worker_main will fail because there's no proper JSON input
-        # but this exercises the import and function call
-        try:
-            worker_main()
-        except (EOFError, json.JSONDecodeError, Exception):
-            # Expected to fail without proper input
-            pass
-    finally:
-        sys.stdin = old_stdin
-
-
 @pytest.mark.slow
 def test_custom_backup_filename(basic_shrink_target, tmp_path):
     """Test that custom backup filename is used when specified."""
@@ -715,9 +688,9 @@ def test_textual_ui_path(basic_shrink_target, monkeypatch):
     Exercises the textual UI code path in run_command.
     """
 
-    # Mock run_textual_ui to avoid actually launching the TUI
-    mock_run_textual_ui = MagicMock()
-    monkeypatch.setattr("shrinkray.__main__.run_textual_ui", mock_run_textual_ui)
+    # Mock the interpreter host to avoid actually launching the TUI
+    mock_run_host = MagicMock(return_value=0)
+    monkeypatch.setattr("shrinkray.__main__.run_with_tui_interpreter", mock_run_host)
 
     runner = CliRunner(catch_exceptions=False)
     result = runner.invoke(
@@ -730,9 +703,33 @@ def test_textual_ui_path(basic_shrink_target, monkeypatch):
         ],
     )
 
-    # The function should have been called
-    assert mock_run_textual_ui.called
+    # The host should have been called with the TUI entry point
+    assert mock_run_host.called
+    entry, params = mock_run_host.call_args.args
+    assert entry is run_tui_in_interpreter
+    assert params["file_path"] == basic_shrink_target.test_case
     assert result.exit_code == 0
+
+
+def test_textual_ui_propagates_nonzero_exit_code(basic_shrink_target, monkeypatch):
+    """A failing TUI run must become the CLI's exit code."""
+
+    mock_run_host = MagicMock(return_value=1)
+    monkeypatch.setattr("shrinkray.__main__.run_with_tui_interpreter", mock_run_host)
+
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [
+            basic_shrink_target.interestingness_test,
+            basic_shrink_target.test_case,
+            "--ui=textual",
+            "--no-history",
+        ],
+    )
+
+    assert mock_run_host.called
+    assert result.exit_code == 1
 
 
 def test_keyboard_interrupt_handling(basic_shrink_target, tmp_path):
@@ -1452,8 +1449,8 @@ def test_trivial_is_not_error_tui(tmp_path, monkeypatch):
     script.write_text("#!/bin/sh\nexit 0\n")
     script.chmod(0o755)
 
-    mock_run_textual_ui = MagicMock()
-    monkeypatch.setattr("shrinkray.__main__.run_textual_ui", mock_run_textual_ui)
+    mock_run_host = MagicMock(return_value=0)
+    monkeypatch.setattr("shrinkray.__main__.run_with_tui_interpreter", mock_run_host)
 
     runner = CliRunner(catch_exceptions=False)
     result = runner.invoke(
@@ -1468,7 +1465,10 @@ def test_trivial_is_not_error_tui(tmp_path, monkeypatch):
         ],
     )
 
-    assert mock_run_textual_ui.called
+    assert mock_run_host.called
+    (_, params) = mock_run_host.call_args.args
+    assert params["trivial_is_error"] is False
+    assert params["parallelism"] == 1
     assert result.exit_code == 0
 
 

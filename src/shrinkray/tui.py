@@ -1,16 +1,23 @@
-"""Textual-based TUI for Shrink Ray."""
+"""Textual-based TUI for Shrink Ray.
 
+This module runs inside a subinterpreter (see shrinkray.interp.host),
+so its transitive imports must all be loadable there: no libcst,
+tree-sitter, or black, whose native modules refuse to load in
+subinterpreters.
+"""
+
+import json
 import math
 import os
+import socket
 import subprocess
-import sys
 import time
 import traceback
 from collections.abc import AsyncGenerator, Callable
 from contextlib import aclosing
 from datetime import timedelta
 from difflib import unified_diff
-from typing import Literal, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 import humanize
 from rich.text import Text
@@ -35,12 +42,13 @@ from textual.widgets import (
 from textual_plotext import PlotextPlot
 
 from shrinkray.formatting import try_decode
-from shrinkray.interp.client import SubprocessClient
+from shrinkray.interp.client import WorkerClient
 from shrinkray.interp.protocol import (
     PassStatsData,
     ProgressUpdate,
     Response,
 )
+from shrinkray.interp.signals import SignalShim
 
 
 ThemeMode = Literal["auto", "dark", "light"]
@@ -1651,6 +1659,7 @@ class ShrinkRayApp(App[None]):
         self,
         file_path: str,
         test: list[str],
+        client: ReductionClientProtocol,
         parallelism: int | None = None,
         timeout: float | None = None,
         memory_limit: int | None = None,
@@ -1661,7 +1670,7 @@ class ShrinkRayApp(App[None]):
         volume: str = "normal",
         trivial_is_error: bool = True,
         exit_on_completion: bool = True,
-        client: ReductionClientProtocol | None = None,
+        start_reduction: bool = False,
         theme: ThemeMode = "auto",
         history_enabled: bool = True,
         also_interesting_code: int | None = None,
@@ -1682,7 +1691,11 @@ class ShrinkRayApp(App[None]):
         self._trivial_is_error = trivial_is_error
         self._exit_on_completion = exit_on_completion
         self._client: ReductionClientProtocol | None = client
-        self._owns_client = client is None
+        # When the app drives the reduction (rather than monitoring a
+        # client the caller has already started, as tests do), it also
+        # owns the client's lifecycle.
+        self._start_reduction = start_reduction
+        self._owns_client = start_reduction
         self._completed = False
         self._theme = theme
         self._history_enabled = history_enabled
@@ -1825,14 +1838,10 @@ class ShrinkRayApp(App[None]):
 
     @work(exclusive=True)
     async def run_reduction(self) -> None:
-        """Start the reduction subprocess and monitor progress."""
+        """Start the reduction and monitor progress."""
         try:
-            if self._client is None:
-                # No client provided - start one and begin reduction
-                debug_mode = self._volume == "debug"
-                self._client = SubprocessClient(debug_mode=debug_mode)
-                self._owns_client = True
-
+            assert self._client is not None
+            if self._start_reduction:
                 await self._client.start()
 
                 # Start the reduction - validation was already done by main()
@@ -2040,6 +2049,7 @@ class ShrinkRayApp(App[None]):
 
 
 def run_textual_ui(
+    client: ReductionClientProtocol,
     file_path: str,
     test: list[str],
     parallelism: int | None = None,
@@ -2057,8 +2067,9 @@ def run_textual_ui(
     also_interesting_code: int | None = None,
     external_reducers: list[list[str]] | None = None,
     python_reducer: bool = True,
-) -> None:
-    """Run the textual TUI.
+    headless: bool = False,
+) -> int:
+    """Run the textual TUI against a worker client, returning an exit code.
 
     Note: Validation must be done before calling this function.
     The caller (main()) is responsible for running run_validation() first.
@@ -2067,6 +2078,8 @@ def run_textual_ui(
     app = ShrinkRayApp(
         file_path=file_path,
         test=test,
+        client=client,
+        start_reduction=True,
         parallelism=parallelism,
         timeout=timeout,
         memory_limit=memory_limit,
@@ -2083,6 +2096,34 @@ def run_textual_ui(
         external_reducers=external_reducers,
         python_reducer=python_reducer,
     )
-    app.run()
-    if app.return_code:
-        sys.exit(app.return_code)
+    app.run(headless=headless)
+    return app.return_code or 0
+
+
+def _run_tui(
+    sock_fd: int, signal_read_fd: int, signal_write_fd: int, params_json: str
+) -> int:
+    """The body of run_tui_in_interpreter (which must stay trivial)."""
+    shim = SignalShim(signal_read_fd, signal_write_fd)
+    shim.install()
+    try:
+        # The host retains ownership of the socket fd, so wrap a dup.
+        sock = socket.socket(fileno=os.dup(sock_fd))
+        client = WorkerClient(sock)
+        params: dict[str, Any] = json.loads(params_json)
+        return run_textual_ui(client=client, **params)
+    finally:
+        shim.stop()
+
+
+def run_tui_in_interpreter(
+    sock_fd: int, signal_read_fd: int, signal_write_fd: int, params_json: str
+) -> int:
+    """TUI entry point for the subinterpreter host.
+
+    Called by shrinkray.interp.host.run_with_tui_interpreter via
+    Interpreter.call, which reconstructs this function without module
+    globals for anything defined in its body — so it must do nothing
+    but delegate to a module-level function, which runs normally.
+    """
+    return _run_tui(sock_fd, signal_read_fd, signal_write_fd, params_json)

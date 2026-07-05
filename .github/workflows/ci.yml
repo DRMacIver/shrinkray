@@ -225,6 +225,36 @@ jobs:
         # dependencies we just synced at the matrix resolution.
         run: uv run --no-sync pytest tests/ -m "not slow" -q
 
+  test-openbsd:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    # The VM boot plus building libcst from source (no OpenBSD wheels)
+    # makes this the slowest test job by far.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Run fast tests in an OpenBSD VM
+        uses: vmactions/openbsd-vm@18edb32f4e48dae5865d7b8b3a9587bc01218a20 # v1.4.4
+        with:
+          release: "7.7"
+          usesh: true
+          copyback: false
+          mem: 8192
+          # rust is needed to build libcst from source via setuptools-rust.
+          prepare: |
+            pkg_add python3 py3-pip rust minisat
+          run: |
+            set -ex
+            uname -a
+            python3 --version
+            python3 -m venv /tmp/venv
+            /tmp/venv/bin/pip install --quiet --upgrade pip
+            /tmp/venv/bin/pip install ".[test]"
+            /tmp/venv/bin/python -m pytest tests/ -m "not slow" -q
+
   coverage:
     permissions:
       contents: read

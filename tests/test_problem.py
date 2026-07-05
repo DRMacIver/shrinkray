@@ -3,6 +3,7 @@
 import time
 
 import pytest
+import trio
 
 from shrinkray.problem import (
     BasicReductionProblem,
@@ -1072,3 +1073,109 @@ async def test_view_attempt_unstick_delegates():
     view = View(problem=problem, parse=lambda x: x, dump=lambda x: x)
     assert await view.attempt_unstick() is True
     assert unstick_calls[0] == 1
+
+
+# =============================================================================
+# Concurrent is_interesting tests (parallelism > 1)
+# =============================================================================
+
+
+async def test_concurrent_interesting_candidates_settle_on_smallest():
+    """Concurrent successful candidates must leave the problem on the
+    sort-key-smallest one, with consistent statistics, regardless of the
+    order in which their tests complete."""
+
+    async def is_interesting(tc: bytes) -> bool:
+        await trio.lowlevel.checkpoint()
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"aaaaaaaa",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=4),
+    )
+
+    candidates = [b"aaaa", b"aa", b"aaaaaa", b"a"]
+    results: list[bool] = []
+
+    async with trio.open_nursery() as nursery:
+        for candidate in candidates:
+
+            async def check(candidate: bytes = candidate) -> None:
+                results.append(await problem.is_interesting(candidate))
+
+            nursery.start_soon(check)
+
+    assert results == [True] * len(candidates)
+    assert problem.current_test_case == b"a"
+
+    # Every interesting call either was adopted as a reduction or was
+    # counted as wasted, and failed_reductions tracks the rest.
+    stats = problem.stats
+    assert stats.calls == len(candidates)
+    assert stats.interesting_calls == len(candidates)
+    assert stats.reductions + stats.wasted_interesting_calls == len(candidates)
+    assert stats.failed_reductions == stats.calls - stats.reductions
+    assert stats.reductions >= 1
+    assert stats.current_test_case_size == 1
+
+
+async def test_concurrent_reductions_fire_callbacks_in_decreasing_order():
+    """on_reduce callbacks fire once per adopted reduction, and adopted
+    test cases get strictly smaller over time even under concurrency."""
+
+    async def is_interesting(tc: bytes) -> bool:
+        await trio.lowlevel.checkpoint()
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"aaaaaaaaaa",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=4),
+    )
+
+    adopted: list[bytes] = []
+
+    async def callback(tc: bytes) -> None:
+        adopted.append(tc)
+
+    problem.on_reduce(callback)
+
+    candidates = [b"aaaaaaaa", b"aaaa", b"aaaaaa", b"aa", b"a", b"aaaaaaaaa"]
+    async with trio.open_nursery() as nursery:
+        for candidate in candidates:
+            nursery.start_soon(problem.is_interesting, candidate)
+
+    assert len(adopted) == problem.stats.reductions
+    assert adopted[-1] == b"a"
+    for before, after in zip(adopted, adopted[1:], strict=False):
+        assert problem.sort_key(after) < problem.sort_key(before)
+
+
+async def test_concurrent_uninteresting_candidates_are_cached():
+    """A candidate tested while no reduction happens is served from cache
+    on later calls, including after concurrent duplicate tests."""
+
+    call_count = 0
+
+    async def is_interesting(tc: bytes) -> bool:
+        nonlocal call_count
+        call_count += 1
+        await trio.lowlevel.checkpoint()
+        return False
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=2),
+    )
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(problem.is_interesting, b"x")
+        nursery.start_soon(problem.is_interesting, b"y")
+
+    calls_after_concurrent_phase = call_count
+    # Later duplicate tests are answered from the cache.
+    assert await problem.is_interesting(b"x") is False
+    assert await problem.is_interesting(b"y") is False
+    assert call_count == calls_after_concurrent_phase

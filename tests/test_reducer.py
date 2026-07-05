@@ -114,6 +114,27 @@ def test_reducer_base_class_pass_control_defaults():
 # =============================================================================
 
 
+@pytest.mark.parametrize("parallelism", [1, 2])
+async def test_full_shrinkray_run_under_parallelism(parallelism: int):
+    """A complete ShrinkRay run converges to the same minimal result
+    whether or not speculative parallelism is enabled."""
+
+    async def is_interesting(tc: bytes) -> bool:
+        await trio.lowlevel.checkpoint()
+        return b"hello" in tc
+
+    problem = BasicReductionProblem(
+        initial=b"x" * 50 + b"hello" + b"y" * 50,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=parallelism),
+    )
+
+    reducer = ShrinkRay(target=problem)
+    await reducer.run()
+
+    assert problem.current_test_case == b"hello"
+
+
 async def test_basic_reducer_runs_passes():
     """Test BasicReducer runs all passes."""
     call_log = []

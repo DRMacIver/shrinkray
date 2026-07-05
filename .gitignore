@@ -13,6 +13,9 @@
 __pycache__/
 .vscode
 scratch
+# Node's V8 compile cache, created when node-based oracles (tsc, prettier,
+# terser) run from the repo root during evaluation.
+node-compile-cache/
 .venv*
 # Claude Code - ignore settings but keep commands
 .claude/settings.local.json

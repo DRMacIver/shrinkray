@@ -1,0 +1,10 @@
+{
+  "id": "prettier-3.6.2-css-comma-custom-property-crash",
+  "status": "ok",
+  "original_bytes": 1687,
+  "reduced_bytes": 4,
+  "original_nows_bytes": 1369,
+  "reduced_nows_bytes": 3,
+  "seconds": 10.3,
+  "ratio": 99.8
+}

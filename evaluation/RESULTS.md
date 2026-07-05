@@ -26,6 +26,7 @@ each removed.
 | kissat402-decide-disconnected | cnf | kissat 4.0.2 | 4295 | 536 | 349 | 87.5% | 918.2 |
 | minisat-dimacs-int-overflow | cnf | minisat 2.2 (git 37dc6c6, ASan) | 2326 | 14 | 12 | 99.4% | 1555.9 |
 | mypy-0.942-match-union-tuple-crash | python | mypy 0.942 | 2537 | 133 | 77 | 94.8% | 477.7 |
+| prettier-3.6.2-css-comma-custom-property-crash | css | prettier 3.6.2 | 1687 | 4 | 3 | 99.8% | 10.3 |
 | pylint-2.17.4-duplicate-bases-mro-crash | python | pylint 2.17.4 (astroid 2.15.5) | 2403 | 51 | 34 | 97.9% | 109.0 |
 | python-rapidjson-10-deep-nest-segfault | json | python-rapidjson 1.0 | 200426 | — | — | — | — |
 | ruff-0.0.277-isort-skip-block-panic | python | ruff 0.0.277 | 2774 | 56 | 38 | 98.0% | 10.0 |
@@ -71,7 +72,7 @@ not committed for those two; they are kept as reproduce-and-don't-crash
 entries. The shallow ujson entry (a buffer overflow that triggers at
 modest depth) is the representative small-JSON reduction.
 
-## The tree-sitter entries (Go, Rust, JavaScript)
+## The tree-sitter entries (Go, Rust, JavaScript, TypeScript, CSS)
 
 The `go11810`, `rustc-1941`, and `terser-5151` entries were added to
 evaluate the tree-sitter suggestion in issue #59: they are real crash
@@ -121,6 +122,20 @@ Observations:
 - tree-sitter's error tolerance matters: mid-reduction states are
   often syntactically invalid (the converged Rust output is not valid
   Rust), and the passes keep operating on the parseable parts.
+
+### CSS (`prettier-3.6.2-css-comma-custom-property-crash`)
+
+The `prettier` entry adds CSS coverage via a real crash in prettier
+3.6.2's PostCSS printer (prettier/prettier#17806, fixed by PR #17899;
+current prettier formats it cleanly). The upstream repro buries the
+trigger in a custom property spliced into a gradient
+(`--l: , …; radial-gradient(… var(--l))`), but the underlying fault is
+just a declaration whose value is a bare comma. Shrink ray strips the
+1687-byte stylesheet down to that essence — **4 bytes, `0:,`** (99.8%),
+the whole reduction in ~10s. The `.css` grammar drives the tree-sitter
+passes and the byte passes finish the job; the tiny floor is a good
+demonstration that a construct-specific bug reduces to its minimal core
+regardless of how elaborately the report dressed it up.
 
 ### TypeScript (`tsc-5.8.2-object-entries-setstate-crash`)
 

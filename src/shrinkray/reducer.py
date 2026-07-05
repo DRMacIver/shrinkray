@@ -1,3 +1,4 @@
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Generator, Iterable
 from contextlib import contextmanager
@@ -7,6 +8,7 @@ import attrs
 import trio
 from attrs import define
 
+from shrinkray.history import sanitize_for_filename
 from shrinkray.passes.bytes import (
     Split,
     Tokenize,
@@ -35,6 +37,7 @@ from shrinkray.passes.definitions import (
     ReductionPump,
     compose,
 )
+from shrinkray.passes.external import ExternalReducerPass, external_reducer
 from shrinkray.passes.genericlanguages import (
     combine_expressions,
     cut_comment_like_things,
@@ -42,11 +45,12 @@ from shrinkray.passes.genericlanguages import (
     normalize_identifiers,
     reduce_integer_literals,
     replace_falsey_with_zero,
+    replace_identifiers_with_zero,
     simplify_brackets,
 )
 from shrinkray.passes.json import JSON, JSON_PASSES
 from shrinkray.passes.patching import PatchApplier, Patches
-from shrinkray.passes.python import PYTHON_PASSES, is_python
+from shrinkray.passes.python import is_python, python_reducer_command
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
 from shrinkray.passes.treesitter import language_for_filename, treesitter_passes
@@ -148,6 +152,23 @@ class ShrinkRay(Reducer[bytes]):
     # Set from the test case's file extension.
     treesitter_language: str | None = None
 
+    # Commands (argv lists) for user-specified external reducers, run as
+    # reduction passes. See shrinkray.passes.external.
+    external_reducers: list[list[str]] = attrs.Factory(list)
+
+    # Whether to run the built-in libcst Python reducer (as an external
+    # reducer) when the test case looks like Python.
+    python_reducer: bool = True
+
+    # Directory to write external reducer stderr logs to, or None to discard.
+    reducer_log_dir: str | None = None
+
+    # The external reducer passes built for this reducer, kept so their
+    # subprocesses can be torn down when the run finishes.
+    _external_reducer_passes: list[ExternalReducerPass] = attrs.field(
+        factory=list, init=False
+    )
+
     current_pump: ReductionPump[bytes] | None = None
 
     unlocked_ok_passes: bool = False
@@ -217,6 +238,7 @@ class ShrinkRay(Reducer[bytes]):
             remove_whitespace,
             reduce_integer_literals,
             replace_falsey_with_zero,
+            replace_identifiers_with_zero,
             combine_expressions,
             merge_adjacent_strings,
             lexeme_based_deletions,
@@ -277,10 +299,50 @@ class ShrinkRay(Reducer[bytes]):
     # such runs are skipped entirely.
     pass_fingerprints: dict[str, bytes] = attrs.Factory(dict)
 
+    def _log_file_for(self, name: str) -> str | None:
+        """Path for an external reducer's stderr log, or None to discard."""
+        if self.reducer_log_dir is None:
+            return None
+        os.makedirs(self.reducer_log_dir, exist_ok=True)
+        return os.path.join(self.reducer_log_dir, f"reducer-{name}.log")
+
+    def build_external_reducer_passes(self) -> list[ExternalReducerPass]:
+        """Build the external reducer passes for the current test case.
+
+        This includes the built-in Python reducer (when enabled and the test
+        case looks like Python) followed by any user-specified reducers.
+        """
+        passes: list[ExternalReducerPass] = []
+        if self.python_reducer and is_python(self.target.current_test_case):
+            passes.append(
+                external_reducer(
+                    python_reducer_command(),
+                    name="python",
+                    log_file=self._log_file_for("python"),
+                )
+            )
+        for i, command in enumerate(self.external_reducers):
+            name = f"reduce-with-{i}"
+            passes.append(
+                external_reducer(
+                    command,
+                    name=name,
+                    log_file=self._log_file_for(name),
+                )
+            )
+        return passes
+
+    async def close_external_reducers(self) -> None:
+        """Tear down any external reducer subprocesses started during the run."""
+        with trio.CancelScope(shield=True):
+            for reducer_pass in self._external_reducer_passes:
+                await reducer_pass.aclose()
+
     def __attrs_post_init__(self) -> None:
-        if is_python(self.target.current_test_case):
-            self.great_passes.extend(PYTHON_PASSES)
-            self.initial_cuts.extend(PYTHON_PASSES)
+        external_passes = self.build_external_reducer_passes()
+        self._external_reducer_passes = external_passes
+        self.great_passes.extend(external_passes)
+        self.initial_cuts.extend(external_passes)
         if self.enable_cpp_passes:
             self.great_passes.extend(CPP_PASSES)
             self.initial_cuts.extend(CPP_PASSES)
@@ -529,6 +591,12 @@ class ShrinkRay(Reducer[bytes]):
                 return
 
     async def run(self) -> None:
+        try:
+            await self._run()
+        finally:
+            await self.close_external_reducers()
+
+    async def _run(self) -> None:
         await self.target.setup()
 
         if await self.target.is_interesting(b""):
@@ -641,6 +709,11 @@ class KeyProblem(ReductionProblem[bytes]):
 
 @define
 class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
+    # Forwarded to each per-file ShrinkRay. See ShrinkRay for details.
+    external_reducers: list[list[str]] = attrs.Factory(list)
+    python_reducer: bool = True
+    reducer_log_dir: str | None = None
+
     async def run(self):
         while True:
             prev = self.target.current_test_case
@@ -668,9 +741,18 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
                     applier=applier,
                     key=k,
                 )
+                if self.reducer_log_dir is not None:
+                    key_log_dir: str | None = os.path.join(
+                        self.reducer_log_dir, sanitize_for_filename(k)
+                    )
+                else:
+                    key_log_dir = None
                 key_shrinkray = ShrinkRay(
                     enable_cpp_passes=any(k.endswith(s) for s in C_FILE_EXTENSIONS),
                     treesitter_language=language_for_filename(k),
                     target=key_problem,
+                    external_reducers=self.external_reducers,
+                    python_reducer=self.python_reducer,
+                    reducer_log_dir=key_log_dir,
                 )
                 nursery.start_soon(key_shrinkray.run)

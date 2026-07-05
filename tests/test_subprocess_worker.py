@@ -532,6 +532,62 @@ async def test_worker_start_reduction_single_file(tmp_path):
     assert worker.problem.current_test_case == b"hello world"
 
 
+async def test_worker_start_reduction_reads_external_reducer_params(tmp_path):
+    """_start_reduction forwards external_reducers/python_reducer to the state."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    worker = ReducerWorker(output_stream=MemoryOutputStream())
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "formatter": "none",
+        "volume": "quiet",
+        "history_enabled": False,
+        "skip_validation": True,
+        "external_reducers": [["my-reducer", "arg"]],
+        "python_reducer": False,
+    }
+
+    await worker._start_reduction(params)
+
+    assert worker.state is not None
+    assert worker.state.external_reducers == [["my-reducer", "arg"]]
+    assert worker.state.python_reducer is False
+
+
+async def test_worker_start_reduction_default_external_reducer_params(tmp_path):
+    """_start_reduction defaults external reducers off / python reducer on."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    worker = ReducerWorker(output_stream=MemoryOutputStream())
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "formatter": "none",
+        "volume": "quiet",
+        "history_enabled": False,
+        "skip_validation": True,
+    }
+
+    await worker._start_reduction(params)
+
+    assert worker.state is not None
+    assert worker.state.external_reducers == []
+    assert worker.state.python_reducer is True
+
+
 async def test_worker_start_reduction_skip_validation(tmp_path):
     """Test _start_reduction with skip_validation=True skips setup()."""
     # Create a test file

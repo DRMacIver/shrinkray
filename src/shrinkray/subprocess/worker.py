@@ -203,6 +203,8 @@ class ReducerWorker:
         skip_validation = params.get("skip_validation", False)
         history_enabled = params.get("history_enabled", True)
         also_interesting_code = params.get("also_interesting_code")
+        external_reducers = params.get("external_reducers", [])
+        python_reducer = params.get("python_reducer", True)
 
         state_kwargs: dict[str, Any] = {
             "input_type": input_type,
@@ -219,6 +221,8 @@ class ReducerWorker:
             "volume": volume,
             "history_enabled": history_enabled,
             "also_interesting_code": also_interesting_code,
+            "external_reducers": external_reducers,
+            "python_reducer": python_reducer,
         }
 
         if os.path.isdir(filename):

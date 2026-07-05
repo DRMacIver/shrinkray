@@ -20,6 +20,8 @@ Reduction passes for "things that look like programming languages" - text with c
 
 Python-specific AST-aware reductions using libcst. Includes passes for lifting indented constructs (replacing `if`/`while`/`try`/`with` blocks with their bodies), replacing indented block bodies with `...`, replacing statements with `pass`, stripping type annotations, and deleting statements. These understand Python syntax and produce valid Python output.
 
+These passes are not run in-process. Instead they run inside a subprocess as an **external reducer** (see `notes/external-reducers.md`): `ShrinkRay` launches `python -m shrinkray.reducers.python`, which runs `PYTHON_PASSES` against a `RemoteReductionProblem` that answers `is_interesting` over the external-reducer protocol. This keeps libcst (and any future heavyweight reducers) out of the main process while preserving parallelism.
+
 ### json.py
 
 JSON-specific passes. Provides `delete_identifiers` for recursively removing keys from JSON objects throughout the structure (built on the `DeleteIdentifiers` patch type).

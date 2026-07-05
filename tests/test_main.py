@@ -10,7 +10,6 @@ import sys
 import time
 from unittest.mock import MagicMock, patch
 
-import black
 import click
 import pexpect
 import pyte
@@ -22,10 +21,6 @@ from click.testing import CliRunner
 from shrinkray.__main__ import _validate_memory_limit, main, worker_main
 from shrinkray.process import default_memory_limit, interrupt_wait_and_kill
 from shrinkray.validation import ValidationResult
-
-
-def format(s: str) -> str:
-    return black.format_str(s, mode=black.Mode()).strip()
 
 
 @pytest.mark.slow
@@ -91,10 +86,10 @@ except AssertionError:
         ]
     )
 
-    # With parallelism > 1, speculative execution races can land the reducer
-    # in different final fixed points (e.g. deleting a.py entirely and
-    # reducing c.py to "assert 0"), so the exact-output assertions below need
-    # a deterministic single-threaded reduction.
+    # Run single-threaded for a deterministic reduction path. (The reduction is
+    # confluent here now that replace_identifiers_with_zero can take `assert x`
+    # to `assert 0`, but --parallelism=1 keeps the exact-output assertions below
+    # robust regardless.)
     if in_place:
         subprocess.check_call(
             [
@@ -123,14 +118,18 @@ except AssertionError:
             ],
         )
 
-    assert a.exists()
+    # c.py reduces all the way to `assert 0`: reduce_integer_literals takes
+    # `x == 2` to `x == 0`, a span deletion drops `x ==`, and (crucially)
+    # replace_identifiers_with_zero turns any surviving `assert x` into
+    # `assert 0`. That drops the cross-file dependency on a.py, so a.py and the
+    # unused b.py are both deleted and only c.py survives.
+    assert not a.exists()
     assert not b.exists()
     assert c.exists()
+    assert c.read_text() == "assert 0"
 
-    # TODO: Remove calls to format when formatting is implemented properly for
-    # directories.
-    assert format(a.read_text()) == "x = 0"
-    assert format(c.read_text()) == "from a import x\n\nassert x"
+    # The reduction preserved interestingness: the script still succeeds.
+    assert subprocess.call([str(script), str(target)]) == 0
 
 
 @pytest.mark.slow

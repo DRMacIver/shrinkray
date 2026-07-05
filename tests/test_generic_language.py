@@ -16,6 +16,7 @@ from shrinkray.passes.genericlanguages import (
     reduce_integer_literals,
     regex_pass,
     replace_falsey_with_zero,
+    replace_identifiers_with_zero,
     simplify_brackets,
 )
 from shrinkray.problem import ParseError, shortlex
@@ -196,6 +197,33 @@ def test_replace_falsey_empty_list():
 def test_replace_falsey_empty_parens():
     result = reduce_with([replace_falsey_with_zero], b"()", lambda x: True)
     assert result == b"0"
+
+
+# === replace_identifiers_with_zero tests ===
+
+
+def test_replace_identifier_with_zero():
+    # `x` is an identifier; replacing it with 0 keeps the "assert " prefix.
+    result = reduce_with(
+        [replace_identifiers_with_zero],
+        b"assert x",
+        lambda t: t.startswith(b"assert "),
+    )
+    assert result == b"assert 0"
+
+
+def test_replace_identifier_with_zero_only_touches_names():
+    # A bare integer is not an identifier, so this pass leaves it alone.
+    result = reduce_with([replace_identifiers_with_zero], b"57", lambda t: True)
+    assert result == b"57"
+
+
+def test_replace_identifier_with_zero_rejects_when_uninteresting():
+    # Replacing the only identifier is rejected if it breaks interestingness.
+    result = reduce_with(
+        [replace_identifiers_with_zero], b"keep", lambda t: t == b"keep"
+    )
+    assert result == b"keep"
 
 
 # === simplify_brackets tests ===

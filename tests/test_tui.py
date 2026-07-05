@@ -96,6 +96,8 @@ class FakeReductionClient:
         skip_validation: bool = False,
         history_enabled: bool = True,
         also_interesting_code: int | None = None,
+        external_reducers: list[list[str]] | None = None,
+        python_reducer: bool = True,
     ) -> Response:
         if self._start_error:
             return Response(id="start", error=self._start_error)
@@ -3016,6 +3018,8 @@ def test_run_textual_ui_creates_and_runs_app():
             theme="dark",
             history_enabled=True,
             also_interesting_code=None,
+            external_reducers=None,
+            python_reducer=True,
         )
 
         # Verify run() was called

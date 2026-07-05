@@ -254,6 +254,11 @@ class ShrinkRayState[TestCase](ABC):
     # When a test returns this code, it's recorded but not used for reduction
     also_interesting_code: int | None = None
 
+    # External reducers (argv lists) to run as reduction passes, and whether to
+    # run the built-in Python reducer. Passed through to the reducer.
+    external_reducers: list[list[str]] = attrs.Factory(list)
+    python_reducer: bool = True
+
     # Set of test cases to exclude from interestingness (for restart-from-point)
     # These are byte-identical matches of previously reduced values
     excluded_test_cases: set[bytes] | None = None
@@ -370,6 +375,16 @@ class ShrinkRayState[TestCase](ABC):
             test_case_bytes = self._get_test_case_bytes(test_case)
             output = self._get_last_captured_output()
             self.history_manager.record_also_interesting(test_case_bytes, output)
+
+    def reducer_log_dir(self) -> str | None:
+        """Directory for external reducer stderr logs, or None to discard them.
+
+        Uses a subdirectory of the run's history directory when history is
+        enabled, so reducer logs live alongside the run's other artifacts.
+        """
+        if self.history_manager is not None:
+            return os.path.join(self.history_manager.history_dir, "reducers")
+        return None
 
     @abstractmethod
     def new_reducer(self, problem: ReductionProblem[TestCase]) -> Reducer[TestCase]: ...
@@ -978,6 +993,9 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
             problem,
             enable_cpp_passes=os.path.splitext(self.filename)[1] in C_FILE_EXTENSIONS,
             treesitter_language=language_for_filename(self.filename),
+            external_reducers=self.external_reducers,
+            python_reducer=self.python_reducer,
+            reducer_log_dir=self.reducer_log_dir(),
         )
 
     def _get_initial_bytes(self) -> bytes:
@@ -1099,7 +1117,12 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     def new_reducer(
         self, problem: ReductionProblem[dict[str, bytes]]
     ) -> Reducer[dict[str, bytes]]:
-        return DirectoryShrinkRay(target=problem)
+        return DirectoryShrinkRay(
+            target=problem,
+            external_reducers=self.external_reducers,
+            python_reducer=self.python_reducer,
+            reducer_log_dir=self.reducer_log_dir(),
+        )
 
     def _get_initial_bytes(self) -> bytes:
         # Serialize directory content for history recording

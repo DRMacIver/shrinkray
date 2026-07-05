@@ -12,10 +12,10 @@
   - The empty file is now correctly preferred to whitespace-only files.
   - Format-specific passes (for example JSON) no longer crash when the test
     case stops parsing in that format mid-reduction.
-- Byte lowering passes are much more thorough: they can move bytes to values
-  that are larger numerically but smaller in the text ordering, lower a byte
-  while raising or stripping the bytes after it (generalised carrying), and
-  propose whitespace-padded layouts of the current content.
+- Byte lowering passes can now move bytes to preferred characters
+  (whitespace, "0", "a", "z") that are larger numerically but smaller in
+  the ordering used for text, so e.g. a control character can become a
+  letter.
 - Reduction passes that give up early when making no progress now attempt
-  the same candidates at every parallelism level, and always try every
-  candidate when there are few of them, making results more reproducible.
+  the same candidates at every parallelism level, making results more
+  reproducible across different `--parallelism` settings.

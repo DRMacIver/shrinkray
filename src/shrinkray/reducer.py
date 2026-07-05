@@ -18,17 +18,13 @@ from shrinkray.passes.bytes import (
     lexeme_based_deletions,
     lift_braces,
     line_sorter,
-    lower_byte_and_strip_trailing_whitespace,
     lower_bytes,
     lower_individual_bytes,
-    lower_with_suffix_raises,
     remove_indents,
     remove_whitespace,
-    replace_byte_with_whitespace_run,
     replace_space_with_newlines,
     short_deletions,
     standard_substitutions,
-    whitespace_layout_candidates,
 )
 from shrinkray.passes.cpp import (
     C_FILE_EXTENSIONS,
@@ -242,10 +238,6 @@ class ShrinkRay(Reducer[bytes]):
             delete_byte_spans,
             lower_bytes,
             lower_individual_bytes,
-            lower_with_suffix_raises,
-            lower_byte_and_strip_trailing_whitespace,
-            replace_byte_with_whitespace_run,
-            whitespace_layout_candidates,
             simplify_brackets,
             standard_substitutions,
             # This is in last ditch because it's probably not useful

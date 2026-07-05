@@ -213,7 +213,6 @@ async def test_apply_patches_early_abort_gives_up(monkeypatch):
     a bounded number of attempts instead of trying every candidate."""
     monkeypatch.setattr("shrinkray.passes.patching.MIN_PATCH_ATTEMPTS", 5)
     monkeypatch.setattr("shrinkray.passes.patching.EARLY_ABORT_SIZE_FACTOR", 0)
-    monkeypatch.setattr("shrinkray.passes.patching.FULL_EXPLORATION_LIMIT", 0)
 
     initial = bytes(range(50))  # distinct bytes so each deletion differs
 
@@ -245,7 +244,6 @@ async def test_apply_patches_early_abort_deterministic_across_parallelism(
     than at a scheduling-dependent count of completed attempts."""
     monkeypatch.setattr("shrinkray.passes.patching.MIN_PATCH_ATTEMPTS", 10)
     monkeypatch.setattr("shrinkray.passes.patching.EARLY_ABORT_SIZE_FACTOR", 0)
-    monkeypatch.setattr("shrinkray.passes.patching.FULL_EXPLORATION_LIMIT", 0)
 
     initial = bytes(range(60))
     patches = [[(i, i + 1)] for i in range(60)]

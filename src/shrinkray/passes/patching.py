@@ -175,12 +175,6 @@ class PatchApplier[PatchType, TargetType]:
 MIN_PATCH_ATTEMPTS = 250
 EARLY_ABORT_SIZE_FACTOR = 3
 
-# Patch sets no bigger than this are always explored fully: the early-abort
-# budget exists to stop hopeless passes from grinding through enormous
-# candidate sets, not to make the attempted subset of a small set depend on
-# shuffle order.
-FULL_EXPLORATION_LIMIT = 5000
-
 
 async def apply_patches[PatchType, TargetType](
     problem: ReductionProblem[TargetType],
@@ -226,8 +220,6 @@ async def apply_patches[PatchType, TargetType](
     give_up_after = max(
         MIN_PATCH_ATTEMPTS, EARLY_ABORT_SIZE_FACTOR * problem.current_size
     )
-    if len(patches) <= FULL_EXPLORATION_LIMIT:
-        give_up_after = max(give_up_after, len(patches))
     any_success = False
 
     async with trio.open_nursery() as nursery:

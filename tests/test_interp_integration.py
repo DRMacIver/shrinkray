@@ -11,7 +11,8 @@ import time
 
 import pytest
 
-from shrinkray.subprocess import SubprocessClient, client, worker
+from shrinkray.interp import client, worker
+from shrinkray.interp.client import SubprocessClient
 
 
 def _pid_alive(pid: int) -> bool:
@@ -36,7 +37,7 @@ def test_worker_module_runs_as_main():
     """Test that the worker module can be executed as a subprocess."""
     # Start the worker process
     proc = subprocess.Popen(
-        [sys.executable, "-m", "shrinkray.subprocess.worker"],
+        [sys.executable, "-m", "shrinkray.interp.worker"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -91,7 +92,7 @@ def test_subprocess_client_has_expected_methods():
 def test_worker_handles_unknown_command():
     """Test that the worker returns an error for unknown commands."""
     proc = subprocess.Popen(
-        [sys.executable, "-m", "shrinkray.subprocess.worker"],
+        [sys.executable, "-m", "shrinkray.interp.worker"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -120,7 +121,7 @@ def test_worker_handles_unknown_command():
 def test_worker_handles_malformed_json():
     """Test that the worker handles malformed JSON gracefully."""
     proc = subprocess.Popen(
-        [sys.executable, "-m", "shrinkray.subprocess.worker"],
+        [sys.executable, "-m", "shrinkray.interp.worker"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -189,7 +190,7 @@ def test_sigterm_kills_running_interestingness_tests(tmp_path):
     }
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "shrinkray.subprocess.worker"],
+        [sys.executable, "-m", "shrinkray.interp.worker"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

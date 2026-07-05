@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
+from shrinkray.interp.protocol import PassStatsData, ProgressUpdate, Response
 from shrinkray.tui import ShrinkRayApp, StatsDisplay
 
 

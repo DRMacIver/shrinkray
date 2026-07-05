@@ -680,7 +680,7 @@ def resolve_reference(
         else:
             qualified = source_module
         # Return if it's a symbol OR if it's from a tracked module
-        # (module imports like 'from shrinkray.subprocess import worker'
+        # (module imports like 'from shrinkray.interp import worker'
         # may not be in all_symbols but still indicate a source reference)
         if qualified in all_symbols or is_tracked_module(source_module):
             return qualified
@@ -890,7 +890,7 @@ def references_source_symbols(
                 sym = all_symbols[current]
                 if sym.module.startswith(PACKAGE_PREFIX):
                     return True
-            # Also check if it's a module reference (e.g., shrinkray.subprocess.worker)
+            # Also check if it's a module reference (e.g., shrinkray.interp.worker)
             elif current.startswith(PACKAGE_PREFIX):
                 return True
 

@@ -11,8 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from shrinkray.subprocess.client import SubprocessClient
-from shrinkray.subprocess.protocol import ProgressUpdate, Response
+from shrinkray.interp.client import SubprocessClient
+from shrinkray.interp.protocol import ProgressUpdate, Response
 
 
 # === SubprocessClient unit tests ===
@@ -880,7 +880,7 @@ def test_subprocess_client_close_actually_kills_after_terminate_timeout():
             raise TimeoutError("Simulated timeout")
 
         with patch(
-            "shrinkray.subprocess.client.asyncio.wait_for",
+            "shrinkray.interp.client.asyncio.wait_for",
             side_effect=patched_wait_for,
         ):
             await client.close()
@@ -943,7 +943,7 @@ def test_subprocess_client_get_progress_updates_timeout_continue():
             raise TimeoutError("Simulated timeout")
 
         with patch(
-            "shrinkray.subprocess.client.asyncio.wait_for",
+            "shrinkray.interp.client.asyncio.wait_for",
             side_effect=mock_wait_for,
         ):
             updates = []

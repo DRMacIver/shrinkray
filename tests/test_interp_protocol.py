@@ -2,7 +2,7 @@
 
 import pytest
 
-from shrinkray.subprocess.protocol import (
+from shrinkray.interp.protocol import (
     PassStatsData,
     ProgressUpdate,
     Request,

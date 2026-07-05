@@ -14,22 +14,22 @@ import pytest
 import trio
 import trio.testing
 
-import shrinkray.subprocess.worker
+import shrinkray.interp.worker
 from shrinkray.adaptive_timeout import AdaptiveTimeoutPolicy
-from shrinkray.problem import InvalidInitialExample
-from shrinkray.state import ShrinkRayDirectoryState, ShrinkRayStateSingleFile
-from shrinkray.subprocess.protocol import (
+from shrinkray.interp.protocol import (
     ProgressUpdate,
     Request,
     Response,
     deserialize,
     serialize,
 )
-from shrinkray.subprocess.worker import (
+from shrinkray.interp.worker import (
     InputStream,
     ReducerWorker,
     main,
 )
+from shrinkray.problem import InvalidInitialExample
+from shrinkray.state import ShrinkRayDirectoryState, ShrinkRayStateSingleFile
 
 
 # === ReducerWorker initialization tests ===
@@ -860,7 +860,7 @@ def test_worker_get_content_preview_decode_exception():
 
     # Mock is_binary_string to return False (treat as text), so the code
     # path reaches the decode call which will raise RuntimeError
-    with patch("shrinkray.subprocess.worker.is_binary_string", return_value=False):
+    with patch("shrinkray.interp.worker.is_binary_string", return_value=False):
         preview, hex_mode = worker._get_content_preview()
 
     # Should return empty string and hex_mode=True on exception
@@ -964,7 +964,7 @@ def test_worker_main_guard():
     """Test that the module has a main function."""
 
     # The module exists and can be imported
-    assert hasattr(shrinkray.subprocess.worker, "main")
+    assert hasattr(shrinkray.interp.worker, "main")
 
 
 @pytest.mark.serial
@@ -1037,8 +1037,8 @@ def test_worker_main_runs_trio():
     """Test main() function creates worker and runs trio."""
 
     # Mock trio.run and ReducerWorker to verify the flow
-    with patch("shrinkray.subprocess.worker.trio.run") as mock_trio_run:
-        with patch("shrinkray.subprocess.worker.ReducerWorker") as mock_worker_class:
+    with patch("shrinkray.interp.worker.trio.run") as mock_trio_run:
+        with patch("shrinkray.interp.worker.ReducerWorker") as mock_worker_class:
             mock_worker = MagicMock()
             mock_worker_class.return_value = mock_worker
 
@@ -1080,11 +1080,11 @@ def test_worker_main_module_entry_point():
     """Test the __name__ == '__main__' guard."""
 
     # Mock trio.run to prevent it from actually running
-    with patch("shrinkray.subprocess.worker.trio.run") as mock_trio_run:
+    with patch("shrinkray.interp.worker.trio.run") as mock_trio_run:
         # Use runpy to execute the module with __name__ == "__main__"
         try:
             runpy.run_module(
-                "shrinkray.subprocess.worker",
+                "shrinkray.interp.worker",
                 run_name="__main__",
                 alter_sys=True,
             )
@@ -1873,7 +1873,7 @@ async def test_build_progress_update_periodic_size_history():
     # We need to mock time.time to return a later time
     fake_current_time = start_time + recorded_time + 0.3  # 0.3s after last record
 
-    with patch("shrinkray.subprocess.worker.time.time", return_value=fake_current_time):
+    with patch("shrinkray.interp.worker.time.time", return_value=fake_current_time):
         await worker._build_progress_update()
 
     # Now a periodic entry should have been added (size same, time passed)

@@ -15,19 +15,19 @@ import trio
 from binaryornot.helpers import is_binary_string
 
 from shrinkray.cli import InputType
-from shrinkray.problem import InvalidInitialExample
-from shrinkray.state import (
-    OutputCaptureManager,
-    ShrinkRayDirectoryState,
-    ShrinkRayStateSingleFile,
-)
-from shrinkray.subprocess.protocol import (
+from shrinkray.interp.protocol import (
     PassStatsData,
     ProgressUpdate,
     Request,
     Response,
     deserialize,
     serialize,
+)
+from shrinkray.problem import InvalidInitialExample
+from shrinkray.state import (
+    OutputCaptureManager,
+    ShrinkRayDirectoryState,
+    ShrinkRayStateSingleFile,
 )
 from shrinkray.work import Volume
 

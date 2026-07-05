@@ -13,8 +13,8 @@ from textual.app import App
 from textual.widgets import DataTable, Label, ListView, Static, TabbedContent
 
 from shrinkray import tui
-from shrinkray.subprocess.client import SubprocessClient
-from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
+from shrinkray.interp.client import SubprocessClient
+from shrinkray.interp.protocol import PassStatsData, ProgressUpdate, Response
 from shrinkray.tui import (
     ContentPreview,
     ExpandedBoxModal,

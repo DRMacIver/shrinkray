@@ -35,8 +35,8 @@ from textual.widgets import (
 from textual_plotext import PlotextPlot
 
 from shrinkray.formatting import try_decode
-from shrinkray.subprocess.client import SubprocessClient
-from shrinkray.subprocess.protocol import (
+from shrinkray.interp.client import SubprocessClient
+from shrinkray.interp.protocol import (
     PassStatsData,
     ProgressUpdate,
     Response,

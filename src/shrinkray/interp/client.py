@@ -9,7 +9,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import IO, Any
 
-from shrinkray.subprocess.protocol import (
+from shrinkray.interp.protocol import (
     ProgressUpdate,
     Request,
     Response,
@@ -48,7 +48,7 @@ class SubprocessClient:
         self._process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
-            "shrinkray.subprocess.worker",
+            "shrinkray.interp.worker",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=self._stderr_log_file,

@@ -215,6 +215,7 @@ Main Process (asyncio/textual)     Subprocess (trio)
 2. **Cache clearing on reduction**: When a smaller test case is found, old cached results are no longer useful (derived from old test case)
 3. **View caching**: `problem.view(format)` caches parsed views to avoid redundant parsing
 4. **Speculative parallelism**: Multiple candidates tested concurrently; first success wins, others are "wasted" but harmless
+5. **Adaptive timeouts**: `AdaptiveTimeoutPolicy` (`adaptive_timeout.py`) chooses each test run's timeout from recent measured runtimes (user `--timeout` is the maximum). When reduction stalls with tests timing out it raises the timeout to look for slow reductions; cached timeout-failures carry a validity condition so they are retried after a raise, and reducers call `problem.attempt_unstick()` before terminating so a raised timeout can trigger another round.
 
 ## Development Process: Test-Driven Development
 

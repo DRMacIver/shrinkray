@@ -25,3 +25,14 @@ delta debugging, which has a very high chance of generating duplicates due to th
 its coarse grained passes decompose into multiple operations from its fine grained passes.
 Shrink Ray basically never does that (I don't think it actually works) so has few opportunities
 to generate duplicates.
+## Update: adaptive timeouts gave the cache a real job
+
+The adaptive timeout feature (2026-07) complicates the "just remove it" plan.
+When reduction stalls with tests timing out, the reducer raises the timeout and
+re-runs a full round of passes; candidates that previously *timed out* are
+retried (their cache entries carry a validity condition tied to the timeout
+they ran under), while candidates that completed are served from cache. Without
+the cache, each of those retry rounds would re-execute every candidate the
+passes regenerate, which is exactly the situation where test runs are at their
+most expensive. So if the cache is ever removed, the timeout-exploration
+machinery needs a different way to avoid re-running completed candidates.

@@ -89,11 +89,13 @@ async def run_shrink_ray(
     default=None,
     type=click.FLOAT,
     help=(
-        "Time out subprocesses after this many seconds. If not specified, "
-        "runs the interestingness test once and sets timeout to 10x the "
-        "measured time (capped at 5 minutes). If set to <= 0 then no timeout "
-        "will be used. Any commands that time out will be treated as failing "
-        "the test"
+        "Maximum time in seconds to allow the interestingness test to run. "
+        "Shrink Ray adapts the actual timeout to measured test runtimes over "
+        "the course of the run, never exceeding this value (or 5 minutes if "
+        "not specified), and temporarily raises it again when reduction "
+        "stalls with tests timing out. If set to <= 0 then no timeout will "
+        "be used. Any commands that time out will be treated as failing the "
+        "test"
     ),
 )
 @click.option(

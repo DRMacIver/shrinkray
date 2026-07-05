@@ -3962,7 +3962,11 @@ def test_state_creates_timeout_policy_from_user_timeout(simple_state):
 
 
 async def test_fast_completions_pull_timeout_down(tmp_path):
-    state = make_adaptive_state(tmp_path, "#!/bin/bash\nexit 0", min_timeout=0.2)
+    # A generous cap so that even a heavily loaded machine (slow script
+    # startup inflates the measured runtime) stays well below it.
+    state = make_adaptive_state(
+        tmp_path, "#!/bin/bash\nexit 0", timeout=60.0, min_timeout=0.2
+    )
     result = await state.run_for_result(b"hello")
     assert result.exit_code == 0
     assert not result.timed_out

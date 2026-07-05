@@ -566,6 +566,10 @@ class ShrinkRay(Reducer[bytes]):
                 # worth trying before we give up for good.
                 if not await self.target.attempt_unstick():
                     break
+                # Something changed, so a pass that previously ran to
+                # completion without progress may now succeed on the same
+                # test case: no-progress fingerprints are no longer valid.
+                self.pass_fingerprints.clear()
 
 
 class UpdateKeys(Patches[dict[str, bytes], dict[str, bytes]]):

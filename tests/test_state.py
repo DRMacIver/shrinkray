@@ -14,6 +14,7 @@ from shrinkray.adaptive_timeout import MIN_TIMEOUT, AdaptiveTimeoutPolicy
 from shrinkray.cli import InputType
 from shrinkray.problem import InvalidInitialExample, shortlex
 from shrinkray.process import kill_process_group as original_kill
+from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
 from shrinkray.state import (
     MemoryLimitExceededOnInitial,
     OutputCaptureManager,
@@ -211,6 +212,103 @@ async def test_single_file_state_run_formatter_command(simple_state):
     result = await simple_state.run_formatter_command(["cat"], b"hello")
     assert result.stdout == b"hello"
     assert result.returncode == 0
+
+
+# === External reducer wiring ===
+
+
+def test_reducer_log_dir_none_without_history(simple_state):
+    # simple_state has history_enabled=False
+    assert simple_state.reducer_log_dir() is None
+
+
+def test_reducer_log_dir_under_history(tmp_path):
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=True,
+    )
+    assert state.history_manager is not None
+    log_dir = state.reducer_log_dir()
+    assert log_dir == os.path.join(state.history_manager.history_dir, "reducers")
+
+
+def test_new_reducer_forwards_external_reducer_settings(tmp_path):
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+        external_reducers=[["my-reducer"]],
+        python_reducer=False,
+    )
+    reducer = state.reducer
+    assert isinstance(reducer, ShrinkRay)
+    assert reducer.external_reducers == [["my-reducer"]]
+    assert reducer.python_reducer is False
+    assert reducer.reducer_log_dir is None
+
+
+def test_directory_new_reducer_forwards_settings(tmp_path):
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "a.txt").write_text("hello")
+
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="target",
+        parallelism=1,
+        initial={"a.txt": b"hello"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+        external_reducers=[["my-reducer"]],
+        python_reducer=False,
+    )
+    reducer = state.reducer
+    assert isinstance(reducer, DirectoryShrinkRay)
+    assert reducer.external_reducers == [["my-reducer"]]
+    assert reducer.python_reducer is False
 
 
 # === ShrinkRayDirectoryState tests ===

@@ -72,9 +72,7 @@ def decode_feedback(line: bytes | str) -> tuple[bytes, bool]:
 class ReceiveStream(Protocol):
     """The subset of a trio receive stream that :class:`LineReader` needs."""
 
-    async def receive_some(
-        self, max_bytes: int | None = None
-    ) -> bytes | bytearray: ...
+    async def receive_some(self, max_bytes: int | None = None) -> bytes | bytearray: ...
 
 
 class LineReader:

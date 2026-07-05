@@ -58,6 +58,8 @@ class FakeReductionClientForSnapshots:
         skip_validation: bool = False,
         history_enabled: bool = True,
         also_interesting_code: int | None = None,
+        external_reducers: list[list[str]] | None = None,
+        python_reducer: bool = True,
     ) -> Response:
         return Response(id="start", result={"status": "started"})
 

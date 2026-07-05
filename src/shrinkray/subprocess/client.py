@@ -151,6 +151,8 @@ class SubprocessClient:
         skip_validation: bool = False,
         history_enabled: bool = True,
         also_interesting_code: int | None = None,
+        external_reducers: list[list[str]] | None = None,
+        python_reducer: bool = True,
     ) -> Response:
         """Start the reduction process."""
         params: dict[str, Any] = {
@@ -165,6 +167,8 @@ class SubprocessClient:
             "skip_validation": skip_validation,
             "history_enabled": history_enabled,
             "also_interesting_code": also_interesting_code,
+            "external_reducers": external_reducers or [],
+            "python_reducer": python_reducer,
         }
         if parallelism is not None:
             params["parallelism"] = parallelism

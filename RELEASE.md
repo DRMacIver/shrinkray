@@ -16,3 +16,6 @@
   exists for the platform), Shrink Ray now prints a warning saying what
   went wrong and reduces without tree-sitter passes, instead of crashing
   partway through the reduction.
+- Fixed a crash on macOS when shutting down an external reducer whose
+  subprocess had just exited on its own (a permission error from
+  signalling an already-exited process group).

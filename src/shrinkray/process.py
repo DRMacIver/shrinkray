@@ -5,7 +5,6 @@ import random
 import resource
 import signal
 import sys
-from collections.abc import Callable
 
 import trio
 
@@ -68,25 +67,33 @@ def default_memory_limit() -> int:
     return pages * page_size
 
 
-def child_preexec(memory_limit: int | None) -> Callable[[], None]:
-    """Build the ``preexec_fn`` for an interestingness-test subprocess.
+# ulimit flag matching MEMORY_RLIMIT: -v sets RLIMIT_AS; on OpenBSD,
+# which has no RLIMIT_AS, -d sets RLIMIT_DATA (see MEMORY_RLIMIT above).
+_ULIMIT_FLAG = "-v" if hasattr(resource, "RLIMIT_AS") else "-d"
 
-    Always puts the child in its own session (via ``setsid``) so the whole
-    process group can be killed later, and, when a memory limit is set,
-    caps the child's address space so a runaway test cannot exhaust host
-    memory. A failure to set the limit (e.g. on macOS, which rejects
-    ``RLIMIT_AS``) is ignored so the child still launches.
+
+def memory_limited_command(command: list[str], memory_limit: int | None) -> list[str]:
+    """Wrap an interestingness-test command to cap its memory use.
+
+    When a memory limit is set, the command is prefixed with a shell
+    that applies ``ulimit`` and then execs the real command, so a
+    runaway test cannot exhaust host memory. The limit cannot be set
+    with a ``preexec_fn``: that forces subprocess to fork, and forking
+    a process that hosts the TUI subinterpreter crashes the child, so
+    tests are spawned with ``start_new_session=True`` (which uses
+    posix_spawn) instead. A failure to set the limit (e.g. on macOS,
+    which rejects ``RLIMIT_AS``) is ignored so the child still runs.
     """
-
-    def preexec() -> None:
-        os.setsid()
-        if memory_limit is not None and memory_limit > 0:
-            try:
-                resource.setrlimit(MEMORY_RLIMIT, (memory_limit, memory_limit))
-            except (ValueError, OSError):
-                pass
-
-    return preexec
+    if memory_limit is None or memory_limit <= 0:
+        return command
+    kib = memory_limit // 1024
+    return [
+        "/bin/sh",
+        "-c",
+        f'ulimit {_ULIMIT_FLAG} {kib} 2>/dev/null; exec "$@"',
+        "sh",
+        *command,
+    ]
 
 
 def peak_child_rss_bytes() -> int:
@@ -104,8 +111,8 @@ def peak_child_rss_bytes() -> int:
 def signal_group(sp: trio.Process, sig: int) -> None:
     """Send a signal to the process group led by sp.
 
-    Test subprocesses are started with setsid (see child_preexec), so the
-    child leads its own process group and its pid names that group. The
+    Test subprocesses are started with start_new_session=True (setsid),
+    so the child leads its own process group and its pid names that group. The
     group is deliberately not looked up with getpgid: on OpenBSD that
     fails with EPERM for processes in a different session, and using the
     pid directly also cannot name shrink-ray's own group by mistake (that

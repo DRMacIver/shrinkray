@@ -161,7 +161,7 @@ class ExternalReducerPass:
                 stdout=subprocess.PIPE,
                 stderr=stderr_file.fileno(),
                 env=env,
-                preexec_fn=os.setsid,
+                start_new_session=True,
             )
         except BaseException:
             stderr_file.close()

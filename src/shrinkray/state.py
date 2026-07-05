@@ -40,10 +40,10 @@ from shrinkray.problem import (
     sort_key_for_initial,
 )
 from shrinkray.process import (
-    child_preexec,
     default_memory_limit,
     interrupt_wait_and_kill,
     kill_process_group,
+    memory_limited_command,
     peak_child_rss_bytes,
 )
 from shrinkray.reducer import DirectoryShrinkRay, Reducer, ShrinkRay
@@ -469,9 +469,12 @@ class ShrinkRayState[TestCase](ABC):
         else:
             command = self.test
 
+        command = memory_limited_command(
+            command, self.effective_memory_limit(self.first_call)
+        )
         kwargs: dict[str, Any] = {
             "universal_newlines": False,
-            "preexec_fn": child_preexec(self.effective_memory_limit(self.first_call)),
+            "start_new_session": True,
             "cwd": cwd,
             "check": False,
         }
@@ -602,7 +605,7 @@ class ShrinkRayState[TestCase](ABC):
                 )
         finally:
             # Kill entire process group to clean up child processes.
-            # The subprocess uses setsid (preexec_fn=os.setsid), so child
+            # The subprocess uses setsid (start_new_session=True), so child
             # processes spawned by the interestingness test form a process
             # group. Trio only kills the direct child on cancellation, but
             # shell scripts often fork children that continue running and

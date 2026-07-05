@@ -11,3 +11,8 @@
   test no longer fails with a permission error, and `--memory-limit` now
   caps test memory there too (OpenBSD has no address-space limit, so the
   data-segment limit is used instead).
+- When a tree-sitter grammar cannot be loaded (for example because it
+  has to be fetched at runtime and the download fails, or no grammar
+  exists for the platform), Shrink Ray now prints a warning saying what
+  went wrong and reduces without tree-sitter passes, instead of crashing
+  partway through the reduction.

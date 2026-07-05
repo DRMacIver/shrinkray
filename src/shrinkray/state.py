@@ -31,7 +31,7 @@ from shrinkray.history import (
     serialize_directory,
 )
 from shrinkray.passes.cpp import C_FILE_EXTENSIONS
-from shrinkray.passes.treesitter import language_for_filename
+from shrinkray.passes.treesitter import loadable_language_for_filename
 from shrinkray.problem import (
     BasicReductionProblem,
     InterestingnessResult,
@@ -1016,7 +1016,7 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
         return ShrinkRay(
             problem,
             enable_cpp_passes=os.path.splitext(self.filename)[1] in C_FILE_EXTENSIONS,
-            treesitter_language=language_for_filename(self.filename),
+            treesitter_language=loadable_language_for_filename(self.filename),
             external_reducers=self.external_reducers,
             python_reducer=self.python_reducer,
             reducer_log_dir=self.reducer_log_dir(),

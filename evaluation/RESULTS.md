@@ -34,6 +34,7 @@ each removed.
 | shrinkray-libcst-deep-nesting | python | libcst 1.8.6 (deep-nesting regression) | 4378 | 800 | 800 | 81.7% | 1125.9 |
 | splr0172-eliminate-assert | cnf | splr 0.17.2 (debug-assertions) | 3148 | 329 | 209 | 89.5% | — |
 | terser-5151-forof-empty-pattern-crash | javascript | terser 5.15.1 | 2945 | 24 | 22 | 99.2% | 44.3 |
+| tsc-5.8.2-object-entries-setstate-crash | typescript | typescript 5.8.2 (tsc) | 1637 | 80 | 46 | 95.1% | 242.3 |
 | ujson-510-indent-buffer-overflow | json | ujson 5.1.0 | 826 | 110 | 92 | 86.7% | 102.1 |
 
 ### c-reduce comparison (C/C++ entries)
@@ -120,6 +121,24 @@ Observations:
 - tree-sitter's error tolerance matters: mid-reduction states are
   often syntactically invalid (the converged Rust output is not valid
   Rust), and the passes keep operating on the parseable parts.
+
+### TypeScript (`tsc-5.8.2-object-entries-setstate-crash`)
+
+The `tsc` entry extends the tree-sitter coverage to TypeScript — another
+language with no dedicated passes — using a real declaration-emit crash
+in `tsc` 5.8.2 (microsoft/TypeScript#61351, introduced in 5.8 and fixed
+in 5.9.3; the current 6.0.3 no longer reproduces it). The trigger is a
+computed-property call `this.setState({ [key]: value })` inside a
+`for…of` over `Object.entries`, in an exported class whose method takes
+a declared type. It is construct-specific rather than depth-driven, so
+it reduces to a small essential core: 1637 → 80 bytes (95.1%). The
+`.ts` grammar drives the same `delete_children` / `lift_nodes` /
+`substitute_nodes` passes, and the byte-level cleanup then removes the
+`export` keyword (the crash survives on an anonymous class) and
+collapses the `State` type to the literal `0`, leaving just the class,
+its method, and the crashing loop body. No new passes were needed —
+this is a coverage-and-robustness check that the grammar-aware pipeline
+generalises to a format it was not tuned on.
 
 ## C/C++ entries: shrink ray vs c-reduce
 

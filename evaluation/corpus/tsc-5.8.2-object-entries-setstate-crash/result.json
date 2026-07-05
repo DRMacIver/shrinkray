@@ -1,0 +1,10 @@
+{
+  "id": "tsc-5.8.2-object-entries-setstate-crash",
+  "status": "ok",
+  "original_bytes": 1637,
+  "reduced_bytes": 80,
+  "original_nows_bytes": 1280,
+  "reduced_nows_bytes": 46,
+  "seconds": 242.3,
+  "ratio": 95.1
+}

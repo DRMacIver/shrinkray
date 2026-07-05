@@ -14,12 +14,13 @@ Each section below demonstrates one heuristic in isolation.
 import string
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from shrinkray.problem import (
     LazyChainedSortKey,
     natural_key,
+    reflow_sort_key,
 )
 
 
@@ -319,6 +320,24 @@ def test_hypothesis_transitive(a, b, c):
     """If a < b and b < c, then a < c."""
     if natural_key(a) < natural_key(b) and natural_key(b) < natural_key(c):
         assert natural_key(a) < natural_key(c)
+
+
+# =============================================================================
+# Reflow sort key
+# =============================================================================
+
+
+@example(" ")
+@example("\n")
+@example("\x1e")
+@given(st.text(min_size=1, max_size=20))
+def test_reflow_empty_is_global_minimum(s):
+    """The empty string must be the unique minimum of the reflow ordering.
+
+    Regression test: basic_format("") used to return "\\n", putting "" in the
+    same canonical class as whitespace-only strings and then ranking it above
+    them on the closeness tie-breakers, so reduction could not reach empty."""
+    assert reflow_sort_key("") < reflow_sort_key(s)
 
 
 # =============================================================================

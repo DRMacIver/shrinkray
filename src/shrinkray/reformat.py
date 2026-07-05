@@ -471,6 +471,12 @@ def detect_family(s: str) -> str:
 
 
 def basic_format(s: str) -> str:
+    # The empty string is its own canonical form. Mapping it to "\n" (as the
+    # family reflows do for whitespace-only input) would rank "" above
+    # whitespace-only strings in the reflow sort key, so the empty test case
+    # would not be the global minimum of the reduction ordering.
+    if not s:
+        return ""
     fam = detect_family(s)
     if fam == "tag":
         return _reflow_tag(s)

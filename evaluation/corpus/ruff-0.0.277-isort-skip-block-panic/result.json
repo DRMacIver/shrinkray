@@ -2,9 +2,9 @@
   "id": "ruff-0.0.277-isort-skip-block-panic",
   "status": "ok",
   "original_bytes": 2774,
-  "reduced_bytes": 55,
+  "reduced_bytes": 56,
   "original_nows_bytes": 2137,
-  "reduced_nows_bytes": 37,
-  "seconds": 20.3,
+  "reduced_nows_bytes": 38,
+  "seconds": 10.0,
   "ratio": 98.0
 }

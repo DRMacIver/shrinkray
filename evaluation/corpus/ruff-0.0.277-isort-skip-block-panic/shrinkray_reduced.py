@@ -1,4 +1,4 @@
 try:  # isort:skip
-    0  # isort:skip
+    ()  # isort:skip
 except:
     ...

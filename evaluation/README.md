@@ -4,7 +4,8 @@ A corpus of **real bugs in real tools** — inputs that make a specific
 pinned version of a compiler, formatter, linter, JSON parser, or SAT
 solver crash — used to evaluate shrink ray's reduction quality on
 realistic material across the formats it supports (C/C++, Python, JSON,
-DIMACS CNF), and to compare it against other reducers.
+DIMACS CNF, and tree-sitter-grammar languages like Go, Rust, and
+JavaScript), and to compare it against other reducers.
 
 Each entry is a plausible, pre-reduction-sized input with a genuine bug
 trigger buried inside realistic scaffolding (application-shaped code,

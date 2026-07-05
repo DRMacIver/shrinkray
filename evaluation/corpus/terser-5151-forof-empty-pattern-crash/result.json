@@ -1,0 +1,10 @@
+{
+  "id": "terser-5151-forof-empty-pattern-crash",
+  "status": "ok",
+  "original_bytes": 2945,
+  "reduced_bytes": 24,
+  "original_nows_bytes": 2326,
+  "reduced_nows_bytes": 22,
+  "seconds": 44.3,
+  "ratio": 99.2
+}

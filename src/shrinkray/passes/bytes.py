@@ -559,9 +559,7 @@ async def lower_bytes(problem: ReductionProblem[bytes]) -> None:
     ranks = ByteRanks(problem)
     sources = sorted(set(problem.current_test_case))
 
-    patches = [
-        {c: r} for c in sources for r in ranks.lowering_candidates(c)
-    ] + [
+    patches = [{c: r} for c in sources for r in ranks.lowering_candidates(c)] + [
         {c: r, d: r}
         for c in sources
         for d in sources

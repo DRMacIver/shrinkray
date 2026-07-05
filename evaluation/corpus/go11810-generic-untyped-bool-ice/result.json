@@ -1,0 +1,10 @@
+{
+  "id": "go11810-generic-untyped-bool-ice",
+  "status": "ok",
+  "original_bytes": 2288,
+  "reduced_bytes": 220,
+  "original_nows_bytes": 1845,
+  "reduced_nows_bytes": 181,
+  "seconds": 906.2,
+  "ratio": 90.4
+}

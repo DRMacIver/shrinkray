@@ -29,6 +29,7 @@ from shrinkray.history import (
     serialize_directory,
 )
 from shrinkray.passes.cpp import C_FILE_EXTENSIONS
+from shrinkray.passes.treesitter import language_for_filename
 from shrinkray.problem import (
     BasicReductionProblem,
     InterestingnessResult,
@@ -976,6 +977,7 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
         return ShrinkRay(
             problem,
             enable_cpp_passes=os.path.splitext(self.filename)[1] in C_FILE_EXTENSIONS,
+            treesitter_language=language_for_filename(self.filename),
         )
 
     def _get_initial_bytes(self) -> bytes:

@@ -32,6 +32,24 @@ Passes for DIMACS CNF files (SAT solver input format). Includes clause deletion,
 
 C/C++ passes built on a sloppy lexer plus bracket matching (a pure Python replacement for creduce's `clang_delta`, which shrink ray previously shelled out to). Rather than parsing properly, these find things that look like functions, namespaces, class heads, templates, call expressions and typedefs, then overgenerate candidate edits and let the interestingness test reject the wrong ones. Includes `replace_function_bodies` (function def -> declaration), `delete_function_definitions`, `remove_namespaces` (including `extern "C"`), `remove_base_classes`, `remove_constructor_initializers`, `remove_template_parts`, `replace_type_with_int`, and `simplify_call_expressions`, plus two **pumps** (which may temporarily increase code size): `inline_typedefs` and `inline_function_calls`.
 
+### treesitter.py
+
+Grammar-aware passes for any language with a grammar in
+tree-sitter-language-pack, selected by file extension (Go, Rust,
+JavaScript, Java, and many more; JSON and DIMACS CNF keep their dedicated
+passes only). tree-sitter is a parser rather than a generator, but nodes
+carry byte offsets, so every transformation is expressed through the
+ordinary `Cuts`/`Replacements` patch machinery: `delete_children` (runs of
+named children, eating adjacent separators), `lift_nodes` (replace a node
+with a same-type descendant from any depth, or any named descendant within
+two levels), `delete_orphaned_declarations` (delete a node together with
+top-level declarations/imports left textually unreferenced — the pass that
+makes dead code deletable in languages like Go that reject unused
+imports), and `substitute_nodes` (replace a node's text with the smallest
+same-type text in the file). tree-sitter parses broken input tolerantly,
+so these passes keep working on syntactically-invalid intermediate states.
+See `evaluation/RESULTS.md` for the evaluation that motivated them.
+
 ## Pass Ordering in ShrinkRay
 
 The `ShrinkRay` reducer organises passes into stages:

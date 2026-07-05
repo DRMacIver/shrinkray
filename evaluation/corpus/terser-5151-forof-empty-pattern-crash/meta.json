@@ -1,0 +1,26 @@
+{
+  "id": "terser-5151-forof-empty-pattern-crash",
+  "format": "javascript",
+  "tool": "terser 5.15.1",
+  "extension": ".js",
+  "bug_url": "https://github.com/terser/terser/issues/1293",
+  "symptom": "terser 5.15.1's compress pass crashes with 'TypeError: Cannot read properties of undefined (reading value)' in join_object_assignments when a for-of loop with an empty array destructuring pattern ('for (var [] of xs)') sits inside a statically-falsy conditional, whose dead-branch handling runs join_consecutive_vars over the loop head.",
+  "oracle": {
+    "type": "command",
+    "setup": "setup.sh",
+    "command": [
+      "{tools}/terser-5.15.1/node_modules/.bin/terser",
+      "{file}",
+      "-c",
+      "unsafe=false"
+    ]
+  },
+  "interesting": {
+    "output_contains": [
+      "Cannot read properties of undefined (reading 'value')",
+      "at join_object_assignments"
+    ],
+    "exit_code": 1
+  },
+  "timeout": 10
+}

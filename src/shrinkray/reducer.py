@@ -49,6 +49,7 @@ from shrinkray.passes.patching import PatchApplier, Patches
 from shrinkray.passes.python import PYTHON_PASSES, is_python
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
+from shrinkray.passes.treesitter import language_for_filename, treesitter_passes
 from shrinkray.problem import (
     ReductionProblem,
     ReductionStats,
@@ -142,6 +143,10 @@ class ShrinkRay(Reducer[bytes]):
     # Enables the C/C++ specific passes and pumps. Set when the test
     # case's file name suggests it's C or C++.
     enable_cpp_passes: bool = False
+
+    # Enables grammar-aware passes for the named tree-sitter language.
+    # Set from the test case's file extension.
+    treesitter_language: str | None = None
 
     current_pump: ReductionPump[bytes] | None = None
 
@@ -279,6 +284,10 @@ class ShrinkRay(Reducer[bytes]):
         if self.enable_cpp_passes:
             self.great_passes.extend(CPP_PASSES)
             self.initial_cuts.extend(CPP_PASSES)
+        if self.treesitter_language is not None:
+            passes = treesitter_passes(self.treesitter_language)
+            self.great_passes.extend(passes)
+            self.initial_cuts.extend(passes)
         self.register_format_specific_pass(JSON, JSON_PASSES)
         self.register_format_specific_pass(
             DimacsCNF,
@@ -661,6 +670,7 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
                 )
                 key_shrinkray = ShrinkRay(
                     enable_cpp_passes=any(k.endswith(s) for s in C_FILE_EXTENSIONS),
+                    treesitter_language=language_for_filename(k),
                     target=key_problem,
                 )
                 nursery.start_soon(key_shrinkray.run)

@@ -1,0 +1,30 @@
+name: OpenBSD debugging (issue 56)
+
+on:
+  push:
+    branches:
+      - DRMacIver/bsd-debugging
+  workflow_dispatch:
+
+jobs:
+  openbsd-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run diagnostics in an OpenBSD VM
+        uses: vmactions/openbsd-vm@v1
+        with:
+          release: "7.7"
+          usesh: true
+          copyback: false
+          prepare: |
+            pkg_add python3 py3-pip
+          run: |
+            set -x
+            uname -a
+            python3 --version
+            python3 -m venv /tmp/venv
+            /tmp/venv/bin/pip install --quiet trio
+            /tmp/venv/bin/python scripts/openbsd_debug.py

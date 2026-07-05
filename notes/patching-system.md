@@ -13,10 +13,10 @@ Trying these one-at-a-time is slow. But we can often apply multiple changes simu
 
 ## Patches Abstract Interface
 
-The `Patches[Patch, Target]` class defines how patches work:
+The `Patches[PatchType, TargetType]` class defines how patches work:
 
 ```python
-class Patches[Patch, Target]:
+class Patches[PatchType, TargetType](ABC):
     @property
     def empty(self) -> Patch: ...           # The identity patch
     def combine(self, *patches) -> Patch: ...  # Merge patches
@@ -38,12 +38,11 @@ Combining cuts merges their intervals. The `size` is total bytes deleted.
 The codebase has several other `Patches` implementations for different use cases:
 
 - **SetPatches[T]**: A frozenset of items (for sets of changes that combine via union)
-- **ListPatches[T]**: A list of items (for ordered changes that combine via concatenation)
-- **ByteReplacement**: Dict mapping byte positions to replacement values
-- **IndividualByteReplacement**: Like ByteReplacement but for single-byte changes
-- **RegionReplacement**: Replaces byte regions with new content
+- **ByteReplacement**: Dict mapping a byte *value* to a smaller replacement value, globally replacing every occurrence of that value
+- **IndividualByteReplacement**: Dict mapping a byte *position* to a replacement value, changing only the byte at that position
+- **Replacements**: Replaces byte ranges with new contents (overlapping edits conflict)
 - **RegionReplacingPatches**: Generic region replacement for any string-like type
-- **NewlineReplacer**: Replaces spaces with newlines at specific positions
+- **NewlineReplacer**: Replaces the byte at specific positions with a newline (used to turn spaces and tabs into newlines)
 - **DeleteIdentifiers**: Removes keys from JSON objects
 - **UpdateKeys**: Updates key-value pairs in dictionaries
 
@@ -55,7 +54,7 @@ The core engine that applies patches in parallel with intelligent merging.
 
 ### Merge Master Pattern
 
-Workers call `try_apply_patch()` in parallel. When a patch passes its interestingness test, the worker attempts to acquire the merge lock and add it to a merge queue.
+Workers call `try_apply_patch()` in parallel. When a patch passes its interestingness test, the worker adds it to a merge queue and then attempts to acquire the merge lock.
 
 **Important:** While a merge master is active, all other workers must wait for the merge to complete or reject their patch. This serialises the actual state updates while allowing parallel testing.
 

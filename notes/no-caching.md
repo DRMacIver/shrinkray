@@ -10,8 +10,10 @@ is found**. This means the cache only helps when testing multiple candidates aga
 same base test case before any reduction succeeds. In fairly natural test cases I was
 noticing cache hit rates of literally 0%.
 
-**Note:** This caching should probably be removed (it was likely just forgotten).
-See [issue #31](https://github.com/DRMacIver/shrinkray/issues/31) for tracking.
+**Note:** [Issue #31](https://github.com/DRMacIver/shrinkray/issues/31) considered
+removing this caching entirely, but concluded it should stay: the current logic is
+basically harmless even when it doesn't help, cache clearing on reduction is a
+reasonable compromise, and the cases where it could be improved are already fast.
 
 I suspect caching in general is not that useful for test-case reduction, but this is
 likely particularly the case with Shrink Ray which has a very large number of fine-grained

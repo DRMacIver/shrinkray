@@ -33,8 +33,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/DRMacIver/shrinkray"
 Repository = "https://github.com/DRMacIver/shrinkray"
-Documentation = "https://shrinkray.readthedocs.io"
-Changelog = "https://github.com/DRMacIver/shrinkray/releases"
+Changelog = "https://github.com/DRMacIver/shrinkray/blob/main/CHANGELOG.md"
 
 [project.scripts]
 shrinkray = "shrinkray.__main__:main"

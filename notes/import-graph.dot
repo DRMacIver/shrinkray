@@ -19,6 +19,7 @@ digraph imports {
     "problem";
     "process";
     "reducer";
+    "reformat";
     "state";
     "subprocess";
     "subprocess.client";
@@ -29,6 +30,7 @@ digraph imports {
     "validation";
     "work";
 
+    "formatting" -> "reformat";
     "history" -> "cli";
     "passes.bytes" -> "passes.patching";
     "passes.bytes" -> "problem";
@@ -55,6 +57,7 @@ digraph imports {
     "passes.sequences" -> "passes.patching";
     "passes.sequences" -> "problem";
     "problem" -> "formatting";
+    "problem" -> "reformat";
     "problem" -> "work";
     "reducer" -> "passes.bytes";
     "reducer" -> "passes.cpp";

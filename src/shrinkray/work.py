@@ -111,6 +111,10 @@ class WorkContext:
                     send.close()
 
             yield receive
+            # The consumer may stop reading early; without this the
+            # producer task would block (or crash) on a channel nobody is
+            # reading and the nursery would never exit.
+            nursery.cancel_scope.cancel()
 
     @asynccontextmanager
     async def filter(self, ls: Sequence[T], f: Callable[[T], Awaitable[bool]]):

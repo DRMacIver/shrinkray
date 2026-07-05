@@ -84,6 +84,27 @@ async def test_worker_map(p: int) -> None:
                 i += 1
 
 
+@pytest.mark.parametrize("p", [1, 2, 4])
+async def test_worker_map_consumer_can_stop_early(p: int, autojump_clock) -> None:
+    """Exiting the map context without consuming everything must not hang.
+
+    Regression test: map's nursery wasn't cancelled on exit, so the
+    producer task stayed blocked sending into a full channel nobody was
+    reading, and the nursery never finished."""
+    work = WorkContext(parallelism=p)
+
+    consumed = []
+    with trio.fail_after(10):
+        async with work.map(list(range(100)), checkpointing_identity) as mapped:
+            async with aclosing(mapped) as aiter:
+                async for x in aiter:
+                    consumed.append(x)
+                    if len(consumed) == 2:
+                        break
+
+    assert consumed == [0, 1]
+
+
 @pytest.mark.parametrize("p", [1, 2])
 async def test_worker_map_empty(p: int) -> None:
     """Test map with empty sequence."""

@@ -241,8 +241,9 @@ jobs:
       # pip otherwise builds from source (libcst, maturin,
       # tree-sitter-language-pack, ...), skipping several minutes of rust
       # and C compilation.
-      - name: Cache pip downloads and built wheels
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore pip cache
+        id: pip-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .pip-cache
           key: openbsd-7.9-pip-${{ hashFiles('uv.lock') }}
@@ -266,10 +267,24 @@ jobs:
             set -ex
             uname -a
             python3 --version
-            python3 -m venv /tmp/venv
-            /tmp/venv/bin/pip install --quiet --upgrade pip
-            /tmp/venv/bin/pip install --cache-dir "$PWD/.pip-cache" ".[test]"
-            /tmp/venv/bin/python -m pytest tests/ -m "not slow" -q
+            df -h
+            # /tmp is a small partition on OpenBSD's default disk layout;
+            # the venv and pip's build directories need the roomier /home.
+            mkdir -p /home/tmp
+            export TMPDIR=/home/tmp
+            python3 -m venv /home/venv
+            /home/venv/bin/pip install --quiet --upgrade pip
+            /home/venv/bin/pip install --cache-dir "$PWD/.pip-cache" ".[test]"
+            df -h
+            /home/venv/bin/python -m pytest tests/ -m "not slow" -q
+      # Save the cache even when tests fail: seeding the expensive
+      # from-source wheel builds must not depend on a green run.
+      - name: Save pip cache
+        if: always() && steps.pip-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .pip-cache
+          key: openbsd-7.9-pip-${{ hashFiles('uv.lock') }}
 
   coverage:
     permissions:

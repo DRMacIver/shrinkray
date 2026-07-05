@@ -166,15 +166,17 @@ async def interrupt_wait_and_kill(sp: "trio.Process", delay: float = 0.1) -> Non
                 if sp.poll() is not None:
                     return
                 await trio.sleep(delay * 1.5**n * random.random())
-        except ProcessLookupError:  # pragma: no cover
-            # This is incredibly hard to trigger reliably, because it only happens
-            # if the process exits at exactly the wrong time.
+        except (ProcessLookupError, PermissionError):
+            # The group can be gone if the process exits at exactly the
+            # wrong time. macOS reports that as EPERM rather than ESRCH
+            # when the group's only member has exited but is unreaped;
+            # the sp.wait() below then reaps it.
             pass
 
         if sp.returncode is None:
             try:
                 signal_group(sp, signal.SIGKILL)
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
                 pass
 
         with trio.move_on_after(delay):

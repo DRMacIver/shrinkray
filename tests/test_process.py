@@ -235,6 +235,44 @@ async def test_interrupt_wait_and_kill_handles_fast_exit_after_sigint(tmp_path):
     assert sp.returncode == 0
 
 
+async def test_interrupt_wait_and_kill_tolerates_eperm_for_exited_group():
+    # On macOS, killpg raises EPERM (not ESRCH) when the target group's
+    # only member exits between interrupt_wait_and_kill closing its pipes
+    # and the signal being sent - exactly what the external reducer's
+    # persistent subprocess does, since it exits on stdin EOF. The kill
+    # sequence must fall through and reap rather than crash.
+    sp = await trio.lowlevel.open_process(
+        [sys.executable, "-c", "import sys; sys.stdin.read()"],
+        preexec_fn=os.setsid,
+        stdin=subprocess.PIPE,
+    )
+    with patch(
+        "shrinkray.process.os.killpg",
+        side_effect=PermissionError(1, "Operation not permitted"),
+    ):
+        await interrupt_wait_and_kill(sp, delay=0.5)
+    assert sp.returncode == 0
+
+
+async def test_interrupt_wait_and_kill_raises_when_signals_cannot_be_sent():
+    # If killpg reports EPERM while the process is genuinely still alive,
+    # nothing can be killed and the failure must be loud.
+    sp = await trio.lowlevel.open_process(
+        [sys.executable, "-c", "import time; time.sleep(100)"],
+        preexec_fn=os.setsid,
+    )
+    try:
+        with patch(
+            "shrinkray.process.os.killpg",
+            side_effect=PermissionError(1, "Operation not permitted"),
+        ):
+            with pytest.raises(ValueError, match="Could not kill subprocess"):
+                await interrupt_wait_and_kill(sp, delay=0.01)
+    finally:
+        sp.kill()
+        await sp.wait()
+
+
 async def test_interrupt_wait_and_kill_closes_pipes_before_signaling():
     # Start a process with stdout pipe
     sp = await trio.lowlevel.open_process(

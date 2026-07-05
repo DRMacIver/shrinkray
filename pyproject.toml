@@ -28,6 +28,8 @@ dependencies = [
     "exceptiongroup>=1.2.0",
     "binaryornot>=0.4.4",
     "black>=24.1.0",
+    "tree-sitter>=0.26.0",
+    "tree-sitter-language-pack>=1.12.2",
 ]
 
 [project.urls]

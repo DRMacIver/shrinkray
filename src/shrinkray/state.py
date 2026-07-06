@@ -324,9 +324,7 @@ class ShrinkRayState[TestCase](ABC):
         if not self.llm_enabled:
             return {}
         if self._llm_client is None:
-            self._llm_client = LlamaCppClient(
-                model=parse_model_spec(self.llm_model)
-            )
+            self._llm_client = LlamaCppClient(model=parse_model_spec(self.llm_model))
         return {
             "llm_client": self._llm_client,
             "llm_config": LLMConfig(

@@ -129,18 +129,14 @@ async def test_cancellation_abandons_the_running_generation(
         patcher.setattr(llama, "create_chat_completion", blocking)
         try:
             with trio.move_on_after(0.5) as scope:
-                await client.complete(
-                    "slow", max_tokens=1, seed=1, temperature=0.0
-                )
+                await client.complete("slow", max_tokens=1, seed=1, temperature=0.0)
             assert scope.cancelled_caught
         finally:
             release.set()
 
     # The abandoned generation finished behind the lock; the client is
     # still usable afterwards.
-    result = await client.complete(
-        "after", max_tokens=1, seed=2, temperature=0.0
-    )
+    result = await client.complete("after", max_tokens=1, seed=2, temperature=0.0)
     assert isinstance(result, str)
     assert blocked_calls == 1
 

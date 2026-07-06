@@ -266,9 +266,7 @@ def test_does_not_test_candidates_that_sort_above_current():
         calls.append(x)
         return b"boom" in x
 
-    client = FakeLLMClient(
-        responses=["```\nboom boom boom boom boom boom boom\n```"]
-    )
+    client = FakeLLMClient(responses=["```\nboom boom boom boom boom boom boom\n```"])
     reduce_with(
         [llm_rewrite(client, LLMConfig(patience=1))],
         b"say boom\n",
@@ -304,7 +302,7 @@ def test_seeds_are_drawn_from_the_work_context():
 
 def test_read_oracle_script_returns_text(tmp_path):
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/sh\ngrep boom \"$1\"\n")
+    script.write_text('#!/bin/sh\ngrep boom "$1"\n')
     assert read_oracle_script(str(script)) == '#!/bin/sh\ngrep boom "$1"\n'
 
 
@@ -390,7 +388,7 @@ def test_llm_only_reduction_end_to_end():
 
 def make_llm_state(tmp_path, **overrides) -> ShrinkRayStateSingleFile:
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/sh\ngrep boom \"$1\"\n")
+    script.write_text('#!/bin/sh\ngrep boom "$1"\n')
     script.chmod(0o755)
     target = tmp_path / "target.txt"
     target.write_text("say boom\n")

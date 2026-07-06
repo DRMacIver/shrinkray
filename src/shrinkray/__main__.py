@@ -400,8 +400,7 @@ def main(
     if (
         llm_only
         and not llm
-        and ctx.get_parameter_source("llm")
-        == click.core.ParameterSource.COMMANDLINE
+        and ctx.get_parameter_source("llm") == click.core.ParameterSource.COMMANDLINE
     ):
         raise click.UsageError("--llm-only cannot be combined with --no-llm.")
     llm_enabled = llm or llm_only

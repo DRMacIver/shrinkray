@@ -378,9 +378,7 @@ class ShrinkRay(Reducer[bytes]):
             # Model calls are far more expensive than ordinary passes, so
             # they only run once the cheap passes have stopped making
             # progress.
-            self.last_ditch_passes.append(
-                llm_rewrite(self.llm_client, self.llm_config)
-            )
+            self.last_ditch_passes.append(llm_rewrite(self.llm_client, self.llm_config))
         external_passes = self.build_external_reducer_passes()
         self._external_reducer_passes = external_passes
         self.great_passes.extend(external_passes)

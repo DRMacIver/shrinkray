@@ -242,10 +242,17 @@ async def parallel_map[S, T](
             # Results arrive out of order; hold early arrivals on a heap and
             # emit exactly one result per input, in input order.
             result_heap: list[tuple[int, S]] = []
-            for i in range(len(ls)):
-                while not result_heap or result_heap[0][0] != i:
-                    heapq.heappush(result_heap, await receive_results.receive())
-                await send_out_values.send(heapq.heappop(result_heap)[1])
+            try:
+                for i in range(len(ls)):
+                    while not result_heap or result_heap[0][0] != i:
+                        heapq.heappush(result_heap, await receive_results.receive())
+                    await send_out_values.send(heapq.heappop(result_heap)[1])
+            except trio.BrokenResourceError:
+                # The consumer closed the receive channel (stopped reading
+                # early); there are no more results to deliver. Raising
+                # here would escape the nursery as an ExceptionGroup that
+                # the consumer never sees coming.
+                return
             send_out_values.close()
 
         yield receive_out_values

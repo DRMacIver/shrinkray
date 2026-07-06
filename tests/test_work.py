@@ -85,6 +85,27 @@ async def test_worker_map(p: int) -> None:
 
 
 @pytest.mark.parametrize("p", [1, 2, 4])
+async def test_parallel_map_consumer_can_stop_early(p: int, autojump_clock) -> None:
+    """Closing parallel_map's receive channel while the consolidator is
+    blocked mid-send must not raise; it just means the consumer stopped
+    reading. Regression test: the BrokenResourceError escaped the
+    nursery as an ExceptionGroup the caller never expected."""
+    consumed = []
+    async with parallel_map(
+        list(range(100)), checkpointing_identity, parallelism=p
+    ) as mapped:
+        async with aclosing(mapped) as aiter:
+            async for x in aiter:
+                consumed.append(x)
+                # Let the workers run ahead so the consolidator fills its
+                # output buffer and blocks mid-send before we close.
+                await trio.sleep(1)
+                break
+
+    assert consumed == [0]
+
+
+@pytest.mark.parametrize("p", [1, 2, 4])
 async def test_worker_map_consumer_can_stop_early(p: int, autojump_clock) -> None:
     """Exiting the map context without consuming everything must not hang.
 

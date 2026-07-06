@@ -405,18 +405,21 @@ def main(
         raise click.UsageError("--llm-only cannot be combined with --no-llm.")
     llm_enabled = llm or llm_only
     if llm_enabled:
-        if not llm_support_available():
-            print(
-                "The LLM passes need llama-cpp-python, which is not installed. "
-                "Install shrink ray's llm extra (e.g. `uv tool install "
-                "'shrinkray[llm]'`) or run without --llm.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        # Validate the spec before checking availability so that spec
+        # errors are reported the same way on every platform.
         try:
             parse_model_spec(llm_model)
         except ValueError as e:
             raise click.BadParameter(str(e), param_hint="--llm-model")
+        if not llm_support_available():
+            print(
+                "The LLM passes need llama-cpp-python, which is not installed "
+                "or cannot load on this platform. Install shrink ray's llm "
+                "extra (e.g. `uv tool install 'shrinkray[llm]'`) or run "
+                "without --llm.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
     also_interesting_explicit = (
         ctx.get_parameter_source("also_interesting")
         == click.core.ParameterSource.COMMANDLINE

@@ -19,6 +19,7 @@ from attrs import define
 from click.testing import CliRunner
 
 from shrinkray.__main__ import _validate_memory_limit, main, worker_main
+from shrinkray.llm_client import llm_support_available
 from shrinkray.process import default_memory_limit, interrupt_wait_and_kill
 from shrinkray.validation import ValidationResult
 
@@ -1945,6 +1946,14 @@ grep "hello" "{log_file}"
 
 # === LLM mode options ===
 
+# The binary no-op test constructs a real client and runs a reduction, so
+# it needs llama-cpp-python to be loadable (it isn't on e.g. OpenBSD; see
+# tests/test_llm_client.py). The option-validation tests run everywhere.
+requires_llm_support = pytest.mark.skipif(
+    not llm_support_available(),
+    reason="llama-cpp-python cannot load on this platform",
+)
+
 
 def _llm_target(tmp_path, content: bytes, pattern: str):
     target = tmp_path / "target.bin"
@@ -1984,6 +1993,7 @@ def test_llm_requires_the_llm_extra(tmp_path, monkeypatch):
     assert "shrinkray[llm]" in result.output
 
 
+@requires_llm_support
 def test_llm_only_reduction_of_binary_input_is_a_no_op(tmp_path):
     # Binary input can't be prompted, so the LLM pass (the only pass in
     # --llm-only mode) never generates and the reduction just converges.

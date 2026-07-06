@@ -15,6 +15,7 @@ Model inference runs in-process through llama-cpp-python (see
 import os
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 import trio
 from attrs import define, frozen
@@ -110,6 +111,12 @@ class LLMConfig:
     # example the text of the user's test script), included in the prompt.
     oracle: str | None = None
 
+    # Looks up the output the interestingness test produced for a given
+    # test case, or None if not known. The output for the current test
+    # case (a crash message, an assertion, a compiler error) tells the
+    # model which parts of the file matter.
+    test_output: Callable[[bytes], bytes | None] | None = None
+
 
 def read_oracle_script(path: str, max_bytes: int = 4_096) -> str | None:
     """The text of the user's interestingness test, for use as prompt
@@ -161,6 +168,19 @@ def completion_max_tokens(input_size: int) -> int:
     return min(8192, 512 + input_size)
 
 
+def truncate_output(data: bytes, limit: int = 2048) -> str:
+    """Test output prepared for inclusion in a prompt.
+
+    Long output keeps its head and tail: the salient line of a crash is
+    usually near one end (a compiler error at the start, a traceback at
+    the end).
+    """
+    if len(data) > limit:
+        half = limit // 2
+        data = data[:half] + b"\n[... snipped ...]\n" + data[-half:]
+    return data.decode("utf-8", errors="replace")
+
+
 def reduction_prompt(test_case: bytes, *, config: LLMConfig) -> str | None:
     """The prompt asking for reduced versions of ``test_case``.
 
@@ -180,6 +200,13 @@ def reduction_prompt(test_case: bytes, *, config: LLMConfig) -> str | None:
         if config.oracle
         else ""
     )
+    output = config.test_output(test_case) if config.test_output else None
+    output_part = (
+        "Running the interestingness test on this test case printed:\n\n"
+        f"```\n{truncate_output(output)}```\n\n"
+        if output
+        else ""
+    )
     return (
         "You are helping to minimize a test case that triggers a bug in a "
         "tool. Your job is to produce smaller versions of the file that "
@@ -187,6 +214,7 @@ def reduction_prompt(test_case: bytes, *, config: LLMConfig) -> str | None:
         "what remains, and shorten names, while preserving whatever makes "
         f"the bug fire.{filename_part}\n\n"
         f"{oracle_part}"
+        f"{output_part}"
         "The current test case is:\n\n"
         f"```\n{text}```\n\n"
         f"Output {config.n_candidates} different reduced versions, each in "

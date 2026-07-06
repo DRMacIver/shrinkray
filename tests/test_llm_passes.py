@@ -26,6 +26,7 @@ from shrinkray.passes.llm import (
     parse_model_spec,
     read_oracle_script,
     reduction_prompt,
+    truncate_output,
 )
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
@@ -534,3 +535,57 @@ async def test_directory_reducer_starts_model_loading_up_front():
     reducer = DirectoryShrinkRay(target=problem, llm_client=client)
     await reducer.run()
     assert client.events[0] == "start_loading"
+
+
+# === Test output in prompts ===
+
+
+def test_prompt_includes_test_output_for_the_current_test_case():
+    seen: list[bytes] = []
+
+    def lookup(tc: bytes) -> bytes | None:
+        seen.append(tc)
+        return b"AssertionError: boom went wrong"
+
+    prompt = reduction_prompt(b"say boom\n", config=LLMConfig(test_output=lookup))
+    assert prompt is not None
+    assert "AssertionError: boom went wrong" in prompt
+    assert "printed" in prompt
+    assert seen == [b"say boom\n"]
+
+
+def test_prompt_omits_output_section_when_unknown():
+    prompt = reduction_prompt(
+        b"say boom\n", config=LLMConfig(test_output=lambda tc: None)
+    )
+    assert prompt is not None
+    assert "printed" not in prompt
+    assert reduction_prompt(b"say boom\n", config=LLMConfig()) == prompt.replace("", "")
+
+
+def test_truncate_output_passes_short_output_through():
+    assert truncate_output(b"hello\n") == "hello\n"
+
+
+def test_truncate_output_keeps_head_and_tail_of_long_output():
+    data = b"start" + b"x" * 10_000 + b"end"
+    result = truncate_output(data)
+    assert result.startswith("start")
+    assert result.endswith("end")
+    assert "[... snipped ...]" in result
+    assert len(result) < 3000
+
+
+def test_truncate_output_replaces_undecodable_bytes():
+    assert "�" in truncate_output(b"\xc3\x28")
+
+
+def test_state_provides_test_output_to_the_prompt(tmp_path):
+    state = make_llm_state(tmp_path, llm_enabled=True)
+    state._successful_outputs[b"say boom\n"] = b"the test printed this"
+    reducer = state.new_reducer(make_state_problem(state))
+    assert isinstance(reducer, ShrinkRay)
+    lookup = reducer.llm_config.test_output
+    assert lookup is not None
+    assert lookup(b"say boom\n") == b"the test printed this"
+    assert lookup(b"something else\n") is None

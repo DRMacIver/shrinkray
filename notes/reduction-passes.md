@@ -37,8 +37,9 @@ C/C++ passes built on a sloppy lexer plus bracket matching (a pure Python replac
 ### llm.py
 
 The LLM mode (on by default; `--no-llm` or `SHRINKRAY_LLM=0` disables). `llm_rewrite` feeds the whole current
-test case to a language model, prompted with the file name and the text of
-the user's interestingness script, and asks for several progressively
+test case to a language model, prompted with the file name, the text of
+the user's interestingness script, and the output the test produced for
+the current test case, and asks for several progressively
 smaller rewrites in fenced code blocks; every block that sorts below the
 current test case is offered to `is_interesting`, so a wrong or
 hallucinating model wastes time but can't hurt correctness. The pass runs

@@ -330,6 +330,11 @@ class ShrinkRayState[TestCase](ABC):
             "llm_config": LLMConfig(
                 filename=self.base,
                 oracle=read_oracle_script(self.test[0]),
+                # The output the interestingness test produced for a given
+                # test case, captured when it ran. In directory mode the
+                # per-file test cases never match these whole-directory
+                # keys, so the prompt section is simply omitted there.
+                test_output=lambda tc: self._successful_outputs.get(tc),
             ),
             "llm_only": self.llm_only,
         }
@@ -772,7 +777,14 @@ class ShrinkRayState[TestCase](ABC):
             async def record_history(test_case: TestCase):
                 test_case_bytes = self._get_test_case_bytes(test_case)
                 # Use output captured at is_interesting time to avoid race conditions
-                output = self._successful_outputs.pop(test_case_bytes, None)
+                output = self._successful_outputs.get(test_case_bytes)
+                # Keep only the adopted test case's output: it stays
+                # available for the LLM passes' prompts, while outputs of
+                # candidates that were interesting but not adopted can no
+                # longer be needed by anything.
+                self._successful_outputs.clear()
+                if output is not None:
+                    self._successful_outputs[test_case_bytes] = output
                 assert self.history_manager is not None
                 self.history_manager.record_reduction(test_case_bytes, output)
 

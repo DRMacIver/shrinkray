@@ -90,8 +90,8 @@ class LlamaCppClient(LLMClient):
                 raise ImportError(
                     "The LLM passes need llama-cpp-python, which is not "
                     "installed. Install shrink ray's llm extra "
-                    "(e.g. `uv tool install 'shrinkray[llm]'`) or pass "
-                    "--no-llm."
+                    "(e.g. `uv tool install 'shrinkray[llm]'`) or run "
+                    "without --llm."
                 )
             if isinstance(self.model, HuggingFaceModel):
                 path = huggingface_hub.hf_hub_download(

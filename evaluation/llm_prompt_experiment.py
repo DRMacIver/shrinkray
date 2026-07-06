@@ -37,10 +37,11 @@ from shrinkray.state import sort_key_for_initial  # noqa: E402
 CORPUS = SHRINKRAY / "evaluation" / "corpus"
 RESULTS = SHRINKRAY / "evaluation" / "work" / "llm_experiments.jsonl"
 
-# Natural-language description of each predicate, used by the with_oracle
-# variant (stands in for the user's interestingness script).
+# Inputs bigger than this are skipped: they don't fit the context window.
 MAX_INPUT_BYTES = 40_000
 
+# Natural-language description of each predicate, used by the *_oracle
+# variants (stands in for the user's interestingness script).
 ORACLES = {
     "python_syntax": "The file must be valid Python (compile() succeeds) and must still contain the string SENTINEL_KEEP.",
     "corpus_mypy": "The file must be valid Python (compile() succeeds) and must still contain all of these substrings: 'match ', 'case ', 'Union[', 'tuple['.",

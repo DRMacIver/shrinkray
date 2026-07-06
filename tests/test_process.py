@@ -118,7 +118,9 @@ def test_memory_limited_command_enforces_the_limit():
         "-c",
         "x = bytearray(1024 * 1024 * 1024); print('allocated')",
     ]
-    unlimited = subprocess.run(memory_limited_command(allocate, None), capture_output=True)
+    unlimited = subprocess.run(
+        memory_limited_command(allocate, None), capture_output=True
+    )
     assert unlimited.returncode == 0, unlimited.stderr
     limited = subprocess.run(
         memory_limited_command(allocate, 256 * 1024 * 1024), capture_output=True

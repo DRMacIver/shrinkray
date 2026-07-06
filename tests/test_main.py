@@ -710,8 +710,6 @@ def test_custom_backup_filename(basic_shrink_target, tmp_path):
     assert os.path.exists(custom_backup)
 
 
-
-
 class _RawLog:
     """Accumulates everything a pexpect child writes, for diagnostics."""
 
@@ -743,8 +741,6 @@ def output_after_tui(log: _RawLog) -> str:
     if marker in text:
         return text.rsplit(marker, 1)[-1]
     return text[-4000:]
-
-
 
 
 def test_textual_ui_path(basic_shrink_target, monkeypatch):

@@ -1,9 +1,10 @@
 """In-process LLM inference for the LLM passes, via llama-cpp-python.
 
-llama-cpp-python is an optional dependency (the ``llm`` extra): it's a
-C++ build that many installs won't want, so this module degrades to a
-clear error when it's missing. The model itself is loaded on the first
-completion request, downloading it from Hugging Face first if necessary.
+llama-cpp-python is a required dependency, but one that can fail to load
+(it has no support for some platforms shrink ray runs on), so this module
+degrades to reporting LLM support as unavailable rather than breaking
+imports. The model itself is loaded on the first completion request,
+downloading it from Hugging Face first if necessary.
 
 Inference is blocking and CPU-heavy, so it runs in a worker thread. The
 model is not safe for concurrent generation, so calls are serialized on a
@@ -16,6 +17,7 @@ its C++/Metal finalizers.
 """
 
 import atexit
+import sys
 import threading
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
@@ -41,7 +43,7 @@ except (ImportError, RuntimeError):
 
 
 def llm_support_available() -> bool:
-    """Whether the optional dependencies for the LLM passes are usable.
+    """Whether the LLM passes' dependencies are usable.
 
     Deliberately based on the import above rather than on whether the
     packages are installed: llama-cpp-python can be installed but
@@ -124,9 +126,7 @@ class LlamaCppClient(LLMClient):
         # out an in-flight generation; the lock in _complete_blocking keeps
         # the abandoned thread from overlapping with the next call.
         try:
-            return await trio.to_thread.run_sync(
-                run_blocking, abandon_on_cancel=True
-            )
+            return await trio.to_thread.run_sync(run_blocking, abandon_on_cancel=True)
         except trio.Cancelled:
             # Tell the abandoned generation to stop at the next token so
             # it releases the model promptly instead of running out its
@@ -181,12 +181,24 @@ class LlamaCppClient(LLMClient):
         if self._llama is None:
             if llama_cpp is None or huggingface_hub is None:
                 raise ImportError(
-                    "The LLM passes need llama-cpp-python, which is not "
-                    "installed. Install shrink ray's llm extra "
-                    "(e.g. `uv tool install 'shrinkray[llm]'`) or run "
-                    "without --llm."
+                    "llama-cpp-python is not installed or cannot load on "
+                    "this platform, so the LLM passes are unavailable. Run "
+                    "with --no-llm to silence this."
                 )
             if isinstance(self.model, HuggingFaceModel):
+                cached = huggingface_hub.try_to_load_from_cache(
+                    self.model.repo_id, self.model.filename
+                )
+                if not isinstance(cached, str):
+                    print(
+                        f"Downloading the LLM model {self.model.repo_id} "
+                        f"({self.model.filename}) from Hugging Face. This "
+                        "happens once and may take a while; reduction "
+                        "continues meanwhile, and the LLM passes join in "
+                        "when it's ready. Pass --no-llm to disable them.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 path = huggingface_hub.hf_hub_download(
                     self.model.repo_id, self.model.filename
                 )

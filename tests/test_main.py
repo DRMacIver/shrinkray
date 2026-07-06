@@ -1984,13 +1984,57 @@ def test_llm_rejects_invalid_model_spec(tmp_path):
     assert "not-a-model" in result.output
 
 
-def test_llm_requires_the_llm_extra(tmp_path, monkeypatch):
+def test_explicit_llm_fails_when_unsupported(tmp_path, monkeypatch):
     script, target = _llm_target(tmp_path, b"say xy\n", "xy")
     monkeypatch.setattr("shrinkray.__main__.llm_support_available", lambda: False)
     runner = CliRunner()
     result = runner.invoke(main, [script, target, "--ui=basic", "--llm"])
     assert result.exit_code == 1
-    assert "shrinkray[llm]" in result.output
+    assert "cannot load on this platform" in result.output
+
+
+def test_llm_enabled_by_env_var_fails_when_unsupported(tmp_path, monkeypatch):
+    script, target = _llm_target(tmp_path, b"say xy\n", "xy")
+    monkeypatch.setattr("shrinkray.__main__.llm_support_available", lambda: False)
+    monkeypatch.setenv("SHRINKRAY_LLM", "1")
+    runner = CliRunner()
+    result = runner.invoke(main, [script, target, "--ui=basic"])
+    assert result.exit_code == 1
+    assert "cannot load on this platform" in result.output
+
+
+def test_default_llm_degrades_with_a_warning_when_unsupported(tmp_path, monkeypatch):
+    # LLM mode is on by default, but on platforms where llama-cpp-python
+    # can't load, an ordinary reduction must still work.
+    monkeypatch.setattr("shrinkray.__main__.llm_support_available", lambda: False)
+    monkeypatch.delenv("SHRINKRAY_LLM")
+    target = tmp_path / "target.txt"
+    target.write_text("say xy please\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q xy "$1"\n')
+    script.chmod(0o755)
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(main, [str(script), str(target), "--ui=basic"])
+    assert result.exit_code == 0
+    assert "Reducing without them" in result.output
+    assert "xy" in target.read_text()
+
+
+def test_env_var_disables_llm(tmp_path):
+    # The conftest sets SHRINKRAY_LLM=0; with a garbage model configured,
+    # the reduction can only succeed because the LLM passes are off.
+    target = tmp_path / "target.txt"
+    target.write_text("say xy please\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q xy "$1"\n')
+    script.chmod(0o755)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"not really a model")
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main, [str(script), str(target), "--ui=basic", f"--llm-model={model}"]
+    )
+    assert result.exit_code == 0
 
 
 @requires_llm_support

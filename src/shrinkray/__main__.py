@@ -273,12 +273,13 @@ to disable it.
 @click.option(
     "--llm/--no-llm",
     "llm",
-    default=False,
+    default=True,
+    envvar="SHRINKRAY_LLM",
     help="""
-Enable reduction passes that ask a language model, running locally in-process,
-to propose smaller test cases. Requires the llm extra (install
-'shrinkray[llm]'), and the first use downloads the default model (about 2.7GB)
-from Hugging Face. Disabled by default.
+Reduction passes that ask a language model, running locally in-process, to
+propose smaller test cases. Enabled by default; the first use downloads the
+default model (about 2.7GB) from Hugging Face in the background while the
+ordinary passes reduce. Disable with --no-llm or SHRINKRAY_LLM=0.
 """.strip(),
 )
 @click.option(
@@ -412,14 +413,23 @@ def main(
         except ValueError as e:
             raise click.BadParameter(str(e), param_hint="--llm-model")
         if not llm_support_available():
+            message = (
+                "llama-cpp-python is not installed or cannot load on this "
+                "platform, so the LLM passes are unavailable."
+            )
+            # LLM mode is on by default; only fail if the user asked for
+            # it explicitly, otherwise degrade to reducing without it.
+            if llm_only or ctx.get_parameter_source("llm") in (
+                click.core.ParameterSource.COMMANDLINE,
+                click.core.ParameterSource.ENVIRONMENT,
+            ):
+                print(message, file=sys.stderr)
+                sys.exit(1)
             print(
-                "The LLM passes need llama-cpp-python, which is not installed "
-                "or cannot load on this platform. Install shrink ray's llm "
-                "extra (e.g. `uv tool install 'shrinkray[llm]'`) or run "
-                "without --llm.",
+                f"Warning: {message} Reducing without them.",
                 file=sys.stderr,
             )
-            sys.exit(1)
+            llm_enabled = False
     also_interesting_explicit = (
         ctx.get_parameter_source("also_interesting")
         == click.core.ParameterSource.COMMANDLINE

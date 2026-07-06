@@ -172,12 +172,12 @@ async def test_missing_content_becomes_empty_string(
     assert result == ""
 
 
-async def test_missing_llama_cpp_gives_install_hint(
+async def test_missing_llama_cpp_gives_a_clear_error(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(shrinkray.llm_client, "llama_cpp", None)
     client = LlamaCppClient(model=LocalModel(path="/m.gguf"))
-    with pytest.raises(ImportError, match=r"shrinkray\[llm\]"):
+    with pytest.raises(ImportError, match="cannot load on this platform"):
         await client.complete("hi", max_tokens=1, seed=1, temperature=0.0)
 
 
@@ -188,7 +188,7 @@ class _BlockOptionalImports:
         return None
 
 
-def test_module_imports_without_the_llm_extra():
+def test_module_imports_without_llama_cpp():
     blocker = _BlockOptionalImports()
     saved = {
         name: sys.modules.pop(name)
@@ -298,9 +298,7 @@ async def test_exit_hook_is_registered_and_joins_generations(
     tiny_model_path: str, monkeypatch: pytest.MonkeyPatch
 ):
     registered: list[Any] = []
-    monkeypatch.setattr(
-        shrinkray.llm_client.atexit, "register", registered.append
-    )
+    monkeypatch.setattr(shrinkray.llm_client.atexit, "register", registered.append)
     client = tiny_client(tiny_model_path)
     await client.complete("warm up", max_tokens=1, seed=0, temperature=0.0)
     assert registered == [client._join_at_exit]
@@ -346,13 +344,32 @@ async def test_exit_hook_gives_up_on_a_stuck_generation(
         patcher.setattr(llama, "create_chat_completion", stuck)
         try:
             with trio.move_on_after(0.2):
-                await client.complete(
-                    "stuck", max_tokens=1, seed=1, temperature=0.0
-                )
+                await client.complete("stuck", max_tokens=1, seed=1, temperature=0.0)
             # The generation ignores the abort (it's blocked inside the
             # model), so the exit hook times out rather than hanging.
-            await trio.to_thread.run_sync(
-                lambda: client._join_at_exit(timeout=0.05)
-            )
+            await trio.to_thread.run_sync(lambda: client._join_at_exit(timeout=0.05))
         finally:
             release.set()
+
+
+@requires_llama_cpp
+async def test_prints_a_notice_before_downloading(
+    tiny_model_path: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    # Pretend the model isn't cached: the one-time download notice must be
+    # printed before fetching (the fetch itself hits the warm cache).
+    monkeypatch.setattr(
+        shrinkray.llm_client.huggingface_hub,
+        "try_to_load_from_cache",
+        lambda *args, **kwargs: None,
+    )
+    client = LlamaCppClient(
+        model=HuggingFaceModel(repo_id=TINY_REPO, filename=TINY_FILE),
+        n_ctx=512,
+        n_gpu_layers=0,
+        n_threads=2,
+    )
+    await client.complete("hi", max_tokens=1, seed=1, temperature=0.0)
+    assert "Downloading the LLM model" in capsys.readouterr().err

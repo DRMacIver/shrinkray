@@ -1055,8 +1055,10 @@ dependencies = [
     { name = "chardet" },
     { name = "click" },
     { name = "exceptiongroup" },
+    { name = "huggingface-hub" },
     { name = "humanize" },
     { name = "libcst" },
+    { name = "llama-cpp-python" },
     { name = "textual" },
     { name = "textual-plotext" },
     { name = "tree-sitter" },
@@ -1068,11 +1070,9 @@ dependencies = [
 dev = [
     { name = "basedpyright" },
     { name = "coverage" },
-    { name = "huggingface-hub" },
     { name = "hypothesis" },
     { name = "hypothesmith" },
     { name = "jinja2" },
-    { name = "llama-cpp-python" },
     { name = "pexpect" },
     { name = "pygments" },
     { name = "pyte" },
@@ -1084,17 +1084,11 @@ dev = [
     { name = "ruff" },
     { name = "syrupy" },
 ]
-llm = [
-    { name = "huggingface-hub" },
-    { name = "llama-cpp-python" },
-]
 test = [
     { name = "coverage" },
-    { name = "huggingface-hub" },
     { name = "hypothesis" },
     { name = "hypothesmith" },
     { name = "jinja2" },
-    { name = "llama-cpp-python" },
     { name = "pexpect" },
     { name = "pygments" },
     { name = "pyte" },
@@ -1116,13 +1110,13 @@ requires-dist = [
     { name = "coverage", marker = "extra == 'test'", specifier = ">=7.4.0" },
     { name = "coverage", extras = ["toml"], marker = "extra == 'test'", specifier = ">=7.4.0" },
     { name = "exceptiongroup", specifier = ">=1.2.0" },
-    { name = "huggingface-hub", marker = "extra == 'llm'", specifier = ">=1.22.0" },
+    { name = "huggingface-hub", specifier = ">=1.22.0" },
     { name = "humanize", specifier = ">=4.9.0" },
     { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6.117.0" },
     { name = "hypothesmith", marker = "extra == 'test'", specifier = ">=0.3.3" },
     { name = "jinja2", marker = "extra == 'test'", specifier = ">=3.0.0" },
     { name = "libcst", specifier = ">=1.8.4" },
-    { name = "llama-cpp-python", marker = "extra == 'llm'", specifier = ">=0.3.33" },
+    { name = "llama-cpp-python", specifier = ">=0.3.33" },
     { name = "pexpect", marker = "extra == 'test'", specifier = ">=4.9.0" },
     { name = "pygments", marker = "extra == 'test'", specifier = ">=2.17.0" },
     { name = "pyte", marker = "extra == 'test'", specifier = ">=0.8.2" },
@@ -1132,7 +1126,6 @@ requires-dist = [
     { name = "pytest-trio", marker = "extra == 'test'", specifier = ">=0.8.0" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.5.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
-    { name = "shrinkray", extras = ["llm"], marker = "extra == 'test'" },
     { name = "shrinkray", extras = ["test"], marker = "extra == 'dev'" },
     { name = "syrupy", marker = "extra == 'test'", specifier = ">=5.0.0" },
     { name = "textual", specifier = ">=8.0.0" },
@@ -1141,7 +1134,7 @@ requires-dist = [
     { name = "tree-sitter-language-pack", specifier = ">=1.12.2" },
     { name = "trio", specifier = ">=0.28.0" },
 ]
-provides-extras = ["llm", "test", "dev"]
+provides-extras = ["test", "dev"]
 
 [[package]]
 name = "sniffio"

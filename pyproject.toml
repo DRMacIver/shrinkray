@@ -30,6 +30,12 @@ dependencies = [
     "black>=24.1.0",
     "tree-sitter>=0.26.0",
     "tree-sitter-language-pack>=1.12.2",
+    # In-process model inference for the LLM passes (a from-source C++
+    # build on platforms without wheels). On platforms where it cannot
+    # load (e.g. OpenBSD) shrink ray degrades to running without the LLM
+    # passes.
+    "llama-cpp-python>=0.3.33",
+    "huggingface-hub>=1.22.0",
 ]
 
 [project.urls]
@@ -42,20 +48,11 @@ shrinkray = "shrinkray.__main__:main"
 shrinkray-worker = "shrinkray.__main__:worker_main"
 
 [project.optional-dependencies]
-# In-process model inference for the LLM passes. Optional at runtime
-# because llama-cpp-python is a from-source C++ build that not every
-# install wants; the test extra includes it so the integration is tested
-# against the real library.
-llm = [
-    "llama-cpp-python>=0.3.33",
-    "huggingface-hub>=1.22.0",
-]
 # Everything needed to run the test suite. Kept separate from dev because
 # the OpenBSD CI job installs only this: the lint tools in dev ship no
 # OpenBSD wheels (ruff would need a huge rust build, basedpyright needs
 # node binaries).
 test = [
-    "shrinkray[llm]",
     "coverage>=7.4.0",
     # >=6.117.0 so that conftest.py's re-registration of the default
     # profile (which disables the deadline) takes effect; CI's auto "ci"

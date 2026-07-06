@@ -36,7 +36,7 @@ C/C++ passes built on a sloppy lexer plus bracket matching (a pure Python replac
 
 ### llm.py
 
-The experimental LLM mode (`--llm`). `llm_rewrite` feeds the whole current
+The LLM mode (on by default; `--no-llm` or `SHRINKRAY_LLM=0` disables). `llm_rewrite` feeds the whole current
 test case to a language model, prompted with the file name and the text of
 the user's interestingness script, and asks for several progressively
 smaller rewrites in fenced code blocks; every block that sorts below the
@@ -49,8 +49,7 @@ the reduction begins (`start_loading`), overlapping with the cheap
 passes; the pass waits for readiness (`wait_until_ready`) only when it's
 actually scheduled, and skips the wait entirely for inputs it could
 never prompt with. Inference is in-process through llama-cpp-python
-(`llm_client.py`, the optional `llm` extra), one generation at a time
-behind a thread lock;
+(`llm_client.py`), one generation at a time behind a thread lock;
 the `LLMClient` ABC is the seam for pointing at other completion sources
 (e.g. an OpenAI-compatible endpoint) later. Prompt-shape decisions were
 measured with `evaluation/llm_prompt_experiment.py` against the benchmark

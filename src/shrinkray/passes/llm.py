@@ -12,7 +12,6 @@ Model inference runs in-process through llama-cpp-python (see
 :class:`LLMClient`, so any other completion source can be plugged in.
 """
 
-import importlib.util
 import os
 import re
 from abc import ABC, abstractmethod
@@ -40,11 +39,6 @@ class HuggingFaceModel:
 
     repo_id: str
     filename: str
-
-
-def llm_support_available() -> bool:
-    """Whether the optional dependencies for the LLM passes are installed."""
-    return importlib.util.find_spec("llama_cpp") is not None
 
 
 def parse_model_spec(spec: str) -> LocalModel | HuggingFaceModel:

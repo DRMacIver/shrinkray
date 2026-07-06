@@ -227,3 +227,9 @@ async def test_wait_until_ready_surfaces_load_failure(tmp_path):
     # wait_until_ready starts the load itself if nobody else has.
     with pytest.raises(ValueError):
         await client.wait_until_ready()
+
+
+def test_llm_support_reflects_import_state(monkeypatch: pytest.MonkeyPatch):
+    assert shrinkray.llm_client.llm_support_available()
+    monkeypatch.setattr(shrinkray.llm_client, "llama_cpp", None)
+    assert not shrinkray.llm_client.llm_support_available()

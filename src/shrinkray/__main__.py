@@ -19,9 +19,9 @@ from shrinkray.cli import (
     validate_ui,
 )
 from shrinkray.formatting import determine_formatter_command
+from shrinkray.llm_client import llm_support_available
 from shrinkray.passes.llm import (
     DEFAULT_MODEL_SPEC,
-    llm_support_available,
     parse_model_spec,
 )
 from shrinkray.process import (

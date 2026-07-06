@@ -28,9 +28,22 @@ if TYPE_CHECKING:
 try:
     import huggingface_hub
     import llama_cpp
-except ImportError:
+except (ImportError, RuntimeError):
+    # llama-cpp-python raises RuntimeError (not ImportError) at import
+    # time on platforms its shared-library loader doesn't recognise
+    # (e.g. OpenBSD, where the package builds but refuses to load).
     huggingface_hub = None
     llama_cpp = None
+
+
+def llm_support_available() -> bool:
+    """Whether the optional dependencies for the LLM passes are usable.
+
+    Deliberately based on the import above rather than on whether the
+    packages are installed: llama-cpp-python can be installed but
+    unloadable on platforms it doesn't support.
+    """
+    return llama_cpp is not None and huggingface_hub is not None
 
 
 @define

@@ -908,7 +908,7 @@ requires-dist = [
     { name = "coverage", extras = ["toml"], marker = "extra == 'test'", specifier = ">=7.4.0" },
     { name = "exceptiongroup", specifier = ">=1.2.0" },
     { name = "humanize", specifier = ">=4.9.0" },
-    { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6.92.1" },
+    { name = "hypothesis", marker = "extra == 'test'", specifier = ">=6.156.0" },
     { name = "hypothesmith", marker = "extra == 'test'", specifier = ">=0.3.1" },
     { name = "jinja2", marker = "extra == 'test'", specifier = ">=3.0.0" },
     { name = "libcst", specifier = ">=1.8.4" },

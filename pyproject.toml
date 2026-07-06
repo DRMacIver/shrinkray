@@ -48,8 +48,15 @@ shrinkray-worker = "shrinkray.__main__:worker_main"
 # node binaries).
 test = [
     "coverage>=7.4.0",
-    "hypothesis>=6.92.1",
-    "hypothesmith>=0.3.1",
+    # >=6.117.0 so that conftest.py's re-registration of the default
+    # profile (which disables the deadline) takes effect; CI's auto "ci"
+    # profile needs only 6.116.0. Versions from 6.156 on ship no sdist or
+    # universal wheel, so the OpenBSD job can't install them - keep the
+    # floor below that and let each platform resolve what it can.
+    "hypothesis>=6.117.0",
+    # >=0.3.3 because 0.3.1 predates LarkStrategy's required alphabet
+    # argument and fails at import with hypothesis >= 6.117.
+    "hypothesmith>=0.3.3",
     "pytest>=8.0.0",
     "pytest-trio>=0.8.0",
     "pytest-asyncio>=0.21.0",

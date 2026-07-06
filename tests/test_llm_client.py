@@ -241,7 +241,7 @@ async def test_wait_until_ready_surfaces_load_failure(tmp_path):
     client = LlamaCppClient(
         model=LocalModel(path=str(bad)), n_gpu_layers=0, n_threads=2
     )
-    # wait_until_ready starts the load itself if nobody else has.
+    client.start_loading()
     with pytest.raises(ValueError):
         await client.wait_until_ready()
 

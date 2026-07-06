@@ -2060,3 +2060,55 @@ def test_llm_only_reduction_of_binary_input_is_a_no_op(tmp_path):
     final = pathlib.Path(target).read_bytes()
     assert b"xy" in final
     assert len(final) == len(content)
+
+
+def test_basic_ui_reports_pending_downloads(tmp_path, monkeypatch):
+    target = tmp_path / "target.txt"
+    target.write_text("say xy please\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q xy "$1"\n')
+    script.chmod(0o755)
+
+    pending = [
+        {"id": "llm", "description": "LLM model x (about 2.7GB)"},
+        {"id": "grammar-go", "description": "tree-sitter grammar for go"},
+    ]
+    monkeypatch.setattr(
+        "shrinkray.state.ShrinkRayStateSingleFile.pending_downloads",
+        lambda self: pending,
+    )
+    started: list[list[str]] = []
+    monkeypatch.setattr(
+        "shrinkray.state.ShrinkRayStateSingleFile.start_downloads",
+        lambda self, disabled: started.append(disabled),
+    )
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(main, [str(script), str(target), "--ui=basic"])
+    assert result.exit_code == 0
+    assert "will download in the background" in result.output
+    assert "tree-sitter grammar for go" in result.output
+    assert "LLM model x" in result.output
+    assert "--no-llm" in result.output
+    assert started == [[]]
+
+
+def test_basic_ui_download_notice_omits_no_llm_when_only_grammar(tmp_path, monkeypatch):
+    target = tmp_path / "target.txt"
+    target.write_text("say xy please\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q xy "$1"\n')
+    script.chmod(0o755)
+
+    monkeypatch.setattr(
+        "shrinkray.state.ShrinkRayStateSingleFile.pending_downloads",
+        lambda self: [{"id": "grammar-go", "description": "grammar for go"}],
+    )
+    monkeypatch.setattr(
+        "shrinkray.state.ShrinkRayStateSingleFile.start_downloads",
+        lambda self, disabled: None,
+    )
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(main, [str(script), str(target), "--ui=basic"])
+    assert result.exit_code == 0
+    assert "grammar for go" in result.output
+    assert "--no-llm" not in result.output

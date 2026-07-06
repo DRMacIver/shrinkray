@@ -118,6 +118,13 @@ Model suggestions are just candidates like any others: they're only accepted
 if your interestingness test still passes, so a bad model costs time but
 never correctness.
 
+When a reduction would download the model (or a tree-sitter grammar for the
+input's language), Shrink Ray tells you first rather than fetching silently:
+the interactive UI shows a startup dialog listing each pending download with a
+checkbox to skip it, and the basic UI prints the list. Reduction starts right
+away behind the dialog on the ordinary passes, and each download's extra
+passes join in when it finishes.
+
 To turn it off, pass `--no-llm` (or set `SHRINKRAY_LLM=0` in the environment,
 useful on shared machines and CI). `--llm-model` selects a different model —
 either a path to a local `.gguf` file or a Hugging Face `repo:filename`

@@ -16,6 +16,7 @@ import trio.testing
 
 import shrinkray.subprocess.worker
 from shrinkray.adaptive_timeout import AdaptiveTimeoutPolicy
+from shrinkray.downloads import GrammarDownload
 from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import ShrinkRayDirectoryState, ShrinkRayStateSingleFile
 from shrinkray.subprocess.protocol import (
@@ -696,7 +697,11 @@ async def test_worker_handle_start_success(tmp_path):
 
     assert response.id == "req-123"
     assert response.error is None
-    assert response.result == {"status": "started"}
+    assert response.result is not None
+    assert response.result["status"] == "started"
+    # A .txt input on this machine has nothing to download, so downloads
+    # were started immediately without asking.
+    assert response.result["pending_downloads"] == []
     assert worker.running is True
 
 
@@ -1335,7 +1340,8 @@ async def test_worker_trivial_result_error(tmp_path):
     # Start should succeed
     response = await worker._handle_start("test-trivial", params)
     assert response.error is None
-    assert response.result == {"status": "started"}
+    assert response.result is not None
+    assert response.result["status"] == "started"
 
     # Run the reducer
     await worker.run_reducer()
@@ -3196,3 +3202,36 @@ async def test_build_progress_update_timeout_none_when_unbounded_with_no_data():
     assert update is not None
     assert update.current_timeout is None
     assert update.timeout_rate == 0.0
+
+
+async def test_worker_reports_and_configures_pending_downloads(tmp_path, monkeypatch):
+    """Pending downloads flow out of start and back in via start_downloads."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello")
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/sh\nexit 0")
+    script.chmod(0o755)
+
+    worker = ReducerWorker(output_stream=MemoryOutputStream())
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "formatter": "none",
+        "volume": "quiet",
+        "skip_validation": True,
+    }
+    response = await worker._handle_start("req-1", params)
+    assert response.result is not None
+    assert worker.state is not None
+    # Simulate a pending item by injecting a grammar download, then use
+    # the command to decline it.
+    worker.state.downloads.grammars["go"] = GrammarDownload(language="go")
+    response = worker._handle_start_downloads("req-2", {"disabled": ["grammar-go"]})
+    assert response.result == {"status": "downloads_started"}
+    assert worker.state.downloads.grammars["go"].disabled
+
+
+async def test_worker_start_downloads_requires_state():
+    worker = ReducerWorker(output_stream=MemoryOutputStream())
+    response = worker._handle_start_downloads("req-1", {"disabled": []})
+    assert response.error == "State not available"

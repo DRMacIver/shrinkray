@@ -13,3 +13,10 @@
   Hugging Face `repo:filename` reference), and `--llm-only` runs only the LLM
   passes. On platforms where the bundled llama-cpp-python cannot load, shrink
   ray warns and reduces without the LLM passes.
+- Shrink Ray no longer downloads anything silently. When a reduction would
+  fetch the LLM model or a tree-sitter grammar for the input's language, it now
+  says so up front: the interactive UI shows a startup dialog listing each
+  download with a checkbox to skip it, and the basic UI prints the list. The
+  reduction starts immediately behind the dialog on the ordinary passes, and
+  each download's extra passes join in as it completes — so declining a
+  download, or dismissing the dialog, never blocks reduction.

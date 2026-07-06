@@ -160,6 +160,8 @@ class ReducerWorker:
                 return self._handle_skip_pass(request.id)
             case "restart_from":
                 return await self._handle_restart_from(request.id, request.params)
+            case "start_downloads":
+                return self._handle_start_downloads(request.id, request.params)
             case _:
                 return Response(
                     id=request.id, error=f"Unknown command: {request.command}"
@@ -172,7 +174,15 @@ class ReducerWorker:
 
         try:
             await self._start_reduction(params)
-            return Response(id=request_id, result={"status": "started"})
+            assert self.state is not None
+            pending = self.state.pending_downloads()
+            if not pending:
+                # Nothing to ask the user about; begin downloads at once.
+                self.state.start_downloads([])
+            return Response(
+                id=request_id,
+                result={"status": "started", "pending_downloads": pending},
+            )
         except* InvalidInitialExample as excs:
             traceback.print_exc()
             assert len(excs.exceptions) == 1
@@ -187,6 +197,14 @@ class ReducerWorker:
             # Include full traceback in error message in case stderr isn't visible
             error_message = traceback.format_exc()
         return Response(id=request_id, error=error_message)
+
+    def _handle_start_downloads(self, request_id: str, params: dict) -> Response:
+        """Record the downloads decision from the UI and begin downloads."""
+        if self.state is None:
+            return Response(id=request_id, error="State not available")
+        disabled = [str(item) for item in params.get("disabled", [])]
+        self.state.start_downloads(disabled)
+        return Response(id=request_id, result={"status": "downloads_started"})
 
     async def _start_reduction(self, params: dict) -> None:
         """Initialize and start the reduction."""

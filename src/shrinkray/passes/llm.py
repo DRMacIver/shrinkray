@@ -80,6 +80,16 @@ class LLMClient(ABC):
         """Wait until complete() can serve requests without long setup."""
         await trio.lowlevel.checkpoint()
 
+    def is_disabled(self) -> bool:
+        """Whether the user declined this client's model (see disable)."""
+        return False
+
+    def disable(self) -> None:  # noqa: B027
+        """Decline the model: release waiters and never start its download.
+
+        Optional hook; clients with no download to decline ignore it.
+        """
+
 
 @define
 class LLMConfig:
@@ -247,6 +257,8 @@ def llm_rewrite(client: LLMClient, config: LLMConfig) -> ReductionPass[bytes]:
             # wait for it. Inputs that can never be prompted return above
             # without waiting.
             await client.wait_until_ready()
+            if client.is_disabled():
+                return
             response = await client.complete(
                 prompt,
                 max_tokens=completion_max_tokens(len(current)),

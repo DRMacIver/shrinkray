@@ -185,6 +185,10 @@ class SubprocessClient:
             params["memory_limit"] = memory_limit
         return await self.send_command("start", params)
 
+    async def start_downloads(self, disabled: list[str]) -> Response:
+        """Approve the background downloads, opting out of `disabled` items."""
+        return await self.send_command("start_downloads", {"disabled": disabled})
+
     async def get_status(self) -> Response:
         """Get current reduction status."""
         return await self.send_command("status")

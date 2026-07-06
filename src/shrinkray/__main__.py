@@ -524,6 +524,17 @@ def main(
 
     # At this point, ui_type must be UIType.basic since textual returned above
     assert ui_type == UIType.basic
+
+    # The basic UI has no modal: report what will be fetched and proceed.
+    pending = state.pending_downloads()
+    if pending:
+        print("Shrink Ray will download in the background:", file=sys.stderr)
+        for item in pending:
+            print(f"  - {item['description']}", file=sys.stderr)
+        if any(item["id"] == "llm" for item in pending):
+            print("(Run with --no-llm to reduce without the model.)", file=sys.stderr)
+    state.start_downloads([])
+
     ui = BasicUI(state)
 
     try:

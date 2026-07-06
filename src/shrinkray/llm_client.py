@@ -76,6 +76,7 @@ class LlamaCppClient(LLMClient):
     _load_error: Exception | None = field(default=None, init=False)
     _ready: threading.Event = field(factory=threading.Event, init=False)
     _shutting_down: threading.Event = field(factory=threading.Event, init=False)
+    _disabled: bool = field(default=False, init=False)
 
     # Completed generations, keyed by everything that determines them
     # (generation is deterministic for a fixed seed). The reducer's
@@ -94,7 +95,7 @@ class LlamaCppClient(LLMClient):
         multi-gigabyte) download overlaps with the cheap passes; the LLM
         pass then calls wait_until_ready before its first generation.
         """
-        if self._load_thread is not None or self._llama is not None:
+        if self._disabled or self._load_thread is not None or self._llama is not None:
             return
 
         def load() -> None:
@@ -110,13 +111,36 @@ class LlamaCppClient(LLMClient):
         self._load_thread.start()
 
     async def wait_until_ready(self) -> None:
-        if self._llama is not None:
+        """Wait for the model, however long its download/load takes.
+
+        Deliberately does not start the load itself: whether (and when)
+        loading starts is the reducer's or the download coordinator's
+        decision, and when the model needs downloading the user gets a
+        say first.
+        """
+        if self._llama is not None or self._disabled:
             await trio.lowlevel.checkpoint()
             return
-        self.start_loading()
         await trio.to_thread.run_sync(self._ready.wait, abandon_on_cancel=True)
         if self._load_error is not None:
             raise self._load_error
+
+    def model_needs_download(self) -> bool:
+        """Whether the first use would download the model from the Hub."""
+        if not isinstance(self.model, HuggingFaceModel) or huggingface_hub is None:
+            return False
+        cached = huggingface_hub.try_to_load_from_cache(
+            self.model.repo_id, self.model.filename
+        )
+        return not isinstance(cached, str)
+
+    def is_disabled(self) -> bool:
+        return self._disabled
+
+    def disable(self) -> None:
+        """Decline the model: never download it, and release any waiters."""
+        self._disabled = True
+        self._ready.set()
 
     async def complete(
         self, prompt: str, *, max_tokens: int, seed: int, temperature: float

@@ -22,6 +22,8 @@ from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.timer import Timer
 from textual.widgets import (
+    Button,
+    Checkbox,
     DataTable,
     Footer,
     Header,
@@ -142,6 +144,7 @@ class ReductionClientProtocol(Protocol):
     async def enable_pass(self, pass_name: str) -> Response: ...
     async def skip_current_pass(self) -> Response: ...
     async def restart_from(self, reduction_number: int) -> Response: ...
+    async def start_downloads(self, disabled: list[str]) -> Response: ...
     async def close(self) -> None: ...
 
     @property
@@ -669,6 +672,83 @@ class OutputPreview(Static):
             result.append("\n")
         result.append(content)
         return result
+
+
+class DownloadsModal(ModalScreen[list[str]]):
+    """Startup modal listing background downloads, with per-item opt-out.
+
+    Dismisses with the list of item ids the user disabled. The reduction
+    is already running behind it on the classical passes; approving the
+    downloads lets the dependent passes join in.
+    """
+
+    CSS = """
+    DownloadsModal {
+        align: center middle;
+    }
+
+    DownloadsModal > Vertical {
+        width: 70;
+        height: auto;
+        max-height: 80%;
+        background: $panel;
+        border: thick $primary;
+        padding: 1 2;
+    }
+
+    DownloadsModal #downloads-title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    DownloadsModal #downloads-buttons {
+        align-horizontal: center;
+        height: auto;
+        margin-top: 1;
+    }
+
+    DownloadsModal Button {
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "confirm", "Continue"),
+    ]
+
+    def __init__(self, pending: list[dict[str, str]]) -> None:
+        super().__init__()
+        self._pending = pending
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Shrink Ray would like to download", id="downloads-title")
+            yield Static(
+                "Reduction has already started and will continue without "
+                "these; they let the extra reduction passes join in. Untick "
+                "anything you'd rather not download."
+            )
+            yield Static("")
+            for item in self._pending:
+                yield Checkbox(item["description"], value=True, id=f"dl-{item['id']}")
+            with Horizontal(id="downloads-buttons"):
+                yield Button("Continue", variant="primary", id="downloads-ok")
+
+    def _disabled_ids(self) -> list[str]:
+        disabled: list[str] = []
+        for item in self._pending:
+            checkbox = self.query_one(f"#dl-{item['id']}", Checkbox)
+            if not checkbox.value:
+                disabled.append(item["id"])
+        return disabled
+
+    def on_button_pressed(self, event: "Button.Pressed") -> None:
+        if event.button.id == "downloads-ok":
+            self.action_confirm()
+
+    def action_confirm(self) -> None:
+        self.dismiss(self._disabled_ids())
 
 
 class HelpScreen(ModalScreen[None]):
@@ -1873,6 +1953,13 @@ class ShrinkRayApp(App[None]):
                     self.exit(return_code=1, message=f"Error: {response.error}")
                     return
 
+                # If startup wants to download anything, ask over a modal.
+                # The reduction is already running behind it; the approved
+                # downloads' passes join in when they complete.
+                pending = (response.result or {}).get("pending_downloads") or []
+                if pending:
+                    self._prompt_for_downloads(pending)
+
             # Monitor progress (client is already started and reduction is running)
             stats_display = self.query_one("#stats-display", StatsDisplay)
             content_preview = self.query_one("#content-preview", ContentPreview)
@@ -2005,6 +2092,22 @@ class ShrinkRayApp(App[None]):
     def action_show_pass_stats(self) -> None:
         """Show the pass statistics modal."""
         self.push_screen(PassStatsScreen(self))
+
+    def _prompt_for_downloads(self, pending: list[dict[str, str]]) -> None:
+        """Ask which background downloads to allow, then tell the worker.
+
+        Non-blocking: the reduction keeps running while the modal is up,
+        and the worker only starts the approved downloads once the user
+        confirms.
+        """
+
+        client = self._client
+        assert client is not None
+
+        async def decided(disabled: list[str] | None) -> None:
+            await client.start_downloads(disabled or [])
+
+        self.push_screen(DownloadsModal(pending), decided)
 
     def action_show_help(self) -> None:
         """Show the help modal."""

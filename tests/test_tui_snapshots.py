@@ -87,6 +87,9 @@ class FakeReductionClientForSnapshots:
     async def restart_from(self, reduction_number: int) -> Response:
         return Response(id="restart", result={"status": "restarted", "size": 100})
 
+    async def start_downloads(self, disabled: list[str]) -> Response:
+        return Response(id="dl", result={"status": "downloads_started"})
+
     async def close(self) -> None:
         pass
 

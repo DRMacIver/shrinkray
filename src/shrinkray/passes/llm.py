@@ -80,8 +80,11 @@ class LLMConfig:
 
     # Test cases larger than this are skipped: they don't fit comfortably
     # in a small model's context window, and generating a full rewrite of
-    # a large file is too slow to be worth attempting.
-    max_input_bytes: int = 32_768
+    # a large file is too slow to be worth attempting. Sized so that the
+    # prompt (roughly a token per three bytes, plus the oracle text) and
+    # the completion budget together stay inside LlamaCppClient's default
+    # 16384-token context.
+    max_input_bytes: int = 16_384
 
     # How many reduced versions a single completion is asked to produce.
     n_candidates: int = 3
@@ -102,7 +105,7 @@ class LLMConfig:
     oracle: str | None = None
 
 
-def read_oracle_script(path: str, max_bytes: int = 10_000) -> str | None:
+def read_oracle_script(path: str, max_bytes: int = 4_096) -> str | None:
     """The text of the user's interestingness test, for use as prompt
     context, or None when it wouldn't make a useful prompt (unreadable,
     binary, or too long).

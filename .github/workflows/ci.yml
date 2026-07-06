@@ -46,9 +46,11 @@ jobs:
           copyback: false
           mem: 8192
           # rust is needed to build libcst (setuptools-rust) and maturin
-          # from source; zstd unpacks the tree-sitter parser sources.
+          # from source; zstd unpacks the tree-sitter parser sources;
+          # cmake and ninja build llama-cpp-python (the llm extra, pulled
+          # in by test).
           prepare: |
-            pkg_add python3 py3-pip rust minisat zstd
+            pkg_add python3 py3-pip rust minisat zstd cmake ninja
           run: |
             set -ex
             uname -a

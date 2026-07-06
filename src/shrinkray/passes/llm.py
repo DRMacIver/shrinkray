@@ -12,6 +12,7 @@ Model inference runs in-process through llama-cpp-python (see
 :class:`LLMClient`, so any other completion source can be plugged in.
 """
 
+import importlib.util
 import os
 import re
 from abc import ABC, abstractmethod
@@ -38,6 +39,11 @@ class HuggingFaceModel:
 
     repo_id: str
     filename: str
+
+
+def llm_support_available() -> bool:
+    """Whether the optional dependencies for the LLM passes are installed."""
+    return importlib.util.find_spec("llama_cpp") is not None
 
 
 def parse_model_spec(spec: str) -> LocalModel | HuggingFaceModel:
@@ -94,6 +100,24 @@ class LLMConfig:
     # A description of the interestingness condition, if known (for
     # example the text of the user's test script), included in the prompt.
     oracle: str | None = None
+
+
+def read_oracle_script(path: str, max_bytes: int = 10_000) -> str | None:
+    """The text of the user's interestingness test, for use as prompt
+    context, or None when it wouldn't make a useful prompt (unreadable,
+    binary, or too long).
+    """
+    try:
+        with open(path, "rb") as f:
+            data = f.read(max_bytes + 1)
+    except OSError:
+        return None
+    if len(data) > max_bytes:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)

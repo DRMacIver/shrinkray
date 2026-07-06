@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from shrinkray.passes.llm import DEFAULT_MODEL_SPEC
 from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
 from shrinkray.tui import ShrinkRayApp, StatsDisplay
 
@@ -60,6 +61,9 @@ class FakeReductionClientForSnapshots:
         also_interesting_code: int | None = None,
         external_reducers: list[list[str]] | None = None,
         python_reducer: bool = True,
+        llm_enabled: bool = False,
+        llm_model: str = DEFAULT_MODEL_SPEC,
+        llm_only: bool = False,
     ) -> Response:
         return Response(id="start", result={"status": "started"})
 

@@ -552,6 +552,9 @@ async def test_worker_start_reduction_reads_external_reducer_params(tmp_path):
         "skip_validation": True,
         "external_reducers": [["my-reducer", "arg"]],
         "python_reducer": False,
+        "llm_enabled": True,
+        "llm_model": "org/repo:model.gguf",
+        "llm_only": True,
     }
 
     await worker._start_reduction(params)
@@ -559,6 +562,9 @@ async def test_worker_start_reduction_reads_external_reducer_params(tmp_path):
     assert worker.state is not None
     assert worker.state.external_reducers == [["my-reducer", "arg"]]
     assert worker.state.python_reducer is False
+    assert worker.state.llm_enabled is True
+    assert worker.state.llm_model == "org/repo:model.gguf"
+    assert worker.state.llm_only is True
 
 
 async def test_worker_start_reduction_default_external_reducer_params(tmp_path):
@@ -586,6 +592,8 @@ async def test_worker_start_reduction_default_external_reducer_params(tmp_path):
     assert worker.state is not None
     assert worker.state.external_reducers == []
     assert worker.state.python_reducer is True
+    assert worker.state.llm_enabled is False
+    assert worker.state.llm_only is False
 
 
 async def test_worker_start_reduction_skip_validation(tmp_path):

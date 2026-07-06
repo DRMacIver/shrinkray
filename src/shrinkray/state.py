@@ -30,7 +30,15 @@ from shrinkray.history import (
     deserialize_directory,
     serialize_directory,
 )
+from shrinkray.llm_client import LlamaCppClient
 from shrinkray.passes.cpp import C_FILE_EXTENSIONS
+from shrinkray.passes.llm import (
+    DEFAULT_MODEL_SPEC,
+    LLMClient,
+    LLMConfig,
+    parse_model_spec,
+    read_oracle_script,
+)
 from shrinkray.passes.treesitter import loadable_language_for_filename
 from shrinkray.problem import (
     BasicReductionProblem,
@@ -282,6 +290,17 @@ class ShrinkRayState[TestCase](ABC):
     external_reducers: list[list[str]] = attrs.Factory(list)
     python_reducer: bool = True
 
+    # LLM passes: whether they run at all, the model they use (a local
+    # .gguf path or a Hugging Face repo:filename), and whether they
+    # replace every other pass.
+    llm_enabled: bool = False
+    llm_model: str = DEFAULT_MODEL_SPEC
+    llm_only: bool = False
+
+    # The lazily-built LLM client, shared by every reducer this state
+    # creates so the model is only loaded once.
+    _llm_client: LLMClient | None = None
+
     # Set of test cases to exclude from interestingness (for restart-from-point)
     # These are byte-identical matches of previously reduced values
     excluded_test_cases: set[bytes] | None = None
@@ -299,6 +318,23 @@ class ShrinkRayState[TestCase](ABC):
         self.sweep_stale_working_files()
         self.setup_formatter()
         self._setup_history()
+
+    def llm_reducer_kwargs(self) -> dict[str, Any]:
+        """Constructor kwargs wiring the LLM configuration into a reducer."""
+        if not self.llm_enabled:
+            return {}
+        if self._llm_client is None:
+            self._llm_client = LlamaCppClient(
+                model=parse_model_spec(self.llm_model)
+            )
+        return {
+            "llm_client": self._llm_client,
+            "llm_config": LLMConfig(
+                filename=self.base,
+                oracle=read_oracle_script(self.test[0]),
+            ),
+            "llm_only": self.llm_only,
+        }
 
     @abstractmethod
     def setup_formatter(self): ...
@@ -1020,6 +1056,7 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
             external_reducers=self.external_reducers,
             python_reducer=self.python_reducer,
             reducer_log_dir=self.reducer_log_dir(),
+            **self.llm_reducer_kwargs(),
         )
 
     def _get_initial_bytes(self) -> bytes:
@@ -1152,6 +1189,7 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
             external_reducers=self.external_reducers,
             python_reducer=self.python_reducer,
             reducer_log_dir=self.reducer_log_dir(),
+            **self.llm_reducer_kwargs(),
         )
 
     def _get_initial_bytes(self) -> bytes:

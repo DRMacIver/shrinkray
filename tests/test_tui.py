@@ -13,6 +13,7 @@ from textual.app import App
 from textual.widgets import DataTable, Label, ListView, Static, TabbedContent
 
 from shrinkray import tui
+from shrinkray.passes.llm import DEFAULT_MODEL_SPEC
 from shrinkray.subprocess.client import SubprocessClient
 from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
 from shrinkray.tui import (
@@ -98,6 +99,9 @@ class FakeReductionClient:
         also_interesting_code: int | None = None,
         external_reducers: list[list[str]] | None = None,
         python_reducer: bool = True,
+        llm_enabled: bool = False,
+        llm_model: str = DEFAULT_MODEL_SPEC,
+        llm_only: bool = False,
     ) -> Response:
         if self._start_error:
             return Response(id="start", error=self._start_error)
@@ -3020,6 +3024,9 @@ def test_run_textual_ui_creates_and_runs_app():
             also_interesting_code=None,
             external_reducers=None,
             python_reducer=True,
+            llm_enabled=False,
+            llm_model=DEFAULT_MODEL_SPEC,
+            llm_only=False,
         )
 
         # Verify run() was called

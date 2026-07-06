@@ -15,6 +15,7 @@ import trio
 from binaryornot.helpers import is_binary_string
 
 from shrinkray.cli import InputType
+from shrinkray.passes.llm import DEFAULT_MODEL_SPEC
 from shrinkray.problem import InvalidInitialExample
 from shrinkray.state import (
     OutputCaptureManager,
@@ -205,6 +206,9 @@ class ReducerWorker:
         also_interesting_code = params.get("also_interesting_code")
         external_reducers = params.get("external_reducers", [])
         python_reducer = params.get("python_reducer", True)
+        llm_enabled = params.get("llm_enabled", False)
+        llm_model = params.get("llm_model", DEFAULT_MODEL_SPEC)
+        llm_only = params.get("llm_only", False)
 
         state_kwargs: dict[str, Any] = {
             "input_type": input_type,
@@ -223,6 +227,9 @@ class ReducerWorker:
             "also_interesting_code": also_interesting_code,
             "external_reducers": external_reducers,
             "python_reducer": python_reducer,
+            "llm_enabled": llm_enabled,
+            "llm_model": llm_model,
+            "llm_only": llm_only,
         }
 
         if os.path.isdir(filename):

@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import IO, Any
 
+from shrinkray.passes.llm import DEFAULT_MODEL_SPEC
 from shrinkray.subprocess.protocol import (
     ProgressUpdate,
     Request,
@@ -153,6 +154,9 @@ class SubprocessClient:
         also_interesting_code: int | None = None,
         external_reducers: list[list[str]] | None = None,
         python_reducer: bool = True,
+        llm_enabled: bool = False,
+        llm_model: str = DEFAULT_MODEL_SPEC,
+        llm_only: bool = False,
     ) -> Response:
         """Start the reduction process."""
         params: dict[str, Any] = {
@@ -169,6 +173,9 @@ class SubprocessClient:
             "also_interesting_code": also_interesting_code,
             "external_reducers": external_reducers or [],
             "python_reducer": python_reducer,
+            "llm_enabled": llm_enabled,
+            "llm_model": llm_model,
+            "llm_only": llm_only,
         }
         if parallelism is not None:
             params["parallelism"] = parallelism

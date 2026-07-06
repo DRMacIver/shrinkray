@@ -1941,3 +1941,61 @@ grep "hello" "{log_file}"
     finally:
         if child.isalive():
             child.terminate(force=True)
+
+
+# === LLM mode options ===
+
+
+def _llm_target(tmp_path, content: bytes, pattern: str):
+    target = tmp_path / "target.bin"
+    target.write_bytes(content)
+    script = tmp_path / "test.sh"
+    script.write_text(f'#!/bin/sh\ngrep -q {pattern} "$1"\n')
+    script.chmod(0o755)
+    return str(script), str(target)
+
+
+def test_llm_only_conflicts_with_no_llm(tmp_path):
+    script, target = _llm_target(tmp_path, b"say xy\n", "xy")
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main, [script, target, "--ui=basic", "--llm-only", "--no-llm"]
+    )
+    assert result.exit_code == 2
+    assert "--llm-only cannot be combined with --no-llm" in result.output
+
+
+def test_llm_rejects_invalid_model_spec(tmp_path):
+    script, target = _llm_target(tmp_path, b"say xy\n", "xy")
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main, [script, target, "--ui=basic", "--llm", "--llm-model=not-a-model"]
+    )
+    assert result.exit_code == 2
+    assert "not-a-model" in result.output
+
+
+def test_llm_requires_the_llm_extra(tmp_path, monkeypatch):
+    script, target = _llm_target(tmp_path, b"say xy\n", "xy")
+    monkeypatch.setattr("shrinkray.__main__.llm_support_available", lambda: False)
+    runner = CliRunner()
+    result = runner.invoke(main, [script, target, "--ui=basic", "--llm"])
+    assert result.exit_code == 1
+    assert "shrinkray[llm]" in result.output
+
+
+def test_llm_only_reduction_of_binary_input_is_a_no_op(tmp_path):
+    # Binary input can't be prompted, so the LLM pass (the only pass in
+    # --llm-only mode) does nothing and no model is ever loaded; the
+    # reduction just converges immediately. The pattern sits on a clean
+    # line because BSD grep won't match lines containing invalid UTF-8.
+    content = b"xy\n\xc3\x28\n"
+    script, target = _llm_target(tmp_path, content, "xy")
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(main, [script, target, "--ui=basic", "--llm-only"])
+    assert result.exit_code == 0
+    # No pass can touch this input, so nothing gets deleted (whitespace may
+    # still be canonicalised).
+    final = pathlib.Path(target).read_bytes()
+    assert b"xy" in final
+    assert len(final) == len(content)

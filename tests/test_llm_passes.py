@@ -6,10 +6,14 @@ used; the llama-cpp integration is tested separately in
 test_llm_client.py.
 """
 
+from typing import Any
+
 import pytest
 import trio
 from attrs import define, field
 
+from shrinkray.cli import InputType
+from shrinkray.llm_client import LlamaCppClient
 from shrinkray.passes.llm import (
     DEFAULT_MODEL_SPEC,
     HuggingFaceModel,
@@ -20,10 +24,13 @@ from shrinkray.passes.llm import (
     extract_candidates,
     llm_rewrite,
     parse_model_spec,
+    read_oracle_script,
     reduction_prompt,
 )
 from shrinkray.problem import BasicReductionProblem
-from shrinkray.work import WorkContext
+from shrinkray.reducer import ShrinkRay
+from shrinkray.state import ShrinkRayStateSingleFile
+from shrinkray.work import Volume, WorkContext
 from tests.helpers import reduce_with
 
 
@@ -290,3 +297,161 @@ def test_seeds_are_drawn_from_the_work_context():
     second = trio.run(run_once)
     assert first == second
     assert len(set(first)) == len(first)
+
+
+# === Oracle script reading ===
+
+
+def test_read_oracle_script_returns_text(tmp_path):
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/sh\ngrep boom \"$1\"\n")
+    assert read_oracle_script(str(script)) == '#!/bin/sh\ngrep boom "$1"\n'
+
+
+def test_read_oracle_script_missing_file(tmp_path):
+    assert read_oracle_script(str(tmp_path / "nope.sh")) is None
+
+
+def test_read_oracle_script_binary(tmp_path):
+    script = tmp_path / "test"
+    script.write_bytes(b"\x7fELF\xc3\x28\x00\x01")
+    assert read_oracle_script(str(script)) is None
+
+
+def test_read_oracle_script_too_large(tmp_path):
+    script = tmp_path / "test.sh"
+    script.write_text("x" * 100_000)
+    assert read_oracle_script(str(script)) is None
+
+
+# === Reducer wiring ===
+
+
+def make_shrinkray(initial: bytes = b"say boom\n", **kwargs) -> ShrinkRay:
+    async def is_boom(x: bytes) -> bool:
+        await trio.lowlevel.checkpoint()
+        return b"boom" in x
+
+    problem: BasicReductionProblem[bytes] = BasicReductionProblem(
+        initial=initial,
+        is_interesting=is_boom,
+        work=WorkContext(parallelism=1),
+    )
+    return ShrinkRay(target=problem, **kwargs)
+
+
+def test_llm_pass_runs_late_when_a_client_is_configured():
+    reducer = make_shrinkray(llm_client=FakeLLMClient())
+    assert [p.__name__ for p in reducer.last_ditch_passes].count("llm_rewrite") == 1
+    assert "llm_rewrite" not in [p.__name__ for p in reducer.great_passes]
+
+
+def test_no_llm_pass_without_a_client():
+    reducer = make_shrinkray()
+    all_passes = (
+        reducer.initial_cuts
+        + reducer.great_passes
+        + reducer.ok_passes
+        + reducer.last_ditch_passes
+        + reducer.polish_passes
+    )
+    assert "llm_rewrite" not in [p.__name__ for p in all_passes]
+
+
+def test_llm_only_disables_every_other_pass():
+    reducer = make_shrinkray(
+        llm_client=FakeLLMClient(), llm_only=True, enable_cpp_passes=True
+    )
+    assert [p.__name__ for p in reducer.great_passes] == ["llm_rewrite"]
+    assert reducer.initial_cuts == []
+    assert reducer.ok_passes == []
+    assert reducer.last_ditch_passes == []
+    assert reducer.polish_passes == []
+    assert list(reducer.pumps) == []
+
+
+def test_llm_only_requires_a_client():
+    with pytest.raises(ValueError, match="llm_only"):
+        make_shrinkray(llm_only=True)
+
+
+def test_llm_only_reduction_end_to_end():
+    client = FakeLLMClient(responses=["```\nboom\n```"])
+    reducer = make_shrinkray(
+        initial=b"say boom please\n", llm_client=client, llm_only=True
+    )
+
+    trio.run(reducer.run)
+    assert reducer.target.current_test_case == b"boom\n"
+
+
+# === State wiring ===
+
+
+def make_llm_state(tmp_path, **overrides) -> ShrinkRayStateSingleFile:
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/sh\ngrep boom \"$1\"\n")
+    script.chmod(0o755)
+    target = tmp_path / "target.txt"
+    target.write_text("say boom\n")
+    kwargs: dict[str, Any] = {
+        "input_type": InputType.all,
+        "in_place": False,
+        "test": [str(script)],
+        "filename": str(target),
+        "timeout": 30.0,
+        "base": "target.txt",
+        "parallelism": 1,
+        "initial": b"say boom\n",
+        "formatter": "none",
+        "trivial_is_error": True,
+        "seed": 0,
+        "volume": Volume.quiet,
+        "history_enabled": False,
+    }
+    kwargs.update(overrides)
+    return ShrinkRayStateSingleFile(**kwargs)
+
+
+def make_state_problem(state: ShrinkRayStateSingleFile) -> BasicReductionProblem[bytes]:
+    async def is_boom(x: bytes) -> bool:
+        await trio.lowlevel.checkpoint()
+        return b"boom" in x
+
+    return BasicReductionProblem(
+        initial=b"say boom\n",
+        is_interesting=is_boom,
+        work=WorkContext(parallelism=1),
+    )
+
+
+def test_state_does_not_configure_llm_by_default(tmp_path):
+    state = make_llm_state(tmp_path)
+    reducer = state.new_reducer(make_state_problem(state))
+    assert isinstance(reducer, ShrinkRay)
+    assert reducer.llm_client is None
+
+
+def test_state_wires_llm_into_the_reducer(tmp_path):
+    state = make_llm_state(tmp_path, llm_enabled=True)
+    reducer = state.new_reducer(make_state_problem(state))
+    assert isinstance(reducer, ShrinkRay)
+    client = reducer.llm_client
+    assert isinstance(client, LlamaCppClient)
+    assert client.model == parse_model_spec(DEFAULT_MODEL_SPEC)
+    assert reducer.llm_config.filename == "target.txt"
+    assert reducer.llm_config.oracle is not None
+    assert "grep boom" in reducer.llm_config.oracle
+    assert not reducer.llm_only
+
+    # The client (and so the loaded model) is shared across reducers.
+    second = state.new_reducer(make_state_problem(state))
+    assert isinstance(second, ShrinkRay)
+    assert second.llm_client is client
+
+
+def test_state_passes_llm_only_through(tmp_path):
+    state = make_llm_state(tmp_path, llm_enabled=True, llm_only=True)
+    reducer = state.new_reducer(make_state_problem(state))
+    assert isinstance(reducer, ShrinkRay)
+    assert reducer.llm_only

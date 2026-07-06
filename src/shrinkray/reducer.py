@@ -51,6 +51,7 @@ from shrinkray.passes.genericlanguages import (
     simplify_brackets,
 )
 from shrinkray.passes.json import JSON, JSON_PASSES
+from shrinkray.passes.llm import LLMClient, LLMConfig, llm_rewrite
 from shrinkray.passes.patching import PatchApplier, Patches
 from shrinkray.passes.python import is_python, python_reducer_command
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
@@ -174,6 +175,16 @@ class ShrinkRay(Reducer[bytes]):
 
     # Directory to write external reducer stderr logs to, or None to discard.
     reducer_log_dir: str | None = None
+
+    # Completion source for the LLM passes, or None to disable them.
+    llm_client: LLMClient | None = None
+
+    # Tuning and prompt context for the LLM passes.
+    llm_config: LLMConfig = attrs.Factory(LLMConfig)
+
+    # Run only the LLM passes, disabling every other reduction pass
+    # (including external reducers and pumps). Requires llm_client.
+    llm_only: bool = False
 
     # The external reducer passes built for this reducer, kept so their
     # subprocesses can be torn down when the run finishes.
@@ -351,6 +362,25 @@ class ShrinkRay(Reducer[bytes]):
                 await reducer_pass.aclose()
 
     def __attrs_post_init__(self) -> None:
+        if self.llm_only:
+            if self.llm_client is None:
+                raise ValueError("llm_only requires an llm_client")
+            # The LLM passes are the whole reduction: no initial cuts (their
+            # timeout-based cancellation fits fast passes, not model calls),
+            # no other tiers, no external reducers, no pumps.
+            self.initial_cuts = []
+            self.great_passes = [llm_rewrite(self.llm_client, self.llm_config)]
+            self.ok_passes = []
+            self.last_ditch_passes = []
+            self.polish_passes = []
+            return
+        if self.llm_client is not None:
+            # Model calls are far more expensive than ordinary passes, so
+            # they only run once the cheap passes have stopped making
+            # progress.
+            self.last_ditch_passes.append(
+                llm_rewrite(self.llm_client, self.llm_config)
+            )
         external_passes = self.build_external_reducer_passes()
         self._external_reducer_passes = external_passes
         self.great_passes.extend(external_passes)
@@ -378,7 +408,7 @@ class ShrinkRay(Reducer[bytes]):
 
     @property
     def pumps(self) -> Iterable[ReductionPump[bytes]]:
-        if self.enable_cpp_passes:
+        if self.enable_cpp_passes and not self.llm_only:
             return CPP_PUMPS
         else:
             return ()
@@ -673,6 +703,9 @@ class ShrinkRay(Reducer[bytes]):
             external_reducers=self.external_reducers,
             python_reducer=self.python_reducer,
             reducer_log_dir=self.reducer_log_dir,
+            llm_client=self.llm_client,
+            llm_config=self.llm_config,
+            llm_only=self.llm_only,
             restart_at_fixpoint=False,
         )
         await reducer.run()
@@ -804,6 +837,9 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     external_reducers: list[list[str]] = attrs.Factory(list)
     python_reducer: bool = True
     reducer_log_dir: str | None = None
+    llm_client: LLMClient | None = None
+    llm_config: LLMConfig = attrs.Factory(LLMConfig)
+    llm_only: bool = False
 
     async def run(self):
         while True:
@@ -845,5 +881,10 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
                     external_reducers=self.external_reducers,
                     python_reducer=self.python_reducer,
                     reducer_log_dir=key_log_dir,
+                    llm_client=self.llm_client,
+                    # The prompt should name the file actually being
+                    # reduced, not the directory.
+                    llm_config=attrs.evolve(self.llm_config, filename=k),
+                    llm_only=self.llm_only,
                 )
                 nursery.start_soon(key_shrinkray.run)

@@ -35,6 +35,7 @@ from textual.widgets import (
 from textual_plotext import PlotextPlot
 
 from shrinkray.formatting import try_decode
+from shrinkray.passes.llm import DEFAULT_MODEL_SPEC
 from shrinkray.subprocess.client import SubprocessClient
 from shrinkray.subprocess.protocol import (
     PassStatsData,
@@ -132,6 +133,9 @@ class ReductionClientProtocol(Protocol):
         also_interesting_code: int | None = None,
         external_reducers: list[list[str]] | None = None,
         python_reducer: bool = True,
+        llm_enabled: bool = False,
+        llm_model: str = DEFAULT_MODEL_SPEC,
+        llm_only: bool = False,
     ) -> Response: ...
     async def cancel(self) -> Response: ...
     async def disable_pass(self, pass_name: str) -> Response: ...
@@ -1667,6 +1671,9 @@ class ShrinkRayApp(App[None]):
         also_interesting_code: int | None = None,
         external_reducers: list[list[str]] | None = None,
         python_reducer: bool = True,
+        llm_enabled: bool = False,
+        llm_model: str = DEFAULT_MODEL_SPEC,
+        llm_only: bool = False,
     ) -> None:
         super().__init__()
         self._file_path = file_path
@@ -1689,6 +1696,9 @@ class ShrinkRayApp(App[None]):
         self._also_interesting_code = also_interesting_code
         self._external_reducers = external_reducers or []
         self._python_reducer = python_reducer
+        self._llm_enabled = llm_enabled
+        self._llm_model = llm_model
+        self._llm_only = llm_only
         self._latest_pass_stats: list[PassStatsData] = []
         self._current_pass_name: str = ""
         self._disabled_passes: list[str] = []
@@ -1853,6 +1863,9 @@ class ShrinkRayApp(App[None]):
                     also_interesting_code=self._also_interesting_code,
                     external_reducers=self._external_reducers,
                     python_reducer=self._python_reducer,
+                    llm_enabled=self._llm_enabled,
+                    llm_model=self._llm_model,
+                    llm_only=self._llm_only,
                 )
 
                 if response.error:
@@ -2057,6 +2070,9 @@ def run_textual_ui(
     also_interesting_code: int | None = None,
     external_reducers: list[list[str]] | None = None,
     python_reducer: bool = True,
+    llm_enabled: bool = False,
+    llm_model: str = DEFAULT_MODEL_SPEC,
+    llm_only: bool = False,
 ) -> None:
     """Run the textual TUI.
 
@@ -2082,6 +2098,9 @@ def run_textual_ui(
         also_interesting_code=also_interesting_code,
         external_reducers=external_reducers,
         python_reducer=python_reducer,
+        llm_enabled=llm_enabled,
+        llm_model=llm_model,
+        llm_only=llm_only,
     )
     app.run()
     if app.return_code:

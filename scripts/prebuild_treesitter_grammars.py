@@ -103,8 +103,10 @@ def build_grammar(name: str, source_dir: Path, libs_dir: Path) -> None:
     # The library must be named after the symbol parser.c exports, not
     # the source directory: the registry resolves aliases first (e.g.
     # "csharp" -> "c_sharp") and looks for libtree_sitter_c_sharp.so.
+    # The parameter list may be `(void)` or `()` depending on the
+    # tree-sitter version that generated the parser (scss uses `()`).
     symbols = re.findall(
-        r"const TSLanguage \*\s*tree_sitter_(\w+)\s*\(\s*void\s*\)",
+        r"const TSLanguage \*\s*tree_sitter_(\w+)\s*\(\s*(?:void)?\s*\)",
         (src / "parser.c").read_text(errors="replace"),
     )
     if not symbols:

@@ -356,9 +356,10 @@ def save_svg_diffs(
             Path(__file__).parent / "resources" / "snapshot_report_template.jinja2"
         )
 
-        snapshot_report_path = session.config.getoption("--snapshot-report")
-        snapshot_report_path = Path(snapshot_report_path)
-        snapshot_report_path = Path.cwd() / snapshot_report_path
+        report_name = session.config.getoption("--snapshot-report")
+        # The option is registered with a string default, so it is always a str.
+        assert isinstance(report_name, str)
+        snapshot_report_path = Path.cwd() / report_name
         snapshot_report_path.parent.mkdir(parents=True, exist_ok=True)
         template = Template(snapshot_template_path.read_text())
 

@@ -85,6 +85,21 @@ def test_try_decode_returns_none_for_undecodable():
         assert decoded == ""
 
 
+def test_try_decode_skips_encodings_that_fail_to_decode():
+    # Which guesses chardet produces depends on its version and the input, so
+    # force a guess that cannot decode the data to pin down the fallthrough
+    # to the next guess.
+    data = "héllo".encode()
+    guesses = [
+        {"encoding": "ascii", "confidence": 0.5, "language": ""},
+        {"encoding": "utf-8", "confidence": 0.99, "language": ""},
+    ]
+    with patch("shrinkray.formatting.chardet.detect_all", return_value=guesses):
+        encoding, decoded = try_decode(data)
+    assert encoding == "utf-8"
+    assert decoded == "héllo"
+
+
 def test_try_decode_handles_empty_data():
     encoding, decoded = try_decode(b"")
     # chardet may return None or utf-8 for empty data depending on version

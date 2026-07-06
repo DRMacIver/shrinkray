@@ -202,7 +202,7 @@ class NotFound(Exception):
 
 
 @asynccontextmanager
-async def parallel_map(
+async def parallel_map[S, T](
     ls: Sequence[T],
     f: Callable[[T], Awaitable[S]],
     parallelism: int,

@@ -20,7 +20,6 @@ from typing import TypeVar
 from shrinkray.problem import Format, ParseError, ReductionProblem
 
 
-S = TypeVar("S")
 T = TypeVar("T")
 
 
@@ -36,7 +35,9 @@ ReductionPass = Callable[[ReductionProblem[T]], Awaitable[None]]
 ReductionPump = Callable[[ReductionProblem[T]], Awaitable[T]]
 
 
-def compose(format: Format[S, T], reduction_pass: ReductionPass[T]) -> ReductionPass[S]:
+def compose[S, T](
+    format: Format[S, T], reduction_pass: ReductionPass[T]
+) -> ReductionPass[S]:
     """Wrap a reduction pass to work through a Format transformation.
 
     This is the key combinator for format-agnostic reduction. It takes

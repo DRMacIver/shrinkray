@@ -1,6 +1,6 @@
 import random
 from collections.abc import Callable, Iterable
-from typing import Any, TypeVar
+from typing import Any
 
 import trio
 from attrs import define
@@ -55,9 +55,6 @@ class BasicReducer[T](Reducer[T]):
                 return
 
 
-T = TypeVar("T")
-
-
 def latin1_text_sort_key(data: bytes) -> Any:
     """The reflow text ordering with a fixed encoding.
 
@@ -81,7 +78,7 @@ def ascii_text_sort_key(data: bytes) -> Any:
         return (1, shortlex(data))
 
 
-def reduce_with(
+def reduce_with[T](
     rp: Iterable[ReductionPass[T]],
     initial: T,
     is_interesting: Callable[[T], bool],

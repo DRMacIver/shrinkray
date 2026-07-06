@@ -103,6 +103,26 @@ Variant test cases are passed to the interestingness test both on STDIN and as a
 
 `shrinkray --help` will give more usage instructions.
 
+## Experimental LLM mode
+
+Shrink Ray can optionally use a language model, running locally in-process, to
+propose smaller test cases alongside its normal reduction passes. Install the
+`llm` extra and pass `--llm`:
+
+```
+pipx install 'shrinkray[llm]'
+shrinkray --llm is_interesting.sh my-test-case
+```
+
+The first use downloads the default model (Qwen3.5-4B, about 2.7GB) from
+Hugging Face; it runs on CPU, or with GPU acceleration where llama-cpp-python
+supports it (e.g. Metal on Apple Silicon). `--llm-model` selects a different
+model — either a path to a local `.gguf` file or a Hugging Face
+`repo:filename` reference — and `--llm-only` disables all of the non-LLM
+passes so the model does the whole reduction. Model suggestions are just
+candidates like any others: they're only accepted if your interestingness test
+still passes, so a bad model costs time but never correctness.
+
 ## Supported formats
 
 Shrink Ray is fully generic in the sense that it will work with literally any file you give it in any format. However, some formats will work a lot better than others.

@@ -34,6 +34,26 @@ Passes for DIMACS CNF files (SAT solver input format). Includes clause deletion,
 
 C/C++ passes built on a sloppy lexer plus bracket matching (a pure Python replacement for creduce's `clang_delta`, which shrink ray previously shelled out to). Rather than parsing properly, these find things that look like functions, namespaces, class heads, templates, call expressions and typedefs, then overgenerate candidate edits and let the interestingness test reject the wrong ones. Includes `replace_function_bodies` (function def -> declaration), `delete_function_definitions`, `remove_namespaces` (including `extern "C"`), `remove_base_classes`, `remove_constructor_initializers`, `remove_template_parts`, `replace_type_with_int`, and `simplify_call_expressions`, plus two **pumps** (which may temporarily increase code size): `inline_typedefs` and `inline_function_calls`.
 
+### llm.py
+
+The experimental LLM mode (`--llm`). `llm_rewrite` feeds the whole current
+test case to a language model, prompted with the file name and the text of
+the user's interestingness script, and asks for several progressively
+smaller rewrites in fenced code blocks; every block that sorts below the
+current test case is offered to `is_interesting`, so a wrong or
+hallucinating model wastes time but can't hurt correctness. The pass runs
+in the last-ditch tier (a generation costs seconds to minutes, so it only
+runs when the cheap passes stall) unless `--llm-only` strips every other
+pass. Inference is in-process through llama-cpp-python (`llm_client.py`,
+the optional `llm` extra), one generation at a time behind a thread lock;
+the `LLMClient` ABC is the seam for pointing at other completion sources
+(e.g. an OpenAI-compatible endpoint) later. Prompt-shape decisions were
+measured with `evaluation/llm_prompt_experiment.py` against the benchmark
+problems: including the interestingness script in the prompt roughly
+doubled the valid-candidate rate, whole-file rewrites beat line-deletion
+lists by a wide margin, and the model frequently found reductions below
+shrink ray's own fixpoint on already-reduced corpus entries.
+
 ### treesitter.py
 
 Grammar-aware passes for any language with a grammar in

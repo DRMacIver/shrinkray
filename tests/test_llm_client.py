@@ -24,6 +24,15 @@ from shrinkray.passes.llm import HuggingFaceModel, LocalModel
 TINY_REPO = "ggml-org/models"
 TINY_FILE = "tinyllamas/stories260K.gguf"
 
+# llama-cpp-python builds on OpenBSD but its shared-library loader refuses
+# the platform at import time, so the real-model tests can only run where
+# the library actually loads. The graceful-degradation tests below run
+# everywhere (they are exactly what such platforms get at runtime).
+requires_llama_cpp = pytest.mark.skipif(
+    not shrinkray.llm_client.llm_support_available(),
+    reason="llama-cpp-python cannot load on this platform",
+)
+
 
 @pytest.fixture(scope="module")
 def tiny_model_path() -> str:
@@ -38,6 +47,7 @@ def tiny_client(path: str) -> LlamaCppClient:
     )
 
 
+@requires_llama_cpp
 async def test_completes_deterministically_with_a_real_model(
     tiny_model_path: str,
 ):
@@ -56,6 +66,7 @@ async def test_completes_deterministically_with_a_real_model(
     assert client._llama is loaded
 
 
+@requires_llama_cpp
 async def test_resolves_hugging_face_models_through_the_hub(
     tiny_model_path: str,
 ):
@@ -72,6 +83,7 @@ async def test_resolves_hugging_face_models_through_the_hub(
     assert result
 
 
+@requires_llama_cpp
 async def test_concurrent_calls_are_serialized(
     tiny_model_path: str, monkeypatch: pytest.MonkeyPatch
 ):
@@ -107,6 +119,7 @@ async def test_concurrent_calls_are_serialized(
     assert max_active == 1
 
 
+@requires_llama_cpp
 async def test_cancellation_abandons_the_running_generation(
     tiny_model_path: str,
 ):
@@ -141,6 +154,7 @@ async def test_cancellation_abandons_the_running_generation(
     assert blocked_calls == 1
 
 
+@requires_llama_cpp
 async def test_missing_content_becomes_empty_string(
     tiny_model_path: str, monkeypatch: pytest.MonkeyPatch
 ):
@@ -191,6 +205,7 @@ def test_module_imports_without_the_llm_extra():
         importlib.reload(shrinkray.llm_client)
 
 
+@requires_llama_cpp
 async def test_background_loading_loads_once_and_serves(
     tiny_model_path: str, monkeypatch: pytest.MonkeyPatch
 ):
@@ -218,6 +233,7 @@ async def test_background_loading_loads_once_and_serves(
     await client.wait_until_ready()
 
 
+@requires_llama_cpp
 async def test_wait_until_ready_surfaces_load_failure(tmp_path):
     bad = tmp_path / "bad.gguf"
     bad.write_bytes(b"this is not a gguf file")
@@ -229,6 +245,7 @@ async def test_wait_until_ready_surfaces_load_failure(tmp_path):
         await client.wait_until_ready()
 
 
+@requires_llama_cpp
 def test_llm_support_reflects_import_state(monkeypatch: pytest.MonkeyPatch):
     assert shrinkray.llm_client.llm_support_available()
     monkeypatch.setattr(shrinkray.llm_client, "llama_cpp", None)

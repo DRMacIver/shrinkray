@@ -3,6 +3,10 @@
 This is the changelog for [Shrink Ray](https://github.com/DRMacIver/shrinkray), a
 fast multi-format test-case reducer. Versions are calendar-based (`YY.M.D.N`).
 
+## 26.7.6.1 — 2026-07-06
+
+- No user-visible changes.
+
 ## 26.7.6.0 — 2026-07-06
 
 - No user-visible changes.

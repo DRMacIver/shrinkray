@@ -1839,13 +1839,19 @@ class ShrinkRayApp(App[None]):
     @work(exclusive=True)
     async def run_reduction(self) -> None:
         """Start the reduction and monitor progress."""
+        # Work on a local reference: action_quit clears self._client
+        # while this worker may still be processing buffered updates,
+        # and that becoming None mid-loop must read as "user quit", not
+        # crash the monitoring loop (which would turn a clean quit into
+        # a nonzero exit code).
+        client = self._client
+        assert client is not None
         try:
-            assert self._client is not None
             if self._start_reduction:
-                await self._client.start()
+                await client.start()
 
                 # Start the reduction - validation was already done by main()
-                response = await self._client.start_reduction(
+                response = await client.start_reduction(
                     file_path=self._file_path,
                     test=self._test,
                     parallelism=self._parallelism,
@@ -1875,8 +1881,11 @@ class ShrinkRayApp(App[None]):
             output_preview = self.query_one("#output-preview", OutputPreview)
             size_graph = self.query_one("#size-graph", SizeGraph)
 
-            async with aclosing(self._client.get_progress_updates()) as updates:
+            async with aclosing(client.get_progress_updates()) as updates:
                 async for update in updates:
+                    if self._client is None:
+                        # The user quit while updates were still queued.
+                        return
                     stats_display.update_stats(update)
                     content_preview.update_content(
                         update.content_preview, update.hex_mode
@@ -1909,17 +1918,21 @@ class ShrinkRayApp(App[None]):
                     # Check if all passes are disabled
                     self._check_all_passes_disabled()
 
-                    if self._client.is_completed:
+                    if client.is_completed:
                         break
+
+            if self._client is None:
+                # The user quit; the app is already exiting.
+                return
 
             self._completed = True
 
             # Check if there was an error from the worker
-            if self._client.error_message:
+            if client.error_message:
                 # Exit immediately on error, printing the error message
                 self.exit(
                     return_code=1,
-                    message=f"Error: {self._client.error_message}",
+                    message=f"Error: {client.error_message}",
                 )
                 return
             elif self._exit_on_completion:
@@ -1932,8 +1945,9 @@ class ShrinkRayApp(App[None]):
             # Include full traceback in error message in case stderr isn't visible
             self.exit(return_code=1, message=f"Error:\n{traceback.format_exc()}")
         finally:
-            if self._owns_client and self._client:
-                await self._client.close()
+            if self._owns_client:
+                # Idempotent if action_quit already closed it.
+                await client.close()
 
     def _check_all_passes_disabled(self) -> None:
         """Check if all passes are disabled and show a message if so."""

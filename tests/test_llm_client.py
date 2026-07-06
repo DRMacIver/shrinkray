@@ -373,3 +373,55 @@ async def test_prints_a_notice_before_downloading(
     )
     await client.complete("hi", max_tokens=1, seed=1, temperature=0.0)
     assert "Downloading the LLM model" in capsys.readouterr().err
+
+
+@requires_llama_cpp
+async def test_repeated_generations_are_cached(
+    tiny_model_path: str, monkeypatch: pytest.MonkeyPatch
+):
+    client = tiny_client(tiny_model_path)
+    await client.complete("warm up", max_tokens=1, seed=0, temperature=0.0)
+    llama = client._llama
+    assert llama is not None
+
+    real = llama.create_chat_completion
+    calls = 0
+
+    def counted(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(llama, "create_chat_completion", counted)
+
+    first = await client.complete("hello", max_tokens=4, seed=7, temperature=0.5)
+    again = await client.complete("hello", max_tokens=4, seed=7, temperature=0.5)
+    assert again == first
+    assert calls == 1
+
+    # Any different parameter is a different generation.
+    await client.complete("hello", max_tokens=4, seed=8, temperature=0.5)
+    assert calls == 2
+
+
+@requires_llama_cpp
+async def test_aborted_generations_are_not_cached(tiny_model_path: str):
+    client = tiny_client(tiny_model_path)
+    await client.complete("warm up", max_tokens=1, seed=0, temperature=0.0)
+    llama = client._llama
+    assert llama is not None
+
+    consumed = [0]
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(
+            llama, "create_chat_completion", endless_stream(consumed, 0.005)
+        )
+        with trio.move_on_after(0.2) as scope:
+            await client.complete("spin", max_tokens=64, seed=3, temperature=0.0)
+        assert scope.cancelled_caught
+
+    # The cancelled generation's partial output must not satisfy a later
+    # request for the same parameters.
+    result = await client.complete("spin", max_tokens=64, seed=3, temperature=0.0)
+    assert isinstance(result, str)
+    assert result  # a real completion, not the aborted empty/partial one

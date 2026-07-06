@@ -199,6 +199,7 @@ class ShrinkRay(Reducer[bytes]):
 
     # Pass control: disabled passes and skip functionality
     disabled_passes: set[str] = attrs.Factory(set)
+    _restarting: bool = attrs.field(default=False, init=False)
     _skip_requested: bool = attrs.field(default=False, init=False)
     _current_pass_scope: "trio.CancelScope | None" = attrs.field(
         default=None, init=False
@@ -413,6 +414,11 @@ class ShrinkRay(Reducer[bytes]):
 
     @property
     def status(self) -> str:
+        if self._restarting:
+            # The restarted sub-reduction mostly replays cached attempts,
+            # so the outer reducer would otherwise sit in "Selecting
+            # reduction pass" with no visible activity for its duration.
+            return "Re-reducing from original input to look for a better result"
         if self.current_pump is None:
             if self.current_reduction_pass is not None:
                 return f"Running reduction pass {self.current_reduction_pass.__name__}"
@@ -710,7 +716,11 @@ class ShrinkRay(Reducer[bytes]):
             llm_only=self.llm_only,
             restart_at_fixpoint=False,
         )
-        await reducer.run()
+        self._restarting = True
+        try:
+            await reducer.run()
+        finally:
+            self._restarting = False
 
     async def __reduce(self) -> None:
         await self.target.setup()

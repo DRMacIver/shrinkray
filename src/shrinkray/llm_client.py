@@ -77,6 +77,16 @@ class LlamaCppClient(LLMClient):
     _ready: threading.Event = field(factory=threading.Event, init=False)
     _shutting_down: threading.Event = field(factory=threading.Event, init=False)
 
+    # Completed generations, keyed by everything that determines them
+    # (generation is deterministic for a fixed seed). The reducer's
+    # restart-at-fixpoint phase replays the whole run's candidates from
+    # the interestingness cache; without this cache the replay would
+    # re-run every generation for real, which for --llm-only means
+    # silently re-doing the entire reduction's model work at fixpoint.
+    _generation_cache: dict[tuple[str, int, int, float], str] = field(
+        factory=dict, init=False
+    )
+
     def start_loading(self) -> None:
         """Download and load the model on a background thread.
 
@@ -111,6 +121,10 @@ class LlamaCppClient(LLMClient):
     async def complete(
         self, prompt: str, *, max_tokens: int, seed: int, temperature: float
     ) -> str:
+        cached = self._generation_cache.get((prompt, max_tokens, seed, temperature))
+        if cached is not None:
+            await trio.lowlevel.checkpoint()
+            return cached
         abort = threading.Event()
 
         def run_blocking() -> str:
@@ -162,7 +176,12 @@ class LlamaCppClient(LLMClient):
                     parts.append(delta)
                 if abort.is_set() or self._shutting_down.is_set():
                     break
-            return "".join(parts)
+            result = "".join(parts)
+            # Only completed generations are cached: an aborted one is a
+            # truncated answer that must not satisfy a later request.
+            if not (abort.is_set() or self._shutting_down.is_set()):
+                self._generation_cache[(prompt, max_tokens, seed, temperature)] = result
+            return result
 
     def _join_at_exit(self, timeout: float = 30.0) -> None:
         """Stop and wait out any in-flight generation before interpreter exit.

@@ -2371,3 +2371,19 @@ async def test_directory_shrinkray_retries_after_successful_unstick():
 
     assert problem.current_test_case == {"a.txt": b"aaa"}
     assert unstick_calls[0] >= 2
+
+
+def test_status_reports_restarting():
+    async def is_interesting(x: bytes) -> bool:
+        await trio.lowlevel.checkpoint()
+        return b"x" in x
+
+    problem = BasicReductionProblem(
+        initial=b"xy",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = ShrinkRay(target=problem)
+    assert reducer.status == "Selecting reduction pass"
+    reducer._restarting = True
+    assert "Re-reducing from original input" in reducer.status

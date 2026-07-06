@@ -59,9 +59,7 @@ class PatchApplier[PatchType, TargetType]:
         self.__patches = patches
         self.__problem = problem
 
-        self.__merge_queue: list[
-            tuple[PatchType, trio.MemorySendChannel[bool]]
-        ] = []
+        self.__merge_queue: list[tuple[PatchType, trio.MemorySendChannel[bool]]] = []
         self.__merge_lock = trio.Lock()
 
         self.__current_patch = self.__patches.empty

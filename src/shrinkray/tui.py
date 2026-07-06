@@ -262,7 +262,9 @@ class StatsDisplay(Static):
         return "\n".join(lines)
 
 
-def format_test_run_header(test_id: int | None, return_code: int | None) -> tuple[str, str]:
+def format_test_run_header(
+    test_id: int | None, return_code: int | None
+) -> tuple[str, str]:
     """Header text and style describing the state of a captured test run.
 
     Returns ("", "") when there is no test to describe.

@@ -433,7 +433,6 @@ cd "$WORK"
         return content
 
 
-
 def serialize_directory(content: dict[str, bytes]) -> bytes:
     """Serialize directory content to bytes.
 

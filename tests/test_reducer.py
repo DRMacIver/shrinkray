@@ -1843,9 +1843,7 @@ async def test_disable_pass_while_running_skips_it(autojump_clock):
     problem = BasicReductionProblem(b"test", is_interesting, work)
     # No external reducer subprocess and no restart phase: both would
     # block on real IO, which does not advance the autojump clock.
-    reducer = ShrinkRay(
-        target=problem, python_reducer=False, restart_at_fixpoint=False
-    )
+    reducer = ShrinkRay(target=problem, python_reducer=False, restart_at_fixpoint=False)
     reducer.great_passes = [slow_pass]
     reducer.ok_passes = []
     reducer.last_ditch_passes = []
@@ -1890,9 +1888,7 @@ async def test_reducer_continues_when_passes_skipped(autojump_clock):
     problem = BasicReductionProblem(b"test", is_interesting, work)
     # No external reducer subprocess and no restart phase: both would
     # block on real IO, which does not advance the autojump clock.
-    reducer = ShrinkRay(
-        target=problem, python_reducer=False, restart_at_fixpoint=False
-    )
+    reducer = ShrinkRay(target=problem, python_reducer=False, restart_at_fixpoint=False)
     reducer.great_passes = [counting_pass]
     reducer.ok_passes = []
     reducer.last_ditch_passes = []

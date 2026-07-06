@@ -1986,13 +1986,20 @@ def test_llm_requires_the_llm_extra(tmp_path, monkeypatch):
 
 def test_llm_only_reduction_of_binary_input_is_a_no_op(tmp_path):
     # Binary input can't be prompted, so the LLM pass (the only pass in
-    # --llm-only mode) does nothing and no model is ever loaded; the
-    # reduction just converges immediately. The pattern sits on a clean
-    # line because BSD grep won't match lines containing invalid UTF-8.
+    # --llm-only mode) never generates and the reduction just converges.
+    # The pattern sits on a clean line because BSD grep won't match lines
+    # containing invalid UTF-8, and the model is a dummy local file so
+    # that the eager background load doesn't try to download anything
+    # (its failure is irrelevant: the pass never waits on it).
     content = b"xy\n\xc3\x28\n"
     script, target = _llm_target(tmp_path, content, "xy")
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"not really a model")
     runner = CliRunner(catch_exceptions=False)
-    result = runner.invoke(main, [script, target, "--ui=basic", "--llm-only"])
+    result = runner.invoke(
+        main,
+        [script, target, "--ui=basic", "--llm-only", f"--llm-model={model}"],
+    )
     assert result.exit_code == 0
     # No pass can touch this input, so nothing gets deleted (whitespace may
     # still be canonicalised).

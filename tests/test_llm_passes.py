@@ -28,7 +28,7 @@ from shrinkray.passes.llm import (
     reduction_prompt,
 )
 from shrinkray.problem import BasicReductionProblem
-from shrinkray.reducer import ShrinkRay
+from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
 from shrinkray.state import ShrinkRayStateSingleFile
 from shrinkray.work import Volume, WorkContext
 from tests.helpers import reduce_with
@@ -453,3 +453,84 @@ def test_state_passes_llm_only_through(tmp_path):
     reducer = state.new_reducer(make_state_problem(state))
     assert isinstance(reducer, ShrinkRay)
     assert reducer.llm_only
+
+
+# === Background model loading ===
+
+
+@define
+class RecordingClient(FakeLLMClient):
+    """FakeLLMClient that records lifecycle events."""
+
+    events: list[str] = field(factory=list)
+
+    def start_loading(self) -> None:
+        self.events.append("start_loading")
+
+    async def wait_until_ready(self) -> None:
+        await trio.lowlevel.checkpoint()
+        self.events.append("wait_until_ready")
+
+    async def complete(
+        self, prompt: str, *, max_tokens: int, seed: int, temperature: float
+    ) -> str:
+        self.events.append("complete")
+        return await super().complete(
+            prompt, max_tokens=max_tokens, seed=seed, temperature=temperature
+        )
+
+
+def test_llm_rewrite_waits_for_readiness_before_generating():
+    client = RecordingClient(responses=["```\nboom\n```"])
+    reduce_with(
+        [llm_rewrite(client, LLMConfig())],
+        b"say boom please\n",
+        lambda x: b"boom" in x,
+    )
+    assert "complete" in client.events
+    assert client.events.index("wait_until_ready") < client.events.index("complete")
+
+
+def test_llm_rewrite_does_not_wait_for_unpromptable_input():
+    # Binary input can never be prompted, so the pass must not block on
+    # a model download it will never use.
+    client = RecordingClient(responses=["```\nboom\n```"])
+    reduce_with(
+        [llm_rewrite(client, LLMConfig())],
+        b"\xc3\x28 boom \xc3\x28",
+        lambda x: b"boom" in x,
+    )
+    assert "wait_until_ready" not in client.events
+    assert "complete" not in client.events
+
+
+def test_reducer_run_starts_model_loading_up_front():
+    client = RecordingClient(responses=["```\nboom\n```"])
+    reducer = make_shrinkray(initial=b"say boom please\n", llm_client=client)
+    trio.run(reducer.run)
+    assert client.events[0] == "start_loading"
+    assert "complete" in client.events
+
+
+def test_llm_only_run_starts_model_loading_up_front():
+    client = RecordingClient()
+    reducer = make_shrinkray(llm_client=client, llm_only=True)
+    trio.run(reducer.run)
+    assert client.events[0] == "start_loading"
+
+
+async def test_directory_reducer_starts_model_loading_up_front():
+    client = RecordingClient()
+
+    async def is_interesting(x: dict[str, bytes]) -> bool:
+        await trio.lowlevel.checkpoint()
+        return b"boom" in x.get("a.txt", b"")
+
+    problem: BasicReductionProblem[dict[str, bytes]] = BasicReductionProblem(
+        initial={"a.txt": b"say boom\n"},
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = DirectoryShrinkRay(target=problem, llm_client=client)
+    await reducer.run()
+    assert client.events[0] == "start_loading"

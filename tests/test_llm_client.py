@@ -189,3 +189,41 @@ def test_module_imports_without_the_llm_extra():
         sys.meta_path.remove(blocker)
         sys.modules.update(saved)
         importlib.reload(shrinkray.llm_client)
+
+
+async def test_background_loading_loads_once_and_serves(
+    tiny_model_path: str, monkeypatch: pytest.MonkeyPatch
+):
+    assert shrinkray.llm_client.llama_cpp is not None
+    real_llama = shrinkray.llm_client.llama_cpp.Llama
+    constructions = 0
+
+    def counting(*args: Any, **kwargs: Any) -> Any:
+        nonlocal constructions
+        constructions += 1
+        return real_llama(*args, **kwargs)
+
+    monkeypatch.setattr(shrinkray.llm_client.llama_cpp, "Llama", counting)
+
+    client = tiny_client(tiny_model_path)
+    client.start_loading()
+    client.start_loading()  # idempotent
+    await client.wait_until_ready()
+    assert client._llama is not None
+    result = await client.complete("hi", max_tokens=1, seed=1, temperature=0.0)
+    assert isinstance(result, str)
+    assert constructions == 1
+
+    # Once loaded, waiting again returns immediately.
+    await client.wait_until_ready()
+
+
+async def test_wait_until_ready_surfaces_load_failure(tmp_path):
+    bad = tmp_path / "bad.gguf"
+    bad.write_bytes(b"this is not a gguf file")
+    client = LlamaCppClient(
+        model=LocalModel(path=str(bad)), n_gpu_layers=0, n_threads=2
+    )
+    # wait_until_ready starts the load itself if nobody else has.
+    with pytest.raises(ValueError):
+        await client.wait_until_ready()

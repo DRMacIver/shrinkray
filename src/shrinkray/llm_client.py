@@ -53,6 +53,40 @@ class LlamaCppClient(LLMClient):
 
     _llama: "Llama | None" = field(default=None, init=False)
     _thread_lock: threading.Lock = field(factory=threading.Lock, init=False)
+    _load_thread: threading.Thread | None = field(default=None, init=False)
+    _load_error: Exception | None = field(default=None, init=False)
+    _ready: threading.Event = field(factory=threading.Event, init=False)
+
+    def start_loading(self) -> None:
+        """Download and load the model on a background thread.
+
+        Idempotent. Called at the start of a reduction so the (possibly
+        multi-gigabyte) download overlaps with the cheap passes; the LLM
+        pass then calls wait_until_ready before its first generation.
+        """
+        if self._load_thread is not None or self._llama is not None:
+            return
+
+        def load() -> None:
+            try:
+                with self._thread_lock:
+                    self._ensure_loaded()
+            except Exception as e:
+                self._load_error = e
+            finally:
+                self._ready.set()
+
+        self._load_thread = threading.Thread(target=load, daemon=True)
+        self._load_thread.start()
+
+    async def wait_until_ready(self) -> None:
+        if self._llama is not None:
+            await trio.lowlevel.checkpoint()
+            return
+        self.start_loading()
+        await trio.to_thread.run_sync(self._ready.wait, abandon_on_cancel=True)
+        if self._load_error is not None:
+            raise self._load_error
 
     async def complete(
         self, prompt: str, *, max_tokens: int, seed: int, temperature: float

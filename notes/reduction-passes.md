@@ -44,8 +44,13 @@ current test case is offered to `is_interesting`, so a wrong or
 hallucinating model wastes time but can't hurt correctness. The pass runs
 in the last-ditch tier (a generation costs seconds to minutes, so it only
 runs when the cheap passes stall) unless `--llm-only` strips every other
-pass. Inference is in-process through llama-cpp-python (`llm_client.py`,
-the optional `llm` extra), one generation at a time behind a thread lock;
+pass. The model download/load starts on a background thread as soon as
+the reduction begins (`start_loading`), overlapping with the cheap
+passes; the pass waits for readiness (`wait_until_ready`) only when it's
+actually scheduled, and skips the wait entirely for inputs it could
+never prompt with. Inference is in-process through llama-cpp-python
+(`llm_client.py`, the optional `llm` extra), one generation at a time
+behind a thread lock;
 the `LLMClient` ABC is the seam for pointing at other completion sources
 (e.g. an OpenAI-compatible endpoint) later. Prompt-shape decisions were
 measured with `evaluation/llm_prompt_experiment.py` against the benchmark

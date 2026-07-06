@@ -632,6 +632,10 @@ class ShrinkRay(Reducer[bytes]):
                 return
 
     async def run(self) -> None:
+        if self.llm_client is not None:
+            # Start any model download/load now so it overlaps with the
+            # cheap passes; the LLM pass waits for it when it first runs.
+            self.llm_client.start_loading()
         try:
             await self._run()
         finally:
@@ -840,6 +844,10 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     llm_only: bool = False
 
     async def run(self):
+        if self.llm_client is not None:
+            # As in ShrinkRay.run: overlap the model load with the cheap
+            # passes of the per-file reductions.
+            self.llm_client.start_loading()
         while True:
             prev = self.target.current_test_case
             await self.delete_keys()

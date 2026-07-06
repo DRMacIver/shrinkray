@@ -115,8 +115,10 @@ shrinkray --llm is_interesting.sh my-test-case
 ```
 
 The first use downloads the default model (Qwen3.5-4B, about 2.7GB) from
-Hugging Face; it runs on CPU, or with GPU acceleration where llama-cpp-python
-supports it (e.g. Metal on Apple Silicon). `--llm-model` selects a different
+Hugging Face — in the background, while the ordinary passes get on with
+reducing; the LLM passes join in once it's ready. The model runs on CPU, or
+with GPU acceleration where llama-cpp-python supports it (e.g. Metal on Apple
+Silicon). `--llm-model` selects a different
 model — either a path to a local `.gguf` file or a Hugging Face
 `repo:filename` reference — and `--llm-only` disables all of the non-LLM
 passes so the model does the whole reduction. Model suggestions are just

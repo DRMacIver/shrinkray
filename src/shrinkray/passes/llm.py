@@ -17,6 +17,7 @@ import os
 import re
 from abc import ABC, abstractmethod
 
+import trio
 from attrs import define, frozen
 
 from shrinkray.passes.definitions import ReductionPass
@@ -72,6 +73,17 @@ class LLMClient(ABC):
     ) -> str:
         """Return the model's response to a single-message chat prompt."""
         ...
+
+    def start_loading(self) -> None:  # noqa: B027
+        """Begin any slow setup (model download and load) in the background.
+
+        Reducers call this when a run starts so that setup overlaps with
+        the early cheap passes instead of stalling the first generation.
+        """
+
+    async def wait_until_ready(self) -> None:
+        """Wait until complete() can serve requests without long setup."""
+        await trio.lowlevel.checkpoint()
 
 
 @define
@@ -208,6 +220,11 @@ def llm_rewrite(client: LLMClient, config: LLMConfig) -> ReductionPass[bytes]:
             prompt = reduction_prompt(current, config=config)
             if prompt is None:
                 return
+            # The model may still be downloading or loading in the
+            # background; by this point there's nothing cheaper to do, so
+            # wait for it. Inputs that can never be prompted return above
+            # without waiting.
+            await client.wait_until_ready()
             response = await client.complete(
                 prompt,
                 max_tokens=completion_max_tokens(len(current)),

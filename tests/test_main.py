@@ -710,6 +710,43 @@ def test_custom_backup_filename(basic_shrink_target, tmp_path):
     assert os.path.exists(custom_backup)
 
 
+
+
+class _RawLog:
+    """Accumulates everything a pexpect child writes, for diagnostics."""
+
+    def __init__(self) -> None:
+        self.chunks: list[str] = []
+
+    def write(self, data: str) -> None:
+        self.chunks.append(data)
+
+    def flush(self) -> None:
+        pass
+
+
+def attach_raw_log(child) -> _RawLog:
+    log = _RawLog()
+    child.logfile_read = log
+    return log
+
+
+def output_after_tui(log: _RawLog) -> str:
+    """Everything the process printed after leaving the alternate screen.
+
+    A nonzero exit prints its traceback or exit message to the real
+    terminal after the TUI restores it; the alternate-screen-exit
+    escape sequence marks that point.
+    """
+    text = "".join(log.chunks)
+    marker = "\x1b[?1049l"
+    if marker in text:
+        return text.rsplit(marker, 1)[-1]
+    return text[-4000:]
+
+
+
+
 def test_textual_ui_path(basic_shrink_target, monkeypatch):
     """Test that the textual UI path is exercised.
 
@@ -1694,6 +1731,7 @@ sys.exit(0)
         timeout=10,
         dimensions=(24, 80),  # Terminal size
     )
+    raw_output = attach_raw_log(child)
 
     try:
         # Wait for TUI to start and show initial state
@@ -1743,7 +1781,10 @@ sys.exit(0)
 
         # Verify clean exit
         child.close()
-        assert child.exitstatus == 0, f"Exit status was {child.exitstatus}"
+        assert child.exitstatus == 0, (
+            f"Exit status was {child.exitstatus}. "
+            f"Output after the TUI exited:\n{output_after_tui(raw_output)}"
+        )
 
     finally:
         # Clean up if still running
@@ -1845,6 +1886,7 @@ grep "hello" "{log_file}"
         timeout=30,
         dimensions=(30, 100),
     )
+    raw_output = attach_raw_log(child)
 
     try:
         # Wait for TUI to start
@@ -1936,7 +1978,9 @@ grep "hello" "{log_file}"
         # The process should have exited cleanly
         if child.exitstatus is not None:
             assert child.exitstatus == 0, (
-                f"Exit status was {child.exitstatus}. Screen:\n{final_screen}"
+                f"Exit status was {child.exitstatus}. "
+                f"Output after the TUI exited:\n{output_after_tui(raw_output)}"
+                f"\nScreen:\n{final_screen}"
             )
 
     finally:

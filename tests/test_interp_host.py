@@ -153,6 +153,35 @@ async def test_socket_send_stream_serialises_concurrent_sends():
     assert sorted(received.splitlines()) == sorted(m.strip() for m in messages)
 
 
+async def test_socket_send_stream_drops_messages_after_peer_closed():
+    """When the TUI quits it closes its end of the socket while the
+    worker may still be emitting progress updates. Those messages have
+    no consumer; sending them must be a no-op rather than an error that
+    escapes the worker's nursery and turns a clean quit into a crash."""
+    a, b = socket.socketpair()
+    stream = SocketSendStream(trio.SocketStream(trio.socket.from_stdlib_socket(a)))
+
+    b.close()
+    # The first send may be buffered; the peer reset surfaces on a
+    # later one. All must be silently dropped.
+    for _ in range(5):
+        await stream.send(b"update\n")
+    a.close()
+
+
+async def test_socket_send_stream_drops_messages_after_own_close():
+    """On EOF the worker's command reader closes the shared stream
+    while the progress emitter may still be running; its sends must
+    also be no-ops."""
+    a, b = socket.socketpair()
+    trio_stream = trio.SocketStream(trio.socket.from_stdlib_socket(a))
+    stream = SocketSendStream(trio_stream)
+
+    await trio_stream.aclose()
+    await stream.send(b"update\n")
+    b.close()
+
+
 # === run_with_tui_interpreter ===
 
 

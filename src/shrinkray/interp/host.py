@@ -138,8 +138,17 @@ class SocketSendStream:
         self._lock = trio.Lock()
 
     async def send(self, data: bytes) -> None:
-        async with self._lock:
-            await self._stream.send_all(data)
+        try:
+            async with self._lock:
+                await self._stream.send_all(data)
+        except (trio.ClosedResourceError, trio.BrokenResourceError):
+            # The TUI has quit: it closed its end of the socket (or the
+            # worker's command reader closed the shared stream on EOF)
+            # while a progress update was still being emitted. Nobody is
+            # listening, so dropping the message is correct — raising
+            # would escape the worker's nursery and turn a clean quit
+            # into a crash.
+            pass
 
 
 async def _run_worker(worker_sock: socket.socket) -> None:

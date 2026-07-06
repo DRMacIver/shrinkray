@@ -49,6 +49,9 @@ ORACLES = {
     "corpus_ujson": "The file must still be JSON nested at least 20 levels deep.",
     "corpus_udlit_cpp": "The file must still contain all of: 'operator\"\"', 'decltype(', '...'.",
     "corpus_minisat": "The file must still contain the number 2147483648.",
+    "coupled_count_json": "The file must be valid JSON with an 'events' list, an 'event_count' equal to the number of events, and at least one event with \"type\": \"crash\".",
+    "coupled_total_text": "The file must contain an 'ENTRY job-corrupted <value>' line and a 'TOTAL <n>' line where n equals the sum of all ENTRY values.",
+    "coupled_arity_python": "The file must be valid Python containing the string MAGIC_SENTINEL inside a function which is called at least once; every call to a module-level function must pass exactly as many positional arguments as the function has parameters (no defaults, *args, or keyword arguments).",
 }
 
 # Map benchmark problem -> corpus entry whose shrinkray_reduced.* we can
@@ -210,6 +213,9 @@ FILENAMES = {
     "corpus_ujson": "original.json",
     "corpus_udlit_cpp": "original.cpp",
     "corpus_minisat": "original.cnf",
+    "coupled_count_json": "events.json",
+    "coupled_total_text": "ledger.txt",
+    "coupled_arity_python": "ingest.py",
 }
 
 

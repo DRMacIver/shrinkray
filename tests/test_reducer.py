@@ -129,7 +129,10 @@ async def test_full_shrinkray_run_under_parallelism(parallelism: int):
         work=WorkContext(parallelism=parallelism),
     )
 
-    reducer = ShrinkRay(target=problem)
+    # python_reducer=False keeps this hermetic (the input parses as a
+    # Python identifier, which would otherwise spawn the external
+    # Python reducer subprocess).
+    reducer = ShrinkRay(target=problem, python_reducer=False)
     await reducer.run()
 
     assert problem.current_test_case == b"hello"
@@ -1838,7 +1841,11 @@ async def test_disable_pass_while_running_skips_it(autojump_clock):
         completed.append(True)
 
     problem = BasicReductionProblem(b"test", is_interesting, work)
-    reducer = ShrinkRay(target=problem)
+    # No external reducer subprocess and no restart phase: both would
+    # block on real IO, which does not advance the autojump clock.
+    reducer = ShrinkRay(
+        target=problem, python_reducer=False, restart_at_fixpoint=False
+    )
     reducer.great_passes = [slow_pass]
     reducer.ok_passes = []
     reducer.last_ditch_passes = []
@@ -1881,7 +1888,11 @@ async def test_reducer_continues_when_passes_skipped(autojump_clock):
         # On second run, just return (no progress)
 
     problem = BasicReductionProblem(b"test", is_interesting, work)
-    reducer = ShrinkRay(target=problem)
+    # No external reducer subprocess and no restart phase: both would
+    # block on real IO, which does not advance the autojump clock.
+    reducer = ShrinkRay(
+        target=problem, python_reducer=False, restart_at_fixpoint=False
+    )
     reducer.great_passes = [counting_pass]
     reducer.ok_passes = []
     reducer.last_ditch_passes = []

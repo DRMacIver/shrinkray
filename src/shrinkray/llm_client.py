@@ -7,11 +7,15 @@ completion request, downloading it from Hugging Face first if necessary.
 
 Inference is blocking and CPU-heavy, so it runs in a worker thread. The
 model is not safe for concurrent generation, so calls are serialized on a
-threading.Lock taken inside the worker thread: a completion abandoned by
-cancellation keeps holding the lock until it actually finishes, and later
-calls queue behind it rather than corrupting the model state.
+threading.Lock taken inside the worker thread. Generations are consumed
+as a token stream so that a completion abandoned by cancellation can be
+told to stop at the next token, rather than running to its token budget
+while holding the lock; an atexit hook stops and joins any in-flight
+generation, because exiting while llama.cpp is mid-generation crashes in
+its C++/Metal finalizers.
 """
 
+import atexit
 import threading
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
@@ -69,6 +73,7 @@ class LlamaCppClient(LLMClient):
     _load_thread: threading.Thread | None = field(default=None, init=False)
     _load_error: Exception | None = field(default=None, init=False)
     _ready: threading.Event = field(factory=threading.Event, init=False)
+    _shutting_down: threading.Event = field(factory=threading.Event, init=False)
 
     def start_loading(self) -> None:
         """Download and load the model on a background thread.
@@ -104,18 +109,39 @@ class LlamaCppClient(LLMClient):
     async def complete(
         self, prompt: str, *, max_tokens: int, seed: int, temperature: float
     ) -> str:
+        abort = threading.Event()
+
         def run_blocking() -> str:
             return self._complete_blocking(
-                prompt, max_tokens=max_tokens, seed=seed, temperature=temperature
+                prompt,
+                max_tokens=max_tokens,
+                seed=seed,
+                temperature=temperature,
+                abort=abort,
             )
 
         # abandon_on_cancel so that skipping the pass doesn't have to wait
         # out an in-flight generation; the lock in _complete_blocking keeps
         # the abandoned thread from overlapping with the next call.
-        return await trio.to_thread.run_sync(run_blocking, abandon_on_cancel=True)
+        try:
+            return await trio.to_thread.run_sync(
+                run_blocking, abandon_on_cancel=True
+            )
+        except trio.Cancelled:
+            # Tell the abandoned generation to stop at the next token so
+            # it releases the model promptly instead of running out its
+            # whole token budget.
+            abort.set()
+            raise
 
     def _complete_blocking(
-        self, prompt: str, *, max_tokens: int, seed: int, temperature: float
+        self,
+        prompt: str,
+        *,
+        max_tokens: int,
+        seed: int,
+        temperature: float,
+        abort: threading.Event,
     ) -> str:
         with self._thread_lock:
             llama = self._ensure_loaded()
@@ -124,12 +150,32 @@ class LlamaCppClient(LLMClient):
                 max_tokens=max_tokens,
                 temperature=temperature,
                 seed=seed,
+                stream=True,
             )
-            # Streaming is never requested, so the response is a mapping,
-            # not an iterator of chunks.
-            assert not isinstance(response, Iterator)
-            content = response["choices"][0]["message"].get("content")
-            return content or ""
+            # Streaming is requested, so the response is an iterator of
+            # chunks, not a single mapping.
+            assert isinstance(response, Iterator)
+            parts: list[str] = []
+            for chunk in response:
+                delta = chunk["choices"][0]["delta"].get("content")
+                if delta:
+                    parts.append(delta)
+                if abort.is_set() or self._shutting_down.is_set():
+                    break
+            return "".join(parts)
+
+    def _join_at_exit(self, timeout: float = 30.0) -> None:
+        """Stop and wait out any in-flight generation before interpreter exit.
+
+        Exiting while llama.cpp is mid-generation crashes in its C++/Metal
+        finalizers. In-flight generations notice _shutting_down at the next
+        token; acquiring the lock then guarantees nothing is inside
+        llama.cpp when teardown proceeds. The timeout bounds shutdown if a
+        generation is somehow stuck inside the model.
+        """
+        self._shutting_down.set()
+        if self._thread_lock.acquire(timeout=timeout):
+            self._thread_lock.release()
 
     def _ensure_loaded(self) -> "Llama":
         if self._llama is None:
@@ -153,4 +199,5 @@ class LlamaCppClient(LLMClient):
                 n_threads=self.n_threads,
                 verbose=False,
             )
+            atexit.register(self._join_at_exit)
         return self._llama

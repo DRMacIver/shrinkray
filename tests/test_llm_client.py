@@ -10,6 +10,7 @@ replacing the library.
 import importlib
 import sys
 import threading
+import time
 from typing import Any
 
 import pytest
@@ -163,8 +164,8 @@ async def test_missing_content_becomes_empty_string(
     llama = client._llama
     assert llama is not None
 
-    def no_content(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        return {"choices": [{"message": {"role": "assistant"}}]}
+    def no_content(*args: Any, **kwargs: Any) -> Any:
+        return iter([{"choices": [{"delta": {"role": "assistant"}}]}])
 
     monkeypatch.setattr(llama, "create_chat_completion", no_content)
     result = await client.complete("hi", max_tokens=1, seed=1, temperature=0.0)
@@ -250,3 +251,108 @@ def test_llm_support_reflects_import_state(monkeypatch: pytest.MonkeyPatch):
     assert shrinkray.llm_client.llm_support_available()
     monkeypatch.setattr(shrinkray.llm_client, "llama_cpp", None)
     assert not shrinkray.llm_client.llm_support_available()
+
+
+def endless_stream(counter: "list[int]", pace: float):
+    def fake(*args: Any, **kwargs: Any) -> Any:
+        def chunks():
+            while True:
+                counter[0] += 1
+                yield {"choices": [{"delta": {"content": "x"}}]}
+                time.sleep(pace)
+
+        return chunks()
+
+    return fake
+
+
+@requires_llama_cpp
+async def test_cancelled_generation_stops_consuming_the_stream(
+    tiny_model_path: str,
+):
+    client = tiny_client(tiny_model_path)
+    await client.complete("warm up", max_tokens=1, seed=0, temperature=0.0)
+    llama = client._llama
+    assert llama is not None
+
+    consumed = [0]
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(
+            llama, "create_chat_completion", endless_stream(consumed, 0.005)
+        )
+        with trio.move_on_after(0.2) as scope:
+            await client.complete(
+                "spin forever", max_tokens=64, seed=1, temperature=0.0
+            )
+        assert scope.cancelled_caught
+
+    # The abandoned generation notices the abort at a token boundary and
+    # releases the model, so a real completion goes through afterwards
+    # rather than queueing behind an endless stream.
+    result = await client.complete("after", max_tokens=1, seed=2, temperature=0.0)
+    assert isinstance(result, str)
+
+
+@requires_llama_cpp
+async def test_exit_hook_is_registered_and_joins_generations(
+    tiny_model_path: str, monkeypatch: pytest.MonkeyPatch
+):
+    registered: list[Any] = []
+    monkeypatch.setattr(
+        shrinkray.llm_client.atexit, "register", registered.append
+    )
+    client = tiny_client(tiny_model_path)
+    await client.complete("warm up", max_tokens=1, seed=0, temperature=0.0)
+    assert registered == [client._join_at_exit]
+    llama = client._llama
+    assert llama is not None
+
+    # With a generation in flight, the exit hook tells it to stop and
+    # waits for it to leave llama.cpp before returning.
+    consumed = [0]
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(
+            llama, "create_chat_completion", endless_stream(consumed, 0.005)
+        )
+        with trio.move_on_after(0.2):
+            await client.complete(
+                "spin forever", max_tokens=64, seed=1, temperature=0.0
+            )
+        await trio.to_thread.run_sync(client._join_at_exit)
+    consumed_after_join = consumed[0]
+    assert not client._thread_lock.locked()
+    assert consumed[0] <= consumed_after_join + 1
+
+
+@requires_llama_cpp
+async def test_exit_hook_gives_up_on_a_stuck_generation(
+    tiny_model_path: str,
+):
+    client = tiny_client(tiny_model_path)
+    await client.complete("warm up", max_tokens=1, seed=0, temperature=0.0)
+    llama = client._llama
+    assert llama is not None
+
+    release = threading.Event()
+
+    def stuck(*args: Any, **kwargs: Any) -> Any:
+        def chunks():
+            release.wait()
+            yield {"choices": [{"delta": {"content": "x"}}]}
+
+        return chunks()
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(llama, "create_chat_completion", stuck)
+        try:
+            with trio.move_on_after(0.2):
+                await client.complete(
+                    "stuck", max_tokens=1, seed=1, temperature=0.0
+                )
+            # The generation ignores the abort (it's blocked inside the
+            # model), so the exit hook times out rather than hanging.
+            await trio.to_thread.run_sync(
+                lambda: client._join_at_exit(timeout=0.05)
+            )
+        finally:
+            release.set()

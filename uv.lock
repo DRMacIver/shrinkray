@@ -680,7 +680,7 @@ requires-dist = [
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.1.0" },
     { name = "binaryornot", specifier = ">=0.4.4" },
     { name = "black", specifier = ">=24.1.0" },
-    { name = "chardet", specifier = ">=5.2.0" },
+    { name = "chardet", specifier = ">=5.2.0,<7" },
     { name = "click", specifier = ">=8.2.1" },
     { name = "coverage", marker = "extra == 'test'", specifier = ">=7.4.0" },
     { name = "coverage", extras = ["toml"], marker = "extra == 'test'", specifier = ">=7.4.0" },

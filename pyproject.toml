@@ -16,7 +16,9 @@ dependencies = [
     # 8.2.0; 8.2.0's CliRunner fails to capture writes to sys.stderr,
     # which was fixed in 8.2.1.
     "click>=8.2.1",
-    "chardet>=5.2.0",
+    # chardet must stay importable in the TUI subinterpreter; 7.0 grew
+    # a native module that refuses to load in subinterpreters
+    "chardet>=5.2.0,<7",
     "trio>=0.28.0",
     "textual>=8.0.0",
     # textual-plotext < 1.0.1 is incompatible with textual >= 8.0.0

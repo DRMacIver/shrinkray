@@ -102,13 +102,19 @@ class ReducerWorker:
         task_status.started()
 
         buffer = b""
-        async with aclosing(self._input_stream) as aiter:
-            async for chunk in aiter:
-                buffer += chunk
-                while b"\n" in buffer:
-                    line, buffer = buffer.split(b"\n", 1)
-                    if line:
-                        await self.handle_line(line.decode("utf-8"))
+        try:
+            async with aclosing(self._input_stream) as aiter:
+                async for chunk in aiter:
+                    buffer += chunk
+                    while b"\n" in buffer:
+                        line, buffer = buffer.split(b"\n", 1)
+                        if line:
+                            await self.handle_line(line.decode("utf-8"))
+        except trio.BrokenResourceError:
+            # On Linux, the TUI closing its socket while progress
+            # updates are still unread surfaces as ECONNRESET on our
+            # next read rather than clean EOF. Either way it is gone.
+            pass
 
         # End of input means the TUI is gone (it closed its end of the
         # socket or crashed); shut down rather than reduce for nobody.

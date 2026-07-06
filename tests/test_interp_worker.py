@@ -419,6 +419,41 @@ async def test_worker_read_commands_handles_multiple_commands():
     assert output.data.count(b'"id"') >= 2
 
 
+class ResetInputStream:
+    """An input stream whose connection is reset by the peer."""
+
+    def __init__(self, data: bytes):
+        self._chunks = [data] if data else []
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> bytes:
+        if self._chunks:
+            return self._chunks.pop(0)
+        raise trio.BrokenResourceError("socket connection broken: ECONNRESET")
+
+    async def aclose(self) -> None:
+        pass
+
+
+async def test_worker_treats_connection_reset_as_eof():
+    """Regression test: on Linux, the TUI closing its socket while
+    progress updates are still unread surfaces as ECONNRESET on the
+    worker's next read, not clean EOF. Both mean the TUI is gone; the
+    worker must shut down gracefully instead of crashing."""
+    request = Request(id="req-1", command="status", params={})
+    input_stream = ResetInputStream((serialize(request) + "\n").encode("utf-8"))
+    output = MemoryOutputStream()
+    worker = ReducerWorker(input_stream=input_stream, output_stream=output)
+
+    with trio.fail_after(5):
+        await worker.run()
+
+    # The command sent before the reset was still processed.
+    assert b"req-1" in output.data
+
+
 async def test_worker_emit_progress_updates_loop():
     """Test emit_progress_updates emits updates while running."""
     output = MemoryOutputStream()

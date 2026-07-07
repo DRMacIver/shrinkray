@@ -1,8 +1,18 @@
+import bisect
+
 import pytest
+import tree_sitter
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 from tree_sitter_language_pack.exceptions import LanguageNotFoundError
 
+from shrinkray.passes.patching import CutPatch
 from shrinkray.passes.treesitter import (
     EXTENSION_LANGUAGES,
+    _covering_chain,
+    _gc_candidates,
+    _name_occurrences,
+    _names_defined,
     _names_mentioned,
     child_deletion_cuts,
     language_for_filename,
@@ -470,3 +480,241 @@ def test_shrinkray_has_no_treesitter_passes_without_language():
     reducer = ShrinkRay(target=problem)
     names = {p.__name__ for p in reducer.great_passes}
     assert not any(name.startswith("treesitter(") for name in names)
+
+
+# === orphan cascade differential test ===
+#
+# `orphaned_declaration_cuts` was rewritten from an O(n^3) repeated-rescan
+# cascade to an event-driven worklist that computes the identical output.
+# `_orphaned_declaration_cuts_reference` below is a verbatim copy of the
+# original (zero-width-safe) implementation, kept so a Hypothesis
+# differential test can assert the optimized version matches it byte for
+# byte on every input.
+
+
+def _orphaned_declaration_cuts_reference(
+    tree: tree_sitter.Tree, source: bytes
+) -> list[CutPatch]:
+    """Reference implementation: the original repeated-rescan cascade."""
+    gc_nodes = [
+        (n, _names_defined(n, source))
+        for n in _gc_candidates(tree)
+        if n.end_byte > n.start_byte
+    ]
+    occurrences = _name_occurrences(
+        source, {name for _, names in gc_nodes for name in names}
+    )
+
+    def external_extent(index: int) -> tuple[int, int] | None:
+        candidate, names = gc_nodes[index]
+        span = (candidate.start_byte, candidate.end_byte)
+        lo: int | None = None
+        hi: int | None = None
+        for name in names:
+            positions = occurrences[name]
+            if positions and positions[0] < span[0]:
+                lo = positions[0] if lo is None else min(lo, positions[0])
+            if positions and positions[-1] >= span[1]:
+                hi = positions[-1] if hi is None else max(hi, positions[-1])
+            first_after = bisect.bisect_left(positions, span[1])
+            if first_after < len(positions):
+                lo = (
+                    positions[first_after]
+                    if lo is None
+                    else min(lo, positions[first_after])
+                )
+            last_before = bisect.bisect_left(positions, span[0]) - 1
+            if last_before >= 0:
+                hi = (
+                    positions[last_before]
+                    if hi is None
+                    else max(hi, positions[last_before])
+                )
+        if lo is None or hi is None:
+            return None
+        return lo, hi + 1
+
+    def is_orphaned(index: int, spans: list[tuple[int, int]]) -> bool:
+        candidate, names = gc_nodes[index]
+        own = (candidate.start_byte, candidate.end_byte)
+        for name in names:
+            for position in occurrences[name]:
+                if own[0] <= position < own[1]:
+                    continue
+                if not any(u <= position < v for u, v in spans):
+                    return False
+        return True
+
+    triggers: dict[tuple[int, int], list[int]] = {}
+    extents: list[tuple[int, int] | None] = []
+    for index in range(len(gc_nodes)):
+        extent = external_extent(index)
+        extents.append(extent)
+        if extent is None:
+            continue
+        for span in _covering_chain(tree, *extent):
+            triggers.setdefault(span, []).append(index)
+
+    cuts: list[CutPatch] = []
+    for x_span, indices in sorted(triggers.items()):
+        spans = [x_span]
+        spans.extend(
+            (g.start_byte, g.end_byte)
+            for i in indices
+            for g in [gc_nodes[i][0]]
+            if not (g.start_byte < x_span[1] and x_span[0] < g.end_byte)
+        )
+        if len(spans) < 2:
+            continue
+        collected: set[int] = set()
+        changed = True
+        while changed:
+            changed = False
+            for index, (candidate, _) in enumerate(gc_nodes):
+                span = (candidate.start_byte, candidate.end_byte)
+                if index in collected or extents[index] is None:
+                    continue
+                if any(u < span[1] and span[0] < v for u, v in spans):
+                    continue
+                if is_orphaned(index, spans):
+                    spans.append(span)
+                    collected.add(index)
+                    changed = True
+        cuts.append(sorted(set(spans)))
+    return cuts
+
+
+# Small pools of identifiers/imports shared across generated declarations
+# so references genuinely collide and drive cascades.
+_IDENTS = ["a", "b", "c", "d", "f0", "f1", "f2", "main", "fmt", "strings"]
+_IMPORT_PATHS = ["fmt", "strings", "os", "gopkg.in/yaml.v2", "x/return", "a/b/c"]
+
+
+def _chain_source(n: int) -> bytes:
+    lines = ["package main", "func f0() int { return 1 }"]
+    for i in range(1, n):
+        lines.append("func f%d() int { return f%d() }" % (i, i - 1))
+    lines.append("func main() { println(f%d()) }" % (n - 1))
+    return ("\n".join(lines) + "\n").encode()
+
+
+@st.composite
+def _go_source(draw: st.DrawFn) -> bytes:
+    parts = ["package main"]
+    for _ in range(draw(st.integers(0, 3))):
+        parts.append('import "%s"' % draw(st.sampled_from(_IMPORT_PATHS)))
+    for _ in range(draw(st.integers(0, 6))):
+        name = draw(st.sampled_from(_IDENTS))
+        calls = " ".join(
+            "%s()" % draw(st.sampled_from(_IDENTS))
+            for _ in range(draw(st.integers(0, 3)))
+        )
+        parts.append("func %s() { %s }" % (name, calls))
+    return "\n".join(parts).encode()
+
+
+@st.composite
+def _js_source(draw: st.DrawFn) -> bytes:
+    parts = []
+    for _ in range(draw(st.integers(0, 3))):
+        parts.append(
+            'import {%s} from "%s";'
+            % (draw(st.sampled_from(_IDENTS)), draw(st.sampled_from(_IMPORT_PATHS)))
+        )
+    for _ in range(draw(st.integers(0, 6))):
+        name = draw(st.sampled_from(_IDENTS))
+        calls = " ".join(
+            "%s();" % draw(st.sampled_from(_IDENTS))
+            for _ in range(draw(st.integers(0, 3)))
+        )
+        parts.append("function %s() { %s }" % (name, calls))
+    return "\n".join(parts).encode()
+
+
+@st.composite
+def _python_source(draw: st.DrawFn) -> bytes:
+    parts = []
+    for _ in range(draw(st.integers(0, 3))):
+        parts.append("import %s" % draw(st.sampled_from(_IDENTS)))
+    for _ in range(draw(st.integers(0, 6))):
+        name = draw(st.sampled_from(_IDENTS))
+        calls = "; ".join(
+            "%s()" % draw(st.sampled_from(_IDENTS))
+            for _ in range(draw(st.integers(0, 3)))
+        ) or "pass"
+        parts.append("def %s():\n    %s" % (name, calls))
+    return "\n".join(parts).encode()
+
+
+@st.composite
+def _rust_source(draw: st.DrawFn) -> bytes:
+    parts = []
+    for _ in range(draw(st.integers(0, 3))):
+        parts.append("use %s;" % draw(st.sampled_from(_IDENTS)))
+    for _ in range(draw(st.integers(0, 6))):
+        name = draw(st.sampled_from(_IDENTS))
+        calls = " ".join(
+            "%s();" % draw(st.sampled_from(_IDENTS))
+            for _ in range(draw(st.integers(0, 3)))
+        )
+        parts.append("fn %s() { %s }" % (name, calls))
+    return "\n".join(parts).encode()
+
+
+@st.composite
+def _c_source(draw: st.DrawFn) -> bytes:
+    parts = []
+    for _ in range(draw(st.integers(0, 3))):
+        parts.append("#include <%s>" % draw(st.sampled_from(_IDENTS)))
+    for _ in range(draw(st.integers(0, 6))):
+        name = draw(st.sampled_from(_IDENTS))
+        calls = " ".join(
+            "%s();" % draw(st.sampled_from(_IDENTS))
+            for _ in range(draw(st.integers(0, 3)))
+        )
+        parts.append("int %s() { %s return 0; }" % (name, calls))
+    return "\n".join(parts).encode()
+
+
+_SOURCE_BUILDERS = {
+    "go": _go_source(),
+    "javascript": _js_source(),
+    "python": _python_source(),
+    "rust": _rust_source(),
+    "c": _c_source(),
+}
+
+
+@st.composite
+def _language_and_source(draw: st.DrawFn) -> tuple[str, bytes]:
+    language = draw(st.sampled_from(sorted(_SOURCE_BUILDERS)))
+    structured = draw(_SOURCE_BUILDERS[language])
+    # Sometimes splice in raw/garbage bytes to reach error-recovery and
+    # zero-width-node paths.
+    garbage = draw(st.binary(max_size=16))
+    where = draw(st.integers(0, len(structured)))
+    if draw(st.booleans()):
+        source = structured[:where] + garbage + structured[where:]
+    else:
+        source = structured
+    return language, source
+
+
+@settings(max_examples=400)
+@given(_language_and_source())
+@example(("go", _chain_source(40)))
+@example(("go", _chain_source(3)))
+@example(("go", b"\x00\xc7pd"))
+@example(("go", b'/"efm;'))
+@example(("go", b"package main\nfunc() {}\nfunc main() {}\n"))
+@example(("go", GO_SOURCE))
+@example(("javascript", b"\x00\xff{{{}}}"))
+@example(("python", b""))
+def test_orphaned_declaration_cuts_matches_reference(
+    language_and_source: tuple[str, bytes],
+) -> None:
+    language, source = language_and_source
+    tree = parse_tree(language, source)
+    assert orphaned_declaration_cuts(tree, source) == (
+        _orphaned_declaration_cuts_reference(tree, source)
+    )

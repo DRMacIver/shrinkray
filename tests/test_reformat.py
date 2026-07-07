@@ -138,6 +138,43 @@ def test_brace_directive_split():
     assert basic_format("#a 1 #b 2") == "#a 1\n#b 2\n"
 
 
+def test_brace_directive_ends_at_newline():
+    # A preprocessor directive must terminate at its own newline: the code that
+    # follows on the next line is ordinary brace content, not part of the
+    # directive. Previously the '#' swallowed everything up to the next '#'.
+    assert (
+        basic_format("#include <stdio.h>\nint main() { return 0; }\n")
+        == "#include <stdio.h>\nint main() {\n  return 0;\n}\n"
+    )
+    assert (
+        basic_format("#define FOO 1\n#define BAR 2\nint x = FOO;\n")
+        == "#define FOO 1\n#define BAR 2\nint x = FOO;\n"
+    )
+
+
+def test_brace_directive_keeps_internal_space():
+    # Inside a directive a run of whitespace between tokens is significant and
+    # must be kept (collapsed to a single space), unlike the whitespace next to
+    # punctuation the brace family drops elsewhere.
+    assert basic_format("#define FOO   BAR") == "#define FOO BAR\n"
+    # '#include <x>' keeps its space too (braces force the brace family here).
+    assert basic_format("#include <x>\n{}") == "#include <x>\n{}\n"
+
+
+def test_brace_directive_ends_at_newline_even_after_backslash():
+    # A directive ends at its newline; a trailing backslash is copied verbatim
+    # like any other character (no line-continuation join). Joining would make
+    # the output re-read as a continuation on the next pass, breaking the fixed
+    # point, so the continued line becomes ordinary content instead.
+    assert basic_format("#define A \\\n  B") == "#define A \\\nB\n"
+
+
+def test_brace_directive_preserves_string_literal():
+    # A '#' inside a string in the directive body must not end the directive.
+    out = basic_format('#error "a # b"\nx;')
+    assert out == '#error "a # b"\nx;\n'
+
+
 # === tag family ===
 
 

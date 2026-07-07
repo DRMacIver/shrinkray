@@ -272,6 +272,37 @@ def _reflow_brace(s: str) -> str:
                 newline()
             emit("#")
             i += 1
+            # Copy the directive body, terminating at its own newline so the
+            # following code is not swallowed. The body is opaque: its internal
+            # whitespace is collapsed to single spaces (keeping significant
+            # separators like '#include <x>') and string literals are preserved,
+            # but braces/semicolons/operators are not restructured. A backslash
+            # is copied verbatim like any other character (no line-continuation
+            # join), which keeps the result a stable fixed point.
+            while i < n:
+                d = s[i]
+                if d in "\"'":
+                    i = _scan_literal(s, i, out)
+                    continue
+                if d.isspace():
+                    j = i
+                    while j < n and s[j].isspace():
+                        j += 1
+                    if "\n" in s[i:j]:
+                        break  # a newline ends the directive
+                    if s[j : j + 1] == "#":
+                        # Whitespace immediately before another '#' starts a new
+                        # directive, so space- and newline-separated directives
+                        # canonicalise alike.
+                        break
+                    # Collapse the run to a single space; a trailing one is
+                    # stripped by the newline() below.
+                    out.append(" ")
+                    i = j
+                    continue
+                out.append(d)
+                i += 1
+            newline()
             continue
         if c == ",":
             emit(", ")

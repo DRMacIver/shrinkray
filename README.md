@@ -103,6 +103,35 @@ Variant test cases are passed to the interestingness test both on STDIN and as a
 
 `shrinkray --help` will give more usage instructions.
 
+## LLM mode
+
+Shrink Ray uses a language model, running locally in-process, to propose
+smaller test cases alongside its normal reduction passes. This is enabled by
+default: once the ordinary passes stop making progress, the model is asked
+for smaller rewrites of the whole test case. The first use downloads the
+default model (Qwen3.5-4B, about 2.7GB) from Hugging Face — in the
+background, while the ordinary passes get on with reducing; the LLM passes
+join in once it's ready. The model runs on CPU, or with GPU acceleration
+where llama-cpp-python supports it (e.g. Metal on Apple Silicon).
+
+Model suggestions are just candidates like any others: they're only accepted
+if your interestingness test still passes, so a bad model costs time but
+never correctness.
+
+When a reduction would download the model (or a tree-sitter grammar for the
+input's language), Shrink Ray tells you first rather than fetching silently:
+the interactive UI shows a startup dialog listing each pending download with a
+checkbox to skip it, and the basic UI prints the list. Reduction starts right
+away behind the dialog on the ordinary passes, and each download's extra
+passes join in when it finishes.
+
+To turn it off, pass `--no-llm` (or set `SHRINKRAY_LLM=0` in the environment,
+useful on shared machines and CI). `--llm-model` selects a different model —
+either a path to a local `.gguf` file or a Hugging Face `repo:filename`
+reference — and `--llm-only` disables all of the non-LLM passes so the model
+does the whole reduction. On platforms where llama-cpp-python cannot load,
+shrink ray warns and reduces without the LLM passes.
+
 ## Supported formats
 
 Shrink Ray is fully generic in the sense that it will work with literally any file you give it in any format. However, some formats will work a lot better than others.

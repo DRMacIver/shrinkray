@@ -22,6 +22,8 @@ evaluation/
 ├── report.py     # regenerate the tables in RESULTS.md
 ├── benchmark.py  # measure reducer efficiency (interestingness calls) against cheap in-process oracles
 ├── benchmark_baseline.json  # committed benchmark metrics for main (compare with benchmark.py --baseline)
+├── llm_benchmark.py         # compare classical vs LLM-assisted reduction quality on the benchmark problems
+├── llm_prompt_experiment.py # measure LLM prompt variants (validity rate, size gain per generation)
 ├── RESULTS.md    # generated tables + hand-written analysis
 ├── corpus/<id>/  # one directory per bug
 ├── sortkey/      # sort-key tuning corpus (see sortkey/README.md)
@@ -193,3 +195,16 @@ See `RESULTS.md` for the generated size/timing tables, the c-reduce
 comparison, and the structural analysis of what each tool could and
 couldn't remove (which has already driven new passes: type replacement
 and namespace-qualifier rewriting in `src/shrinkray/passes/cpp.py`).
+
+## LLM evaluation
+
+`benchmark.py` includes three `coupled_*` problems where no single deletion
+can succeed because two distant parts of the file must change together (a
+count that must match a list length, a checksum line, call-site arity).
+The classical passes get stuck far above the minimum on these by design;
+`llm_benchmark.py` runs each benchmark problem with and without the LLM
+passes and compares final sizes, which is how the LLM mode's ability to
+escape such fixpoints is measured (e.g. coupled_count_json: 143 bytes
+classical vs 46 with the LLM, which is the global minimum).
+`llm_prompt_experiment.py` measures prompt variants per generation and is
+what the shipped prompt's design decisions were based on.

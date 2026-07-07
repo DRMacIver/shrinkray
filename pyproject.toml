@@ -30,6 +30,12 @@ dependencies = [
     "black>=24.1.0",
     "tree-sitter>=0.26.0",
     "tree-sitter-language-pack>=1.12.2",
+    # In-process model inference for the LLM passes (a from-source C++
+    # build on platforms without wheels). On platforms where it cannot
+    # load (e.g. OpenBSD) shrink ray degrades to running without the LLM
+    # passes.
+    "llama-cpp-python>=0.3.33",
+    "huggingface-hub>=1.22.0",
 ]
 
 [project.urls]

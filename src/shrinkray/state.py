@@ -24,14 +24,21 @@ from attrs import define
 
 from shrinkray.adaptive_timeout import AdaptiveTimeoutPolicy
 from shrinkray.cli import InputType
+from shrinkray.downloads import DownloadCoordinator, grammar_plan, missing_grammars
 from shrinkray.formatting import default_reformat_data, determine_formatter_command
 from shrinkray.history import (
     HistoryManager,
     deserialize_directory,
     serialize_directory,
 )
+from shrinkray.llm_client import LlamaCppClient
 from shrinkray.passes.cpp import C_FILE_EXTENSIONS
-from shrinkray.passes.treesitter import loadable_language_for_filename
+from shrinkray.passes.llm import (
+    DEFAULT_MODEL_SPEC,
+    LLMConfig,
+    parse_model_spec,
+    read_oracle_script,
+)
 from shrinkray.problem import (
     BasicReductionProblem,
     InterestingnessResult,
@@ -282,6 +289,22 @@ class ShrinkRayState[TestCase](ABC):
     external_reducers: list[list[str]] = attrs.Factory(list)
     python_reducer: bool = True
 
+    # LLM passes: whether they run at all, the model they use (a local
+    # .gguf path or a Hugging Face repo:filename), and whether they
+    # replace every other pass.
+    llm_enabled: bool = False
+    llm_model: str = DEFAULT_MODEL_SPEC
+    llm_only: bool = False
+
+    # The lazily-built LLM client, shared by every reducer this state
+    # creates so the model is only loaded once.
+    _llm_client: LlamaCppClient | None = None
+
+    # The lazily-built coordinator for the background downloads this
+    # reduction may need. Built on first use; loading of already-cached
+    # resources starts then, downloads wait for start_downloads.
+    _downloads: DownloadCoordinator | None = None
+
     # Set of test cases to exclude from interestingness (for restart-from-point)
     # These are byte-identical matches of previously reduced values
     excluded_test_cases: set[bytes] | None = None
@@ -299,6 +322,67 @@ class ShrinkRayState[TestCase](ABC):
         self.sweep_stale_working_files()
         self.setup_formatter()
         self._setup_history()
+
+    def _ensure_llm_client(self) -> LlamaCppClient:
+        if self._llm_client is None:
+            self._llm_client = LlamaCppClient(model=parse_model_spec(self.llm_model))
+        return self._llm_client
+
+    @property
+    def downloads(self) -> DownloadCoordinator:
+        """The coordinator for this reduction's background downloads."""
+        if self._downloads is None:
+            llm_client = None
+            llm_needs_download = False
+            llm_description = ""
+            if self.llm_enabled:
+                llm_client = self._ensure_llm_client()
+                llm_needs_download = llm_client.model_needs_download()
+                llm_description = f"LLM model {self.llm_model}"
+                if self.llm_model == DEFAULT_MODEL_SPEC:
+                    llm_description += " (about 2.7GB)"
+            self._downloads = DownloadCoordinator(
+                llm_client=llm_client,
+                llm_needs_download=llm_needs_download,
+                llm_description=llm_description,
+                grammars=missing_grammars(self._input_filenames()),
+            )
+            self._downloads.start_immediate()
+        return self._downloads
+
+    def pending_downloads(self) -> list[dict[str, str]]:
+        """What would be downloaded, for the UI to offer opting out of."""
+        return [
+            {"id": item_id, "description": description}
+            for item_id, description in self.downloads.pending()
+        ]
+
+    def start_downloads(self, disabled: list[str]) -> None:
+        """Record the user's decision and begin the approved downloads."""
+        self.downloads.start(disabled)
+
+    @abstractmethod
+    def _input_filenames(self) -> list[str]:
+        """The file names being reduced, for grammar detection."""
+
+    def llm_reducer_kwargs(self) -> dict[str, Any]:
+        """Constructor kwargs wiring the LLM configuration into a reducer."""
+        if not self.llm_enabled:
+            return {}
+        self._ensure_llm_client()
+        return {
+            "llm_client": self._llm_client,
+            "llm_config": LLMConfig(
+                filename=self.base,
+                oracle=read_oracle_script(self.test[0]),
+                # The output the interestingness test produced for a given
+                # test case, captured when it ran. In directory mode the
+                # per-file test cases never match these whole-directory
+                # keys, so the prompt section is simply omitted there.
+                test_output=lambda tc: self._successful_outputs.get(tc),
+            ),
+            "llm_only": self.llm_only,
+        }
 
     @abstractmethod
     def setup_formatter(self): ...
@@ -738,7 +822,14 @@ class ShrinkRayState[TestCase](ABC):
             async def record_history(test_case: TestCase):
                 test_case_bytes = self._get_test_case_bytes(test_case)
                 # Use output captured at is_interesting time to avoid race conditions
-                output = self._successful_outputs.pop(test_case_bytes, None)
+                output = self._successful_outputs.get(test_case_bytes)
+                # Keep only the adopted test case's output: it stays
+                # available for the LLM passes' prompts, while outputs of
+                # candidates that were interesting but not adopted can no
+                # longer be needed by anything.
+                self._successful_outputs.clear()
+                if output is not None:
+                    self._successful_outputs[test_case_bytes] = output
                 assert self.history_manager is not None
                 self.history_manager.record_reduction(test_case_bytes, output)
 
@@ -1013,14 +1104,23 @@ class ShrinkRayState[TestCase](ABC):
 @define(slots=False)
 class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
     def new_reducer(self, problem: ReductionProblem[bytes]) -> Reducer[bytes]:
+        treesitter_language, pending_treesitter = grammar_plan(
+            self.filename, self.downloads
+        )
         return ShrinkRay(
             problem,
             enable_cpp_passes=os.path.splitext(self.filename)[1] in C_FILE_EXTENSIONS,
-            treesitter_language=loadable_language_for_filename(self.filename),
+            treesitter_language=treesitter_language,
+            pending_treesitter_language=pending_treesitter,
+            downloads=self.downloads,
             external_reducers=self.external_reducers,
             python_reducer=self.python_reducer,
             reducer_log_dir=self.reducer_log_dir(),
+            **self.llm_reducer_kwargs(),
         )
+
+    def _input_filenames(self) -> list[str]:
+        return [self.filename]
 
     def _get_initial_bytes(self) -> bytes:
         return self.initial
@@ -1149,10 +1249,15 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     ) -> Reducer[dict[str, bytes]]:
         return DirectoryShrinkRay(
             target=problem,
+            downloads=self.downloads,
             external_reducers=self.external_reducers,
             python_reducer=self.python_reducer,
             reducer_log_dir=self.reducer_log_dir(),
+            **self.llm_reducer_kwargs(),
         )
+
+    def _input_filenames(self) -> list[str]:
+        return list(self.initial)
 
     def _get_initial_bytes(self) -> bytes:
         # Serialize directory content for history recording

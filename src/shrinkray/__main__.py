@@ -19,6 +19,11 @@ from shrinkray.cli import (
     validate_ui,
 )
 from shrinkray.formatting import determine_formatter_command
+from shrinkray.llm_client import llm_support_available
+from shrinkray.passes.llm import (
+    DEFAULT_MODEL_SPEC,
+    parse_model_spec,
+)
 from shrinkray.process import (
     MEMORY_LIMIT_ENFORCEABLE,
     default_memory_limit,
@@ -265,6 +270,36 @@ when the input looks like Python. Enabled by default; use --no-python-reducer
 to disable it.
 """.strip(),
 )
+@click.option(
+    "--llm/--no-llm",
+    "llm",
+    default=True,
+    envvar="SHRINKRAY_LLM",
+    help="""
+Reduction passes that ask a language model, running locally in-process, to
+propose smaller test cases. Enabled by default; the first use downloads the
+default model (about 2.7GB) from Hugging Face in the background while the
+ordinary passes reduce. Disable with --no-llm or SHRINKRAY_LLM=0.
+""".strip(),
+)
+@click.option(
+    "--llm-model",
+    default=DEFAULT_MODEL_SPEC,
+    show_default=True,
+    help="""
+The model the LLM passes use: either a path to a local .gguf file, or a
+Hugging Face repo:filename reference naming a GGUF file to download.
+""".strip(),
+)
+@click.option(
+    "--llm-only",
+    is_flag=True,
+    default=False,
+    help="""
+Run only the LLM passes, disabling all of shrink ray's other reduction passes.
+Implies --llm.
+""".strip(),
+)
 @click.argument("test", callback=validate_command)
 @click.argument(
     "filename",
@@ -290,6 +325,9 @@ def main(
     also_interesting: int,
     reduce_with: list[list[str]],
     python_reducer: bool,
+    llm: bool,
+    llm_model: str,
+    llm_only: bool,
 ) -> None:
     if timeout is not None and timeout <= 0:
         timeout = float("inf")
@@ -359,6 +397,39 @@ def main(
     # Determine if --also-interesting was explicitly passed
     # If --no-history and --also-interesting not explicit, disable also-interesting
     ctx = click.get_current_context()
+
+    if (
+        llm_only
+        and not llm
+        and ctx.get_parameter_source("llm") == click.core.ParameterSource.COMMANDLINE
+    ):
+        raise click.UsageError("--llm-only cannot be combined with --no-llm.")
+    llm_enabled = llm or llm_only
+    if llm_enabled:
+        # Validate the spec before checking availability so that spec
+        # errors are reported the same way on every platform.
+        try:
+            parse_model_spec(llm_model)
+        except ValueError as e:
+            raise click.BadParameter(str(e), param_hint="--llm-model")
+        if not llm_support_available():
+            message = (
+                "llama-cpp-python is not installed or cannot load on this "
+                "platform, so the LLM passes are unavailable."
+            )
+            # LLM mode is on by default; only fail if the user asked for
+            # it explicitly, otherwise degrade to reducing without it.
+            if llm_only or ctx.get_parameter_source("llm") in (
+                click.core.ParameterSource.COMMANDLINE,
+                click.core.ParameterSource.ENVIRONMENT,
+            ):
+                print(message, file=sys.stderr)
+                sys.exit(1)
+            print(
+                f"Warning: {message} Reducing without them.",
+                file=sys.stderr,
+            )
+            llm_enabled = False
     also_interesting_explicit = (
         ctx.get_parameter_source("also_interesting")
         == click.core.ParameterSource.COMMANDLINE
@@ -388,6 +459,9 @@ def main(
         "also_interesting_code": also_interesting_code,
         "external_reducers": reduce_with,
         "python_reducer": python_reducer,
+        "llm_enabled": llm_enabled,
+        "llm_model": llm_model,
+        "llm_only": llm_only,
     }
 
     state: ShrinkRayState[Any]
@@ -442,11 +516,25 @@ def main(
             also_interesting_code=also_interesting_code,
             external_reducers=reduce_with,
             python_reducer=python_reducer,
+            llm_enabled=llm_enabled,
+            llm_model=llm_model,
+            llm_only=llm_only,
         )
         return
 
     # At this point, ui_type must be UIType.basic since textual returned above
     assert ui_type == UIType.basic
+
+    # The basic UI has no modal: report what will be fetched and proceed.
+    pending = state.pending_downloads()
+    if pending:
+        print("Shrink Ray will download in the background:", file=sys.stderr)
+        for item in pending:
+            print(f"  - {item['description']}", file=sys.stderr)
+        if any(item["id"] == "llm" for item in pending):
+            print("(Run with --no-llm to reduce without the model.)", file=sys.stderr)
+    state.start_downloads([])
+
     ui = BasicUI(state)
 
     try:

@@ -4258,3 +4258,52 @@ exit 1
     await state.problem.setup()
     await state.reducer.run()
     assert state.problem.current_test_case == b"hello"
+
+
+def _history_output_state(tmp_path):
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\necho "still interesting"\ngrep -q hello "$1"\n')
+    script.chmod(0o755)
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+    return ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+    )
+
+
+async def test_adopted_reductions_keep_their_test_output(tmp_path):
+    # The adopted test case's output stays available (the LLM passes put it
+    # in their prompts); outputs of other interesting candidates are pruned.
+    state = _history_output_state(tmp_path)
+    _ = state.reducer  # registers the history callback
+    problem = state.problem
+    await problem.setup()
+    assert await problem.is_interesting(b"hello")
+    assert list(state._successful_outputs) == [b"hello"]
+    output = state._successful_outputs[b"hello"]
+    assert b"still interesting" in output
+
+
+async def test_history_records_reductions_without_captured_output(
+    tmp_path, monkeypatch
+):
+    state = _history_output_state(tmp_path)
+    monkeypatch.setattr(state, "_get_last_captured_output", lambda: None)
+    _ = state.reducer
+    problem = state.problem
+    await problem.setup()
+    assert await problem.is_interesting(b"hello")
+    assert state._successful_outputs == {}

@@ -25,6 +25,23 @@ def shrinkray_temp_directory(tmp_path):
         os.environ["SHRINKRAY_DIRECTORY"] = old_value
 
 
+@pytest.fixture(autouse=True)
+def no_llm_by_default():
+    """Disable the (default-on) LLM passes for all tests.
+
+    Without this, every test that runs the real CLI would try to download
+    the multi-gigabyte default model. Tests of the LLM mode itself opt
+    back in by deleting the variable or passing explicit flags.
+    """
+    old_value = os.environ.get("SHRINKRAY_LLM")
+    os.environ["SHRINKRAY_LLM"] = "0"
+    yield
+    if old_value is None:
+        os.environ.pop("SHRINKRAY_LLM", None)
+    else:
+        os.environ["SHRINKRAY_LLM"] = old_value
+
+
 # Re-export the hooks and fixture for pytest to pick up
 pytest_addoption = _textual_snapshot.pytest_addoption  # used
 pytest_sessionstart = _textual_snapshot.pytest_sessionstart  # used

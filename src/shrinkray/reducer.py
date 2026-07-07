@@ -10,6 +10,7 @@ import attrs
 import trio
 from attrs import define
 
+from shrinkray.downloads import DownloadCoordinator, grammar_plan
 from shrinkray.history import sanitize_for_filename
 from shrinkray.passes.bytes import (
     Split,
@@ -51,14 +52,12 @@ from shrinkray.passes.genericlanguages import (
     simplify_brackets,
 )
 from shrinkray.passes.json import JSON, JSON_PASSES
+from shrinkray.passes.llm import LLMClient, LLMConfig, llm_rewrite
 from shrinkray.passes.patching import PatchApplier, Patches
 from shrinkray.passes.python import is_python, python_reducer_command
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
 from shrinkray.passes.sequences import block_deletion, delete_duplicates
-from shrinkray.passes.treesitter import (
-    loadable_language_for_filename,
-    treesitter_passes,
-)
+from shrinkray.passes.treesitter import treesitter_passes
 from shrinkray.problem import (
     BasicReductionProblem,
     ReductionProblem,
@@ -175,6 +174,26 @@ class ShrinkRay(Reducer[bytes]):
     # Directory to write external reducer stderr logs to, or None to discard.
     reducer_log_dir: str | None = None
 
+    # Completion source for the LLM passes, or None to disable them.
+    llm_client: LLMClient | None = None
+
+    # Tuning and prompt context for the LLM passes.
+    llm_config: LLMConfig = attrs.Factory(LLMConfig)
+
+    # Run only the LLM passes, disabling every other reduction pass
+    # (including external reducers and pumps). Requires llm_client.
+    llm_only: bool = False
+
+    # Coordinates the background downloads a reduction may need (LLM
+    # model, tree-sitter grammars). When present, it decides if and when
+    # the LLM model loads, and resolves pending_treesitter_language.
+    downloads: DownloadCoordinator | None = None
+
+    # A tree-sitter language whose grammar is still downloading (or
+    # awaiting the user's go-ahead). Its passes are added to the running
+    # reduction when the download completes.
+    pending_treesitter_language: str | None = None
+
     # The external reducer passes built for this reducer, kept so their
     # subprocesses can be torn down when the run finishes.
     _external_reducer_passes: list[ExternalReducerPass] = attrs.field(
@@ -188,6 +207,7 @@ class ShrinkRay(Reducer[bytes]):
 
     # Pass control: disabled passes and skip functionality
     disabled_passes: set[str] = attrs.Factory(set)
+    _restarting: bool = attrs.field(default=False, init=False)
     _skip_requested: bool = attrs.field(default=False, init=False)
     _current_pass_scope: "trio.CancelScope | None" = attrs.field(
         default=None, init=False
@@ -351,6 +371,23 @@ class ShrinkRay(Reducer[bytes]):
                 await reducer_pass.aclose()
 
     def __attrs_post_init__(self) -> None:
+        if self.llm_only:
+            if self.llm_client is None:
+                raise ValueError("llm_only requires an llm_client")
+            # The LLM passes are the whole reduction: no initial cuts (their
+            # timeout-based cancellation fits fast passes, not model calls),
+            # no other tiers, no external reducers, no pumps.
+            self.initial_cuts = []
+            self.great_passes = [llm_rewrite(self.llm_client, self.llm_config)]
+            self.ok_passes = []
+            self.last_ditch_passes = []
+            self.polish_passes = []
+            return
+        if self.llm_client is not None:
+            # Model calls are far more expensive than ordinary passes, so
+            # they only run once the cheap passes have stopped making
+            # progress.
+            self.last_ditch_passes.append(llm_rewrite(self.llm_client, self.llm_config))
         external_passes = self.build_external_reducer_passes()
         self._external_reducer_passes = external_passes
         self.great_passes.extend(external_passes)
@@ -368,6 +405,21 @@ class ShrinkRay(Reducer[bytes]):
             SAT_PASSES,
         )
 
+    def _register_pending_treesitter(self) -> None:
+        """Add the pending grammar's passes once its download resolves."""
+        language = self.pending_treesitter_language
+        if language is None or self.downloads is None:
+            return
+        if self.downloads.grammar_available(language):
+            self.great_passes.extend(treesitter_passes(language))
+            # Restarted sub-reductions construct their passes afresh, so
+            # recording the language makes them include these too.
+            self.treesitter_language = language
+            self.pending_treesitter_language = None
+        elif not self.downloads.grammar_pending(language):
+            # Declined by the user, or the download failed: stop waiting.
+            self.pending_treesitter_language = None
+
     def register_format_specific_pass[T](
         self, format: Format[bytes, T], passes: Iterable[ReductionPass[T]]
     ):
@@ -378,13 +430,18 @@ class ShrinkRay(Reducer[bytes]):
 
     @property
     def pumps(self) -> Iterable[ReductionPump[bytes]]:
-        if self.enable_cpp_passes:
+        if self.enable_cpp_passes and not self.llm_only:
             return CPP_PUMPS
         else:
             return ()
 
     @property
     def status(self) -> str:
+        if self._restarting:
+            # The restarted sub-reduction mostly replays cached attempts,
+            # so the outer reducer would otherwise sit in "Selecting
+            # reduction pass" with no visible activity for its duration.
+            return "Re-reducing from original input to look for a better result"
         if self.current_pump is None:
             if self.current_reduction_pass is not None:
                 return f"Running reduction pass {self.current_reduction_pass.__name__}"
@@ -604,6 +661,12 @@ class ShrinkRay(Reducer[bytes]):
                 return
 
     async def run(self) -> None:
+        if self.llm_client is not None and self.downloads is None:
+            # Start any model download/load now so it overlaps with the
+            # cheap passes; the LLM pass waits for it when it first runs.
+            # With a download coordinator, starting is its decision (the
+            # user gets a say when the model would have to be fetched).
+            self.llm_client.start_loading()
         try:
             await self._run()
         finally:
@@ -673,9 +736,16 @@ class ShrinkRay(Reducer[bytes]):
             external_reducers=self.external_reducers,
             python_reducer=self.python_reducer,
             reducer_log_dir=self.reducer_log_dir,
+            llm_client=self.llm_client,
+            llm_config=self.llm_config,
+            llm_only=self.llm_only,
             restart_at_fixpoint=False,
         )
-        await reducer.run()
+        self._restarting = True
+        try:
+            await reducer.run()
+        finally:
+            self._restarting = False
 
     async def __reduce(self) -> None:
         await self.target.setup()
@@ -701,6 +771,8 @@ class ShrinkRay(Reducer[bytes]):
         await self.initial_cut()
 
         while True:
+            self._register_pending_treesitter()
+
             # Reset skip tracking for this iteration
             self._passes_were_skipped = False
 
@@ -726,6 +798,15 @@ class ShrinkRay(Reducer[bytes]):
                     await self.run_pass(self.incomplete_passes[name], budgeted=False)
                 if self.target.current_test_case != prev:
                     continue
+            # A grammar download that is still unresolved (in flight, or
+            # awaiting the user's decision) may yet add passes: wait for
+            # its outcome rather than finishing without it.
+            if (
+                self.pending_treesitter_language is not None
+                and self.downloads is not None
+            ):
+                await self.downloads.wait_for_grammar(self.pending_treesitter_language)
+                continue
             # Only terminate if no passes were skipped
             # If passes were skipped, we need another full run to be sure
             if not self._passes_were_skipped:
@@ -804,8 +885,16 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     external_reducers: list[list[str]] = attrs.Factory(list)
     python_reducer: bool = True
     reducer_log_dir: str | None = None
+    llm_client: LLMClient | None = None
+    llm_config: LLMConfig = attrs.Factory(LLMConfig)
+    llm_only: bool = False
+    downloads: DownloadCoordinator | None = None
 
     async def run(self):
+        if self.llm_client is not None and self.downloads is None:
+            # As in ShrinkRay.run: overlap the model load with the cheap
+            # passes of the per-file reductions.
+            self.llm_client.start_loading()
         while True:
             prev = self.target.current_test_case
             await self.delete_keys()
@@ -838,12 +927,22 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
                     )
                 else:
                     key_log_dir = None
+                treesitter_language, pending_treesitter = grammar_plan(
+                    k, self.downloads
+                )
                 key_shrinkray = ShrinkRay(
                     enable_cpp_passes=any(k.endswith(s) for s in C_FILE_EXTENSIONS),
-                    treesitter_language=loadable_language_for_filename(k),
+                    treesitter_language=treesitter_language,
+                    pending_treesitter_language=pending_treesitter,
+                    downloads=self.downloads,
                     target=key_problem,
                     external_reducers=self.external_reducers,
                     python_reducer=self.python_reducer,
                     reducer_log_dir=key_log_dir,
+                    llm_client=self.llm_client,
+                    # The prompt should name the file actually being
+                    # reduced, not the directory.
+                    llm_config=attrs.evolve(self.llm_config, filename=k),
+                    llm_only=self.llm_only,
                 )
                 nursery.start_soon(key_shrinkray.run)

@@ -10,13 +10,24 @@ from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 import pytest
 from rich.text import Text
 from textual.app import App
-from textual.widgets import DataTable, Label, ListView, Static, TabbedContent
+from textual.widgets import (
+    Button,
+    Checkbox,
+    DataTable,
+    Label,
+    ListView,
+    Static,
+    TabbedContent,
+)
+from textual.widgets import Button as _Button
 
 from shrinkray import tui
+from shrinkray.passes.llm import DEFAULT_MODEL_SPEC
 from shrinkray.subprocess.client import SubprocessClient
 from shrinkray.subprocess.protocol import PassStatsData, ProgressUpdate, Response
 from shrinkray.tui import (
     ContentPreview,
+    DownloadsModal,
     ExpandedBoxModal,
     HelpScreen,
     HistoryExplorerModal,
@@ -64,9 +75,12 @@ class FakeReductionClient:
         start_error: str | None = None,
         start_delay: float = 0.0,
         wait_indefinitely: bool = False,
+        pending_downloads: list[dict[str, str]] | None = None,
     ):
         self._updates = updates or []
         self._start_error = start_error
+        self._pending_downloads = pending_downloads or []
+        self.download_decisions: list[list[str]] = []
         self._start_delay = start_delay
         self._wait_indefinitely = wait_indefinitely
         self._started = False
@@ -98,10 +112,23 @@ class FakeReductionClient:
         also_interesting_code: int | None = None,
         external_reducers: list[list[str]] | None = None,
         python_reducer: bool = True,
+        llm_enabled: bool = False,
+        llm_model: str = DEFAULT_MODEL_SPEC,
+        llm_only: bool = False,
     ) -> Response:
         if self._start_error:
             return Response(id="start", error=self._start_error)
-        return Response(id="start", result={"status": "started"})
+        return Response(
+            id="start",
+            result={
+                "status": "started",
+                "pending_downloads": self._pending_downloads,
+            },
+        )
+
+    async def start_downloads(self, disabled: list[str]) -> Response:
+        self.download_decisions.append(disabled)
+        return Response(id="dl", result={"status": "downloads_started"})
 
     async def cancel(self) -> Response:
         self._cancelled = True
@@ -3020,6 +3047,9 @@ def test_run_textual_ui_creates_and_runs_app():
             also_interesting_code=None,
             external_reducers=None,
             python_reducer=True,
+            llm_enabled=False,
+            llm_model=DEFAULT_MODEL_SPEC,
+            llm_only=False,
         )
 
         # Verify run() was called
@@ -7465,3 +7495,170 @@ def test_stats_display_hides_timeout_when_unknown():
     )
     widget.update_stats(update)
     assert "Test timeout" not in widget.render()
+
+
+# === Downloads modal ===
+
+
+def test_downloads_modal_returns_unchecked_items():
+    """Unchecking an item and confirming disables exactly that item."""
+
+    async def run_test():
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=FakeReductionClient(updates=[], wait_indefinitely=True),
+            exit_on_completion=False,
+        )
+        result: dict[str, list[str] | None] = {}
+        pending = [
+            {"id": "llm", "description": "LLM model (2.7GB)"},
+            {"id": "grammar-go", "description": "tree-sitter grammar for go"},
+        ]
+
+        async with app.run_test() as pilot:
+
+            def record(disabled: list[str] | None) -> None:
+                result["disabled"] = disabled
+
+            await pilot.pause()
+            app.push_screen(DownloadsModal(pending), record)
+            await pilot.pause()
+            modal = app.screen
+            assert isinstance(modal, DownloadsModal)
+            # Untick the LLM item, leave the grammar ticked.
+            modal.query_one("#dl-llm", Checkbox).value = False
+            await pilot.pause()
+            modal.query_one("#downloads-ok", Button).press()
+            await pilot.pause()
+
+        assert result["disabled"] == ["llm"]
+
+    run_async(run_test())
+
+
+def test_downloads_modal_default_enables_everything():
+    """Confirming without changing anything disables nothing."""
+
+    async def run_test():
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=FakeReductionClient(updates=[], wait_indefinitely=True),
+            exit_on_completion=False,
+        )
+        result: dict[str, list[str] | None] = {}
+        pending = [{"id": "llm", "description": "LLM model (2.7GB)"}]
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.push_screen(
+                DownloadsModal(pending), lambda d: result.__setitem__("disabled", d)
+            )
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            await asyncio.sleep(0.05)
+            await pilot.pause()
+
+        assert result["disabled"] == []
+
+    run_async(run_test())
+
+
+def test_prompt_for_downloads_reports_decision_to_client():
+    """_prompt_for_downloads forwards the disabled ids to the client."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        await fake_client.start()
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+            exit_on_completion=False,
+        )
+        pending = [{"id": "grammar-go", "description": "tree-sitter grammar for go"}]
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._prompt_for_downloads(pending)
+            await pilot.pause()
+            modal = app.screen
+            assert isinstance(modal, DownloadsModal)
+            modal.query_one("#dl-grammar-go", Checkbox).value = False
+            await pilot.pause()
+            modal.query_one("#downloads-ok", Button).press()
+            await pilot.pause()
+            await asyncio.sleep(0.05)
+            await pilot.pause()
+
+        assert fake_client.download_decisions == [["grammar-go"]]
+
+    run_async(run_test())
+
+
+def test_owned_client_start_prompts_for_downloads():
+    """When the app owns its client, a pending-downloads start opens the modal."""
+
+    async def run_test():
+        mock_client = MagicMock()
+        mock_client.start = AsyncMock()
+        mock_client.start_reduction = AsyncMock(
+            return_value=Response(
+                id="start",
+                result={
+                    "status": "started",
+                    "pending_downloads": [
+                        {"id": "llm", "description": "LLM model (2.7GB)"}
+                    ],
+                },
+            )
+        )
+        mock_client.start_downloads = AsyncMock(
+            return_value=Response(id="dl", result={"status": "downloads_started"})
+        )
+        mock_client.close = AsyncMock()
+        mock_client.is_completed = False
+        mock_client.error_message = None
+
+        async def mock_updates():
+            # Keep the app alive long enough to interact with the modal.
+            await asyncio.sleep(2.0)
+            return
+            yield
+
+        mock_client.get_progress_updates = mock_updates
+
+        with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
+            app = ShrinkRayApp(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                exit_on_completion=False,
+            )
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.2)
+                await pilot.pause()
+                assert isinstance(app.screen, DownloadsModal)
+                app.screen.query_one("#downloads-ok", Button).press()
+                await pilot.pause()
+                await asyncio.sleep(0.05)
+                await pilot.pause()
+                mock_client.start_downloads.assert_awaited_once_with([])
+
+    run_async(run_test())
+
+
+def test_downloads_modal_ignores_other_buttons():
+    """A button press that isn't the confirm button does not dismiss."""
+
+    modal = DownloadsModal([{"id": "llm", "description": "LLM"}])
+    dismissed: list[object] = []
+    modal.dismiss = lambda result=None: dismissed.append(result)  # type: ignore[method-assign]
+
+    event = MagicMock()
+    event.button = MagicMock(spec=_Button)
+    event.button.id = "something-else"
+    modal.on_button_pressed(event)
+    assert dismissed == []

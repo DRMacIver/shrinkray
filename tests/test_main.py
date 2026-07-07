@@ -19,6 +19,7 @@ from attrs import define
 from click.testing import CliRunner
 
 from shrinkray.__main__ import _validate_memory_limit, main, worker_main
+from shrinkray.llm_client import llm_support_available
 from shrinkray.process import default_memory_limit, interrupt_wait_and_kill
 from shrinkray.validation import ValidationResult
 
@@ -1941,3 +1942,173 @@ grep "hello" "{log_file}"
     finally:
         if child.isalive():
             child.terminate(force=True)
+
+
+# === LLM mode options ===
+
+# The binary no-op test constructs a real client and runs a reduction, so
+# it needs llama-cpp-python to be loadable (it isn't on e.g. OpenBSD; see
+# tests/test_llm_client.py). The option-validation tests run everywhere.
+requires_llm_support = pytest.mark.skipif(
+    not llm_support_available(),
+    reason="llama-cpp-python cannot load on this platform",
+)
+
+
+def _llm_target(tmp_path, content: bytes, pattern: str):
+    target = tmp_path / "target.bin"
+    target.write_bytes(content)
+    script = tmp_path / "test.sh"
+    script.write_text(f'#!/bin/sh\ngrep -q {pattern} "$1"\n')
+    script.chmod(0o755)
+    return str(script), str(target)
+
+
+def test_llm_only_conflicts_with_no_llm(tmp_path):
+    script, target = _llm_target(tmp_path, b"say xy\n", "xy")
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main, [script, target, "--ui=basic", "--llm-only", "--no-llm"]
+    )
+    assert result.exit_code == 2
+    assert "--llm-only cannot be combined with --no-llm" in result.output
+
+
+def test_llm_rejects_invalid_model_spec(tmp_path):
+    script, target = _llm_target(tmp_path, b"say xy\n", "xy")
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main, [script, target, "--ui=basic", "--llm", "--llm-model=not-a-model"]
+    )
+    assert result.exit_code == 2
+    assert "not-a-model" in result.output
+
+
+def test_explicit_llm_fails_when_unsupported(tmp_path, monkeypatch):
+    script, target = _llm_target(tmp_path, b"say xy\n", "xy")
+    monkeypatch.setattr("shrinkray.__main__.llm_support_available", lambda: False)
+    runner = CliRunner()
+    result = runner.invoke(main, [script, target, "--ui=basic", "--llm"])
+    assert result.exit_code == 1
+    assert "cannot load on this platform" in result.output
+
+
+def test_llm_enabled_by_env_var_fails_when_unsupported(tmp_path, monkeypatch):
+    script, target = _llm_target(tmp_path, b"say xy\n", "xy")
+    monkeypatch.setattr("shrinkray.__main__.llm_support_available", lambda: False)
+    monkeypatch.setenv("SHRINKRAY_LLM", "1")
+    runner = CliRunner()
+    result = runner.invoke(main, [script, target, "--ui=basic"])
+    assert result.exit_code == 1
+    assert "cannot load on this platform" in result.output
+
+
+def test_default_llm_degrades_with_a_warning_when_unsupported(tmp_path, monkeypatch):
+    # LLM mode is on by default, but on platforms where llama-cpp-python
+    # can't load, an ordinary reduction must still work.
+    monkeypatch.setattr("shrinkray.__main__.llm_support_available", lambda: False)
+    monkeypatch.delenv("SHRINKRAY_LLM")
+    target = tmp_path / "target.txt"
+    target.write_text("say xy please\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q xy "$1"\n')
+    script.chmod(0o755)
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(main, [str(script), str(target), "--ui=basic"])
+    assert result.exit_code == 0
+    assert "Reducing without them" in result.output
+    assert "xy" in target.read_text()
+
+
+def test_env_var_disables_llm(tmp_path):
+    # The conftest sets SHRINKRAY_LLM=0; with a garbage model configured,
+    # the reduction can only succeed because the LLM passes are off.
+    target = tmp_path / "target.txt"
+    target.write_text("say xy please\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q xy "$1"\n')
+    script.chmod(0o755)
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"not really a model")
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main, [str(script), str(target), "--ui=basic", f"--llm-model={model}"]
+    )
+    assert result.exit_code == 0
+
+
+@requires_llm_support
+def test_llm_only_reduction_of_binary_input_is_a_no_op(tmp_path):
+    # Binary input can't be prompted, so the LLM pass (the only pass in
+    # --llm-only mode) never generates and the reduction just converges.
+    # The pattern sits on a clean line because BSD grep won't match lines
+    # containing invalid UTF-8, and the model is a dummy local file so
+    # that the eager background load doesn't try to download anything
+    # (its failure is irrelevant: the pass never waits on it).
+    content = b"xy\n\xc3\x28\n"
+    script, target = _llm_target(tmp_path, content, "xy")
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"not really a model")
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main,
+        [script, target, "--ui=basic", "--llm-only", f"--llm-model={model}"],
+    )
+    assert result.exit_code == 0
+    # No pass can touch this input, so nothing gets deleted (whitespace may
+    # still be canonicalised).
+    final = pathlib.Path(target).read_bytes()
+    assert b"xy" in final
+    assert len(final) == len(content)
+
+
+def test_basic_ui_reports_pending_downloads(tmp_path, monkeypatch):
+    target = tmp_path / "target.txt"
+    target.write_text("say xy please\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q xy "$1"\n')
+    script.chmod(0o755)
+
+    pending = [
+        {"id": "llm", "description": "LLM model x (about 2.7GB)"},
+        {"id": "grammar-go", "description": "tree-sitter grammar for go"},
+    ]
+    monkeypatch.setattr(
+        "shrinkray.state.ShrinkRayStateSingleFile.pending_downloads",
+        lambda self: pending,
+    )
+    started: list[list[str]] = []
+    monkeypatch.setattr(
+        "shrinkray.state.ShrinkRayStateSingleFile.start_downloads",
+        lambda self, disabled: started.append(disabled),
+    )
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(main, [str(script), str(target), "--ui=basic"])
+    assert result.exit_code == 0
+    assert "will download in the background" in result.output
+    assert "tree-sitter grammar for go" in result.output
+    assert "LLM model x" in result.output
+    assert "--no-llm" in result.output
+    assert started == [[]]
+
+
+def test_basic_ui_download_notice_omits_no_llm_when_only_grammar(tmp_path, monkeypatch):
+    target = tmp_path / "target.txt"
+    target.write_text("say xy please\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q xy "$1"\n')
+    script.chmod(0o755)
+
+    monkeypatch.setattr(
+        "shrinkray.state.ShrinkRayStateSingleFile.pending_downloads",
+        lambda self: [{"id": "grammar-go", "description": "grammar for go"}],
+    )
+    monkeypatch.setattr(
+        "shrinkray.state.ShrinkRayStateSingleFile.start_downloads",
+        lambda self, disabled: None,
+    )
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(main, [str(script), str(target), "--ui=basic"])
+    assert result.exit_code == 0
+    assert "grammar for go" in result.output
+    assert "--no-llm" not in result.output

@@ -1238,3 +1238,20 @@ def test_subprocess_client_close_handles_stderr_log_unlink_exception():
         await client.close()
 
     asyncio.run(run())
+
+
+def test_subprocess_client_start_downloads_sends_command():
+    """start_downloads forwards the disabled list over send_command."""
+
+    async def run():
+        client = SubprocessClient()
+        client.send_command = AsyncMock(  # type: ignore[method-assign]
+            return_value=Response(id="dl", result={"status": "downloads_started"})
+        )
+        response = await client.start_downloads(["llm", "grammar-go"])
+        client.send_command.assert_awaited_once_with(
+            "start_downloads", {"disabled": ["llm", "grammar-go"]}
+        )
+        assert response.result == {"status": "downloads_started"}
+
+    asyncio.run(run())

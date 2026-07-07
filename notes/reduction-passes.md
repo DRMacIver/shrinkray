@@ -34,6 +34,54 @@ Passes for DIMACS CNF files (SAT solver input format). Includes clause deletion,
 
 C/C++ passes built on a sloppy lexer plus bracket matching (a pure Python replacement for creduce's `clang_delta`, which shrink ray previously shelled out to). Rather than parsing properly, these find things that look like functions, namespaces, class heads, templates, call expressions and typedefs, then overgenerate candidate edits and let the interestingness test reject the wrong ones. Includes `replace_function_bodies` (function def -> declaration), `delete_function_definitions`, `remove_namespaces` (including `extern "C"`), `remove_base_classes`, `remove_constructor_initializers`, `remove_template_parts`, `replace_type_with_int`, and `simplify_call_expressions`, plus two **pumps** (which may temporarily increase code size): `inline_typedefs` and `inline_function_calls`.
 
+### downloads.py
+
+The startup download coordinator. Two resources a reduction may need are
+fetched lazily: the LLM model (multi-gigabyte) and tree-sitter grammars
+for the input's language. Neither downloads silently. `ShrinkRayState`
+builds a `DownloadCoordinator` describing what's missing
+(`missing_grammars` diffs the input's languages against
+`downloaded_languages()`; the LLM model via
+`LlamaCppClient.model_needs_download`), the UI presents it (the TUI as a
+modal over the already-running reduction, the basic UI as a printed
+list), and only then does `DownloadCoordinator.start(disabled)` begin the
+approved downloads. An already-cached model still loads immediately
+(`start_immediate`) since there's nothing to consent to.
+
+Passes that depend on a download join the running reduction when it
+completes: the LLM passes already wait on `LLMClient.wait_until_ready`,
+and the reducer carries a `pending_treesitter_language` whose passes it
+registers (via `_register_pending_treesitter`) once
+`grammar_available` turns true, waiting at its fixpoint for the outcome
+rather than terminating without them (`grammar_plan` decides per file
+whether a grammar is usable now or pending). A declined or failed
+download simply never adds its passes.
+
+### llm.py
+
+The LLM mode (on by default; `--no-llm` or `SHRINKRAY_LLM=0` disables). `llm_rewrite` feeds the whole current
+test case to a language model, prompted with the file name, the text of
+the user's interestingness script, and the output the test produced for
+the current test case, and asks for several progressively
+smaller rewrites in fenced code blocks; every block that sorts below the
+current test case is offered to `is_interesting`, so a wrong or
+hallucinating model wastes time but can't hurt correctness. The pass runs
+in the last-ditch tier (a generation costs seconds to minutes, so it only
+runs when the cheap passes stall) unless `--llm-only` strips every other
+pass. The model download/load starts on a background thread as soon as
+the reduction begins (`start_loading`), overlapping with the cheap
+passes; the pass waits for readiness (`wait_until_ready`) only when it's
+actually scheduled, and skips the wait entirely for inputs it could
+never prompt with. Inference is in-process through llama-cpp-python
+(`llm_client.py`), one generation at a time behind a thread lock;
+the `LLMClient` ABC is the seam for pointing at other completion sources
+(e.g. an OpenAI-compatible endpoint) later. Prompt-shape decisions were
+measured with `evaluation/llm_prompt_experiment.py` against the benchmark
+problems: including the interestingness script in the prompt roughly
+doubled the valid-candidate rate, whole-file rewrites beat line-deletion
+lists by a wide margin, and the model frequently found reductions below
+shrink ray's own fixpoint on already-reduced corpus entries.
+
 ### treesitter.py
 
 Grammar-aware passes for any language with a grammar in

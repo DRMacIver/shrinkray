@@ -107,9 +107,10 @@ async def run_shrink_ray(
     help=(
         "Cap the address space of each interestingness-test subprocess so a "
         "runaway test cannot exhaust host memory. Accepts a byte count or a "
-        "K/M/G/T suffix (e.g. '4G'). Set to 0 to disable. Defaults to the "
-        "machine's physical RAM. Enforced via RLIMIT_AS, which is not honoured "
-        "on macOS (there it only warns if the initial test exceeds it)."
+        "K/M/G/T suffix (e.g. '4G'), with a minimum of 1 MiB. Set to 0 to "
+        "disable. Defaults to the machine's physical RAM. Enforced via "
+        "RLIMIT_AS, which is not honoured on macOS (there it only warns if "
+        "the initial test exceeds it)."
     ),
 )
 @click.option(
@@ -340,7 +341,17 @@ def main(
     if timeout is not None and timeout <= 0:
         timeout = float("inf")
 
-    if memory_limit is not None and not MEMORY_LIMIT_ENFORCEABLE:
+    # Only warn about unenforceable limits when the user explicitly asked for
+    # one: the default (physical RAM) is applied silently, so macOS users are
+    # not nagged on every run for a limit they never set.
+    memory_limit_source = click.get_current_context().get_parameter_source(
+        "memory_limit"
+    )
+    if (
+        memory_limit is not None
+        and not MEMORY_LIMIT_ENFORCEABLE
+        and memory_limit_source == click.core.ParameterSource.COMMANDLINE
+    ):
         print(
             "Warning: --memory-limit cannot be enforced on this platform "
             "(macOS does not honour RLIMIT_AS); shrink ray will still warn if "

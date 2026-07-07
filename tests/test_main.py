@@ -410,6 +410,25 @@ def test_memory_limit_warns_only_when_not_enforceable(tmpdir, enforceable):
     assert ("cannot be enforced" in result.stderr) == (not enforceable)
 
 
+def test_memory_limit_no_warning_when_not_explicit(tmpdir):
+    # When the user does not pass --memory-limit, the default (physical RAM)
+    # is used silently: no warning even where the limit is unenforceable,
+    # so macOS users are not nagged on every run.
+    target = tmpdir / "hello.txt"
+    target.write_text("hello world", encoding="utf-8")
+    script = tmpdir / "test.sh"
+    script.write_text("#!/bin/sh\nexit 0", encoding="utf-8")  # not executable
+
+    runner = CliRunner(catch_exceptions=False)
+    with patch("shrinkray.__main__.MEMORY_LIMIT_ENFORCEABLE", False):
+        result = runner.invoke(
+            main,
+            [str(script), str(target), "--ui=basic"],
+        )
+    assert result.exit_code == 1  # exits on the non-executable test
+    assert "cannot be enforced" not in result.stderr
+
+
 def test_memory_limit_disabled_gives_no_warning(tmpdir):
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")

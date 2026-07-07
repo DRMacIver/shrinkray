@@ -28,12 +28,12 @@ from shrinkray.process import (
 @pytest.mark.parametrize(
     "value,expected",
     [
-        ("1024", 1024),
+        ("1048576", 1024**2),  # exactly the 1 MiB floor
         ("512M", 512 * 1024**2),
         ("8G", 8 * 1024**3),
         ("1.5G", int(1.5 * 1024**3)),
         ("2T", 2 * 1024**4),
-        ("4K", 4 * 1024),
+        ("1M", 1024**2),
         ("  8G  ", 8 * 1024**3),  # surrounding whitespace
         ("8g", 8 * 1024**3),  # lowercase suffix
         ("0", None),  # zero disables
@@ -51,6 +51,38 @@ def test_parse_memory_limit(value, expected):
 @pytest.mark.parametrize("value", ["abc", "12x", "G", ""])
 def test_parse_memory_limit_rejects_garbage(value):
     with pytest.raises(ValueError):
+        parse_memory_limit(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "inf",
+        "-inf",
+        "nan",
+        "infG",  # non-finite with a suffix still overflows int()
+    ],
+)
+def test_parse_memory_limit_rejects_non_finite(value):
+    # These used to reach int(amount * multiplier) and raise OverflowError
+    # (or silently accept NaN) outside the ValueError handling.
+    with pytest.raises(ValueError):
+        parse_memory_limit(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "1",  # rounds down to ulimit -v 0: every test fails instantly
+        "512",
+        "1023",
+        "1024",  # a single kibibyte is still far too small
+        "4K",
+        "1048575",  # one byte below the 1 MiB floor
+    ],
+)
+def test_parse_memory_limit_rejects_too_small(value):
+    with pytest.raises(ValueError, match="too small"):
         parse_memory_limit(value)
 
 

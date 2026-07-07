@@ -3930,6 +3930,45 @@ def test_sweep_tolerates_missing_directory(tmp_path):
     state.sweep_stale_working_files()
 
 
+def make_in_place_directory_state(tmp_path):
+    """Factory for an in-place directory-mode state, which writes candidate
+    *directories* named ``<base>-<hex>`` next to the target."""
+    script = tmp_path / "t.sh"
+    script.write_text("#!/bin/sh\nexit 0")
+    script.chmod(0o755)
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "a.txt").write_bytes(b"aaaa")
+    return ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=True,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="target",
+        parallelism=1,
+        initial={"a.txt": b"aaaa"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+    )
+
+
+def test_sweep_removes_stale_candidate_directory(tmp_path):
+    # In-place directory mode leaves candidate *directories* behind on a
+    # hard kill. The sweep must remove them, not just plain files.
+    state = make_in_place_directory_state(tmp_path)
+    stale_dir = tmp_path / ("target-" + "a" * 32)
+    stale_dir.mkdir()
+    (stale_dir / "leftover.txt").write_bytes(b"junk")
+
+    state.sweep_stale_working_files()
+
+    assert not stale_dir.exists()
+
+
 def test_sweep_tolerates_unlink_failure(tmp_path, monkeypatch):
     state = make_in_place_state(tmp_path)
     # Create the stale file after construction so the constructor's own

@@ -422,8 +422,11 @@ class ShrinkRayState[TestCase](ABC):
     def sweep_stale_working_files(self) -> None:
         """Remove any leftover temporary candidate files from a previous
         run that was killed before it could clean up after itself. Only
-        files matching this run's own ``<stem>-<hex><ext>`` pattern are
-        removed, so unrelated files are never touched."""
+        entries matching this run's own ``<stem>-<hex><ext>`` pattern are
+        removed, so unrelated files are never touched.
+
+        In in-place directory mode each candidate is a *directory*, so
+        directories are removed recursively; plain files are unlinked."""
         info = self.stale_working_file_pattern()
         if info is None:
             return
@@ -435,10 +438,13 @@ class ShrinkRayState[TestCase](ABC):
         for name in names:
             if pattern.match(name):
                 path = os.path.join(directory, name)
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
 
     @property
     def is_directory_mode(self) -> bool:

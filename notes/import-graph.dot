@@ -17,6 +17,7 @@ digraph imports {
     "passes.genericlanguages";
     "passes.json";
     "passes.llm";
+    "passes.llmtransforms";
     "passes.patching";
     "passes.python";
     "passes.sat";
@@ -64,6 +65,10 @@ digraph imports {
     "passes.json" -> "problem";
     "passes.llm" -> "passes.definitions";
     "passes.llm" -> "problem";
+    "passes.llmtransforms" -> "passes.definitions";
+    "passes.llmtransforms" -> "passes.llm";
+    "passes.llmtransforms" -> "passes.treesitter";
+    "passes.llmtransforms" -> "problem";
     "passes.patching" -> "problem";
     "passes.python" -> "problem";
     "passes.python" -> "work";
@@ -89,6 +94,7 @@ digraph imports {
     "reducer" -> "passes.genericlanguages";
     "reducer" -> "passes.json";
     "reducer" -> "passes.llm";
+    "reducer" -> "passes.llmtransforms";
     "reducer" -> "passes.patching";
     "reducer" -> "passes.python";
     "reducer" -> "passes.sat";

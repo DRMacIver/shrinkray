@@ -53,6 +53,7 @@ from shrinkray.passes.genericlanguages import (
 )
 from shrinkray.passes.json import JSON, JSON_PASSES
 from shrinkray.passes.llm import LLMClient, LLMConfig, llm_rewrite
+from shrinkray.passes.llmtransforms import llm_transform_pumps
 from shrinkray.passes.patching import PatchApplier, Patches
 from shrinkray.passes.python import is_python, python_reducer_command
 from shrinkray.passes.sat import SAT_PASSES, DimacsCNF
@@ -430,10 +431,18 @@ class ShrinkRay(Reducer[bytes]):
 
     @property
     def pumps(self) -> Iterable[ReductionPump[bytes]]:
-        if self.enable_cpp_passes and not self.llm_only:
-            return CPP_PUMPS
-        else:
+        if self.llm_only:
             return ()
+        result: list[ReductionPump[bytes]] = []
+        if self.enable_cpp_passes:
+            result.extend(CPP_PUMPS)
+        if self.llm_client is not None and self.treesitter_language is not None:
+            result.extend(
+                llm_transform_pumps(
+                    self.llm_client, self.llm_config, self.treesitter_language
+                )
+            )
+        return result
 
     @property
     def status(self) -> str:

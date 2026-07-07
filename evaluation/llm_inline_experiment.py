@@ -102,6 +102,59 @@ def _python_large() -> bytes:
 
 
 PROBLEMS: dict[str, InlineProblem] = {
+    # Exercises llm_inline_definitions (and then llm_inline_calls and
+    # llm_evaluate_constants): N is bound once and used twice, and its
+    # binding cannot be deleted while the uses remain.
+    "python_globals": InlineProblem(
+        language="python",
+        extension=".py",
+        initial=(b"N = 3\n\ndef f(x):\n    return x + N\n\nprint(f(N))\n"),
+        expected_output="6\n",
+        function_name=b"N",
+        run_argv=["python3", "{file}"],
+        oracle_description='Running the file must print exactly "6".',
+    ),
+    # Exercises llm_unroll_loops: the loop cannot be deleted while the
+    # accumulation is needed, and no mechanical pass can unroll it.
+    "python_loop": InlineProblem(
+        language="python",
+        extension=".py",
+        initial=(b"total = 0\nfor i in [5]:\n    total += i\nprint(total)\n"),
+        expected_output="5\n",
+        function_name=b"total",
+        run_argv=["python3", "{file}"],
+        oracle_description='Running the file must print exactly "5".',
+    ),
+    # Exercises llm_stub_bodies: the oracle pins the call text, so the
+    # definition must stay, and Go rejects an empty body for a function
+    # returning int — only a synthesized stub can shrink it.
+    "go_stub": InlineProblem(
+        language="go",
+        extension=".go",
+        initial=(
+            b"package main\n\n"
+            b"import \"fmt\"\n\n"
+            b"func big(x int) int {\n"
+            b"\ty := x * 2\n"
+            b"\tfor i := 0; i < 3; i++ {\n"
+            b"\t\ty += i\n"
+            b"\t}\n"
+            b"\treturn y\n"
+            b"}\n\n"
+            b"func main() {\n"
+            b"\tbig(1)\n"
+            b'\tfmt.Println("ok")\n'
+            b"}\n"
+        ),
+        expected_output="ok\n",
+        function_name=b"big",
+        run_argv=["go", "run", "{file}"],
+        required_line=b"big(1)",
+        oracle_description=(
+            'Running the file must print exactly "ok", and the file must '
+            'still contain "big(1)".'
+        ),
+    ),
     "python_simple": InlineProblem(
         language="python",
         extension=".py",

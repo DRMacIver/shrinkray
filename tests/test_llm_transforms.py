@@ -98,7 +98,9 @@ def test_skips_java_calls_on_an_explicit_object():
 
 def test_skips_calls_with_no_recognisable_callee():
     # Rust macro invocations are call-like but name no function.
-    source = b'fn f(x: i32) -> i32 { x + 1 }\nfn main() { let y = f(3); println!("hi"); }\n'
+    source = (
+        b'fn f(x: i32) -> i32 { x + 1 }\nfn main() { let y = f(3); println!("hi"); }\n'
+    )
     assert target_texts("rust", source) == ["f(3)"]
 
 
@@ -525,7 +527,10 @@ def test_inlines_a_definition_end_to_end():
     source = b"A = 10\nprint(A)\n"
     client = FakeLLMClient(responses=["```\n10\n```"])
     pump = llm_transform_pump(
-        client, LLMConfig(), "python", "llm_inline_definitions(python)",
+        client,
+        LLMConfig(),
+        "python",
+        "llm_inline_definitions(python)",
         inline_definition_targets,
     )
     result, _ = run_pump(pump, source, lambda x: b"print" in x)
@@ -536,7 +541,10 @@ def test_evaluates_a_constant_end_to_end():
     source = b"print(10*2+ 1)\n"
     client = FakeLLMClient(responses=["```\n21\n```"])
     pump = llm_transform_pump(
-        client, LLMConfig(), "python", "llm_evaluate_constants(python)",
+        client,
+        LLMConfig(),
+        "python",
+        "llm_evaluate_constants(python)",
         constant_expression_targets,
     )
     result, _ = run_pump(pump, source, lambda x: b"print" in x)

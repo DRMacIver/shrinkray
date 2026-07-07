@@ -231,9 +231,7 @@ def _callee_name(node: tree_sitter.Node) -> tree_sitter.Node | None:
     return None
 
 
-def inline_call_targets(
-    tree: tree_sitter.Tree, source: bytes
-) -> list[TransformTarget]:
+def inline_call_targets(tree: tree_sitter.Tree, source: bytes) -> list[TransformTarget]:
     """Calls to functions defined in the file, paired with instructions
     to inline them.
 
@@ -242,6 +240,7 @@ def inline_call_targets(
     skipped), the call must not be inside that definition (recursion),
     and both must be small enough to prompt with.
     """
+
     def named_definitions() -> Iterable[tuple[bytes, tree_sitter.Node]]:
         for node in iter_nodes(tree):
             if not node.is_named or not _matches(node.type, _DEFINITION_WORDS):
@@ -292,9 +291,7 @@ def inline_call_targets(
     return targets
 
 
-def _binding_name(
-    node: tree_sitter.Node, source: bytes
-) -> tree_sitter.Node | None:
+def _binding_name(node: tree_sitter.Node, source: bytes) -> tree_sitter.Node | None:
     """The name child of a node binding one plain identifier to a value
     or type, or None."""
     if not _matches(node.type, _BINDING_WORDS):

@@ -3,7 +3,9 @@ import libcst.matchers as m
 import pytest
 
 from shrinkray.passes.python import (
+    MAX_PYTHON_BRACKET_DEPTH,
     PYTHON_PASSES,
+    _exceeds_bracket_depth,
     is_python,
     libcst_transform,
     lift_indented_constructs,
@@ -224,6 +226,76 @@ def test_is_python_does_not_crash_on_deeply_nested_brackets(source):
     because it probes every input with is_python.
     """
     assert is_python(source) is False
+
+
+# === bracket-depth scanner (skips strings and comments) ===
+
+
+def test_is_python_counts_string_bracket_data_as_python():
+    """A valid file whose deep brackets are all inside a string is still Python.
+
+    Regression: the depth scanner counted brackets inside string literals, so a
+    valid Python file containing a string with many unbalanced brackets (e.g. a
+    regex corpus) was silently classified not-Python and never reduced.
+    """
+    source = b'x = "' + b"[" * (MAX_PYTHON_BRACKET_DEPTH * 3) + b'"\n'
+    assert is_python(source) is True
+
+
+def test_is_python_ignores_brackets_in_comments():
+    """Brackets inside a comment do not count toward the depth limit."""
+    source = b"x = 1  # " + b"(" * (MAX_PYTHON_BRACKET_DEPTH * 3) + b"\n"
+    assert is_python(source) is True
+
+
+def test_is_python_still_excludes_deeply_nested_brackets():
+    """Genuinely deep *structural* nesting is still refused (would crash libcst)."""
+    source = (
+        b"[" * (MAX_PYTHON_BRACKET_DEPTH * 3)
+        + b"1"
+        + b"]" * (MAX_PYTHON_BRACKET_DEPTH * 3)
+    )
+    assert is_python(source) is False
+
+
+@pytest.mark.parametrize("as_bytes", [False, True])
+def test_bracket_depth_ignores_string_content(as_bytes):
+    src = "'" + "(" * 300 + "'"
+    assert _exceeds_bracket_depth(src.encode() if as_bytes else src, 200) is False
+
+
+@pytest.mark.parametrize("as_bytes", [False, True])
+def test_bracket_depth_counts_structural_brackets(as_bytes):
+    src = "(" * 300
+    assert _exceeds_bracket_depth(src.encode() if as_bytes else src, 200) is True
+
+
+def test_bracket_depth_triple_quoted_string():
+    src = '"""' + "(" * 300 + '"""'
+    assert _exceeds_bracket_depth(src, 200) is False
+
+
+def test_bracket_depth_triple_quote_allows_lone_quote_inside():
+    # A single quote inside a triple-quoted string does not end it.
+    src = '"""' + '"' + "(" * 300 + '"""'
+    assert _exceeds_bracket_depth(src, 200) is False
+
+
+def test_bracket_depth_escaped_quote_does_not_end_string():
+    # The escaped quote does not close the string, so the brackets are content.
+    src = "'\\'" + "(" * 300 + "'"
+    assert _exceeds_bracket_depth(src, 200) is False
+
+
+def test_bracket_depth_unterminated_string_stops_at_newline():
+    # After an unterminated single-line string, the next line is scanned as code.
+    src = "'oops\n" + "(" * 300
+    assert _exceeds_bracket_depth(src, 200) is True
+
+
+def test_bracket_depth_structural_after_string_still_counts():
+    src = "''" + "(" * 300
+    assert _exceeds_bracket_depth(src, 200) is True
 
 
 async def test_libcst_transform_handles_test_case_becoming_invalid():

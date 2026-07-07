@@ -22,18 +22,83 @@ MAX_PYTHON_BRACKET_DEPTH = 200
 
 _OPENING_BRACKETS = frozenset(b"([{")
 _CLOSING_BRACKETS = frozenset(b")]}")
+_QUOTES = frozenset(b"'\"")
+_HASH = ord("#")
+_BACKSLASH = ord("\\")
+_NEWLINE = ord("\n")
+
+
+def _skip_string_literal(start: int, length: int, code_at: Callable[[int], int]) -> int:
+    """Return the index just past the string literal opening at ``start``.
+
+    ``start`` indexes an opening quote. Handles triple-quoted strings and
+    backslash escapes. When the literal is unterminated the scan runs to the end
+    of the line (single-quoted) or the end of input (triple-quoted); erring
+    toward consuming *more* input is the safe direction for
+    :func:`_exceeds_bracket_depth`, since it can only hide brackets, never invent
+    them.
+    """
+    quote = code_at(start)
+    triple = (
+        start + 2 < length
+        and code_at(start + 1) == quote
+        and code_at(start + 2) == quote
+    )
+    i = start + 3 if triple else start + 1
+    while i < length:
+        code = code_at(i)
+        if code == _BACKSLASH:
+            i += 2  # Skip the escaped character.
+            continue
+        if code == quote:
+            if not triple:
+                return i + 1
+            if i + 2 < length and code_at(i + 1) == quote and code_at(i + 2) == quote:
+                return i + 3
+            i += 1  # A lone quote inside a triple-quoted string is content.
+            continue
+        if not triple and code == _NEWLINE:
+            # Unterminated single-line string: resume scanning at the newline.
+            return i
+        i += 1
+    return length
 
 
 def _exceeds_bracket_depth[AnyStr: (str, bytes)](source: AnyStr, limit: int) -> bool:
+    """Return True if *structural* bracket nesting in ``source`` exceeds ``limit``.
+
+    Brackets that appear inside string literals or comments do not count. The
+    string/comment scanner is deliberately sloppy: when in doubt it treats more
+    of the input as string or comment content, which can only *lower* the counted
+    depth, so it never wrongly rejects a valid file that a stricter scan would
+    have accepted.
+    """
+    length = len(source)
+
+    def code_at(index: int) -> int:
+        char = source[index]
+        return ord(char) if isinstance(char, str) else char
+
     depth = 0
-    for char in source:
-        code = ord(char) if isinstance(char, str) else char
+    i = 0
+    while i < length:
+        code = code_at(i)
+        if code == _HASH:
+            # Comment: skip to the end of the line.
+            i += 1
+            while i < length and code_at(i) != _NEWLINE:
+                i += 1
+            continue
+        if code in _QUOTES:
+            i = _skip_string_literal(i, length, code_at)
+            continue
         if code in _OPENING_BRACKETS:
             depth += 1
             if depth > limit:
                 return True
         elif code in _CLOSING_BRACKETS and depth > 0:
             depth -= 1
+        i += 1
     return False
 
 

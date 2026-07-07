@@ -146,7 +146,11 @@ def read_oracle_script(path: str, max_bytes: int = 4_096) -> str | None:
         return None
 
 
-_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
+# A <think> block runs to its closing tag, or, when a generation was
+# truncated mid-reasoning (it hit max_tokens), to the end of the string:
+# the fenced snippets a model quotes inside its reasoning are never output,
+# so an unterminated think block must be stripped just like a closed one.
+_THINK_BLOCK = re.compile(r"<think>.*?(?:</think>|\Z)", re.DOTALL)
 _FENCED_BLOCK = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 
 
@@ -191,6 +195,15 @@ def truncate_output(data: bytes, limit: int = 2048) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def _fenced(text: str) -> str:
+    """``text`` wrapped in a code fence with the closing fence on its own
+    line, even when ``text`` has no trailing newline (otherwise the fence
+    glues onto the content, e.g. ``x = 1``` ``)."""
+    if not text.endswith("\n"):
+        text += "\n"
+    return f"```\n{text}```"
+
+
 def reduction_prompt(test_case: bytes, *, config: LLMConfig) -> str | None:
     """The prompt asking for reduced versions of ``test_case``.
 
@@ -213,7 +226,7 @@ def reduction_prompt(test_case: bytes, *, config: LLMConfig) -> str | None:
     output = config.test_output(test_case) if config.test_output else None
     output_part = (
         "Running the interestingness test on this test case printed:\n\n"
-        f"```\n{truncate_output(output)}```\n\n"
+        f"{_fenced(truncate_output(output))}\n\n"
         if output
         else ""
     )
@@ -226,7 +239,7 @@ def reduction_prompt(test_case: bytes, *, config: LLMConfig) -> str | None:
         f"{oracle_part}"
         f"{output_part}"
         "The current test case is:\n\n"
-        f"```\n{text}```\n\n"
+        f"{_fenced(text)}\n\n"
         f"Output {config.n_candidates} different reduced versions, each in "
         "its own fenced code block, ordered from most aggressive (smallest) "
         "to most conservative (largest). Output nothing else: no "

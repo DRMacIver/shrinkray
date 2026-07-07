@@ -100,6 +100,17 @@ def test_no_blocks_means_no_candidates():
     assert extract_candidates("I cannot help with that.") == []
 
 
+def test_strips_unterminated_thinking_block():
+    # A generation truncated mid-reasoning (hit max_tokens) leaves an
+    # unclosed <think>; the fenced snippets it quotes there are not output.
+    assert extract_candidates("<think>...```\ncode\n```\n and consider") == []
+
+
+def test_keeps_candidates_before_an_unterminated_thinking_block():
+    response = "```\nreal\n```\n<think>...```\nnot output\n```"
+    assert extract_candidates(response) == [b"real\n"]
+
+
 # === Prompt construction ===
 
 
@@ -132,6 +143,26 @@ def test_prompt_includes_oracle_when_known():
 
 def test_prompt_is_none_for_undecodable_input():
     assert reduction_prompt(b"\xc3\x28", config=LLMConfig()) is None
+
+
+def test_prompt_closing_fence_is_on_its_own_line():
+    # Content without a trailing newline must not have the closing fence
+    # glued onto it (which would produce `x = 1``` ` and confuse parsing).
+    prompt = reduction_prompt(b"x = 1", config=LLMConfig())
+    assert prompt is not None
+    assert "x = 1\n```" in prompt
+    assert "x = 1```" not in prompt
+
+
+def test_prompt_output_closing_fence_is_on_its_own_line():
+    # truncate_output of undecodable-free short output has no trailing
+    # newline; the test-output fence must still close on its own line.
+    prompt = reduction_prompt(
+        b"say boom\n", config=LLMConfig(test_output=lambda tc: b"boom crash")
+    )
+    assert prompt is not None
+    assert "boom crash\n```" in prompt
+    assert "boom crash```" not in prompt
 
 
 def test_completion_max_tokens_scales_with_input_but_is_capped():

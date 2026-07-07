@@ -546,10 +546,10 @@ def llm_transform_pump(
 ) -> ReductionPump[bytes]:
     """A pump applying one grammar-guided transformation with the model.
 
-    Each round parses the current result, finds the transformation's
-    targets, and asks the model to rewrite one span at a time; whenever
-    a spliced candidate is interesting it is adopted and the targets
-    are rederived (adoption shifts every later span). Responses are
+    Each round asks the model to rewrite one target span at a time;
+    whenever a spliced candidate is interesting it is adopted and the
+    targets are rederived by reparsing (adoption shifts every later
+    span; fruitless rounds reuse the same targets). Responses are
     remembered per prompt: rederived targets replay earlier answers
     before asking again, and a prompt whose answers all failed is
     retried with a fresh seed up to max_prompt_attempts times, since a

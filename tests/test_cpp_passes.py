@@ -1,4 +1,6 @@
+import types
 from pathlib import Path
+from unittest.mock import patch
 
 import trio
 from hypothesis import given
@@ -40,6 +42,7 @@ from shrinkray.passes.cpp import (
     typedef_inlining_candidates,
 )
 from shrinkray.passes.genericlanguages import cut_comment_like_things
+from shrinkray.passes.patching import Replacements
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
@@ -900,14 +903,43 @@ def test_finds_struct_typedef():
 
 
 def test_typedef_inlining_candidate_replaces_uses():
-    candidates = typedef_inlining_candidates(
-        b"typedef unsigned long ul;\nul f(ul x) { return x; }\n"
+    candidates = list(
+        typedef_inlining_candidates(
+            b"typedef unsigned long ul;\nul f(ul x) { return x; }\n"
+        )
     )
     assert candidates == [b"\nunsigned long f(unsigned long x) { return x; }\n"]
 
 
 def test_typedef_with_no_uses_produces_no_candidates():
-    assert typedef_inlining_candidates(b"typedef int unused_t;\nint x;\n") == []
+    assert list(typedef_inlining_candidates(b"typedef int unused_t;\nint x;\n")) == []
+
+
+def test_typedef_inlining_candidates_are_lazy():
+    # Each typedef with a use yields one candidate. Producing just the
+    # first must not build every full-file rewrite: we count the whole
+    # source rewrites (Replacements.apply) and check that the first
+    # candidate costs far fewer of them than the whole run.
+    source = b"".join(
+        b"typedef int t%d; t%d x%d;\n" % (i, i, i) for i in range(50)
+    )
+    calls = 0
+    original_apply = Replacements.apply
+
+    def counting_apply(self, patch, target):
+        nonlocal calls
+        calls += 1
+        return original_apply(self, patch, target)
+
+    with patch.object(Replacements, "apply", counting_apply):
+        candidates = typedef_inlining_candidates(source)
+        assert isinstance(candidates, types.GeneratorType)
+        next(candidates)
+        after_first = calls
+        rest = list(candidates)
+        after_all = calls
+    assert len(rest) == 49
+    assert after_first < after_all
 
 
 def test_inline_typedefs_pump():
@@ -933,8 +965,10 @@ def test_inline_typedefs_pump():
 
 
 def test_function_inlining_substitutes_arguments():
-    candidates = function_inlining_candidates(
-        b"int sq(int x) { return x * x; }\nint main() { return sq(3); }\n"
+    candidates = list(
+        function_inlining_candidates(
+            b"int sq(int x) { return x * x; }\nint main() { return sq(3); }\n"
+        )
     )
     assert candidates == [
         b"int sq(int x) { return x * x; }\nint main() { return ((3) * (3)); }\n"
@@ -942,36 +976,71 @@ def test_function_inlining_substitutes_arguments():
 
 
 def test_function_inlining_produces_candidate_per_call():
-    candidates = function_inlining_candidates(
-        b"int sq(int x) { return x * x; }\nint main() { return sq(3) + sq(4); }\n"
+    candidates = list(
+        function_inlining_candidates(
+            b"int sq(int x) { return x * x; }\nint main() { return sq(3) + sq(4); }\n"
+        )
     )
     assert len(candidates) == 2
 
 
+def test_function_inlining_candidates_are_lazy():
+    # Producing the first inlined candidate must not build all of them.
+    source = b"".join(
+        b"int f%d(int x) { return x; }\nint m%d() { return f%d(1); }\n" % (i, i, i)
+        for i in range(50)
+    )
+    calls = 0
+    original_apply = Replacements.apply
+
+    def counting_apply(self, patch, target):
+        nonlocal calls
+        calls += 1
+        return original_apply(self, patch, target)
+
+    with patch.object(Replacements, "apply", counting_apply):
+        candidates = function_inlining_candidates(source)
+        assert isinstance(candidates, types.GeneratorType)
+        next(candidates)
+        after_first = calls
+        rest = list(candidates)
+        after_all = calls
+    assert len(rest) == 49
+    assert after_first < after_all
+
+
 def test_function_inlining_skips_arity_mismatch():
     assert (
-        function_inlining_candidates(
-            b"int sq(int x) { return x * x; }\nint main() { return sq(3, 4); }\n"
+        list(
+            function_inlining_candidates(
+                b"int sq(int x) { return x * x; }\nint main() { return sq(3, 4); }\n"
+            )
         )
         == []
     )
 
 
 def test_function_inlining_handles_void_parameter_list():
-    candidates = function_inlining_candidates(
-        b"int five(void) { return 5; }\nint main() { return five(); }\n"
+    candidates = list(
+        function_inlining_candidates(
+            b"int five(void) { return 5; }\nint main() { return five(); }\n"
+        )
     )
     assert candidates == [b"int five(void) { return 5; }\nint main() { return (5); }\n"]
 
 
 def test_function_inlining_skips_recursive_calls():
-    assert function_inlining_candidates(b"int f(int x) { return f(x - 1); }\n") == []
+    assert (
+        list(function_inlining_candidates(b"int f(int x) { return f(x - 1); }\n")) == []
+    )
 
 
 def test_function_inlining_skips_multi_statement_bodies():
     assert (
-        function_inlining_candidates(
-            b"int f(int x) { g(); return x; }\nint main() { return f(3); }\n"
+        list(
+            function_inlining_candidates(
+                b"int f(int x) { g(); return x; }\nint main() { return f(3); }\n"
+            )
         )
         == []
     )
@@ -1300,32 +1369,34 @@ def test_using_with_empty_definition_is_ignored():
 
 
 def test_function_inlining_skips_empty_body():
-    assert function_inlining_candidates(b"void f() { }\nint main() { f(); }") == []
+    assert list(function_inlining_candidates(b"void f() { }\nint main() { f(); }")) == []
 
 
 def test_function_inlining_skips_body_with_preprocessor_directive():
     source = b"int f() {\n#define A 1\nreturn 0; }\nint main() { return f(); }"
-    assert function_inlining_candidates(source) == []
+    assert list(function_inlining_candidates(source)) == []
 
 
 def test_function_inlining_skips_body_with_unmatched_bracket():
     source = b"int f() { return (x; }\nint main() { return f(); }"
-    assert function_inlining_candidates(source) == []
+    assert list(function_inlining_candidates(source)) == []
 
 
 def test_function_inlining_skips_body_with_stray_return():
     source = b"int f() { x return 0; }\nint main() { return f(); }"
-    assert function_inlining_candidates(source) == []
+    assert list(function_inlining_candidates(source)) == []
 
 
 def test_function_inlining_skips_variadic_parameters():
     source = b"int f(...) { return 0; }\nint main() { return f(); }"
-    assert function_inlining_candidates(source) == []
+    assert list(function_inlining_candidates(source)) == []
 
 
 def test_function_inlining_substitutes_pointer_parameters():
-    candidates = function_inlining_candidates(
-        b"int deref(int *p) { return *p; }\nint main() { return deref(q); }"
+    candidates = list(
+        function_inlining_candidates(
+            b"int deref(int *p) { return *p; }\nint main() { return deref(q); }"
+        )
     )
     assert candidates == [
         b"int deref(int *p) { return *p; }\nint main() { return (*(q)); }"
@@ -1365,7 +1436,7 @@ def test_template_id_without_call_is_left_alone():
 
 def test_function_inlining_skips_bare_return():
     source = b"void f() { return; }\nint main() { f(); return 0; }"
-    assert function_inlining_candidates(source) == []
+    assert list(function_inlining_candidates(source)) == []
 
 
 def test_candidate_pump_skips_already_seen_candidates():
@@ -1417,5 +1488,5 @@ def test_cpp_passes_never_crash_on_arbitrary_input(source: bytes):
 
 @given(CPPISH_SOUP)
 def test_cpp_candidate_generators_never_crash_on_arbitrary_input(source: bytes):
-    typedef_inlining_candidates(source)
-    function_inlining_candidates(source)
+    list(typedef_inlining_candidates(source))
+    list(function_inlining_candidates(source))

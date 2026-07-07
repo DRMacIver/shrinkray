@@ -13,7 +13,8 @@ to make progress.
 """
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
+from hashlib import blake2b
 
 from attrs import define
 
@@ -1038,28 +1039,33 @@ def find_typedefs(view: TokenView) -> list[TypedefInfo]:
     return results
 
 
-def typedef_inlining_candidates(source: bytes) -> list[bytes]:
-    """For each simple typedef, produce a variant of the source with
-    the typedef removed and every use of its name replaced by its
-    definition."""
+def _name_use_index(tokens: list[Token]) -> dict[bytes, list[int]]:
+    """Index the positions of every NAME token by its text, in a single
+    pass, so callers can iterate just the uses of a given name."""
+    index: dict[bytes, list[int]] = {}
+    for i, t in enumerate(tokens):
+        if t.kind == NAME:
+            index.setdefault(t.text, []).append(i)
+    return index
+
+
+def typedef_inlining_candidates(source: bytes) -> Iterator[bytes]:
+    """For each simple typedef, yield a variant of the source with the
+    typedef removed and every use of its name replaced by its
+    definition. Candidates are produced lazily, one at a time."""
     view = token_view(source)
     tokens = view.tokens
+    name_uses = _name_use_index(tokens)
     replacer = Replacements()
-    results: list[bytes] = []
     for td in find_typedefs(view):
         edits: list[tuple[int, int, bytes]] = [
             (tokens[td.decl_start].start, tokens[td.decl_end].end, b"")
         ]
-        for i, t in enumerate(tokens):
-            if (
-                t.kind == NAME
-                and t.text == td.name
-                and not td.decl_start <= i <= td.decl_end
-            ):
-                edits.append((t.start, t.end, td.definition))
+        for i in name_uses.get(td.name, ()):
+            if not td.decl_start <= i <= td.decl_end:
+                edits.append((tokens[i].start, tokens[i].end, td.definition))
         if len(edits) > 1:
-            results.append(replacer.apply(tuple(sorted(edits)), source))
-    return results
+            yield replacer.apply(tuple(sorted(edits)), source)
 
 
 def _single_statement_body(view: TokenView, f: FunctionInfo) -> tuple[int, int] | None:
@@ -1116,15 +1122,16 @@ def _parameter_names(view: TokenView, f: FunctionInfo) -> list[bytes] | None:
     return names
 
 
-def function_inlining_candidates(source: bytes) -> list[bytes]:
-    """For each function whose body is a single statement, produce
+def function_inlining_candidates(source: bytes) -> Iterator[bytes]:
+    """For each function whose body is a single statement, yield
     variants of the source where a call to it is replaced by the
     (parenthesised) body expression with arguments substituted for
-    parameters. This is in the style of clang_delta's simple-inliner."""
+    parameters. This is in the style of clang_delta's simple-inliner.
+    Candidates are produced lazily, one at a time."""
     view = token_view(source)
     tokens = view.tokens
+    name_uses = _name_use_index(tokens)
     replacer = Replacements()
-    results: list[bytes] = []
     for f in find_function_definitions(view):
         expr_range = _single_statement_body(view, f)
         if expr_range is None:
@@ -1135,11 +1142,9 @@ def function_inlining_candidates(source: bytes) -> list[bytes]:
         expr_lo, expr_hi = expr_range
         expr_start = tokens[expr_lo].start
         expr_end = tokens[expr_hi - 1].end
-        for i, t in enumerate(tokens):
+        for i in name_uses.get(f.name, ()):
             if (
-                t.kind != NAME
-                or t.text != f.name
-                or f.decl_starts[0] <= i <= f.body_close
+                f.decl_starts[0] <= i <= f.body_close
                 or i + 1 >= len(tokens)
                 or tokens[i + 1].text != b"("
                 or i + 1 not in view.brackets
@@ -1166,8 +1171,7 @@ def function_inlining_candidates(source: bytes) -> list[bytes]:
             expr_source = source[expr_start:expr_end]
             inlined = b"(" + replacer.apply(expr_edits, expr_source) + b")"
             call_edit = ((tokens[i].start, tokens[call_close].end, inlined),)
-            results.append(replacer.apply(call_edit, source))
-    return results
+            yield replacer.apply(call_edit, source)
 
 
 # Bound on how many candidates a pump will adopt in a single
@@ -1178,26 +1182,30 @@ MAX_PUMP_ADOPTIONS = 20
 
 
 def _candidate_pump(
-    name: str, derive: Callable[[bytes], list[bytes]]
+    name: str, derive: Callable[[bytes], Iterable[bytes]]
 ) -> ReductionPump[bytes]:
     """Build a pump from a function that derives candidate variants
     (possibly larger than the input) from the current test case.
 
     Candidates are tried in order; whenever one is interesting we adopt
     it and rederive. The result is the last interesting variant, which
-    the reducer will then try to reduce below the original."""
+    the reducer will then try to reduce below the original.
+
+    Candidates can be large, so `seen` records their blake2b digests
+    rather than the candidate bytes themselves."""
 
     async def pump(problem: ReductionProblem[bytes]) -> bytes:
         target = problem.current_test_case
-        seen = {target}
+        seen = {blake2b(target).digest()}
         adoptions = 0
         improved = True
         while improved and adoptions < MAX_PUMP_ADOPTIONS:
             improved = False
             for candidate in derive(target):
-                if candidate in seen:
+                digest = blake2b(candidate).digest()
+                if digest in seen:
                     continue
-                seen.add(candidate)
+                seen.add(digest)
                 if await problem.is_interesting(candidate):
                     target = candidate
                     adoptions += 1

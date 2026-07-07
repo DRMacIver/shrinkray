@@ -122,6 +122,14 @@ def test_brace_operator_spacing():
     assert basic_format("a  +\n  b") == "a + b\n"
 
 
+def test_brace_operator_trailing_space_stripped_before_newline():
+    # An operator emits a trailing space; when the next token forces a
+    # newline (here a closing brace), that dangling space is stripped
+    # rather than left at the end of the line.
+    assert basic_format("a+}") == "a +\n}\n"
+    assert basic_format("a&&}") == "a &&\n}\n"
+
+
 def test_brace_comma_spacing():
     assert basic_format("f(a,b,c)") == "f(a, b, c)\n"
 

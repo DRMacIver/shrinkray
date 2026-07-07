@@ -1,0 +1,86 @@
+/* Design-system card component styles.
+   prettier 3.6.2 crashes formatting this file: its PostCSS printer
+   dereferences an undefined node for a custom property whose value
+   starts with a comma and is later spliced into a gradient via var(). */
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  --radius: 8px;
+  --p-card-background: #ffffff;
+  --p-card-border: #e3e3e3;
+  --p-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --font-body: -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  color: #1a1a1a;
+  background: #fafafa;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--p-card-border);
+  border-radius: var(--radius);
+  background: var(--p-card-background);
+  box-shadow: var(--p-card-shadow);
+}
+
+.card__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.card__body {
+  margin: 0;
+  font-size: 14px;
+  color: #4a4a4a;
+}
+
+.element {
+  --l: , #0000 calc(100% - 0.5px), var(--p-card-background) calc(100% + 0.5px);
+  position: relative;
+  isolation: isolate;
+}
+
+.element::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(0.5em at 0 0 var(--l)) 100% 100% no-repeat;
+  pointer-events: none;
+}
+
+.button {
+  appearance: none;
+  border: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  background: #2563eb;
+  color: #ffffff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.button:hover {
+  background: #1d4ed8;
+}
+
+@media (max-width: 600px) {
+  .card {
+    padding: var(--space-2);
+  }
+}

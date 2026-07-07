@@ -492,7 +492,7 @@ def test_parallelism_defaults_to_one_for_basename_inplace(tmpdir, monkeypatch):
         captured_parallelism.append(kwargs.get("parallelism"))
         raise SystemExit(0)
 
-    with patch("shrinkray.__main__.ShrinkRayStateSingleFile") as mock_state:
+    with patch("shrinkray.__main__.load_state_for_path") as mock_state:
         mock_state.side_effect = mock_state_init
         runner = CliRunner(catch_exceptions=False)
         try:
@@ -531,7 +531,7 @@ def test_explicit_parallelism_skips_default_logic(tmpdir, monkeypatch):
         captured_parallelism.append(kwargs.get("parallelism"))
         raise SystemExit(0)
 
-    with patch("shrinkray.__main__.ShrinkRayStateSingleFile") as mock_state:
+    with patch("shrinkray.__main__.load_state_for_path") as mock_state:
         mock_state.side_effect = mock_state_init
         runner = CliRunner(catch_exceptions=False)
         try:
@@ -796,7 +796,7 @@ def test_timeout_zero_converts_to_infinity(tmpdir, monkeypatch):
         captured_timeout.append(kwargs.get("timeout"))
         raise SystemExit(0)
 
-    with patch("shrinkray.__main__.ShrinkRayStateSingleFile") as mock_state:
+    with patch("shrinkray.__main__.load_state_for_path") as mock_state:
         mock_state.side_effect = mock_state_init
         runner = CliRunner(catch_exceptions=False)
         try:
@@ -842,7 +842,7 @@ def test_default_backup_filename_calculation(tmpdir, monkeypatch):
     def mock_state_init(**kwargs):
         raise SystemExit(0)
 
-    with patch("shrinkray.__main__.ShrinkRayStateSingleFile") as mock_state:
+    with patch("shrinkray.__main__.load_state_for_path") as mock_state:
         mock_state.side_effect = mock_state_init
         with patch("os.remove", tracking_remove):
             runner = CliRunner(catch_exceptions=False)
@@ -890,7 +890,7 @@ def test_custom_backup_path_is_used(tmpdir, monkeypatch):
     def mock_state_init(**kwargs):
         raise SystemExit(0)
 
-    with patch("shrinkray.__main__.ShrinkRayStateSingleFile") as mock_state:
+    with patch("shrinkray.__main__.load_state_for_path") as mock_state:
         mock_state.side_effect = mock_state_init
         with patch("os.remove", tracking_remove):
             runner = CliRunner(catch_exceptions=False)
@@ -953,7 +953,7 @@ def test_directory_mode_setup(tmp_path, monkeypatch):
             return_value=mock_validation_result,
         ),
         patch(
-            "shrinkray.__main__.ShrinkRayDirectoryState",
+            "shrinkray.state.ShrinkRayDirectoryState",
             side_effect=mock_dir_state_init,
         ),
         patch("shutil.copytree", tracking_copytree),

@@ -1,0 +1,26 @@
+{
+  "id": "tsc-5.8.2-object-entries-setstate-crash",
+  "format": "typescript",
+  "tool": "typescript 5.8.2 (tsc)",
+  "extension": ".ts",
+  "bug_url": "https://github.com/microsoft/TypeScript/issues/61351",
+  "symptom": "tsc 5.8.2 --noEmit crashes with 'TypeError: Cannot read properties of undefined (reading 'kind')' in getModifierFlagsWorker while computing declaration-emit visibility for an exported class whose method is called via a computed-property object literal (this.setState({ [key]: value })) inside a for-of over Object.entries. Introduced in 5.8 by PR #60052 and fixed in 5.9.3.",
+  "oracle": {
+    "type": "command",
+    "setup": "setup.sh",
+    "command": [
+      "node",
+      "{tools}/typescript-5.8.2/node_modules/typescript/bin/tsc",
+      "--noEmit",
+      "{file}"
+    ]
+  },
+  "interesting": {
+    "output_contains": [
+      "Cannot read properties of undefined (reading 'kind')",
+      "at getModifierFlagsWorker"
+    ],
+    "exit_code": 1
+  },
+  "timeout": 10
+}

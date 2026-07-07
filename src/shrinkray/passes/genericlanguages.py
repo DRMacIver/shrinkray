@@ -94,21 +94,30 @@ def regex_pass[AnyStr: (bytes, str)](
 
             patch_applier = PatchApplier(patches, problem)
 
+            async def reduce_region(i: int) -> None:
+                async def is_interesting(s):
+                    return await patch_applier.try_apply_patch({i: s})
+
+                subproblem = BasicReductionProblem(
+                    initial_values_for_regions[i],
+                    is_interesting,
+                    work=problem.work,
+                )
+                await fn(subproblem)
+
+            # An input can have a huge number of matching regions, so
+            # rather than spawning a task per region we run a bounded
+            # worker pool, matching how apply_patches bounds its workers.
+            remaining_regions = list(range(len(matching_regions)))
+            remaining_regions.reverse()
+
             async with trio.open_nursery() as nursery:
+                for _ in range(max(problem.work.parallelism, 1)):
 
-                async def reduce_region(i: int) -> None:
-                    async def is_interesting(s):
-                        return await patch_applier.try_apply_patch({i: s})
-
-                    subproblem = BasicReductionProblem(
-                        initial_values_for_regions[i],
-                        is_interesting,
-                        work=problem.work,
-                    )
-                    nursery.start_soon(fn, subproblem)
-
-                for i in range(len(matching_regions)):
-                    await reduce_region(i)
+                    @nursery.start_soon
+                    async def worker() -> None:
+                        while remaining_regions:
+                            await reduce_region(remaining_regions.pop())
 
         return reduction_pass
 

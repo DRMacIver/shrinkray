@@ -114,6 +114,30 @@ def test_reducer_base_class_pass_control_defaults():
 # =============================================================================
 
 
+@pytest.mark.parametrize("parallelism", [1, 2])
+async def test_full_shrinkray_run_under_parallelism(parallelism: int):
+    """A complete ShrinkRay run converges to the same minimal result
+    whether or not speculative parallelism is enabled."""
+
+    async def is_interesting(tc: bytes) -> bool:
+        await trio.lowlevel.checkpoint()
+        return b"hello" in tc
+
+    problem = BasicReductionProblem(
+        initial=b"x" * 50 + b"hello" + b"y" * 50,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=parallelism),
+    )
+
+    # python_reducer=False keeps this hermetic (the input parses as a
+    # Python identifier, which would otherwise spawn the external
+    # Python reducer subprocess).
+    reducer = ShrinkRay(target=problem, python_reducer=False)
+    await reducer.run()
+
+    assert problem.current_test_case == b"hello"
+
+
 async def test_basic_reducer_runs_passes():
     """Test BasicReducer runs all passes."""
     call_log = []
@@ -1798,7 +1822,7 @@ async def test_skip_current_pass_without_active_scope():
     assert reducer._skip_requested is True
 
 
-async def test_disable_pass_while_running_skips_it():
+async def test_disable_pass_while_running_skips_it(autojump_clock):
     """Test that disabling a pass while it's running skips it."""
 
     async def is_interesting(x):
@@ -1806,18 +1830,20 @@ async def test_disable_pass_while_running_skips_it():
 
     work = WorkContext(parallelism=1)
 
-    skip_happened = []
+    pass_started = trio.Event()
+    completed = []
 
     async def slow_pass(p):
-        # Signal that we started
-        skip_happened.append("started")
-        # Wait a bit to give time for the disable call
-        await trio.sleep(0.1)
-        # If we get here, we weren't skipped
-        skip_happened.append("completed")
+        pass_started.set()
+        # Suspend until the disable cancels us; completing means the
+        # skip never happened.
+        await trio.sleep(60)
+        completed.append(True)
 
     problem = BasicReductionProblem(b"test", is_interesting, work)
-    reducer = ShrinkRay(target=problem)
+    # No external reducer subprocess and no restart phase: both would
+    # block on real IO, which does not advance the autojump clock.
+    reducer = ShrinkRay(target=problem, python_reducer=False, restart_at_fixpoint=False)
     reducer.great_passes = [slow_pass]
     reducer.ok_passes = []
     reducer.last_ditch_passes = []
@@ -1827,9 +1853,7 @@ async def test_disable_pass_while_running_skips_it():
     async with trio.open_nursery() as nursery:
 
         async def disable_after_start():
-            # Wait for the pass to start
-            while "started" not in skip_happened:
-                await trio.sleep(0.01)
+            await pass_started.wait()
             # Disable it (should skip because it's the current pass)
             reducer.disable_pass("slow_pass")
 
@@ -1838,12 +1862,11 @@ async def test_disable_pass_while_running_skips_it():
         nursery.cancel_scope.cancel()
 
     # Pass should have started but not completed (because it was cancelled)
-    assert "started" in skip_happened
-    # The pass was cancelled before it could complete
-    assert "completed" not in skip_happened
+    assert pass_started.is_set()
+    assert completed == []
 
 
-async def test_reducer_continues_when_passes_skipped():
+async def test_reducer_continues_when_passes_skipped(autojump_clock):
     """Test that reducer continues when passes were skipped and no progress made."""
 
     async def is_interesting(x):
@@ -1851,17 +1874,21 @@ async def test_reducer_continues_when_passes_skipped():
 
     work = WorkContext(parallelism=1)
 
+    first_run_started = trio.Event()
     run_count = [0]
 
     async def counting_pass(p):
         run_count[0] += 1
         if run_count[0] == 1:
-            # On first run, we'll be skipped externally
-            await trio.sleep(0.5)  # Long enough to be skipped
+            # On first run, suspend until we're skipped externally.
+            first_run_started.set()
+            await trio.sleep(60)
         # On second run, just return (no progress)
 
     problem = BasicReductionProblem(b"test", is_interesting, work)
-    reducer = ShrinkRay(target=problem)
+    # No external reducer subprocess and no restart phase: both would
+    # block on real IO, which does not advance the autojump clock.
+    reducer = ShrinkRay(target=problem, python_reducer=False, restart_at_fixpoint=False)
     reducer.great_passes = [counting_pass]
     reducer.ok_passes = []
     reducer.last_ditch_passes = []
@@ -1871,17 +1898,14 @@ async def test_reducer_continues_when_passes_skipped():
     async with trio.open_nursery() as nursery:
 
         async def skip_first_run():
-            # Wait for the first run to start
-            while run_count[0] < 1:
-                await trio.sleep(0.01)
-            await trio.sleep(0.05)  # Wait a bit more
+            await first_run_started.wait()
             # Skip the current pass
             reducer.skip_current_pass()
 
         nursery.start_soon(skip_first_run)
 
-        # Run with a timeout to prevent infinite loop if test fails
-        with trio.move_on_after(2.0):
+        # Guard against an infinite loop if the reducer never terminates
+        with trio.fail_after(600):
             await reducer.run()
 
         nursery.cancel_scope.cancel()

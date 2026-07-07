@@ -3,6 +3,7 @@ from string import ascii_lowercase, ascii_uppercase
 from unittest.mock import MagicMock, PropertyMock
 
 import pytest
+import trio
 
 from shrinkray.passes.genericlanguages import (
     IntegerFormat,
@@ -19,9 +20,46 @@ from shrinkray.passes.genericlanguages import (
     replace_identifiers_with_zero,
     simplify_brackets,
 )
-from shrinkray.problem import ParseError, shortlex
+from shrinkray.problem import (
+    BasicReductionProblem,
+    ParseError,
+    ReductionProblem,
+    shortlex,
+)
 from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
+
+
+@pytest.mark.parametrize("p", [1, 2])
+async def test_regex_pass_bounds_concurrent_regions(p: int) -> None:
+    """regex_pass must not run more than work.parallelism regions at once.
+
+    Regression test: it used to spawn one task per regex match with no
+    bound, so an input with many matches created that many concurrent
+    tasks and subproblems."""
+    concurrent = 0
+    max_concurrent = 0
+
+    @regex_pass(b"[0-9]+")
+    async def observing_pass(problem: ReductionProblem[bytes]) -> None:
+        nonlocal concurrent, max_concurrent
+        concurrent += 1
+        max_concurrent = max(max_concurrent, concurrent)
+        # Suspend so that any concurrently-started regions can run now.
+        await trio.lowlevel.checkpoint()
+        concurrent -= 1
+
+    async def is_interesting(x: bytes) -> bool:
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"0 1 2 3 4 5 6 7 8 9",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=p),
+    )
+    await observing_pass(problem)
+
+    assert 0 < max_concurrent <= p
 
 
 def test_can_reduce_an_integer_in_the_middle_of_a_string() -> None:

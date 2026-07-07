@@ -40,6 +40,7 @@ from shrinkray.tui import (
     _get_percentage_axis_bounds,
     _get_time_axis_bounds,
     detect_terminal_theme,
+    read_file_for_display,
     run_textual_ui,
 )
 
@@ -1395,64 +1396,85 @@ def test_expanded_modal_stores_file_path():
     assert modal._file_path == "/path/to/file"
 
 
-def test_expanded_modal_read_file_success(tmp_path):
-    """Test _read_file reads file successfully."""
+def test_read_file_for_display_success(tmp_path):
+    """Test read_file_for_display reads file successfully."""
     test_file = tmp_path / "test.txt"
     test_file.write_text("Hello World")
 
-    modal = ExpandedBoxModal("Test", "content-container")
-    content = modal._read_file(str(test_file))
+    content = read_file_for_display(str(test_file))
     assert isinstance(content, Text)
     assert content.plain == "Hello World"
 
 
-def test_expanded_modal_read_file_preserves_brackets(tmp_path):
-    """Test _read_file preserves bracket characters in file content."""
+def test_read_file_for_display_preserves_brackets(tmp_path):
+    """Test read_file_for_display preserves bracket characters."""
     test_file = tmp_path / "test.txt"
     # Content with brackets that could be interpreted as Rich markup
     test_file.write_text("expected [bold] and [red]text[/red]")
 
-    modal = ExpandedBoxModal("Test", "content-container")
-    content = modal._read_file(str(test_file))
+    content = read_file_for_display(str(test_file))
     # Returns a Text object so brackets are preserved literally
     assert isinstance(content, Text)
     assert "[bold]" in content.plain
     assert "[red]text[/red]" in content.plain
 
 
-def test_expanded_modal_read_file_binary(tmp_path):
-    """Test _read_file falls back to hex for binary content."""
+def test_read_file_for_display_binary(tmp_path):
+    """Test read_file_for_display falls back to hex for binary content."""
     test_file = tmp_path / "test.bin"
     test_file.write_bytes(b"\x80\x81\x82\x83")
 
-    modal = ExpandedBoxModal("Test", "content-container")
     # Mock try_decode to simulate undecodable binary data,
     # since chardet may decode arbitrary bytes in single-byte encodings
     with patch("shrinkray.tui.try_decode", return_value=(None, "")):
-        content = modal._read_file(str(test_file))
+        content = read_file_for_display(str(test_file))
     assert isinstance(content, Text)
     assert "Binary content" in content
     assert "80818283" in content
 
 
-def test_expanded_modal_read_file_missing(tmp_path):
-    """Test _read_file returns styled message for missing file."""
-    modal = ExpandedBoxModal("Test", "content-container")
-    result = modal._read_file(str(tmp_path / "nonexistent.txt"))
+def test_read_file_for_display_missing(tmp_path):
+    """Test read_file_for_display returns styled message for missing file."""
+    result = read_file_for_display(str(tmp_path / "nonexistent.txt"))
     assert isinstance(result, Text)
     assert "File not found" in result
 
 
-def test_expanded_modal_read_file_oserror(tmp_path):
-    """Test _read_file returns styled message on OSError."""
-    modal = ExpandedBoxModal("Test", "content-container")
+def test_read_file_for_display_oserror(tmp_path):
+    """Test read_file_for_display returns styled message on OSError."""
     # Create a file that exists but can't be read
     test_file = tmp_path / "unreadable.txt"
     test_file.write_text("content")
     with patch("builtins.open", side_effect=OSError("Permission denied")):
-        result = modal._read_file(str(test_file))
+        result = read_file_for_display(str(test_file))
     assert isinstance(result, Text)
     assert "Error reading file" in result
+
+
+def test_read_file_for_display_truncates_text(tmp_path):
+    """Test read_file_for_display truncates large text files."""
+    test_file = tmp_path / "large.txt"
+    test_file.write_text("x" * 60000)
+
+    content = read_file_for_display(str(test_file), max_size=50000)
+    assert isinstance(content, Text)
+    assert "truncated" in content
+    # Content should be limited (50000 chars + truncation message)
+    assert len(content.plain) < 60000
+
+
+def test_read_file_for_display_truncates_binary(tmp_path):
+    """Test read_file_for_display truncates large binary files."""
+    test_file = tmp_path / "large.bin"
+    test_file.write_bytes(b"\x80\x81\x82" * 20000)
+
+    # Mock try_decode to simulate undecodable binary data,
+    # since chardet may decode arbitrary bytes in single-byte encodings
+    with patch("shrinkray.tui.try_decode", return_value=(None, "")):
+        content = read_file_for_display(str(test_file), max_size=50000)
+    assert isinstance(content, Text)
+    assert "Binary content" in content
+    assert "truncated" in content
 
 
 # === ExpandedBoxModal integration tests ===
@@ -6309,108 +6331,6 @@ def test_history_modal_scan_entries_ignores_files(tmp_path):
     # Should only find the directory entry, not the stray file
     assert len(entries) == 1
     assert entries[0][0] == "0001"
-
-
-def test_history_modal_read_file_success(tmp_path):
-    """Test _read_file reads file successfully."""
-    test_file = tmp_path / "test.txt"
-    test_file.write_text("Hello World\nLine 2")
-
-    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
-    content = modal._read_file(str(test_file))
-
-    assert isinstance(content, Text)
-    assert content.plain == "Hello World\nLine 2"
-
-
-def test_history_modal_read_file_preserves_brackets(tmp_path):
-    """Test _read_file preserves bracket characters in file content."""
-    test_file = tmp_path / "test.txt"
-    # Content with brackets that look like Rich markup tags
-    test_file.write_text("error: [bold]text[/bold] failed")
-
-    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
-    content = modal._read_file(str(test_file))
-
-    # Returns a Text object so brackets are preserved literally
-    assert isinstance(content, Text)
-    assert "[bold]" in content.plain
-    assert "error:" in content
-    assert "failed" in content
-
-
-def test_history_modal_read_file_binary(tmp_path):
-    """Test _read_file handles binary content."""
-    test_file = tmp_path / "test.bin"
-    test_file.write_bytes(b"\x80\x81\x82\x83")
-
-    modal = HistoryExplorerModal(str(tmp_path), "test.bin")
-    # Mock try_decode to simulate undecodable binary data,
-    # since chardet may decode arbitrary bytes in single-byte encodings
-    with patch("shrinkray.tui.try_decode", return_value=(None, "")):
-        content = modal._read_file(str(test_file))
-
-    # Should fall back to hex display
-    assert isinstance(content, Text)
-    assert "Binary content" in content
-
-
-def test_history_modal_read_file_missing(tmp_path):
-    """Test _read_file returns styled message for missing file."""
-    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
-    content = modal._read_file(str(tmp_path / "nonexistent.txt"))
-
-    assert isinstance(content, Text)
-    assert "File not found" in content
-
-
-def test_history_modal_read_file_truncated_text(tmp_path):
-    """Test _read_file truncates large text files."""
-    test_file = tmp_path / "large.txt"
-    # Create a file > 50000 bytes
-    test_file.write_text("x" * 60000)
-
-    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
-    content = modal._read_file(str(test_file))
-
-    # Should be truncated
-    assert isinstance(content, Text)
-    assert "truncated" in content
-    # Content should be limited (50000 chars + truncation message)
-    assert len(content.plain) < 60000
-
-
-def test_history_modal_read_file_truncated_binary(tmp_path):
-    """Test _read_file truncates large binary files."""
-    test_file = tmp_path / "large.bin"
-    # Create a binary file > 50000 bytes
-    test_file.write_bytes(b"\x80\x81\x82" * 20000)
-
-    modal = HistoryExplorerModal(str(tmp_path), "test.bin")
-    # Mock try_decode to simulate undecodable binary data,
-    # since chardet may decode arbitrary bytes in single-byte encodings
-    with patch("shrinkray.tui.try_decode", return_value=(None, "")):
-        content = modal._read_file(str(test_file))
-
-    # Should be truncated and shown as binary
-    assert isinstance(content, Text)
-    assert "Binary content" in content
-    assert "truncated" in content
-
-
-def test_history_modal_read_file_oserror(tmp_path):
-    """Test _read_file handles OSError gracefully."""
-    test_file = tmp_path / "test.txt"
-    test_file.write_text("content")
-
-    modal = HistoryExplorerModal(str(tmp_path), "test.txt")
-
-    # Mock open to raise OSError
-    with patch("builtins.open", side_effect=OSError("Permission denied")):
-        content = modal._read_file(str(test_file))
-
-    assert isinstance(content, Text)
-    assert "Error reading file" in content
 
 
 def test_history_modal_on_list_view_highlighted_no_entries(tmp_path):

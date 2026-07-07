@@ -219,7 +219,7 @@ cd "$WORK"
 
         if self.is_directory:
             # Deserialize and write directory structure
-            content = self._deserialize_directory(test_case)
+            content = deserialize_directory(test_case)
             target_dir = os.path.join(subdir, self.target_basename)
             self._write_directory_content(target_dir, content)
         else:
@@ -255,7 +255,7 @@ cd "$WORK"
 
         if self.is_directory:
             # Deserialize and write directory structure
-            content = self._deserialize_directory(test_case)
+            content = deserialize_directory(test_case)
             target_dir = os.path.join(subdir, self.target_basename)
             self._write_directory_content(target_dir, content)
         else:
@@ -291,7 +291,7 @@ cd "$WORK"
         if self.is_directory:
             # For directory mode, read and serialize the directory content
             content = self._read_directory_content(target_path)
-            return self._serialize_directory(content)
+            return serialize_directory(content)
         else:
             with open(target_path, "rb") as f:
                 return f.read()
@@ -339,7 +339,7 @@ cd "$WORK"
             if self.is_directory:
                 # For directories, read and serialize content
                 content = self._read_directory_content(target_path)
-                excluded_test_cases.add(self._serialize_directory(content))
+                excluded_test_cases.add(serialize_directory(content))
             else:
                 with open(target_path, "rb") as f:
                     excluded_test_cases.add(f.read())
@@ -431,14 +431,6 @@ cd "$WORK"
                 with open(file_path, "rb") as f:
                     content[rel_path] = f.read()
         return content
-
-    @staticmethod
-    def _deserialize_directory(data: bytes) -> dict[str, bytes]:
-        return deserialize_directory(data)
-
-    @staticmethod
-    def _serialize_directory(content: dict[str, bytes]) -> bytes:
-        return serialize_directory(content)
 
 
 def serialize_directory(content: dict[str, bytes]) -> bytes:

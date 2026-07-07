@@ -84,6 +84,52 @@ async def test_worker_map(p: int) -> None:
                 i += 1
 
 
+@pytest.mark.parametrize("p", [1, 2, 4])
+async def test_parallel_map_consumer_can_stop_early(p: int, autojump_clock) -> None:
+    """Closing parallel_map's receive channel while the consolidator is
+    blocked mid-send must not raise; it just means the consumer stopped
+    reading. Regression test: the BrokenResourceError escaped the
+    nursery as an ExceptionGroup the caller never expected."""
+    consumed = []
+    async with parallel_map(
+        list(range(100)), checkpointing_identity, parallelism=p
+    ) as mapped:
+        async with aclosing(mapped) as aiter:
+            async for x in aiter:
+                consumed.append(x)
+                # Let the workers run ahead so the consolidator fills its
+                # output buffer and blocks mid-send before we close.
+                await trio.sleep(1)
+                break
+
+    assert consumed == [0]
+
+
+@pytest.mark.parametrize("p", [1, 2, 4])
+async def test_worker_map_consumer_can_stop_early(p: int, autojump_clock) -> None:
+    """Exiting the map context without consuming everything must not hang.
+
+    Regression test: map's nursery wasn't cancelled on exit, so the
+    producer task stayed blocked sending into a full channel nobody was
+    reading, and the nursery never finished."""
+    work = WorkContext(parallelism=p)
+
+    consumed = []
+    with trio.fail_after(10):
+        async with work.map(list(range(100)), checkpointing_identity) as mapped:
+            async with aclosing(mapped) as aiter:
+                async for x in aiter:
+                    consumed.append(x)
+                    if len(consumed) == 2:
+                        # Give the producer time to fill the channel and
+                        # block mid-send, so that closing the channel
+                        # exercises the worst case deterministically.
+                        await trio.sleep(1)
+                        break
+
+    assert consumed == [0, 1]
+
+
 @pytest.mark.parametrize("p", [1, 2])
 async def test_worker_map_empty(p: int) -> None:
     """Test map with empty sequence."""

@@ -1,3 +1,4 @@
+import pytest
 from tree_sitter_language_pack.exceptions import LanguageNotFoundError
 
 from shrinkray.passes.treesitter import (
@@ -36,6 +37,31 @@ def test_language_for_known_extensions():
     assert language_for_filename("foo.rs") == "rust"
     assert language_for_filename("/some/path/foo.js") == "javascript"
     assert language_for_filename("FOO.GO") == "go"
+
+
+@pytest.mark.parametrize(
+    "filename, language",
+    [
+        ("styles.scss", "scss"),
+        ("styles.less", "less"),
+        ("schema.graphql", "graphql"),
+        ("schema.gql", "graphql"),
+        ("service.proto", "proto"),
+        ("main.tf", "hcl"),
+        ("vars.tfvars", "hcl"),
+        ("config.hcl", "hcl"),
+        ("Widget.vue", "vue"),
+        ("Widget.svelte", "svelte"),
+        ("Token.sol", "solidity"),
+        ("build.gradle", "groovy"),
+        ("app.clj", "clojure"),
+        ("solver.f90", "fortran"),
+        ("deploy.ps1", "powershell"),
+        ("module.cmake", "cmake"),
+    ],
+)
+def test_language_for_added_extensions(filename, language):
+    assert language_for_filename(filename) == language
 
 
 def test_language_for_unknown_extension():

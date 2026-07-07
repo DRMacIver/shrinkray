@@ -963,37 +963,6 @@ class ShrinkRayState[TestCase](ABC):
             self.can_format = False
             return data
 
-    async def check_formatter(self):
-        if self.formatter_command is None:
-            return
-        formatter_result = await self.run_formatter_command(
-            self.formatter_command, self.initial
-        )
-
-        if formatter_result.returncode != 0:
-            print(
-                "Formatter exited unexpectedly on initial test case. If this is expected, please run with --formatter=none.",
-                file=sys.stderr,
-            )
-            print(
-                formatter_result.stderr.decode("utf-8").strip(),
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        reformatted = formatter_result.stdout
-        if not await self.is_interesting(reformatted) and await self.is_interesting(
-            self.initial
-        ):
-            print(
-                "Formatting initial test case made it uninteresting. If this is expected, please run with --formatter=none.",
-                file=sys.stderr,
-            )
-            print(
-                formatter_result.stderr.decode("utf-8").strip(),
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
     async def build_error_message(self, e: Exception) -> str:
         """Build a detailed error message for an invalid initial example.
 
@@ -1078,11 +1047,6 @@ class ShrinkRayState[TestCase](ABC):
                 )
 
         return "\n".join(lines)
-
-    async def report_error(self, e):
-        error_message = await self.build_error_message(e)
-        print(error_message, file=sys.stderr)
-        sys.exit(1)
 
     def check_trivial_result(self, problem) -> str | None:
         """Check if the result is trivially small and return error message if so.
@@ -1198,16 +1162,9 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
             formatting_increase = max(0, len(reformatted) - len(final_result))
             final_result = reformatted
 
-        if len(problem.current_test_case) <= 1 and self.trivial_is_error:
-            print(
-                f"Reduced to a trivial test case of size {len(problem.current_test_case)}"
-            )
-            print(
-                "This probably wasn't what you intended. If so, please modify your interestingness test "
-                "to be more restrictive.\n"
-                "If you intended this behaviour, you can run with '--trivial-is-not-error' to "
-                "suppress this message."
-            )
+        trivial_message = self.check_trivial_result(problem)
+        if trivial_message is not None:
+            print(trivial_message)
             sys.exit(1)
 
         else:
@@ -1261,15 +1218,15 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
 
     def _get_initial_bytes(self) -> bytes:
         # Serialize directory content for history recording
-        return self._serialize_directory(self.initial)
+        return serialize_directory(self.initial)
 
     def _get_test_case_bytes(self, test_case: dict[str, bytes]) -> bytes:
         # Serialize directory content for comparison/exclusion
-        return self._serialize_directory(test_case)
+        return serialize_directory(test_case)
 
     def _set_initial_for_restart(self, content: bytes) -> None:
         # Deserialize and update initial directory content
-        self.initial = self._deserialize_directory(content)
+        self.initial = deserialize_directory(content)
 
     def _initialize_history_manager(self) -> None:
         """Initialize the history manager in directory mode."""
@@ -1279,14 +1236,6 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
             self.test,
             self.filename,
         )
-
-    @staticmethod
-    def _serialize_directory(content: dict[str, bytes]) -> bytes:
-        return serialize_directory(content)
-
-    @staticmethod
-    def _deserialize_directory(data: bytes) -> dict[str, bytes]:
-        return deserialize_directory(data)
 
     async def write_test_case_to_file_impl(
         self, working: str, test_case: dict[str, bytes]
@@ -1311,3 +1260,65 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
 
     async def print_exit_message(self, problem):
         print("All done!")
+
+
+def load_state_for_path(
+    *,
+    filename: str,
+    input_type: Any,
+    in_place: bool,
+    test: list[str],
+    timeout: float | None,
+    memory_limit: int | None,
+    parallelism: int,
+    formatter: str,
+    trivial_is_error: bool,
+    seed: int,
+    volume: Volume,
+    history_enabled: bool,
+    also_interesting_code: int | None,
+    external_reducers: list[list[str]],
+    python_reducer: bool,
+    llm_enabled: bool,
+    llm_model: str,
+    llm_only: bool,
+) -> ShrinkRayState[Any]:
+    """Read `filename` from disk and build the appropriate reduction state.
+
+    A directory becomes a ShrinkRayDirectoryState over every file under it
+    (keyed by relative path); a regular file becomes a
+    ShrinkRayStateSingleFile. This is the single construction path shared
+    by the CLI (basic UI) and the worker subprocess (textual UI), so the
+    two cannot drift apart.
+    """
+    kwargs: dict[str, Any] = {
+        "input_type": input_type,
+        "in_place": in_place,
+        "test": test,
+        "timeout": timeout,
+        "memory_limit": memory_limit,
+        "base": os.path.basename(filename),
+        "parallelism": parallelism,
+        "filename": filename,
+        "formatter": formatter,
+        "trivial_is_error": trivial_is_error,
+        "seed": seed,
+        "volume": volume,
+        "history_enabled": history_enabled,
+        "also_interesting_code": also_interesting_code,
+        "external_reducers": external_reducers,
+        "python_reducer": python_reducer,
+        "llm_enabled": llm_enabled,
+        "llm_model": llm_model,
+        "llm_only": llm_only,
+    }
+    if os.path.isdir(filename):
+        initial = {}
+        for d, _, fs in os.walk(filename):
+            for f in fs:
+                path = os.path.join(d, f)
+                with open(path, "rb") as reader:
+                    initial[os.path.relpath(path, filename)] = reader.read()
+        return ShrinkRayDirectoryState(initial=initial, **kwargs)
+    with open(filename, "rb") as reader:
+        return ShrinkRayStateSingleFile(initial=reader.read(), **kwargs)

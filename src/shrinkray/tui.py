@@ -262,6 +262,46 @@ class StatsDisplay(Static):
         return "\n".join(lines)
 
 
+def format_test_run_header(
+    test_id: int | None, return_code: int | None
+) -> tuple[str, str]:
+    """Header text and style describing the state of a captured test run.
+
+    Returns ("", "") when there is no test to describe.
+    """
+    if test_id is not None and return_code is None:
+        return f"Test #{test_id} running...", "green"
+    if test_id is not None:
+        return f"Test #{test_id} exited with code {return_code}", "dim"
+    return "", ""
+
+
+def read_file_for_display(file_path: str, max_size: int | None = None) -> Text:
+    """Read a file for display in the TUI, decoding as text if possible.
+
+    Undecodable content is shown as hex. If max_size is given, content
+    beyond it is dropped and the result is marked as truncated.
+    """
+    if not os.path.isfile(file_path):
+        return Text("File not found", style="dim")
+    try:
+        with open(file_path, "rb") as f:
+            raw_content = f.read()
+    except OSError:
+        return Text("Error reading file", style="red")
+    truncated = max_size is not None and len(raw_content) > max_size
+    if truncated:
+        raw_content = raw_content[:max_size]
+    encoding, text = try_decode(raw_content)
+    if encoding is not None:
+        result = Text(text)
+    else:
+        result = Text("Binary content - hex display\n\n" + raw_content.hex())
+    if truncated:
+        result.append("\n\n... (truncated)", style="dim")
+    return result
+
+
 def _format_time_label(seconds: float) -> str:
     """Format a time value for axis labels."""
     if seconds < 60:
@@ -635,19 +675,10 @@ class OutputPreview(Static):
     def render(self) -> Text:
         # Header line - use return_code to determine if test is running
         # (return_code is None means still running, has value means completed)
-        if self.active_test_id is not None and self.last_return_code is None:
-            header_text = f"Test #{self.active_test_id} running..."
-            header_style = "green"
-        elif self.active_test_id is not None:
-            header_text = (
-                f"Test #{self.active_test_id} exited with code {self.last_return_code}"
-            )
-            header_style = "dim"
-        elif self._has_seen_output or self.output_content:
-            # Have seen output before - show without header
-            header_text = ""
-            header_style = ""
-        else:
+        header_text, header_style = format_test_run_header(
+            self.active_test_id, self.last_return_code
+        )
+        if not header_text and not (self._has_seen_output or self.output_content):
             header_text = "No test output yet..."
             header_style = "dim"
 
@@ -859,21 +890,6 @@ class ExpandedBoxModal(ModalScreen[None]):
         self._content_widget_id = content_widget_id
         self._file_path = file_path
 
-    def _read_file(self, file_path: str) -> Text:
-        """Read file content, decoding as text if possible."""
-        if not os.path.isfile(file_path):
-            return Text("File not found", style="dim")
-        try:
-            with open(file_path, "rb") as f:
-                raw_content = f.read()
-            # Try to decode as text, fall back to hex display if binary
-            encoding, text = try_decode(raw_content)
-            if encoding is not None:
-                return Text(text)
-            return Text("Binary content - hex display\n\n" + raw_content.hex())
-        except OSError:
-            return Text("Error reading file", style="red")
-
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label(self._title, id="expanded-title")
@@ -908,7 +924,7 @@ class ExpandedBoxModal(ModalScreen[None]):
     def _get_file_content(self, app: "ShrinkRayApp") -> str | Text:
         """Get content from file or preview widget."""
         if self._file_path:
-            return self._read_file(self._file_path)
+            return read_file_for_display(self._file_path)
         content_previews = list(app.query("#content-preview").results(ContentPreview))
         if not content_previews:
             return "Content preview not available"
@@ -935,16 +951,7 @@ class ExpandedBoxModal(ModalScreen[None]):
         )
         has_seen_output = output_preview._has_seen_output
 
-        # Build header with styling
-        if test_id is not None and return_code is None:
-            header_text = f"Test #{test_id} running..."
-            header_style = "green"
-        elif test_id is not None:
-            header_text = f"Test #{test_id} exited with code {return_code}"
-            header_style = "dim"
-        else:
-            header_text = ""
-            header_style = ""
+        header_text, header_style = format_test_run_header(test_id, return_code)
 
         if raw_content:
             result = Text()
@@ -1573,45 +1580,19 @@ class HistoryExplorerModal(ModalScreen[None]):
         self, entry_path: str, file_preview_id: str, output_preview_id: str
     ) -> None:
         """Update the preview pane with content from the selected entry."""
-        # Read file content
+        # Read file content, truncating large files for the preview pane.
+        max_size = 50000
         file_path = os.path.join(entry_path, self._target_basename)
-        file_content = self._read_file(file_path)
+        file_content = read_file_for_display(file_path, max_size=max_size)
         self.query_one(f"#{file_preview_id}", Static).update(file_content)
 
         # Read output content
         output_path = os.path.join(entry_path, f"{self._target_basename}.out")
         if os.path.isfile(output_path):
-            output_content = self._read_file(output_path)
+            output_content = read_file_for_display(output_path, max_size=max_size)
         else:
             output_content = Text("No output captured", style="dim")
         self.query_one(f"#{output_preview_id}", Static).update(output_content)
-
-    def _read_file(self, file_path: str) -> Text:
-        """Read file content, decoding as text if possible."""
-        if not os.path.isfile(file_path):
-            return Text("File not found", style="dim")
-        try:
-            with open(file_path, "rb") as f:
-                raw_content = f.read()
-            # Truncate large files
-            max_size = 50000
-            truncated = len(raw_content) > max_size
-            if truncated:
-                raw_content = raw_content[:max_size]
-            # Try to decode as text
-            encoding, text = try_decode(raw_content)
-            if encoding is not None:
-                result = Text(text)
-                if truncated:
-                    result.append("\n\n... (truncated)", style="dim")
-                return result
-            # Binary content - hex display
-            result = Text("Binary content - hex display\n\n" + raw_content.hex())
-            if truncated:
-                result.append("\n\n... (truncated)", style="dim")
-            return result
-        except OSError:
-            return Text("Error reading file", style="red")
 
     def action_restart_from_here(self) -> None:
         """Restart reduction from the currently selected history point."""

@@ -29,11 +29,7 @@ from shrinkray.process import (
     default_memory_limit,
     parse_memory_limit,
 )
-from shrinkray.state import (
-    ShrinkRayDirectoryState,
-    ShrinkRayState,
-    ShrinkRayStateSingleFile,
-)
+from shrinkray.state import ShrinkRayState, load_state_for_path
 from shrinkray.tui import run_textual_ui
 from shrinkray.ui import BasicUI, ShrinkRayUI
 from shrinkray.validation import run_validation
@@ -442,60 +438,18 @@ def main(
     else:
         also_interesting_code = also_interesting
 
-    state_kwargs: dict[str, Any] = {
-        "input_type": input_type,
-        "in_place": in_place,
-        "test": test,
-        "timeout": timeout,
-        "memory_limit": memory_limit,
-        "base": os.path.basename(filename),
-        "parallelism": parallelism,
-        "filename": filename,
-        "formatter": formatter,
-        "trivial_is_error": trivial_is_error,
-        "seed": seed,
-        "volume": volume,
-        "history_enabled": history,
-        "also_interesting_code": also_interesting_code,
-        "external_reducers": reduce_with,
-        "python_reducer": python_reducer,
-        "llm_enabled": llm_enabled,
-        "llm_model": llm_model,
-        "llm_only": llm_only,
-    }
-
-    state: ShrinkRayState[Any]
-    ui: ShrinkRayUI[Any]
-
     if os.path.isdir(filename):
         if input_type == InputType.stdin:
             raise click.UsageError("Cannot pass a directory input on stdin.")
 
         shutil.rmtree(backup, ignore_errors=True)
         shutil.copytree(filename, backup)
-
-        files = [os.path.join(d, f) for d, _, fs in os.walk(filename) for f in fs]
-
-        initial = {}
-        for f in files:
-            with open(f, "rb") as i:
-                initial[os.path.relpath(f, filename)] = i.read()
-
-        state = ShrinkRayDirectoryState(initial=initial, **state_kwargs)
-
     else:
         try:
             os.remove(backup)
         except FileNotFoundError:
             pass
-
-        with open(filename, "rb") as reader:
-            initial = reader.read()
-
-        with open(backup, "wb") as writer:
-            writer.write(initial)
-
-        state = ShrinkRayStateSingleFile(initial=initial, **state_kwargs)
+        shutil.copyfile(filename, backup)
 
     if ui_type == UIType.textual:
         run_textual_ui(
@@ -524,6 +478,26 @@ def main(
 
     # At this point, ui_type must be UIType.basic since textual returned above
     assert ui_type == UIType.basic
+    state = load_state_for_path(
+        filename=filename,
+        input_type=input_type,
+        in_place=in_place,
+        test=test,
+        timeout=timeout,
+        memory_limit=memory_limit,
+        parallelism=parallelism,
+        formatter=formatter,
+        trivial_is_error=trivial_is_error,
+        seed=seed,
+        volume=volume,
+        history_enabled=history,
+        also_interesting_code=also_interesting_code,
+        external_reducers=reduce_with,
+        python_reducer=python_reducer,
+        llm_enabled=llm_enabled,
+        llm_model=llm_model,
+        llm_only=llm_only,
+    )
 
     # The basic UI has no modal: report what will be fetched and proceed.
     pending = state.pending_downloads()

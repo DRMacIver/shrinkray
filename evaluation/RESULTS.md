@@ -26,6 +26,7 @@ each removed.
 | kissat402-decide-disconnected | cnf | kissat 4.0.2 | 4295 | 536 | 349 | 87.5% | 918.2 |
 | minisat-dimacs-int-overflow | cnf | minisat 2.2 (git 37dc6c6, ASan) | 2326 | 14 | 12 | 99.4% | 1555.9 |
 | mypy-0.942-match-union-tuple-crash | python | mypy 0.942 | 2537 | 133 | 77 | 94.8% | 477.7 |
+| prettier-3.6.2-css-comma-custom-property-crash | css | prettier 3.6.2 | 1687 | 4 | 3 | 99.8% | 10.3 |
 | pylint-2.17.4-duplicate-bases-mro-crash | python | pylint 2.17.4 (astroid 2.15.5) | 2403 | 51 | 34 | 97.9% | 109.0 |
 | python-rapidjson-10-deep-nest-segfault | json | python-rapidjson 1.0 | 200426 | — | — | — | — |
 | ruff-0.0.277-isort-skip-block-panic | python | ruff 0.0.277 | 2774 | 56 | 38 | 98.0% | 10.0 |
@@ -34,6 +35,7 @@ each removed.
 | shrinkray-libcst-deep-nesting | python | libcst 1.8.6 (deep-nesting regression) | 4378 | 800 | 800 | 81.7% | 1125.9 |
 | splr0172-eliminate-assert | cnf | splr 0.17.2 (debug-assertions) | 3148 | 329 | 209 | 89.5% | — |
 | terser-5151-forof-empty-pattern-crash | javascript | terser 5.15.1 | 2945 | 24 | 22 | 99.2% | 44.3 |
+| tsc-5.8.2-object-entries-setstate-crash | typescript | typescript 5.8.2 (tsc) | 1637 | 80 | 46 | 95.1% | 242.3 |
 | ujson-510-indent-buffer-overflow | json | ujson 5.1.0 | 826 | 110 | 92 | 86.7% | 102.1 |
 
 ### c-reduce comparison (C/C++ entries)
@@ -70,7 +72,7 @@ not committed for those two; they are kept as reproduce-and-don't-crash
 entries. The shallow ujson entry (a buffer overflow that triggers at
 modest depth) is the representative small-JSON reduction.
 
-## The tree-sitter entries (Go, Rust, JavaScript)
+## The tree-sitter entries (Go, Rust, JavaScript, TypeScript, CSS)
 
 The `go11810`, `rustc-1941`, and `terser-5151` entries were added to
 evaluate the tree-sitter suggestion in issue #59: they are real crash
@@ -120,6 +122,38 @@ Observations:
 - tree-sitter's error tolerance matters: mid-reduction states are
   often syntactically invalid (the converged Rust output is not valid
   Rust), and the passes keep operating on the parseable parts.
+
+### CSS (`prettier-3.6.2-css-comma-custom-property-crash`)
+
+The `prettier` entry adds CSS coverage via a real crash in prettier
+3.6.2's PostCSS printer (prettier/prettier#17806, fixed by PR #17899;
+current prettier formats it cleanly). The upstream repro buries the
+trigger in a custom property spliced into a gradient
+(`--l: , …; radial-gradient(… var(--l))`), but the underlying fault is
+just a declaration whose value is a bare comma. Shrink ray strips the
+1687-byte stylesheet down to that essence — **4 bytes, `0:,`** (99.8%),
+the whole reduction in ~10s. The `.css` grammar drives the tree-sitter
+passes and the byte passes finish the job; the tiny floor is a good
+demonstration that a construct-specific bug reduces to its minimal core
+regardless of how elaborately the report dressed it up.
+
+### TypeScript (`tsc-5.8.2-object-entries-setstate-crash`)
+
+The `tsc` entry extends the tree-sitter coverage to TypeScript — another
+language with no dedicated passes — using a real declaration-emit crash
+in `tsc` 5.8.2 (microsoft/TypeScript#61351, introduced in 5.8 and fixed
+in 5.9.3; the current 6.0.3 no longer reproduces it). The trigger is a
+computed-property call `this.setState({ [key]: value })` inside a
+`for…of` over `Object.entries`, in an exported class whose method takes
+a declared type. It is construct-specific rather than depth-driven, so
+it reduces to a small essential core: 1637 → 80 bytes (95.1%). The
+`.ts` grammar drives the same `delete_children` / `lift_nodes` /
+`substitute_nodes` passes, and the byte-level cleanup then removes the
+`export` keyword (the crash survives on an anonymous class) and
+collapses the `State` type to the literal `0`, leaving just the class,
+its method, and the crashing loop body. No new passes were needed —
+this is a coverage-and-robustness check that the grammar-aware pipeline
+generalises to a format it was not tuned on.
 
 ## C/C++ entries: shrink ray vs c-reduce
 

@@ -1,0 +1,25 @@
+{
+  "id": "prettier-3.6.2-css-comma-custom-property-crash",
+  "format": "css",
+  "tool": "prettier 3.6.2",
+  "extension": ".css",
+  "bug_url": "https://github.com/prettier/prettier/issues/17806",
+  "symptom": "prettier 3.6.2's PostCSS printer crashes with 'TypeError: Cannot read properties of undefined (reading 'value')' in plugins/postcss.mjs on a declaration whose value is (or begins with) a bare comma. The upstream report used a custom property spliced into a gradient (--l: , ...; radial-gradient(... var(--l))); shrink ray reduces it to the essential trigger, a declaration like '0:,'. Fixed by PR #17899 in a later release; current prettier formats it cleanly.",
+  "oracle": {
+    "type": "command",
+    "setup": "setup.sh",
+    "command": [
+      "node",
+      "{tools}/prettier-3.6.2/node_modules/prettier/bin/prettier.cjs",
+      "{file}"
+    ]
+  },
+  "interesting": {
+    "output_contains": [
+      "Cannot read properties of undefined (reading 'value')",
+      "postcss.mjs"
+    ],
+    "exit_code": 2
+  },
+  "timeout": 10
+}

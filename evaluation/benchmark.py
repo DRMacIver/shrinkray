@@ -46,6 +46,7 @@ from pathlib import Path
 
 import trio
 
+from shrinkray.passes.treesitter import parse_tree
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import ShrinkRay
 from shrinkray.state import sort_key_for_initial
@@ -205,6 +206,24 @@ def contains_all(*tokens: bytes):
     return predicate
 
 
+def valid_go_with(*tokens: bytes):
+    """Candidate parses as Go with no syntax errors and keeps the tokens.
+
+    Approximates the go1.18 untyped-bool ICE well enough to drive a
+    realistic, Go-shaped reduction: it keeps the generic ~bool trigger
+    while requiring syntactic validity, which puts the grammar-aware
+    passes under the rejection pressure real strict-syntax reductions
+    face and makes the final size a meaningful quality signal (a plain
+    token predicate collapses to a few unparsable bytes instead)."""
+
+    def predicate(data: bytes) -> bool:
+        if not all(t in data for t in tokens):
+            return False
+        return not parse_tree("go", data).root_node.has_error
+
+    return predicate
+
+
 # --- synthetic problem inputs -----------------------------------------------
 
 
@@ -359,10 +378,21 @@ main()
 
 
 class Problem:
-    def __init__(self, initial: bytes, predicate, *, cpp: bool = False):
+    def __init__(
+        self,
+        initial: bytes,
+        predicate,
+        *,
+        cpp: bool = False,
+        treesitter_language: str | None = None,
+    ):
         self.initial = initial
         self.predicate = predicate
         self.cpp = cpp
+        # When set, the reducer runs its grammar-aware tree-sitter passes
+        # for this language (as it does when reducing a file with the
+        # matching extension), so their efficiency is measured too.
+        self.treesitter_language = treesitter_language
 
 
 def _corpus_file(entry: str, filename: str) -> bytes:
@@ -438,6 +468,16 @@ def build_problems() -> dict[str, Problem]:
             _corpus_file("minisat-dimacs-int-overflow", "original.cnf"),
             contains_all(b"2147483648"),
         ),
+        # Tree-sitter (Go): keeps the generic ~bool constraint and a
+        # comparison (the untyped-bool ICE trigger) and requires the
+        # candidate to stay syntactically valid Go, so the grammar-aware
+        # passes are exercised under realistic rejection pressure and the
+        # final size is a meaningful quality signal.
+        "corpus_go": Problem(
+            _corpus_file("go11810-generic-untyped-bool-ice", "original.go"),
+            valid_go_with(b"~bool", b"=="),
+            treesitter_language="go",
+        ),
     }
     return problems
 
@@ -471,7 +511,11 @@ def run_problem(name: str, problem: Problem) -> dict:
             )
 
         reduction_problem.on_reduce(record)
-        reducer = ShrinkRay(target=reduction_problem, enable_cpp_passes=problem.cpp)
+        reducer = ShrinkRay(
+            target=reduction_problem,
+            enable_cpp_passes=problem.cpp,
+            treesitter_language=problem.treesitter_language,
+        )
         await reducer.run()
         return reduction_problem.current_test_case, reduction_problem, reducer
 

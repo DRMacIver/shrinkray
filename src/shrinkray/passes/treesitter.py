@@ -30,6 +30,7 @@ import bisect
 import os
 import re
 import sys
+import traceback
 from collections.abc import Iterator
 
 import tree_sitter
@@ -54,6 +55,10 @@ from shrinkray.problem import ReductionProblem
 EXTENSION_LANGUAGES: dict[str, str] = {
     ".c": "c",
     ".cc": "cpp",
+    ".clj": "clojure",
+    ".cljc": "clojure",
+    ".cljs": "clojure",
+    ".cmake": "cmake",
     ".cpp": "cpp",
     ".cs": "csharp",
     ".css": "css",
@@ -64,8 +69,15 @@ EXTENSION_LANGUAGES: dict[str, str] = {
     ".erl": "erlang",
     ".ex": "elixir",
     ".exs": "elixir",
+    ".f90": "fortran",
+    ".f95": "fortran",
     ".go": "go",
+    ".gql": "graphql",
+    ".gradle": "groovy",
+    ".graphql": "graphql",
+    ".groovy": "groovy",
     ".h": "cpp",
+    ".hcl": "hcl",
     ".hh": "cpp",
     ".hpp": "cpp",
     ".hs": "haskell",
@@ -76,25 +88,34 @@ EXTENSION_LANGUAGES: dict[str, str] = {
     # The javascript grammar includes JSX syntax.
     ".jsx": "javascript",
     ".kt": "kotlin",
+    ".less": "less",
     ".lua": "lua",
     ".m": "objc",
-    ".ml": "ocaml",
     ".mjs": "javascript",
+    ".ml": "ocaml",
     ".nim": "nim",
     ".php": "php",
     ".pl": "perl",
+    ".proto": "proto",
+    ".ps1": "powershell",
     ".py": "python",
     ".r": "r",
     ".rb": "ruby",
     ".rs": "rust",
     ".scala": "scala",
+    ".scss": "scss",
     ".sh": "bash",
+    ".sol": "solidity",
     ".sql": "sql",
+    ".svelte": "svelte",
     ".swift": "swift",
+    ".tf": "hcl",
+    ".tfvars": "hcl",
     ".toml": "toml",
     ".ts": "typescript",
     ".tsx": "tsx",
     ".vim": "vim",
+    ".vue": "vue",
     ".yaml": "yaml",
     ".yml": "yaml",
     ".zig": "zig",
@@ -124,7 +145,10 @@ def loadable_language_for_filename(filename: str) -> str | None:
     except tree_sitter_language_pack.exceptions.Error as e:
         # The exception type says what failed: DownloadError for a
         # fetch, LanguageNotFoundError for a grammar this platform does
-        # not have, DynamicLoadError for a broken build, and so on.
+        # not have, DynamicLoadError for a broken build, and so on. The
+        # full traceback goes to stderr too (the run log in TUI mode) so
+        # a broken grammar install can actually be debugged.
+        traceback.print_exc()
         print(
             f"WARNING: could not load the tree-sitter grammar {language!r} "
             f"for {filename} ({type(e).__name__}: {e}); "

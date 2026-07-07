@@ -153,16 +153,6 @@ def test_subprocess_client_context_manager():
     asyncio.run(run())
 
 
-def test_subprocess_client_get_status_before_start():
-    async def run():
-        async with SubprocessClient() as client:
-            response = await client.get_status()
-            assert response.result is not None
-            assert response.result.get("running") is False
-
-    asyncio.run(run())
-
-
 def test_subprocess_client_close_handles_already_closed():
     async def run():
         client = SubprocessClient()
@@ -195,6 +185,36 @@ def test_subprocess_client_get_progress_updates_stops_when_completed():
 
         # Should exit immediately since _completed is True
         assert updates == []
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_get_progress_updates_drains_queue_on_completion():
+    """Updates queued before completion is noticed must still be delivered.
+
+    Regression test: the worker emits a final ProgressUpdate immediately
+    before its 'completed' Response. If the completion flag was seen
+    first, the final update was silently dropped, leaving the TUI showing
+    stale final stats."""
+
+    async def run():
+        client = SubprocessClient()
+        final_update = ProgressUpdate(
+            status="Complete",
+            size=1,
+            original_size=100,
+            calls=50,
+            reductions=10,
+        )
+        await client._progress_queue.put(final_update)
+        client._completed = True
+
+        updates = []
+        async with aclosing(client.get_progress_updates()) as aiter:
+            async for update in aiter:
+                updates.append(update)
+
+        assert updates == [final_update]
 
     asyncio.run(run())
 

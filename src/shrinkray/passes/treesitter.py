@@ -142,10 +142,13 @@ def loadable_language_for_filename(filename: str) -> str | None:
         return None
     try:
         tree_sitter_language_pack.get_language(language)
-    except tree_sitter_language_pack.exceptions.Error as e:
+    except Exception as e:
         # The exception type says what failed: DownloadError for a
         # fetch, LanguageNotFoundError for a grammar this platform does
-        # not have, DynamicLoadError for a broken build, and so on. The
+        # not have, DynamicLoadError for a broken build, and so on.
+        # Loading also downloads, compiles and dlopens, so errors from
+        # outside the pack's own hierarchy (OSError on a full cache
+        # dir, a native load failure) are treated the same way. The
         # full traceback goes to stderr too (the run log in TUI mode) so
         # a broken grammar install can actually be debugged.
         traceback.print_exc()
@@ -290,7 +293,10 @@ def _names_mentioned(node: tree_sitter.Node, source: bytes) -> frozenset[bytes]:
                 if word is not None:
                     names.add(word.group())
         elif n.child_count == 0 and "identifier" in n.type:
-            names.add(source[n.start_byte : n.end_byte])
+            # A MISSING identifier inserted by error recovery is zero
+            # width; the empty bytes it covers are not a name.
+            if n.end_byte > n.start_byte:
+                names.add(source[n.start_byte : n.end_byte])
         else:
             stack.extend(n.children)
     return frozenset(names)
@@ -357,7 +363,7 @@ def _names_defined(node: tree_sitter.Node, source: bytes) -> frozenset[bytes]:
     candidates.
     """
     name_child = node.child_by_field_name("name")
-    if name_child is not None:
+    if name_child is not None and name_child.end_byte > name_child.start_byte:
         return frozenset({source[name_child.start_byte : name_child.end_byte]})
     return _names_mentioned(node, source)
 
@@ -404,7 +410,14 @@ def orphaned_declaration_cuts(tree: tree_sitter.Tree, source: bytes) -> list[Cut
     those. This joint deletion is what makes dead code deletable in
     languages like Go that hard-error on unused imports.
     """
-    gc_nodes = [(n, _names_defined(n, source)) for n in _gc_candidates(tree)]
+    # Zero-width nodes (from error recovery on garbage input) delete
+    # nothing and can never be covered by a deleted span, so the
+    # cascade below would re-collect them forever.
+    gc_nodes = [
+        (n, _names_defined(n, source))
+        for n in _gc_candidates(tree)
+        if n.end_byte > n.start_byte
+    ]
     occurrences = _name_occurrences(
         source, {name for _, names in gc_nodes for name in names}
     )
@@ -485,18 +498,21 @@ def orphaned_declaration_cuts(tree: tree_sitter.Tree, source: bytes) -> list[Cut
         if len(spans) < 2:
             continue
         # Cascade: deleting these regions may orphan further
-        # declarations whose references lived inside them.
+        # declarations whose references lived inside them. Each
+        # candidate is collected at most once, bounding the loop.
+        collected: set[int] = set()
         changed = True
         while changed:
             changed = False
             for index, (candidate, _) in enumerate(gc_nodes):
                 span = (candidate.start_byte, candidate.end_byte)
-                if extents[index] is None:
+                if index in collected or extents[index] is None:
                     continue
                 if any(u < span[1] and span[0] < v for u, v in spans):
                     continue
                 if is_orphaned(index, spans):
                     spans.append(span)
+                    collected.add(index)
                     changed = True
         cuts.append(sorted(set(spans)))
     return cuts

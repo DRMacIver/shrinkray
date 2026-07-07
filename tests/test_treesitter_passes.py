@@ -101,6 +101,29 @@ def test_loadable_language_none_when_grammar_unavailable(monkeypatch, capsys):
     assert "without tree-sitter passes" in stderr
 
 
+def test_loadable_language_none_when_loading_fails_outside_the_pack(
+    monkeypatch, capsys
+):
+    # Loading a grammar dlopens a shared library (after possibly
+    # downloading or compiling it), so failures outside the pack's own
+    # exception hierarchy can surface too — a full cache directory, a
+    # native load error. Those must also downgrade to running without
+    # tree-sitter passes, matching the background download path.
+    def unavailable(name):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(
+        "shrinkray.passes.treesitter.tree_sitter_language_pack.get_language",
+        unavailable,
+    )
+    assert loadable_language_for_filename("foo.go") is None
+    stderr = capsys.readouterr().err
+    assert "WARNING" in stderr
+    assert "OSError" in stderr
+    assert "read-only file system" in stderr
+    assert "without tree-sitter passes" in stderr
+
+
 def test_all_mapped_languages_are_loadable_and_parse():
     for language in sorted(set(EXTENSION_LANGUAGES.values())):
         tree = parse_tree(language, b"")
@@ -297,6 +320,41 @@ def test_orphan_cuts_empty_when_there_are_no_declarations():
     source = b"package main\n"
     tree = parse_tree("go", source)
     assert orphaned_declaration_cuts(tree, source) == []
+
+
+def test_orphan_cuts_terminate_on_zero_width_nodes():
+    # Garbage input makes tree-sitter emit a zero-width top-level node
+    # containing a MISSING identifier. Its empty "name" occurs at every
+    # non-word boundary and its zero-width span can never be covered by
+    # the deleted spans, so the cascade used to re-append it forever.
+    source = b"\x00\xc7pd"
+    tree = parse_tree("go", source)
+    for cut in orphaned_declaration_cuts(tree, source):
+        for start, end in cut:
+            assert end > start
+
+
+def test_orphan_names_ignore_missing_identifiers():
+    # A declaration whose name is a zero-width MISSING node defines no
+    # usable name; it must be skipped rather than treated as a
+    # declaration of the empty name (which "occurs" everywhere).
+    source = b"package main\nfunc() {}\nfunc main() {}\n"
+    tree = parse_tree("go", source)
+    for cut in orphaned_declaration_cuts(tree, source):
+        for start, end in cut:
+            assert end > start
+
+
+def test_orphan_names_ignore_zero_width_mentioned_identifiers():
+    # This garbage input parses to a surviving (non-zero-width)
+    # top-level node with no `name` field, so its names come from
+    # _names_mentioned, whose traversal reaches a zero-width MISSING
+    # identifier. That empty name must not be collected.
+    source = b'/"efm;'
+    tree = parse_tree("go", source)
+    for cut in orphaned_declaration_cuts(tree, source):
+        for start, end in cut:
+            assert end > start
 
 
 # === substitutions ===

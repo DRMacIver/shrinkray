@@ -37,7 +37,7 @@ produces a candidate that fails the interestingness test and is
 discarded, so an imperfect model costs time but never correctness.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 import tree_sitter
 from attrs import frozen
@@ -156,6 +156,40 @@ def _matches(node_type: str, words: frozenset[str]) -> bool:
     return not words.isdisjoint(node_type.split("_"))
 
 
+def _contains(span: tuple[int, int], node: tree_sitter.Node) -> bool:
+    return span[0] <= node.start_byte and node.end_byte <= span[1]
+
+
+def _unique_definitions(
+    source: bytes, named_nodes: Iterable[tuple[bytes, tree_sitter.Node]]
+) -> dict[bytes, tuple[tuple[int, int], str, str]]:
+    """Map each name defined by exactly one of the given nodes to that
+    node's (span, decoded name, decoded text).
+
+    This is the shared notion of "the definition a name can be replaced
+    by" for both inlining transformations: ambiguous names (defined by
+    more than one node), oversized nodes, and undecodable text are all
+    dropped.
+    """
+    nodes: dict[bytes, tree_sitter.Node | None] = {}
+    for name, node in named_nodes:
+        nodes[name] = None if name in nodes else node
+
+    result: dict[bytes, tuple[tuple[int, int], str, str]] = {}
+    for name, node in nodes.items():
+        if node is None:
+            continue
+        if node.end_byte - node.start_byte > MAX_SNIPPET_BYTES:
+            continue
+        try:
+            context = source[node.start_byte : node.end_byte].decode("utf-8")
+            name_text = name.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        result[name] = ((node.start_byte, node.end_byte), name_text, context.strip())
+    return result
+
+
 def _definition_name(node: tree_sitter.Node) -> tree_sitter.Node | None:
     """The identifier a function definition binds, or None.
 
@@ -208,36 +242,20 @@ def inline_call_targets(
     skipped), the call must not be inside that definition (recursion),
     and both must be small enough to prompt with.
     """
-    definitions: dict[bytes, tree_sitter.Node | None] = {}
-    for node in iter_nodes(tree):
-        if not node.is_named or not _matches(node.type, _DEFINITION_WORDS):
-            continue
-        # Bodiless function-like nodes (declarations, interface
-        # members, C declarators) define nothing to inline.
-        if node.child_by_field_name("body") is None:
-            continue
-        name_node = _definition_name(node)
-        if name_node is None:
-            continue
-        name = source[name_node.start_byte : name_node.end_byte]
-        definitions[name] = None if name in definitions else node
+    def named_definitions() -> Iterable[tuple[bytes, tree_sitter.Node]]:
+        for node in iter_nodes(tree):
+            if not node.is_named or not _matches(node.type, _DEFINITION_WORDS):
+                continue
+            # Bodiless function-like nodes (declarations, interface
+            # members, C declarators) define nothing to inline.
+            if node.child_by_field_name("body") is None:
+                continue
+            name_node = _definition_name(node)
+            if name_node is None:
+                continue
+            yield source[name_node.start_byte : name_node.end_byte], node
 
-    inlinable: dict[bytes, tuple[tuple[int, int], str, str]] = {}
-    for name, definition in definitions.items():
-        if definition is None:
-            continue
-        if definition.end_byte - definition.start_byte > MAX_SNIPPET_BYTES:
-            continue
-        try:
-            context = source[definition.start_byte : definition.end_byte].decode(
-                "utf-8"
-            )
-            name_text = name.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
-        span = (definition.start_byte, definition.end_byte)
-        inlinable[name] = (span, name_text, context)
-
+    inlinable = _unique_definitions(source, named_definitions())
     targets: list[TransformTarget] = []
     for node in iter_nodes(tree):
         if not node.is_named or not _matches(node.type, _CALL_WORDS):
@@ -249,10 +267,7 @@ def inline_call_targets(
         if entry is None:
             continue
         definition_span, name_text, context = entry
-        if (
-            definition_span[0] <= node.start_byte
-            and node.end_byte <= definition_span[1]
-        ):
+        if _contains(definition_span, node):
             continue
         if node.end_byte - node.start_byte > MAX_SNIPPET_BYTES:
             continue
@@ -277,11 +292,11 @@ def inline_call_targets(
     return targets
 
 
-def _binding_parts(
+def _binding_name(
     node: tree_sitter.Node, source: bytes
-) -> tuple[tree_sitter.Node, tree_sitter.Node] | None:
-    """The (name, definition) children of a node binding one plain
-    identifier to a value or type, or None."""
+) -> tree_sitter.Node | None:
+    """The name child of a node binding one plain identifier to a value
+    or type, or None."""
     if not _matches(node.type, _BINDING_WORDS):
         return None
     # An augmented assignment (`x += 1`) reads the name's prior value
@@ -303,7 +318,7 @@ def _binding_parts(
         if name is None:
             continue
         if name.child_count == 0 and "identifier" in name.type:
-            return (name, value)
+            return name
         # A structured binding (tuple pattern, expression list): not
         # one name bound to one definition.
         return None
@@ -319,37 +334,23 @@ def inline_definition_targets(
     This generalises typedef inlining: variables, constants, type
     aliases and C macros all bind a name whose uses can be replaced by
     the definition, after which the binding itself is deletable. Names
-    bound more than once (reassignment, augmented assignment) are
-    skipped: their value at a given use is not the textual definition.
+    bound more than once (reassignment) are skipped: their value at a
+    given use is not the textual definition. Uses that textually precede
+    the binding are still offered: inside a function body they can
+    legitimately refer to a binding made later, and a use the rewrite
+    gets wrong just fails the interestingness test.
     """
-    bindings: dict[bytes, tree_sitter.Node | None] = {}
-    for node in iter_nodes(tree):
-        if not node.is_named:
-            continue
-        parts = _binding_parts(node, source)
-        if parts is None:
-            continue
-        name_node = parts[0]
-        name = source[name_node.start_byte : name_node.end_byte]
-        bindings[name] = None if name in bindings else node
 
-    inlinable: dict[bytes, tuple[tuple[int, int], str, str]] = {}
-    for name, binding in bindings.items():
-        if binding is None:
-            continue
-        if binding.end_byte - binding.start_byte > MAX_SNIPPET_BYTES:
-            continue
-        try:
-            context = source[binding.start_byte : binding.end_byte].decode("utf-8")
-            name_text = name.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
-        inlinable[name] = (
-            (binding.start_byte, binding.end_byte),
-            name_text,
-            context.strip(),
-        )
+    def named_bindings() -> Iterable[tuple[bytes, tree_sitter.Node]]:
+        for node in iter_nodes(tree):
+            if not node.is_named:
+                continue
+            name_node = _binding_name(node, source)
+            if name_node is None:
+                continue
+            yield source[name_node.start_byte : name_node.end_byte], node
 
+    inlinable = _unique_definitions(source, named_bindings())
     targets: list[TransformTarget] = []
     for node in iter_nodes(tree):
         if node.child_count != 0 or "identifier" not in node.type:
@@ -358,7 +359,7 @@ def inline_definition_targets(
         if entry is None:
             continue
         binding_span, name_text, context = entry
-        if binding_span[0] <= node.start_byte and node.end_byte <= binding_span[1]:
+        if _contains(binding_span, node):
             continue
         targets.append(
             TransformTarget(

@@ -173,6 +173,10 @@ jobs:
       - name: Install VHS and dependencies
         run: |
           # Install ttyd (required for VHS headless operation)
+          # GitHub's runner images preinstall Microsoft apt repos
+          # (azure-cli, prod) that periodically ship an invalid signature and
+          # break `apt-get update`. We don't use them, so drop them first.
+          sudo sh -c 'grep -rl packages.microsoft.com /etc/apt/sources.list.d/ 2>/dev/null | xargs -r rm -f' || true
           sudo apt-get update
           sudo apt-get install -y ttyd ffmpeg
           # Install VHS
@@ -282,6 +286,10 @@ jobs:
       - name: Install system dependencies (Ubuntu)
         if: runner.os == 'Linux'
         run: |
+          # GitHub's runner images preinstall Microsoft apt repos
+          # (azure-cli, prod) that periodically ship an invalid signature and
+          # break `apt-get update`. We don't use them, so drop them first.
+          sudo sh -c 'grep -rl packages.microsoft.com /etc/apt/sources.list.d/ 2>/dev/null | xargs -r rm -f' || true
           sudo apt-get update
           sudo apt-get install -y minisat creduce
       - name: Install system dependencies (macOS)
@@ -317,6 +325,10 @@ jobs:
         run: uv python pin 3.13
       - name: Install system dependencies
         run: |
+          # GitHub's runner images preinstall Microsoft apt repos
+          # (azure-cli, prod) that periodically ship an invalid signature and
+          # break `apt-get update`. We don't use them, so drop them first.
+          sudo sh -c 'grep -rl packages.microsoft.com /etc/apt/sources.list.d/ 2>/dev/null | xargs -r rm -f' || true
           sudo apt-get update
           sudo apt-get install -y minisat creduce
       - name: Install Python dependencies
@@ -349,6 +361,10 @@ jobs:
       - name: Install system dependencies (Ubuntu)
         if: runner.os == 'Linux'
         run: |
+          # GitHub's runner images preinstall Microsoft apt repos
+          # (azure-cli, prod) that periodically ship an invalid signature and
+          # break `apt-get update`. We don't use them, so drop them first.
+          sudo sh -c 'grep -rl packages.microsoft.com /etc/apt/sources.list.d/ 2>/dev/null | xargs -r rm -f' || true
           sudo apt-get update
           sudo apt-get install -y minisat creduce
       - name: Install system dependencies (macOS)

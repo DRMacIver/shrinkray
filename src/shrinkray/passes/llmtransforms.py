@@ -278,11 +278,18 @@ def inline_call_targets(
 
 
 def _binding_parts(
-    node: tree_sitter.Node,
+    node: tree_sitter.Node, source: bytes
 ) -> tuple[tree_sitter.Node, tree_sitter.Node] | None:
     """The (name, definition) children of a node binding one plain
     identifier to a value or type, or None."""
     if not _matches(node.type, _BINDING_WORDS):
+        return None
+    # An augmented assignment (`x += 1`) reads the name's prior value
+    # rather than defining it. Every grammar exposes the compound
+    # operator through an `operator` field; plain bindings either have
+    # no such field or a bare `=`.
+    operator = node.child_by_field_name("operator")
+    if operator is not None and source[operator.start_byte : operator.end_byte] != b"=":
         return None
     value = node.child_by_field_name("value")
     if value is None:
@@ -319,7 +326,7 @@ def inline_definition_targets(
     for node in iter_nodes(tree):
         if not node.is_named:
             continue
-        parts = _binding_parts(node)
+        parts = _binding_parts(node, source)
         if parts is None:
             continue
         name_node = parts[0]

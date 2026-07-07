@@ -200,6 +200,17 @@ def test_skips_reassigned_names():
     assert definition_targets("python", source) == []
 
 
+def test_skips_augmented_assignments():
+    # An augmented assignment reads the name's prior value rather than
+    # defining it, so it must not count as a binding even when it is the
+    # only assignment-like node naming the identifier (e.g. a mutated
+    # parameter).
+    python = b"def f(x):\n    x += 1\n    return x\n\nprint(f(1))\n"
+    assert definition_targets("python", python) == []
+    c = b"int f(int x) { x += 1; return x; }\n"
+    assert definition_targets("c", c) == []
+
+
 def test_skips_bindings_of_multiple_names():
     source = b"x, y = 1, 2\nprint(x)\n"
     assert definition_targets("python", source) == []

@@ -14,9 +14,12 @@ from shrinkray.passes.cpp import (
     PREPROC,
     PUNCT,
     STRING,
+    TokenView,
     _candidate_pump,
     _find_angle_close,
     _find_class_base_lists,
+    _find_namespace_blocks,
+    _qualifier_cuts_by_path,
     _split_on_top_level_commas,
     delete_function_definitions,
     find_function_definitions,
@@ -486,6 +489,84 @@ def test_strips_nested_namespace_path_qualifier():
     assert b"namespace" not in result
     assert b"a::b::" not in result
     assert b"int w = v;" in result.replace(b"\n", b"")
+
+
+# === Namespace qualifier scanning ===
+#
+# All namespaces' qualifier cuts are found with a single indexed scan
+# over the tokens. These tests check that the indexed scan agrees with
+# the straightforward (but per-namespace, hence quadratic) scan it
+# replaced, kept here as a reference implementation.
+
+
+def _reference_namespace_qualifier_cuts(
+    view: TokenView, name_path: tuple[int, int], decl_start: int
+) -> list[tuple[int, int]]:
+    """Pre-index implementation of namespace qualifier scanning: walk
+    the whole token list for one namespace's path, skipping the
+    declaration header, consuming matched qualifiers."""
+    tokens = view.tokens
+    lo, hi = name_path
+    path_texts = [tokens[k].text for k in range(lo, hi)]
+    n = len(path_texts)
+    cuts: list[tuple[int, int]] = []
+    p = 0
+    limit = len(tokens) - n
+    while p <= limit:
+        if decl_start <= p <= hi:
+            p += 1
+            continue
+        if (
+            all(tokens[p + k].text == path_texts[k] for k in range(n))
+            and p + n < len(tokens)
+            and tokens[p + n].text == b"::"
+        ):
+            cuts.append((tokens[p].start, tokens[p + n].end))
+            p += n + 1
+        else:
+            p += 1
+    return cuts
+
+
+NAMESPACEY_SOURCES = st.lists(
+    st.sampled_from(
+        ["namespace", "extern", "a", "b", "x", "::", "{", "}", ";", "=", '"C"']
+    ),
+    max_size=30,
+).map(lambda parts: " ".join(parts).encode())
+
+
+@given(NAMESPACEY_SOURCES)
+def test_qualifier_cut_index_matches_reference_scan(source: bytes):
+    view = token_view(source)
+    tokens = view.tokens
+    blocks = _find_namespace_blocks(view)
+    paths: set[tuple[bytes, ...]] = set()
+    for _, _, _, name_path in blocks:
+        if name_path is not None:
+            lo, hi = name_path
+            paths.add(tuple(t.text for t in tokens[lo:hi]))
+    index = _qualifier_cuts_by_path(view, paths)
+    for decl, _, _, name_path in blocks:
+        if name_path is None:
+            continue
+        lo, hi = name_path
+        key = tuple(t.text for t in tokens[lo:hi])
+        assert index[key] == _reference_namespace_qualifier_cuts(
+            view, name_path, decl
+        )
+
+
+def test_qualifier_cuts_consume_overlapping_matches():
+    # After matching `a::a` followed by `::`, the scan resumes after the
+    # consumed qualifier, so the overlapping `a::a::` starting at the
+    # second `a` is not also cut.
+    source = b"namespace a::a { }\na::a::a::x;\n"
+    view = token_view(source)
+    [cuts] = _qualifier_cuts_by_path(view, {(b"a", b"::", b"a")}).values()
+    assert [source[:s] + source[e:] for s, e in cuts] == [
+        b"namespace a::a { }\na::x;\n"
+    ]
 
 
 # === remove_base_classes ===

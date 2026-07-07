@@ -743,14 +743,16 @@ async def replace_type_with_int(problem: ReductionProblem[bytes]) -> None:
     await apply_patches(problem, Replacements(), patches)
 
 
-async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
-    """Remove namespaces, in the style of clang_delta's
-    remove-namespace: either delete the whole namespace or splice its
-    contents into the enclosing scope. extern "C" blocks are handled
-    the same way."""
-    view = token_view(problem.current_test_case)
+def _find_namespace_blocks(
+    view: TokenView,
+) -> list[tuple[int, int, int, tuple[int, int] | None]]:
+    """Find namespace declarations and extern "C" blocks, returned as
+    (decl, open, close, name_path) token index tuples: the token
+    starting the declaration, its braces, and the range of tokens
+    naming the namespace (None for extern blocks and anonymous
+    namespaces)."""
     tokens = view.tokens
-    cuts: list[CutPatch] = []
+    results: list[tuple[int, int, int, tuple[int, int] | None]] = []
     for i, t in enumerate(tokens):
         if t.kind != NAME:
             continue
@@ -772,10 +774,68 @@ async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
             continue
         if j >= len(tokens) or tokens[j].text != b"{" or j not in view.brackets:
             continue
-        close = view.brackets[j]
-        cuts.append([(t.start, tokens[close].end)])
+        results.append((i, j, view.brackets[j], name_path))
+    return results
+
+
+def _qualifier_cuts_by_path(
+    view: TokenView, paths: set[tuple[bytes, ...]]
+) -> dict[tuple[bytes, ...], list[tuple[int, int]]]:
+    """For each namespace name path, find every `<path>::` qualifier in
+    the token stream and return cuts that delete each one (the path
+    tokens plus the trailing `::`). Qualifiers inside a namespace's own
+    body count too: once the namespace is spliced away, a self-qualified
+    reference like `ns::x` dangles just like an external one. Deleting
+    these turns `ns::name` into `name` so the namespace can go.
+
+    Occurrences for all paths are found from a single indexing scan
+    over the tokens, so many namespaces don't imply many full scans. A
+    path can never match inside its own namespace's header (the header
+    is the maximal run of name tokens and is followed by `{`, never
+    `::`), so the result is safely shared between all namespaces with
+    the same name."""
+    tokens = view.tokens
+    occurrences: dict[bytes, list[int]] = {path[0]: [] for path in paths}
+    for idx, tok in enumerate(tokens):
+        if tok.text in occurrences:
+            occurrences[tok.text].append(idx)
+    result: dict[tuple[bytes, ...], list[tuple[int, int]]] = {}
+    for path in paths:
+        n = len(path)
+        cuts: list[tuple[int, int]] = []
+        min_next = 0
+        for p in occurrences[path[0]]:
+            if p < min_next or p + n >= len(tokens):
+                continue
+            if (
+                all(tokens[p + k].text == path[k] for k in range(n))
+                and tokens[p + n].text == b"::"
+            ):
+                cuts.append((tokens[p].start, tokens[p + n].end))
+                min_next = p + n + 1
+        result[path] = cuts
+    return result
+
+
+async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
+    """Remove namespaces, in the style of clang_delta's
+    remove-namespace: either delete the whole namespace or splice its
+    contents into the enclosing scope. extern "C" blocks are handled
+    the same way."""
+    view = token_view(problem.current_test_case)
+    tokens = view.tokens
+    blocks = _find_namespace_blocks(view)
+    paths: set[tuple[bytes, ...]] = set()
+    for _, _, _, name_path in blocks:
+        if name_path is not None:
+            lo, hi = name_path
+            paths.add(tuple(t.text for t in tokens[lo:hi]))
+    qualifier_cuts = _qualifier_cuts_by_path(view, paths)
+    cuts: list[CutPatch] = []
+    for decl, open_idx, close, name_path in blocks:
+        cuts.append([(tokens[decl].start, tokens[close].end)])
         splice = [
-            (t.start, tokens[j].end),
+            (tokens[decl].start, tokens[open_idx].end),
             (tokens[close].start, tokens[close].end),
         ]
         cuts.append(splice)
@@ -785,43 +845,11 @@ async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
         # namespace's qualifier from references, which is what actually
         # lets the namespace go.
         if name_path is not None:
-            qualifier_cuts = _namespace_qualifier_cuts(view, name_path, i)
-            if qualifier_cuts:
-                cuts.append(splice + qualifier_cuts)
+            lo, hi = name_path
+            path_cuts = qualifier_cuts[tuple(t.text for t in tokens[lo:hi])]
+            if path_cuts:
+                cuts.append(splice + path_cuts)
     await apply_patches(problem, Cuts(), cuts)
-
-
-def _namespace_qualifier_cuts(
-    view: TokenView, name_path: tuple[int, int], decl_start: int
-) -> list[tuple[int, int]]:
-    """Find every `<path>::` qualifier that names the namespace declared
-    by the tokens in [name_path[0], name_path[1]), outside the
-    declaration's header, and return cuts that delete each one (the path
-    tokens plus the trailing `::`). Qualifiers inside the namespace's own
-    body count too: once the namespace is spliced away, a self-qualified
-    reference like `ns::x` dangles just like an external one. Deleting
-    these turns `ns::name` into `name` so the namespace can go."""
-    tokens = view.tokens
-    lo, hi = name_path
-    path_texts = [tokens[k].text for k in range(lo, hi)]
-    n = len(path_texts)
-    cuts: list[tuple[int, int]] = []
-    p = 0
-    limit = len(tokens) - n
-    while p <= limit:
-        if decl_start <= p <= hi:
-            p += 1
-            continue
-        if (
-            all(tokens[p + k].text == path_texts[k] for k in range(n))
-            and p + n < len(tokens)
-            and tokens[p + n].text == b"::"
-        ):
-            cuts.append((tokens[p].start, tokens[p + n].end))
-            p += n + 1
-        else:
-            p += 1
-    return cuts
 
 
 async def remove_template_parts(problem: ReductionProblem[bytes]) -> None:

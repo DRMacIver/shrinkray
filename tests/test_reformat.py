@@ -345,6 +345,48 @@ def test_property_arbitrary_text_is_idempotent(s):
     assert basic_format(once) == once
 
 
+def test_whitespace_collapse_does_not_fuse_operators():
+    # Dropping the space between two single punctuation characters must not fuse
+    # them into a longer operator token that a second pass would then re-space.
+    # 'a& &b' is two '&' tokens; it must NOT become '&&' (which would re-detect
+    # as the '&&' operator on the next pass, breaking idempotence).
+    assert basic_format("a& &b") == "a& &b\n"
+    assert basic_format("a& &b") == basic_format(basic_format("a& &b"))
+    # The genuine '&&' operator (no intervening space) is still spaced.
+    assert basic_format("a&&b") == "a && b\n"
+    # Same mechanism in the inline (tag/Python) normaliser.
+    assert basic_format("<p>a& &b</p>") == "<p>a& &b</p>\n"
+    assert basic_format("<p>a&&b</p>") == "<p>a && b</p>\n"
+
+
+def test_whitespace_collapse_does_not_fuse_comment_introducers():
+    # Collapsing '/ /' -> '//' or '/ *' -> '/*' would start a comment that the
+    # next pass tokenises differently, so those spaces are kept.
+    assert basic_format("a/ /b") == "a/ /b\n"
+    assert basic_format("a/ *b") == "a/ *b\n"
+
+
+def test_whitespace_collapse_does_not_manufacture_a_tag():
+    # Dropping the space between '<' and a tag-name character would splice them
+    # into a tag that re-detects as the tag family on the next pass. When a '>'
+    # follows (so a tag really would form) the space is kept.
+    assert basic_format("< b>") == "< b>\n"
+    assert basic_format("< b>") == basic_format(basic_format("< b>"))
+    # With no following '>' there is no tag risk, so the space still collapses.
+    assert basic_format("< b") == "<b\n"
+
+
+def test_dict_colon_in_brackets_is_not_a_python_block():
+    # A ':' inside brackets (a dict/slice literal) is not a block header colon,
+    # so an input whose only colon is bracket-enclosed must stay in the brace
+    # family. Otherwise it detects as Python once, flattens to brace-looking
+    # output, and then re-detects as brace on the next pass (a family flip).
+    src = 'd = {"x":\n     1}'
+    assert detect_family(src) == "brace"
+    once = basic_format(src)
+    assert basic_format(once) == once
+
+
 @given(ARBITRARY)
 def test_property_arbitrary_text_preserves_non_whitespace(s):
     # The formatter only ever rewrites whitespace (and inserts spacing around
@@ -445,6 +487,18 @@ def test_detect_family_colon_needs_strictly_deeper_body():
     assert detect_family("a:\nb") == "brace"  # same indent -> not a block
     assert detect_family("{\n  :\n") == "brace"  # label colon, only blanks after
     assert detect_family("class C {\n  public:\n  int x;\n}") == "brace"
+    # A header colon with only blank lines after it is not a block (no body).
+    assert detect_family("x:\n\n") == "brace"
+
+
+def test_colon_inside_multiline_string_is_not_a_block_header():
+    # A ':' at the end of an (unterminated) string that spans physical lines is
+    # inside the string, not a block header. Attributing it to an earlier line
+    # would misdetect the input as Python and flip families on the next pass.
+    src = ' |0]"cb*&|\n\t\t{B<}b0:'
+    assert detect_family(src) == "brace"
+    once = basic_format(src)
+    assert basic_format(once) == once
 
 
 @pytest.mark.parametrize(

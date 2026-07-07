@@ -31,6 +31,21 @@ import re
 OPS = ["==", "!=", "<=", ">=", "+=", "-=", "&&", "||", "+", "="]
 INDENT = "  "
 
+# Two-character tokens that whitespace collapse must not manufacture out of a
+# dropped space: the two-character operators (e.g. "& &" -> "&&") plus the
+# comment introducers ("/ /" -> "//", "/ *" -> "/*"). If collapse fused any of
+# these, the next reflow pass would tokenise the boundary differently (re-space
+# the operator, or start a comment) and basic_format would not be idempotent.
+_MULTI_OPS = frozenset(op for op in OPS if len(op) == 2)
+_FUSE_PAIRS = _MULTI_OPS | {"//", "/*"}
+
+# Characters that can immediately follow "<" to begin a tag (see _TAG_ANY).
+# Dropping whitespace between "<" and one of these can turn brace-family text
+# like "< c>" into "<c>", which re-detects as the tag family on the next pass
+# (a family flip). The whitespace collapse keeps that space when a ">" follows,
+# so a tag is never manufactured out of collapsed whitespace.
+_TAG_START = frozenset("!/?abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
 
 def _is_word(c: str) -> bool:
     """Whether ``c`` is an identifier character (unicode-aware).
@@ -65,6 +80,62 @@ _TAG = re.compile(r"<(/?)([A-Za-z][\w:-]*)?", re.S)
 _TAG_ANY = re.compile(r"<[A-Za-z!/?][^>]*>")
 
 
+def _block_header_lines(s: str) -> list[bool]:
+    """For each physical line, whether it ends (ignoring trailing whitespace)
+    with a ``:`` that lies at bracket depth 0 and outside string literals.
+
+    A ``:`` inside ``()[]{}`` is a dict/slice/annotation colon, not a block
+    header, so it must not be treated as one. Tracking bracket depth (and
+    skipping string literals) keeps detection stable: without it, a bracketed
+    ``:`` reads as a Python block once, flattens to brace-looking output, and
+    then re-detects as brace on the next pass -- a family flip that breaks
+    idempotence.
+    """
+    lines = s.split("\n")
+    result = [False] * len(lines)
+    depth = 0
+    line_idx = 0
+    last_sig = ""  # last non-whitespace character on the current line
+    last_depth = 0  # bracket depth at that character
+    sink: list[str] = []
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c in "\"'":
+            start = i
+            i = _scan_literal(s, i, sink)
+            # A literal may span physical lines; those lines end inside the
+            # string, so they are never block headers. Advance past each and
+            # record a non-colon end so a ':' inside the string can't be read
+            # as a header colon.
+            for _ in range(s.count("\n", start, i)):
+                result[line_idx] = False
+                line_idx += 1
+            last_sig = '"'
+            last_depth = depth
+            continue
+        if c == "\n":
+            result[line_idx] = last_sig == ":" and last_depth == 0
+            line_idx += 1
+            last_sig = ""
+            i += 1
+            continue
+        if c in "([{":
+            last_sig = c
+            last_depth = depth
+            depth += 1
+        elif c in ")]}":
+            depth = max(0, depth - 1)
+            last_sig = c
+            last_depth = depth
+        elif not c.isspace():
+            last_sig = c
+            last_depth = depth
+        i += 1
+    result[line_idx] = last_sig == ":" and last_depth == 0
+    return result
+
+
 def _has_python_block(s: str) -> bool:
     """Whether ``s`` contains a Python-style block: a ``:``-terminated line
     directly followed by a strictly more-indented line.
@@ -77,8 +148,9 @@ def _has_python_block(s: str) -> bool:
     ``basic_format`` idempotent and stops C/C++ labels reading as Python.
     """
     lines = s.split("\n")
+    header_colon = _block_header_lines(s)
     for k, header in enumerate(lines[:-1]):
-        if not header.rstrip().endswith(":"):
+        if not header_colon[k]:
             continue
         header_indent = len(header) - len(header.lstrip(" \t"))
         for body in lines[k + 1 :]:
@@ -137,7 +209,7 @@ def _inline(s: str) -> str:
                 j += 1
             prev = out[-1][-1] if out and out[-1] else ""
             nxt = s[j] if j < n else ""
-            if _is_word(prev) and _is_word(nxt):
+            if (_is_word(prev) and _is_word(nxt)) or prev + nxt in _MULTI_OPS:
                 out.append(" ")
             i = j
             continue
@@ -223,7 +295,14 @@ def _reflow_brace(s: str) -> str:
             while j < n and s[j].isspace():
                 j += 1
             nxt = s[j] if j < n else ""
-            if line_started and _is_word(last_char()) and _is_word(nxt):
+            prev = last_char()
+            keep = (_is_word(prev) and _is_word(nxt)) or prev + nxt in _FUSE_PAIRS
+            if not keep and prev == "<" and nxt in _TAG_START and ">" in s[j:]:
+                # Collapsing here would splice "<" onto a tag name and form a
+                # tag that the next pass detects as the tag family; keep the
+                # space so the family is stable.
+                keep = True
+            if line_started and keep:
                 out.append(" ")
             i = j
             continue

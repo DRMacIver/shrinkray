@@ -2088,6 +2088,76 @@ async def test_run_pass_probation_cleared_when_aborted_run_made_progress():
     assert not reducer.pass_probation["reduces_then_churns"]
 
 
+@pytest.mark.parametrize("parallelism", [1, 2])
+async def test_run_pass_detects_progress_through_key_problem(parallelism: int):
+    """Directory-mode regression: run_pass detected progress only via the
+    call monitor, which fires from BasicReductionProblem.is_interesting.
+    A KeyProblem routes its calls through the patch applier to the
+    underlying dict problem, so the monitor never fired: a pass that
+    reduced a key's value was recorded as fruitless, fingerprinted on its
+    own output, and skipped next round, converging at a non-fixpoint."""
+
+    async def is_interesting(x):
+        return set(x) == {"file1"}
+
+    base = BasicReductionProblem(
+        initial={"file1": b"aaaa"},
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=parallelism),
+    )
+    applier = PatchApplier(patches=UpdateKeys(), problem=base)
+    kp = KeyProblem(base_problem=base, applier=applier, key="file1")
+    reducer = ShrinkRay(target=kp, python_reducer=False)
+
+    async def halve(p):
+        await p.is_interesting(p.current_test_case[: len(p.current_test_case) // 2])
+
+    halve.__name__ = "halve"
+
+    await reducer.run_pass(halve)
+    assert base.current_test_case["file1"] == b"aa"
+    # The pass made progress, so it must not be put on probation or
+    # fingerprint-skipped on the next round.
+    assert not reducer.pass_probation["halve"]
+    assert "halve" not in reducer.pass_fingerprints
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+async def test_run_pass_probation_budget_applies_through_key_problem(
+    parallelism: int,
+):
+    """Directory-mode regression: the probation call budget must count
+    calls made through a KeyProblem. Previously the monitor never fired
+    for them, so budgeted passes always ran in full."""
+
+    async def is_interesting(x):
+        return x == {"file1": b"aaaa"}
+
+    base = BasicReductionProblem(
+        initial={"file1": b"aaaa"},
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=parallelism),
+    )
+    applier = PatchApplier(patches=UpdateKeys(), problem=base)
+    kp = KeyProblem(base_problem=base, applier=applier, key="file1")
+    reducer = ShrinkRay(target=kp, python_reducer=False)
+    reducer.probation_budget = 5
+    reducer.pass_probation["churner"] = True
+
+    attempts = [0]
+
+    async def churner(p):
+        for i in range(50):
+            attempts[0] += 1
+            await p.is_interesting(b"z%d" % i)
+
+    churner.__name__ = "churner"
+
+    await reducer.run_pass(churner)
+    assert attempts[0] <= reducer.probation_budget + 2
+    assert "churner" in reducer.incomplete_passes
+
+
 async def test_run_verifies_aborted_passes_before_finishing():
     """A reduction hiding beyond the probation budget is still found:
     incomplete passes are re-run without a budget before termination."""

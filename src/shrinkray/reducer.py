@@ -480,7 +480,8 @@ class ShrinkRay(Reducer[bytes]):
 
         use_budget = budgeted and self.pass_probation.get(pass_name, False)
         scope = trio.CancelScope()
-        last_seen = problem.current_test_case
+        started_from = problem.current_test_case
+        last_seen = started_from
         consecutive_failures = 0
         budget_exhausted = False
         made_progress = False
@@ -517,6 +518,13 @@ class ShrinkRay(Reducer[bytes]):
             with scope:
                 self._current_pass_scope = scope
                 await rp(self.target)
+
+            # The monitor only observes calls that fire this problem's
+            # own monitor hook; a problem that delegates its evaluations
+            # elsewhere may miss some. A changed test case is progress
+            # regardless of whether the monitor saw it happen.
+            if problem.current_test_case is not started_from:
+                made_progress = True
 
             if budget_exhausted:
                 # The pass was abandoned by its probation budget. It still
@@ -876,7 +884,16 @@ class KeyProblem(ReductionProblem[bytes]):
         return self.base_problem.stats
 
     async def is_interesting(self, test_case: bytes) -> bool:
-        return await self.applier.try_apply_patch({self.key: test_case})
+        result = await self.applier.try_apply_patch({self.key: test_case})
+        # run_pass installs its per-pass call monitor on the problem the
+        # pass runs against, but the evaluation here happens on the shared
+        # underlying dict problem, which never fires this problem's
+        # monitor (and whose own monitor slot can't be borrowed: every
+        # key's reducer runs against it concurrently). Fire it here so
+        # progress detection and probation budgets work per key.
+        if self.pass_call_monitor is not None:
+            self.pass_call_monitor()
+        return result
 
     def size(self, test_case: bytes) -> int:
         return len(test_case)

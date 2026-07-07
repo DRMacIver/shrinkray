@@ -542,7 +542,12 @@ def _logical_lines(s: str) -> list[str]:
 
 
 def _split_top(s: str, sep: str) -> list[str]:
-    """Split on `sep` at bracket depth 0, outside string literals."""
+    """Split on `sep` at bracket depth 0, outside string literals and comments.
+
+    A ``#`` comment runs to the end of its line and is never split, so a ``;``
+    (or other separator) inside a Python comment is not mistaken for a statement
+    boundary that would move the comment's text onto its own line as code.
+    """
     parts: list[str] = []
     cur: list[str] = []
     depth = 0
@@ -551,6 +556,12 @@ def _split_top(s: str, sep: str) -> list[str]:
         c = s[i]
         if c in "\"'":
             i = _scan_literal(s, i, cur)
+            continue
+        if c == "#":
+            j = s.find("\n", i)
+            j = n if j < 0 else j
+            cur.append(s[i:j])
+            i = j
             continue
         if c in "([{":
             depth += 1
@@ -583,9 +594,17 @@ def _reflow_indent(s: str) -> str:
             if width > stack[-1]:  # inconsistent dedent; treat as a new level
                 stack.append(width)
         depth = len(stack) - 1
-        for stmt in _split_top(raw.strip(), ";"):
-            if stmt.strip():
-                out.append(INDENT * depth + _inline(stmt.strip()))
+        # One statement per line, but keep every ';': it separated this part
+        # from the next, so re-attach it (basic_format only rewrites whitespace,
+        # never deleting a non-whitespace character). A trailing ';' therefore
+        # survives, and an empty statement becomes a lone ';'.
+        stmts = _split_top(raw.strip(), ";")
+        for idx, part in enumerate(stmts):
+            text = _inline(part.strip())
+            if idx < len(stmts) - 1:
+                text += ";"
+            if text:
+                out.append(INDENT * depth + text)
     return "\n".join(out) + "\n" if out else "\n"
 
 

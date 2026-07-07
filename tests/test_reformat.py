@@ -47,7 +47,7 @@ def test_detect_family(text, family):
         ("void f() {}", "void f()\n\n{}"),
         ("z = a + b", "z = a +\nb"),
         ("#define A 1\n#define B 2", "#define A 1 #define B 2"),
-        ("def f(x):\n    a = 1\n    b = 2", "def f(x):\n\ta = 1;b = 2"),
+        ("def f(x):\n    a = 1\n    b = 2", "def f(x):\n\ta = 1\n\tb = 2"),
         ("<p>hi</p>", "<p>\n hi\n</p>"),
         ("<!DOCTYPE html>", "<!DOCTYPE\nhtml>"),
     ],
@@ -232,8 +232,26 @@ def test_indent_dedent():
 
 
 def test_indent_semicolon_split():
+    # One statement per line, but the ';' is preserved (basic_format only
+    # rewrites whitespace; it never deletes a non-whitespace character).
     out = basic_format("def f():\n    a = 1; b = 2")
-    assert out == "def f():\n  a = 1\n  b = 2\n"
+    assert out == "def f():\n  a = 1;\n  b = 2\n"
+
+
+def test_indent_semicolon_split_preserves_semicolons():
+    # Every ';' present in the source survives the one-statement-per-line split,
+    # including a trailing one and an empty statement.
+    assert (
+        basic_format("def f():\n    a = 1;;b = 2;")
+        == "def f():\n  a = 1;\n  ;\n  b = 2;\n"
+    )
+
+
+def test_indent_comment_is_not_split_on_semicolon():
+    # A ';' inside a '#' comment must not be treated as a statement separator:
+    # the comment text stays on the comment's line rather than being moved onto
+    # its own line as code.
+    assert basic_format("if x:\n    y  # a; b") == "if x:\n  y#a;b\n"
 
 
 def test_indent_string_spanning_brackets():
@@ -468,7 +486,9 @@ def test_indent_semicolon_in_string_not_split():
 
 
 def test_indent_blank_line_and_trailing_semicolon_and_newline():
-    assert basic_format("def f():\n\n    a = 1;\n") == "def f():\n  a = 1\n"
+    # basic_format canonicalises whitespace only, so the trailing ';' is kept
+    # (blank lines and the trailing newline are still normalised away).
+    assert basic_format("def f():\n\n    a = 1;\n") == "def f():\n  a = 1;\n"
 
 
 def test_indent_unterminated_string():

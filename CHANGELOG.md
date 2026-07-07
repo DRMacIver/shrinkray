@@ -3,6 +3,18 @@
 This is the changelog for [Shrink Ray](https://github.com/DRMacIver/shrinkray), a
 fast multi-format test-case reducer. Versions are calendar-based (`YY.M.D.N`).
 
+## 26.7.7.1 — 2026-07-07
+
+- Reduced memory use on inputs containing a very large number of integer
+  literals or identifiers: the passes that rewrite them now process them with
+  bounded concurrency instead of all at once.
+- The final statistics shown when a reduction completes no longer
+  occasionally miss the last progress update.
+- Grammar-aware reduction now applies to more file types, recognised by
+  extension: SCSS/Less, GraphQL, Protobuf, Terraform/HCL, Vue, Svelte, Solidity,
+  Gradle/Groovy, Clojure, Fortran, PowerShell, and CMake. Files of these types
+  now benefit from structure-aware deletions rather than byte-level cuts alone.
+
 ## 26.7.7.0 — 2026-07-07
 
 - Shrink Ray now has an LLM mode, enabled by default: alongside the ordinary

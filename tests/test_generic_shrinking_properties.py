@@ -6,12 +6,44 @@ import trio
 from hypothesis import Phase, assume, example, given, note, settings
 from hypothesis import strategies as st
 from hypothesis.errors import Frozen, StopTest
+from trio.testing import MockClock
 
 from shrinkray.passes.python import is_python
 from shrinkray.problem import BasicReductionProblem, default_sort_key
 from shrinkray.reducer import ShrinkRay
 from shrinkray.work import Volume, WorkContext
 from tests.helpers import assert_no_blockers, assert_reduces_to, direct_reductions
+
+
+# Virtual seconds (under the mock clock) a single reduction may consume before
+# we treat it as non-terminating. A normal reduction spends ~130 virtual
+# seconds here regardless of input — almost all of it in the initial-cut
+# watcher's `trio.sleep(5)` calls — so this generous bound only trips on a
+# genuine runaway. Because it is measured in the reducer's own virtual time,
+# not wall-clock time, it is completely insensitive to how busy the machine is.
+REDUCTION_HANG_LIMIT = 600.0
+
+
+def run_reduction_to_fixpoint(problem: BasicReductionProblem) -> None:
+    """Run a full reduction of ``problem`` under an autojumping mock clock.
+
+    The reducer's real-time waits (notably the initial-cut watcher's sleeps)
+    become instantaneous, so the test's wall-clock runtime is negligible and
+    cannot flake under load, while a generous virtual-time deadline still
+    catches a reduction that fails to terminate.
+    """
+
+    async def _run() -> None:
+        # The external Python reducer runs in a real subprocess whose I/O
+        # cannot be driven by a mock clock, so it is disabled here; these
+        # tests exercise the in-process reducer, and the external reducer has
+        # its own dedicated tests.
+        reducer = ShrinkRay(problem, python_reducer=False)
+        with trio.move_on_after(REDUCTION_HANG_LIMIT) as cancel_scope:
+            await reducer.run()
+        assert not cancel_scope.cancelled_caught, "reduction did not terminate"
+
+    trio.run(_run, clock=MockClock(autojump_threshold=0))
 
 
 POTENTIAL_BLOCKERS = [
@@ -50,7 +82,7 @@ common_settings = settings(deadline=None, max_examples=10, report_multiple_bugs=
     data=st.data(),
     parallelism=st.integers(1, 1),
 )
-async def test_can_shrink_arbitrary_problems(
+def test_can_shrink_arbitrary_problems(
     initial, rnd, data, parallelism, is_interesting_sync
 ):
     is_interesting_cache = {}
@@ -88,11 +120,7 @@ async def test_can_shrink_arbitrary_problems(
         initial=initial, is_interesting=is_interesting, work=work
     )
 
-    reducer = ShrinkRay(problem)
-
-    with trio.move_on_after(10) as cancel_scope:
-        await reducer.run()
-    assert not cancel_scope.cancelled_caught
+    run_reduction_to_fixpoint(problem)
 
     assert len(problem.current_test_case) <= len(initial)
 
@@ -109,7 +137,7 @@ async def test_can_shrink_arbitrary_problems(
     initial=test_cases,
     parallelism=st.integers(1, 10),
 )
-async def test_can_fail_to_shrink_arbitrary_problems(initial, parallelism):
+def test_can_fail_to_shrink_arbitrary_problems(initial, parallelism):
     async def is_interesting(test_case: bytes) -> bool:
         await trio.lowlevel.checkpoint()
         return test_case == initial
@@ -123,11 +151,7 @@ async def test_can_fail_to_shrink_arbitrary_problems(initial, parallelism):
         initial=initial, is_interesting=is_interesting, work=work
     )
 
-    reducer = ShrinkRay(problem)
-
-    with trio.move_on_after(10) as cancel_scope:
-        await reducer.run()
-    assert not cancel_scope.cancelled_caught
+    run_reduction_to_fixpoint(problem)
 
     assert problem.current_test_case == initial
 
@@ -145,7 +169,7 @@ async def test_can_fail_to_shrink_arbitrary_problems(initial, parallelism):
     initial=test_cases,
     parallelism=st.integers(1, 10),
 )
-async def test_can_succeed_at_shrinking_arbitrary_problems(initial, parallelism):
+def test_can_succeed_at_shrinking_arbitrary_problems(initial, parallelism):
     initial_is_python = is_python(initial)
 
     async def is_interesting(test_case: bytes) -> bool:
@@ -163,11 +187,7 @@ async def test_can_succeed_at_shrinking_arbitrary_problems(initial, parallelism)
         initial=initial, is_interesting=is_interesting, work=work
     )
 
-    reducer = ShrinkRay(problem)
-
-    with trio.move_on_after(10) as cancel_scope:
-        await reducer.run()
-    assert not cancel_scope.cancelled_caught
+    run_reduction_to_fixpoint(problem)
 
     assert len(problem.current_test_case) == 1
 

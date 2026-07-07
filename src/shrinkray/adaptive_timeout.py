@@ -179,16 +179,22 @@ class AdaptiveTimeoutPolicy:
 
         Returns True if the timeout was raised, in which case another
         round of reduction may now make progress (previously cached
-        timeout-failures become invalid and will be retried). A raise has
-        to pay off: if the round it unlocked produced no reduction, the
-        next call refuses to raise again, so a test that never terminates
-        (which times out at every raised timeout, re-arming the counter
-        each round) cannot keep the reduction alive forever.
+        timeout-failures become invalid and will be retried).
+
+        A slow reduction may only be unlocked several rungs above the
+        adapted timeout, so repeated fruitless raises are allowed to climb
+        towards the cap: the cap bounds the climb, and once the timeout
+        reaches it no further raise is possible. Without a cap (--timeout
+        0) there is no such bound, so a test that never terminates would
+        time out at every raised timeout, re-arm the counter, and be raised
+        forever; in that case only a single fruitless raise is allowed
+        before giving up.
         """
         if self.__exploration_exhausted:
             return False
+        uncapped = math.isinf(self.__cap)
         if (
-            not self.__raised_without_reduction
+            not (uncapped and self.__raised_without_reduction)
             and self.__timeouts_below_cap > 0
             and self.__rung_timeout(self.__level + 1)
             > self.__rung_timeout(self.__level)

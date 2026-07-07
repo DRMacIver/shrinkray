@@ -302,17 +302,22 @@ def test_unstick_does_nothing_without_timeouts():
     assert policy.current_timeout() == 5.0
 
 
-def test_unstick_gives_up_after_fruitless_raise():
+def test_unstick_climbs_a_capped_timeout_to_the_cap_then_gives_up():
     policy, _ = make_policy(user_timeout=18.0)
     policy.record_completion(0.5, interesting=True)  # base 5.0
     policy.record_timeout(5.0)
     assert policy.attempt_unstick()
     assert policy.current_timeout() == 10.0
-    # The raise produced no reduction, only more timeouts: refuse to
-    # raise again rather than climbing pointlessly.
+    # Still stuck with only timeouts, but a capped timeout keeps climbing:
+    # a reduction that only completes near the cap can still be unlocked, and
+    # the cap bounds how far the climb can go.
     policy.record_timeout(10.0)
+    assert policy.attempt_unstick()
+    assert policy.current_timeout() == 18.0
+    # At the cap there is no headroom left, so it finally gives up and
+    # reverts to the base timeout.
+    policy.record_timeout(18.0)
     assert not policy.attempt_unstick()
-    # After giving up we return to the base timeout.
     assert policy.current_timeout() == 5.0
 
 

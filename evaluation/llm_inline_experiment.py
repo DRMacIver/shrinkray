@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Measure the grammar-guided LLM inlining pump against a real model.
+"""Measure the grammar-guided LLM transformation pumps against a real model.
 
-Each problem is a small program with a function whose definition cannot
-be deleted while a call to it remains, judged by a real semantic oracle
-(run the program, require exact output). Classical passes can shrink
-names and whitespace but cannot rewrite the call into its inlined form,
-so the function definition survives; the inlining pump should remove it.
+Each problem is a small program with a construct classical passes cannot
+remove — a call whose function definition must otherwise stay, a
+once-bound name, a loop, a body that cannot legally be emptied — judged
+by a real semantic oracle (run the program, require exact output). The
+grammar-guided pumps should rewrite the construct so the scaffolding it
+kept alive becomes deletable.
 
 Runs each problem in three modes and reports final sizes side by side:
 
 - classical: the ordinary passes only (no LLM at all).
 - rewrite: the ordinary passes plus the whole-file llm_rewrite pass,
   with the pumps disabled.
-- pump: the ordinary passes plus llm_inline_calls, with the whole-file
-  llm_rewrite pass stripped out so the pump's contribution is isolated.
+- pump: the ordinary passes plus all five grammar-guided transformation
+  pumps, with the whole-file llm_rewrite pass stripped out so the
+  pumps' contribution is isolated.
 
 restart_at_fixpoint is disabled in every mode: the restarted
 sub-reduction builds its own pass list, which would let llm_rewrite
@@ -65,10 +67,6 @@ class InlineProblem:
     extension: str
     initial: bytes
     expected_output: str
-    # The function the problem wants inlined away. Success is judged by
-    # eye from the final test case: passes rename identifiers, so the
-    # name itself cannot be checked for.
-    function_name: bytes
     # argv to run a source file, with {file} (and for C {binary})
     # placeholders. A two-step compile-and-run is expressed by compile_argv.
     run_argv: list[str]
@@ -110,7 +108,6 @@ PROBLEMS: dict[str, InlineProblem] = {
         extension=".py",
         initial=(b"N = 3\n\ndef f(x):\n    return x + N\n\nprint(f(N))\n"),
         expected_output="6\n",
-        function_name=b"N",
         run_argv=["python3", "{file}"],
         oracle_description='Running the file must print exactly "6".',
     ),
@@ -121,7 +118,6 @@ PROBLEMS: dict[str, InlineProblem] = {
         extension=".py",
         initial=(b"total = 0\nfor i in [5]:\n    total += i\nprint(total)\n"),
         expected_output="5\n",
-        function_name=b"total",
         run_argv=["python3", "{file}"],
         oracle_description='Running the file must print exactly "5".',
     ),
@@ -147,7 +143,6 @@ PROBLEMS: dict[str, InlineProblem] = {
             b"}\n"
         ),
         expected_output="ok\n",
-        function_name=b"big",
         run_argv=["go", "run", "{file}"],
         required_line=b"big(1)",
         oracle_description=(
@@ -160,7 +155,6 @@ PROBLEMS: dict[str, InlineProblem] = {
         extension=".py",
         initial=(b"def add_one(x):\n    return x + 1\n\nprint(add_one(3))\n"),
         expected_output="4\n",
-        function_name=b"add_one",
         run_argv=["python3", "{file}"],
         oracle_description='Running the file must print exactly "4".',
     ),
@@ -178,7 +172,6 @@ PROBLEMS: dict[str, InlineProblem] = {
             b"print(scale(10))\n"
         ),
         expected_output="21\n",
-        function_name=b"scale",
         run_argv=["python3", "{file}"],
         oracle_description='Running the file must print exactly "21".',
     ),
@@ -187,7 +180,6 @@ PROBLEMS: dict[str, InlineProblem] = {
         extension=".js",
         initial=(b"function addOne(x) { return x + 1; }\nconsole.log(addOne(3));\n"),
         expected_output="4\n",
-        function_name=b"addOne",
         run_argv=["node", "{file}"],
         oracle_description='Running the file must print exactly "4".',
     ),
@@ -196,7 +188,6 @@ PROBLEMS: dict[str, InlineProblem] = {
         extension=".rb",
         initial=(b"def add_one(x)\n  x + 1\nend\nputs add_one(3)\n"),
         expected_output="4\n",
-        function_name=b"add_one",
         run_argv=["ruby", "{file}"],
         oracle_description='Running the file must print exactly "4".',
     ),
@@ -209,7 +200,6 @@ PROBLEMS: dict[str, InlineProblem] = {
             b'int main(void) { printf("%d\\n", add_one(3)); return 0; }\n'
         ),
         expected_output="4\n",
-        function_name=b"add_one",
         run_argv=["{binary}"],
         compile_argv=["cc", "-x", "c", "{file}", "-o", "{binary}"],
         oracle_description='Running the file must print exactly "4".',
@@ -219,7 +209,6 @@ PROBLEMS: dict[str, InlineProblem] = {
         extension=".py",
         initial=_python_large(),
         expected_output="22\n",
-        function_name=b"combine",
         run_argv=["python3", "{file}"],
         required_line=b"self.value = 7",
         oracle_description=(
@@ -335,12 +324,15 @@ async def reduce_problem(
     reducer = reducer_class(
         target=reduction_problem,
         treesitter_language=problem.language,
+        # A real run on C/C++ input gets the hand-written passes and
+        # inliner pumps; the baseline is dishonest without them.
+        enable_cpp_passes=problem.language in ("c", "cpp"),
         python_reducer=False,
         restart_at_fixpoint=False,
         **kwargs,
     )
     if mode == "pump":
-        # Isolate the inlining pump: drop the whole-file rewrite pass.
+        # Isolate the pumps: drop the whole-file rewrite pass.
         reducer.last_ditch_passes = [
             p for p in reducer.last_ditch_passes if p.__name__ != "llm_rewrite"
         ]
@@ -376,6 +368,9 @@ async def main() -> None:
     parser.add_argument("--modes", default="classical,rewrite,pump")
     args = parser.parse_args()
     names = args.problems or list(PROBLEMS)
+    unknown = [name for name in names if name not in PROBLEMS]
+    if unknown:
+        parser.error(f"Unknown problems: {', '.join(unknown)}")
     modes = args.modes.split(",")
 
     client = None
@@ -401,7 +396,11 @@ async def main() -> None:
                 flush=True,
             )
             print("  final: " + result["final"].replace("\n", "\\n"), flush=True)
-    (RESULTS_DIR / "results.json").write_text(json.dumps(all_results, indent=2))
+            # Rewritten after every mode: a full run takes hours, and a
+            # crash or interrupt must not lose the completed results.
+            (RESULTS_DIR / "results.json").write_text(
+                json.dumps(all_results, indent=2)
+            )
     print(f"\nFull results in {RESULTS_DIR}")
 
 

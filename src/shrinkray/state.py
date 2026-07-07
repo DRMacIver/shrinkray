@@ -321,9 +321,16 @@ class ShrinkRayState[TestCase](ABC):
     # This avoids race conditions when multiple tests run in parallel
     _successful_outputs: dict[bytes, bytes] = {}
 
+    # Sort keys of the test cases whose output is stored above, keyed by the
+    # same test case bytes. record_reduction uses these to prune losing
+    # candidates' outputs while retaining any candidate that can still be
+    # adopted (see _record_reduction_history).
+    _successful_output_keys: dict[bytes, Any] = {}
+
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
         self._successful_outputs = {}  # Initialize mutable default
+        self._successful_output_keys = {}  # Initialize mutable default
         self.sweep_stale_working_files()
         self.setup_formatter()
         self._setup_history()
@@ -828,18 +835,7 @@ class ShrinkRayState[TestCase](ABC):
 
             @problem.on_reduce
             async def record_history(test_case: TestCase):
-                test_case_bytes = self._get_test_case_bytes(test_case)
-                # Use output captured at is_interesting time to avoid race conditions
-                output = self._successful_outputs.get(test_case_bytes)
-                # Keep only the adopted test case's output: it stays
-                # available for the LLM passes' prompts, while outputs of
-                # candidates that were interesting but not adopted can no
-                # longer be needed by anything.
-                self._successful_outputs.clear()
-                if output is not None:
-                    self._successful_outputs[test_case_bytes] = output
-                assert self.history_manager is not None
-                self.history_manager.record_reduction(test_case_bytes, output)
+                self._record_reduction_history(test_case)
 
         # Writing the file back can't be guaranteed atomic, so we put a lock around
         # writing successful reductions back to the original file so we don't
@@ -874,6 +870,44 @@ class ShrinkRayState[TestCase](ABC):
     def problem(self):
         return self.reducer.target
 
+    def _record_reduction_history(self, test_case: TestCase) -> None:
+        """Record an adopted reduction in history and prune stored outputs.
+
+        The recorded output is the one captured when the test case was found
+        interesting (see check_interesting), not a fresh read, so a
+        concurrently running test cannot overwrite it.
+
+        Pruning keeps the adopted test case's output (the LLM passes read it
+        from _successful_outputs) and the output of any candidate that still
+        sorts better than the adopted one: adoption only ever moves to a
+        strictly better test case, so a better-sorting stored candidate may
+        itself be adopted moments later (which happens under parallelism, when
+        several candidates are interesting at once). Everything worse than the
+        adopted candidate is a loser whose output nothing can use again, so it
+        is dropped to bound memory.
+        """
+        assert self.history_manager is not None
+        test_case_bytes = self._get_test_case_bytes(test_case)
+        output = self._successful_outputs.get(test_case_bytes)
+        adopted_key = self.problem.sort_key(test_case)
+        survivors = {
+            tcb
+            for tcb, key in self._successful_output_keys.items()
+            if key < adopted_key
+        }
+        survivors.add(test_case_bytes)
+        self._successful_outputs = {
+            tcb: out
+            for tcb, out in self._successful_outputs.items()
+            if tcb in survivors
+        }
+        self._successful_output_keys = {
+            tcb: key
+            for tcb, key in self._successful_output_keys.items()
+            if tcb in survivors
+        }
+        self.history_manager.record_reduction(test_case_bytes, output)
+
     async def check_interesting(self, test_case: TestCase) -> InterestingnessResult:
         """Run the interestingness test on test_case.
 
@@ -897,6 +931,9 @@ class ShrinkRayState[TestCase](ABC):
                 output = self._get_last_captured_output()
                 if output is not None:
                     self._successful_outputs[test_case_bytes] = output
+                    self._successful_output_keys[test_case_bytes] = (
+                        self.problem.sort_key(test_case)
+                    )
                 return InterestingnessResult(interesting=True)
             if result.timed_out and result.timeout_used is not None:
                 timeout_used = result.timeout_used
@@ -930,6 +967,7 @@ class ShrinkRayState[TestCase](ABC):
             pass
         # Clear stored successful outputs (no longer relevant after restart)
         self._successful_outputs.clear()
+        self._successful_output_keys.clear()
         # Forget learned timeout state: the restart point may be much
         # slower than what the timeout had adapted down to.
         self.timeout_policy.reset()

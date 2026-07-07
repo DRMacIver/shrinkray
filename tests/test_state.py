@@ -3945,6 +3945,63 @@ def test_sweep_tolerates_unlink_failure(tmp_path, monkeypatch):
     state.sweep_stale_working_files()
 
 
+# === successful-output pruning tests ===
+
+
+def test_record_history_keeps_concurrent_better_candidate(tmp_path):
+    """A candidate that is interesting and sorts better than the one just
+    adopted must keep its captured output.
+
+    Under parallelism two candidates A and B can both be interesting; A is
+    adopted first and its record runs, then B (which sorts better) is
+    adopted. If recording A discarded B's stored output, B's own history
+    entry would be written without its test output and the output for the
+    now-current test case would be lost.
+    """
+    state = make_in_place_state(tmp_path)
+    # Build the reducer so state.problem (and its sort_key) is available.
+    _ = state.reducer
+    state.history_manager = MagicMock()
+
+    adopted = b"bbb"
+    better = b"aa"  # sorts before (shorter than) the adopted candidate
+    assert state.problem.sort_key(better) < state.problem.sort_key(adopted)
+    state._successful_outputs = {adopted: b"out-A", better: b"out-B"}
+    state._successful_output_keys = {
+        adopted: state.problem.sort_key(adopted),
+        better: state.problem.sort_key(better),
+    }
+
+    state._record_reduction_history(adopted)
+
+    # The better, still-adoptable candidate's output survives.
+    assert state._successful_outputs.get(better) == b"out-B"
+    # The adopted candidate's output is retained for the LLM prompts.
+    assert state._successful_outputs.get(adopted) == b"out-A"
+
+
+def test_record_history_prunes_losing_candidate(tmp_path):
+    """A candidate that was interesting but sorts worse than the adopted
+    one can never be adopted again, so its output is pruned."""
+    state = make_in_place_state(tmp_path)
+    _ = state.reducer
+    state.history_manager = MagicMock()
+
+    adopted = b"aa"
+    loser = b"cccc"  # sorts after (longer than) the adopted candidate
+    state._successful_outputs = {adopted: b"out-A", loser: b"out-L"}
+    state._successful_output_keys = {
+        adopted: state.problem.sort_key(adopted),
+        loser: state.problem.sort_key(loser),
+    }
+
+    state._record_reduction_history(adopted)
+
+    assert loser not in state._successful_outputs
+    assert loser not in state._successful_output_keys
+    assert state._successful_outputs.get(adopted) == b"out-A"
+
+
 # === adaptive timeout integration tests ===
 
 

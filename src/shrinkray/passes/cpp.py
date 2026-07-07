@@ -739,6 +739,12 @@ async def replace_type_with_int(problem: ReductionProblem[bytes]) -> None:
     view = token_view(source)
     tokens = view.tokens
     template_prefixes = _template_prefixes(view)
+    # Index NAME tokens by text once, so each definition can iterate just
+    # the uses of its own name instead of rescanning every token.
+    name_uses: dict[bytes, list[int]] = {}
+    for idx, tok in enumerate(tokens):
+        if tok.kind == NAME:
+            name_uses.setdefault(tok.text, []).append(idx)
     patches: list[ReplacementPatch] = []
     for k, t in enumerate(tokens):
         if t.kind != NAME or t.text not in (b"struct", b"class", b"union"):
@@ -760,23 +766,23 @@ async def replace_type_with_int(problem: ReductionProblem[bytes]) -> None:
         edits: list[tuple[int, int, bytes]] = [
             (tokens[decl_start].start, tokens[end].end, b"")
         ]
-        p = 0
-        while p < len(tokens):
+        for p in name_uses[name]:
             if decl_start <= p <= end:
-                p += 1
                 continue
-            if tokens[p].kind == NAME and tokens[p].text == name:
-                start_byte = tokens[p].start
-                span_end = tokens[p].end
-                if p + 1 < len(tokens) and tokens[p + 1].text == b"<":
-                    m = _find_angle_close(view, p + 1)
-                    if m is not None:
-                        span_end = tokens[m].end
-                        p = m
-                edits.append((start_byte, span_end, b"int"))
-            p += 1
-        # By construction these edits never overlap: the definition span
-        # is excluded from the use scan, and uses are distinct tokens.
+            span_end = tokens[p].end
+            consumed_end = p
+            if p + 1 < len(tokens) and tokens[p + 1].text == b"<":
+                m = _find_angle_close(view, p + 1)
+                if m is not None:
+                    span_end = tokens[m].end
+                    consumed_end = m
+            # A use before the definition whose consumed `<...>` span runs
+            # into it (e.g. `S< struct S : T >`) would produce an edit
+            # overlapping the deletion, making the whole candidate
+            # self-conflicting; skip it rather than waste the candidate.
+            if p < decl_start and consumed_end >= decl_start:
+                continue
+            edits.append((tokens[p].start, span_end, b"int"))
         patches.append(tuple(sorted(edits)))
     await apply_patches(problem, Replacements(), patches)
 

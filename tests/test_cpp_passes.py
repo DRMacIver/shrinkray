@@ -737,6 +737,20 @@ def test_replace_type_handles_bases_and_nested_templates():
     assert b"int make();" in result.replace(b"\n", b"")
 
 
+def test_replace_type_skips_use_whose_span_overlaps_the_definition():
+    # The first use of S consumes a `<...>` span that runs into the
+    # first definition of S. Emitting an edit for it would make the
+    # candidate self-conflicting (and so useless); the overlapping use
+    # is skipped instead, so the definition can still be replaced.
+    result = reduce_with(
+        [replace_type_with_int],
+        b"S< struct S : T > ; struct S : T { }; S y;",
+        lambda x: b"{ }" in x and b"y;" in x,
+    )
+    assert b"struct S" not in result
+    assert b"{ }" in result
+
+
 def test_replace_type_does_not_touch_value_uses_that_break():
     # When the interestingness test needs the type to stay (here it
     # requires the `S s` declaration verbatim), the replace candidate is

@@ -250,19 +250,83 @@ def match_brackets(tokens: list[Token]) -> dict[int, int]:
     return result
 
 
+# Tokens that stop an angle bracket scan dead: this can't be a
+# template argument list if one of these appears at the top level.
+_ANGLE_TERMINATORS = frozenset([b";", b"{", b"}", b")", b"]", b"&&", b"||", b"?"])
+
+# The pending '<' opens of an angle bracket scan arriving at some token:
+# the k-th element (0-based) is the token index where the scan
+# terminates if it has k+1 opens left, and running off the list means
+# it never does. Ladders are persistent linked lists so that all token
+# positions can share their common suffixes.
+type _AngleLadder = tuple[int, "_AngleLadder"] | None
+
+
+def _angle_closes(tokens: list[Token], brackets: dict[int, int]) -> dict[int, int]:
+    """For each '<' token index, the index of the '>' (or '>>') token
+    that plausibly closes it as a template argument list; '<' tokens
+    with no plausible close are absent.
+
+    A scan's future depends only on its position and how many '<' it
+    still has open, so all scans through a token can be described at
+    once by a ladder (see _AngleLadder), built in a single right to
+    left pass: '>' closes one open, '>>' closes two, a matched '(' or
+    '[' jumps the scan past the group, and terminator, string, and
+    preprocessor tokens end the scan unsuccessfully."""
+    result: dict[int, int] = {}
+    ladders: list[_AngleLadder] = [None] * (len(tokens) + 1)
+    for j in range(len(tokens) - 1, -1, -1):
+        t = tokens[j]
+        nxt = ladders[j + 1]
+        ladder: _AngleLadder
+        if t.kind in (STRING, PREPROC):
+            ladder = None
+        elif t.kind == PUNCT:
+            if t.text == b"<":
+                # A scan starting here has one open at the next token;
+                # a scan passing through gains an open.
+                if nxt is not None:
+                    result[j] = nxt[0]
+                    ladder = nxt[1]
+                else:
+                    ladder = None
+            elif t.text == b">":
+                ladder = (j, nxt)
+            elif t.text == b">>":
+                ladder = (j, (j, nxt))
+            elif t.text in (b"(", b"["):
+                m = brackets.get(j)
+                ladder = None if m is None else ladders[m + 1]
+            elif t.text in _ANGLE_TERMINATORS:
+                ladder = None
+            else:
+                ladder = nxt
+        else:
+            ladder = nxt
+        ladders[j] = ladder
+    return result
+
+
 @define(frozen=True)
 class TokenView:
     """A tokenized view of C/C++ source: the significant (non-comment)
-    tokens plus bracket matching over them."""
+    tokens plus bracket matching and angle bracket matching over them."""
 
     source: bytes
     tokens: list[Token]
     brackets: dict[int, int]
+    angle_closes: dict[int, int]
 
 
 def token_view(source: bytes) -> TokenView:
     tokens = [t for t in lex(source) if t.kind != COMMENT]
-    return TokenView(source=source, tokens=tokens, brackets=match_brackets(tokens))
+    brackets = match_brackets(tokens)
+    return TokenView(
+        source=source,
+        tokens=tokens,
+        brackets=brackets,
+        angle_closes=_angle_closes(tokens, brackets),
+    )
 
 
 # Names that can be followed by a parenthesised group without being a
@@ -333,33 +397,7 @@ def _find_angle_close(view: TokenView, i: int) -> int | None:
     """Given the index of a '<' token, find the index of the '>' (or
     '>>') token that plausibly closes it as a template argument list.
     Returns None if this doesn't look like a template argument list."""
-    tokens = view.tokens
-    depth = 1
-    j = i + 1
-    while j < len(tokens):
-        t = tokens[j]
-        if t.kind in (STRING, PREPROC):
-            return None
-        if t.kind == PUNCT:
-            if t.text == b"<":
-                depth += 1
-            elif t.text == b">":
-                depth -= 1
-                if depth == 0:
-                    return j
-            elif t.text == b">>":
-                depth -= 2
-                if depth <= 0:
-                    return j
-            elif t.text in (b"(", b"["):
-                m = view.brackets.get(j)
-                if m is None:
-                    return None
-                j = m
-            elif t.text in (b";", b"{", b"}", b")", b"]", b"&&", b"||", b"?"):
-                return None
-        j += 1
-    return None
+    return view.angle_closes.get(i)
 
 
 def _split_on_top_level_commas(

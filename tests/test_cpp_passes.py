@@ -1123,6 +1123,86 @@ def test_angle_close_rejects_end_of_file():
     assert angle_close_text(b"a < b", 1) is None
 
 
+def _reference_find_angle_close(view: TokenView, i: int) -> int | None:
+    """Pre-precompute implementation of _find_angle_close: a fresh
+    forward scan from each '<', kept as a reference for the equivalence
+    test of the whole-stream construction."""
+    tokens = view.tokens
+    depth = 1
+    j = i + 1
+    while j < len(tokens):
+        t = tokens[j]
+        if t.kind in (STRING, PREPROC):
+            return None
+        if t.kind == PUNCT:
+            if t.text == b"<":
+                depth += 1
+            elif t.text == b">":
+                depth -= 1
+                if depth == 0:
+                    return j
+            elif t.text == b">>":
+                depth -= 2
+                if depth <= 0:
+                    return j
+            elif t.text in (b"(", b"["):
+                m = view.brackets.get(j)
+                if m is None:
+                    return None
+                j = m
+            elif t.text in (b";", b"{", b"}", b")", b"]", b"&&", b"||", b"?"):
+                return None
+        j += 1
+    return None
+
+
+ANGLE_SOUP = st.lists(
+    st.sampled_from(
+        [
+            "<",
+            ">",
+            ">>",
+            "(",
+            ")",
+            "[",
+            "]",
+            "{",
+            "}",
+            ";",
+            ",",
+            "&&",
+            "||",
+            "?",
+            "a",
+            "0",
+            '"s"',
+            "'c'",
+            "<=",
+            "<<",
+            "\n#d\n",
+        ]
+    ),
+    max_size=40,
+).map(lambda parts: " ".join(parts).encode())
+
+
+@given(ANGLE_SOUP)
+def test_angle_close_precompute_matches_reference_scan(source: bytes):
+    view = token_view(source)
+    for i, t in enumerate(view.tokens):
+        if t.kind == PUNCT and t.text == b"<":
+            assert view.angle_closes.get(i) == _reference_find_angle_close(view, i)
+
+
+def test_angle_close_can_escape_crossed_brackets():
+    # match_brackets pairs each bracket type independently, so a
+    # bracketed jump can escape an enclosing group of a different type.
+    source = b"( < [ ) x ] >"
+    view = token_view(source)
+    assert view.tokens[1].text == b"<"
+    assert _find_angle_close(view, 1) == 6
+
+
 def test_split_on_commas_ignores_unmatched_brackets():
     view = token_view(b"a, (b, c")
     pieces = _split_on_top_level_commas(view, 0, len(view.tokens))

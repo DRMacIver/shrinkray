@@ -19,6 +19,7 @@ its C++/Metal finalizers.
 import atexit
 import sys
 import threading
+from collections import OrderedDict
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
@@ -40,6 +41,17 @@ except (ImportError, RuntimeError):
     # (e.g. OpenBSD, where the package builds but refuses to load).
     huggingface_hub = None
     llama_cpp = None
+
+
+# Cap on remembered generations. Each entry keeps a full prompt (up to
+# LLMConfig.max_input_bytes plus the oracle/output text) and its whole
+# completion, so entries run to tens of kilobytes; every llm_rewrite
+# round draws a fresh seed, making each generation a new key, so without
+# a bound the cache would grow for the entire run (hundreds of megabytes
+# on long reductions). A few hundred entries keeps the restart-at-fixpoint
+# replay mostly served from cache while bounding memory to a few tens of
+# megabytes; past the cap the least-recently-used entry is evicted.
+DEFAULT_GENERATION_CACHE_SIZE = 256
 
 
 def llm_support_available() -> bool:
@@ -70,6 +82,9 @@ class LlamaCppClient(LLMClient):
     # Threads for CPU inference; None lets llama.cpp pick.
     n_threads: int | None = None
 
+    # Maximum number of generations kept in the LRU cache below.
+    generation_cache_size: int = DEFAULT_GENERATION_CACHE_SIZE
+
     _llama: "Llama | None" = field(default=None, init=False)
     _thread_lock: threading.Lock = field(factory=threading.Lock, init=False)
     _load_thread: threading.Thread | None = field(default=None, init=False)
@@ -83,9 +98,12 @@ class LlamaCppClient(LLMClient):
     # restart-at-fixpoint phase replays the whole run's candidates from
     # the interestingness cache; without this cache the replay would
     # re-run every generation for real, which for --llm-only means
-    # silently re-doing the entire reduction's model work at fixpoint.
-    _generation_cache: dict[tuple[str, int, int, float], str] = field(
-        factory=dict, init=False
+    # silently re-doing the entire reduction's model work at fixpoint. An
+    # OrderedDict gives an LRU: reads move an entry to the end and inserts
+    # past generation_cache_size evict the least-recently-used entry (see
+    # _cached_generation / _remember_generation).
+    _generation_cache: "OrderedDict[tuple[str, int, int, float], str]" = field(
+        factory=OrderedDict, init=False
     )
 
     def start_loading(self) -> None:
@@ -103,7 +121,30 @@ class LlamaCppClient(LLMClient):
                 with self._thread_lock:
                     self._ensure_loaded()
             except Exception as e:
+                # A genuine failure to download or load the model (offline
+                # or flaky network, an unsupported or corrupt file, out of
+                # memory) must not crash the reduction, which is running on
+                # the classical passes: disable the client so
+                # wait_until_ready returns and the LLM passes skip
+                # themselves, and warn the user once, mirroring how a
+                # failed grammar download is reported. `except Exception`
+                # is deliberately narrow: KeyboardInterrupt and SystemExit
+                # (never delivered to this background thread anyway, since
+                # signals go to the main thread) and trio.Cancelled (which
+                # cannot arise here: this is a plain thread, not a trio
+                # task) derive from BaseException and so propagate rather
+                # than silently disabling the client.
+                # The exception (with its traceback) is kept on
+                # _load_error for inspection; the warning names only its
+                # type, mirroring how a failed grammar download is reported.
                 self._load_error = e
+                self._disabled = True
+                print(
+                    "WARNING: could not load the LLM model "
+                    f"({type(e).__name__}); reducing without the LLM passes.",
+                    file=sys.stderr,
+                    flush=True,
+                )
             finally:
                 self._ready.set()
 
@@ -122,8 +163,9 @@ class LlamaCppClient(LLMClient):
             await trio.lowlevel.checkpoint()
             return
         await trio.to_thread.run_sync(self._ready.wait, abandon_on_cancel=True)
-        if self._load_error is not None:
-            raise self._load_error
+        # A load that failed has already disabled the client and warned
+        # the user (see start_loading); waiters simply return so the LLM
+        # passes see is_disabled() and skip themselves.
 
     def model_needs_download(self) -> bool:
         """Whether the first use would download the model from the Hub."""
@@ -142,10 +184,30 @@ class LlamaCppClient(LLMClient):
         self._disabled = True
         self._ready.set()
 
+    def _cached_generation(self, key: tuple[str, int, int, float]) -> str | None:
+        """The cached completion for these parameters, marked most-recently
+        used, or None if it isn't cached."""
+        try:
+            value = self._generation_cache[key]
+        except KeyError:
+            return None
+        self._generation_cache.move_to_end(key)
+        return value
+
+    def _remember_generation(
+        self, key: tuple[str, int, int, float], value: str
+    ) -> None:
+        """Cache a completion as most-recently used, evicting the
+        least-recently used entries once over generation_cache_size."""
+        self._generation_cache[key] = value
+        self._generation_cache.move_to_end(key)
+        while len(self._generation_cache) > self.generation_cache_size:
+            self._generation_cache.popitem(last=False)
+
     async def complete(
         self, prompt: str, *, max_tokens: int, seed: int, temperature: float
     ) -> str:
-        cached = self._generation_cache.get((prompt, max_tokens, seed, temperature))
+        cached = self._cached_generation((prompt, max_tokens, seed, temperature))
         if cached is not None:
             await trio.lowlevel.checkpoint()
             return cached
@@ -181,30 +243,53 @@ class LlamaCppClient(LLMClient):
         temperature: float,
         abort: threading.Event,
     ) -> str:
+        key = (prompt, max_tokens, seed, temperature)
         with self._thread_lock:
+            # This request may have queued behind another generation while
+            # holding no lock. Now that it has the lock, don't pay for a
+            # full model load and generation if it was cancelled in the
+            # meantime, or during interpreter shutdown.
+            if abort.is_set() or self._shutting_down.is_set():
+                return ""
+            # Another request may have generated exactly this while we
+            # waited for the lock; serve its result rather than
+            # regenerating it.
+            cached = self._cached_generation(key)
+            if cached is not None:
+                return cached
             llama = self._ensure_loaded()
-            response = llama.create_chat_completion(
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=temperature,
-                seed=seed,
-                stream=True,
-            )
-            # Streaming is requested, so the response is an iterator of
-            # chunks, not a single mapping.
-            assert isinstance(response, Iterator)
-            parts: list[str] = []
-            for chunk in response:
-                delta = chunk["choices"][0]["delta"].get("content")
-                if delta:
-                    parts.append(delta)
-                if abort.is_set() or self._shutting_down.is_set():
-                    break
+            try:
+                response = llama.create_chat_completion(
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    seed=seed,
+                    stream=True,
+                )
+                # Streaming is requested, so the response is an iterator of
+                # chunks, not a single mapping.
+                assert isinstance(response, Iterator)
+                parts: list[str] = []
+                for chunk in response:
+                    delta = chunk["choices"][0]["delta"].get("content")
+                    if delta:
+                        parts.append(delta)
+                    if abort.is_set() or self._shutting_down.is_set():
+                        break
+            except ValueError:
+                # llama.cpp raises ValueError when the prompt plus the
+                # completion budget exceeds the context window. The pass's
+                # byte-based size limit is only a heuristic, so token-dense
+                # input (emoji, rare scripts, dense punctuation) can clear
+                # it yet overflow here. A failed generation must never
+                # crash the reduction, so treat an overflow as an empty
+                # (unhelpful) answer rather than propagating.
+                return ""
             result = "".join(parts)
             # Only completed generations are cached: an aborted one is a
             # truncated answer that must not satisfy a later request.
             if not (abort.is_set() or self._shutting_down.is_set()):
-                self._generation_cache[(prompt, max_tokens, seed, temperature)] = result
+                self._remember_generation(key, result)
             return result
 
     def _join_at_exit(self, timeout: float = 30.0) -> None:

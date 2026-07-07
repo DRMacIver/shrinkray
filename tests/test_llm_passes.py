@@ -10,14 +10,12 @@ from typing import Any
 
 import pytest
 import trio
-from attrs import define, field
 
 from shrinkray.cli import InputType
 from shrinkray.llm_client import LlamaCppClient
 from shrinkray.passes.llm import (
     DEFAULT_MODEL_SPEC,
     HuggingFaceModel,
-    LLMClient,
     LLMConfig,
     LocalModel,
     completion_max_tokens,
@@ -32,7 +30,7 @@ from shrinkray.problem import BasicReductionProblem
 from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
 from shrinkray.state import ShrinkRayStateSingleFile
 from shrinkray.work import Volume, WorkContext
-from tests.helpers import reduce_with
+from tests.helpers import FakeLLMClient, RecordingClient, reduce_with
 
 
 # === Model spec parsing ===
@@ -142,25 +140,6 @@ def test_completion_max_tokens_scales_with_input_but_is_capped():
 
 
 # === The pass itself ===
-
-
-@define
-class FakeLLMClient(LLMClient):
-    """Returns scripted responses in order, then empty strings."""
-
-    responses: list[str] = field(factory=list)
-    prompts: list[str] = field(factory=list)
-    seeds: list[int] = field(factory=list)
-
-    async def complete(
-        self, prompt: str, *, max_tokens: int, seed: int, temperature: float
-    ) -> str:
-        await trio.lowlevel.checkpoint()
-        self.prompts.append(prompt)
-        self.seeds.append(seed)
-        if len(self.prompts) <= len(self.responses):
-            return self.responses[len(self.prompts) - 1]
-        return ""
 
 
 def test_adopts_a_valid_reduction():
@@ -457,28 +436,6 @@ def test_state_passes_llm_only_through(tmp_path):
 
 
 # === Background model loading ===
-
-
-@define
-class RecordingClient(FakeLLMClient):
-    """FakeLLMClient that records lifecycle events."""
-
-    events: list[str] = field(factory=list)
-
-    def start_loading(self) -> None:
-        self.events.append("start_loading")
-
-    async def wait_until_ready(self) -> None:
-        await trio.lowlevel.checkpoint()
-        self.events.append("wait_until_ready")
-
-    async def complete(
-        self, prompt: str, *, max_tokens: int, seed: int, temperature: float
-    ) -> str:
-        self.events.append("complete")
-        return await super().complete(
-            prompt, max_tokens=max_tokens, seed=seed, temperature=temperature
-        )
 
 
 def test_llm_rewrite_waits_for_readiness_before_generating():

@@ -172,7 +172,14 @@ def natural_key(s: str) -> LazyChainedSortKey:
     return LazyChainedSortKey(functions=NATURAL_ORDERING_FUNCTIONS, value=s)
 
 
-@lru_cache(maxsize=1024)
+# The cache only needs a handful of live entries: each comparison touches
+# two strings (the candidate and the current test case, which is re-keyed
+# on every comparison), plus a few more for candidates concurrently in
+# flight under parallelism. Each entry retains both the raw string and its
+# canonicalised form (roughly twice the test case size), so a large cache
+# would pin many copies of a multi-megabyte test case in memory for no
+# extra hits.
+@lru_cache(maxsize=8)
 def reflow_sort_key(s: str) -> Any:
     """Canonicalisation-based ordering key for a text test case.
 

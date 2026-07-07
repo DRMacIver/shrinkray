@@ -258,16 +258,14 @@ def test_is_python_still_excludes_deeply_nested_brackets():
     assert is_python(source) is False
 
 
-@pytest.mark.parametrize("as_bytes", [False, True])
-def test_bracket_depth_ignores_string_content(as_bytes):
-    src = "'" + "(" * 300 + "'"
-    assert _exceeds_bracket_depth(src.encode() if as_bytes else src, 200) is False
+@pytest.mark.parametrize("src", ["'" + "(" * 300 + "'", b"'" + b"(" * 300 + b"'"])
+def test_bracket_depth_ignores_string_content(src):
+    assert _exceeds_bracket_depth(src, 200) is False
 
 
-@pytest.mark.parametrize("as_bytes", [False, True])
-def test_bracket_depth_counts_structural_brackets(as_bytes):
-    src = "(" * 300
-    assert _exceeds_bracket_depth(src.encode() if as_bytes else src, 200) is True
+@pytest.mark.parametrize("src", ["(" * 300, b"(" * 300])
+def test_bracket_depth_counts_structural_brackets(src):
+    assert _exceeds_bracket_depth(src, 200) is True
 
 
 def test_bracket_depth_triple_quoted_string():
@@ -296,6 +294,18 @@ def test_bracket_depth_unterminated_string_stops_at_newline():
 def test_bracket_depth_structural_after_string_still_counts():
     src = "''" + "(" * 300
     assert _exceeds_bracket_depth(src, 200) is True
+
+
+def test_bracket_depth_unterminated_string_to_eof():
+    # No closing quote and no newline: the literal runs to the end of input, so
+    # its brackets never count.
+    src = "'" + "(" * 300
+    assert _exceeds_bracket_depth(src, 200) is False
+
+
+def test_bracket_depth_unterminated_triple_string_to_eof():
+    src = '"""' + "(" * 300
+    assert _exceeds_bracket_depth(src, 200) is False
 
 
 async def test_libcst_transform_handles_test_case_becoming_invalid():

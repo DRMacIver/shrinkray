@@ -267,6 +267,17 @@ to disable it.
 """.strip(),
 )
 @click.option(
+    "--restart/--no-restart",
+    "restart",
+    default=True,
+    help="""
+Re-reduce from the original input once a fixpoint is reached, constrained to
+results that sort below it. This can find smaller results that greedy
+reduction misses, at the cost of extra work. Enabled by default; use
+--no-restart to skip it.
+""".strip(),
+)
+@click.option(
     "--llm/--no-llm",
     "llm",
     default=True,
@@ -321,6 +332,7 @@ def main(
     also_interesting: int,
     reduce_with: list[list[str]],
     python_reducer: bool,
+    restart: bool,
     llm: bool,
     llm_model: str,
     llm_only: bool,
@@ -470,6 +482,7 @@ def main(
             also_interesting_code=also_interesting_code,
             external_reducers=reduce_with,
             python_reducer=python_reducer,
+            restart_at_fixpoint=restart,
             llm_enabled=llm_enabled,
             llm_model=llm_model,
             llm_only=llm_only,
@@ -494,6 +507,7 @@ def main(
         also_interesting_code=also_interesting_code,
         external_reducers=reduce_with,
         python_reducer=python_reducer,
+        restart_at_fixpoint=restart,
         llm_enabled=llm_enabled,
         llm_model=llm_model,
         llm_only=llm_only,

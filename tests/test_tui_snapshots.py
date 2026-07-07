@@ -61,6 +61,7 @@ class FakeReductionClientForSnapshots:
         also_interesting_code: int | None = None,
         external_reducers: list[list[str]] | None = None,
         python_reducer: bool = True,
+        restart_at_fixpoint: bool = True,
         llm_enabled: bool = False,
         llm_model: str = DEFAULT_MODEL_SPEC,
         llm_only: bool = False,

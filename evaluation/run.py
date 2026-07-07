@@ -315,7 +315,7 @@ def reduce_entry(entry: dict, parallelism: int | None = None) -> dict:
         # calibration, which would otherwise probe with a slow first call.
         command = [
             "uv", "run", "shrinkray",
-            "--ui=basic", "--no-history",
+            "--ui=basic", "--no-history", "--no-restart",
             f"--timeout={entry.get('timeout', 10)}",
         ]
         # Every entry runs in shrink ray's normal mode, where each test

@@ -889,6 +889,7 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     llm_config: LLMConfig = attrs.Factory(LLMConfig)
     llm_only: bool = False
     downloads: DownloadCoordinator | None = None
+    restart_at_fixpoint: bool = True
 
     async def run(self):
         if self.llm_client is not None and self.downloads is None:
@@ -944,5 +945,6 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
                     # reduced, not the directory.
                     llm_config=attrs.evolve(self.llm_config, filename=k),
                     llm_only=self.llm_only,
+                    restart_at_fixpoint=self.restart_at_fixpoint,
                 )
                 nursery.start_soon(key_shrinkray.run)

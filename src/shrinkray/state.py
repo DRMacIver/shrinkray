@@ -289,6 +289,11 @@ class ShrinkRayState[TestCase](ABC):
     external_reducers: list[list[str]] = attrs.Factory(list)
     python_reducer: bool = True
 
+    # Whether the reducer re-reduces from the original input once it
+    # reaches a fixpoint (see ShrinkRay.restart_at_fixpoint). On by
+    # default; the evaluation harnesses disable it for speed.
+    restart_at_fixpoint: bool = True
+
     # LLM passes: whether they run at all, the model they use (a local
     # .gguf path or a Hugging Face repo:filename), and whether they
     # replace every other pass.
@@ -1080,6 +1085,7 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
             external_reducers=self.external_reducers,
             python_reducer=self.python_reducer,
             reducer_log_dir=self.reducer_log_dir(),
+            restart_at_fixpoint=self.restart_at_fixpoint,
             **self.llm_reducer_kwargs(),
         )
 
@@ -1210,6 +1216,7 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
             external_reducers=self.external_reducers,
             python_reducer=self.python_reducer,
             reducer_log_dir=self.reducer_log_dir(),
+            restart_at_fixpoint=self.restart_at_fixpoint,
             **self.llm_reducer_kwargs(),
         )
 
@@ -1279,6 +1286,7 @@ def load_state_for_path(
     also_interesting_code: int | None,
     external_reducers: list[list[str]],
     python_reducer: bool,
+    restart_at_fixpoint: bool,
     llm_enabled: bool,
     llm_model: str,
     llm_only: bool,
@@ -1308,6 +1316,7 @@ def load_state_for_path(
         "also_interesting_code": also_interesting_code,
         "external_reducers": external_reducers,
         "python_reducer": python_reducer,
+        "restart_at_fixpoint": restart_at_fixpoint,
         "llm_enabled": llm_enabled,
         "llm_model": llm_model,
         "llm_only": llm_only,

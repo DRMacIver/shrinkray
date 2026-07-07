@@ -65,17 +65,22 @@ def test_infinite_user_timeout_still_adapts():
     assert policy.current_timeout() == 10.0
 
 
-def test_unstick_climbs_without_bound_when_uncapped():
+def test_unstick_stops_raising_after_a_fruitless_raise_when_uncapped():
+    """Regression test: with --timeout 0 (no cap), a candidate whose test
+    never terminates re-armed the timeout counter every round, so
+    attempt_unstick doubled the timeout and replayed the round forever.
+    A raise that leads to no reduction must not be followed by another."""
     policy, _ = make_policy(user_timeout=math.inf)
     policy.record_completion(0.5, interesting=True)  # base 5.0
-    # With no cap, exploration never runs out of headroom: a timed-out
-    # candidate is never permanently lost.
-    expected = 5.0
-    for _ in range(12):
+    raises = 0
+    for _ in range(20):
+        # Each round replays the hanging candidate, which times out below
+        # the (infinite) cap and re-arms the counter.
         policy.record_timeout(policy.current_timeout())
-        assert policy.attempt_unstick()
-        expected *= 2
-        assert policy.current_timeout() == expected
+        if not policy.attempt_unstick():
+            break
+        raises += 1
+    assert raises == 1
 
 
 def test_default_cap_when_no_user_timeout():
@@ -297,18 +302,32 @@ def test_unstick_does_nothing_without_timeouts():
     assert policy.current_timeout() == 5.0
 
 
-def test_unstick_climbs_to_cap_then_gives_up():
+def test_unstick_gives_up_after_fruitless_raise():
     policy, _ = make_policy(user_timeout=18.0)
     policy.record_completion(0.5, interesting=True)  # base 5.0
     policy.record_timeout(5.0)
-    assert policy.attempt_unstick()  # 10.0
+    assert policy.attempt_unstick()
+    assert policy.current_timeout() == 10.0
+    # The raise produced no reduction, only more timeouts: refuse to
+    # raise again rather than climbing pointlessly.
     policy.record_timeout(10.0)
-    assert policy.attempt_unstick()  # 18.0 (cap)
-    assert policy.current_timeout() == 18.0
-    policy.record_timeout(18.0)
     assert not policy.attempt_unstick()
     # After giving up we return to the base timeout.
     assert policy.current_timeout() == 5.0
+
+
+def test_unstick_raise_that_finds_reduction_allows_later_raises():
+    policy, _ = make_policy(user_timeout=math.inf)
+    policy.record_completion(0.5, interesting=True)  # base 5.0
+    policy.record_timeout(policy.current_timeout())
+    assert policy.attempt_unstick()
+    # The raised timeout let a slow candidate complete and reduce.
+    policy.record_completion(policy.current_timeout() / 2, interesting=True)
+    policy.note_reduction()
+    # A later round runs out of things to try with fresh timeouts: the
+    # timeout may be raised again.
+    policy.record_timeout(policy.current_timeout())
+    assert policy.attempt_unstick()
 
 
 def test_unstick_ignores_timeouts_at_cap():
@@ -367,6 +386,18 @@ def test_reset_clears_learned_state():
     # Back to knowing nothing: maximally generous.
     assert policy.current_timeout() == DEFAULT_TIMEOUT_CAP
     assert policy.recent_timeout_rate == 0.0
+
+
+def test_reset_forgets_fruitless_unstick_raise():
+    policy, _ = make_policy(user_timeout=math.inf)
+    policy.record_completion(0.5, interesting=True)
+    policy.record_timeout(policy.current_timeout())
+    assert policy.attempt_unstick()
+    policy.reset()
+    # A restarted reduction starts with a clean slate: it may raise again.
+    policy.record_completion(0.5, interesting=True)
+    policy.record_timeout(policy.current_timeout())
+    assert policy.attempt_unstick()
 
 
 # === stats ===

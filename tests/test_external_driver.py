@@ -3,7 +3,11 @@
 import trio
 from trio.testing import memory_stream_one_way_pair, wait_all_tasks_blocked
 
-from shrinkray.problem import ReductionProblem, sort_key_for_initial
+from shrinkray.problem import (
+    ReductionProblem,
+    default_cache_key,
+    sort_key_for_initial,
+)
 from shrinkray.reducers.driver import RemoteReductionProblem, run_reducer
 from shrinkray.reducers.protocol import (
     Idle,
@@ -119,6 +123,30 @@ async def test_is_interesting_caches_results() -> None:
     sent_before = bytes(problem._send_stream.sent)  # type: ignore[attr-defined]
     assert await problem.is_interesting(b"nope-not-smaller-enough\n") is False
     assert bytes(problem._send_stream.sent) == sent_before  # type: ignore[attr-defined]
+
+
+async def test_is_interesting_cache_keys_are_hashed() -> None:
+    """The interestingness cache keys on a short content hash, not full bytes.
+
+    A long reduction tests many distinct multi-MB candidates; keying the cache
+    on the full candidate bytes would accumulate all of them in the persistent
+    subprocess. The parent process caches short digests for exactly this reason.
+    """
+    problem = make_problem(b"hello world\n")
+    big = b"x" * 100_000 + b"\n"
+
+    async with trio.open_nursery() as nursery:
+
+        @nursery.start_soon
+        async def _() -> None:
+            await problem.is_interesting(big)
+
+        await wait_all_tasks_blocked()
+        problem.handle_feedback(big, False)
+
+    # The full candidate is not retained as a key; only its short digest is.
+    assert big not in problem._cache
+    assert list(problem._cache) == [default_cache_key(big)]
 
 
 async def test_is_interesting_returns_false_when_closed() -> None:

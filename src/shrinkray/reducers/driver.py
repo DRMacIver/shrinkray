@@ -22,6 +22,7 @@ from shrinkray.passes.definitions import ReductionPass
 from shrinkray.problem import (
     ReductionProblem,
     ReductionStats,
+    default_cache_key,
     sort_key_for_initial,
 )
 from shrinkray.reducers.protocol import (
@@ -60,7 +61,9 @@ class RemoteReductionProblem(ReductionProblem[bytes]):
         # (event, result-slot) pairs so that duplicate concurrent queries for
         # the same content are each resolved exactly once, in order.
         self._waiters: dict[bytes, deque[tuple[trio.Event, list[bool]]]] = {}
-        self._cache: dict[bytes, bool] = {}
+        # Keyed by a short content digest (not the full candidate bytes) so a
+        # long reduction does not accumulate every distinct multi-MB candidate.
+        self._cache: dict[str, bool] = {}
         self._closed = False
         self._stats = ReductionStats(
             initial_test_case_size=len(initial),
@@ -148,8 +151,9 @@ class RemoteReductionProblem(ReductionProblem[bytes]):
         await trio.lowlevel.checkpoint()
         if test_case == self.__current:
             return True
+        cache_key = default_cache_key(test_case)
         try:
-            return self._cache[test_case]
+            return self._cache[cache_key]
         except KeyError:
             pass
         if self._closed:
@@ -164,7 +168,7 @@ class RemoteReductionProblem(ReductionProblem[bytes]):
         self._stats.calls += 1
         await event.wait()
         result = slot[0]
-        self._cache[test_case] = result
+        self._cache[cache_key] = result
         if result:
             self._stats.interesting_calls += 1
         return result

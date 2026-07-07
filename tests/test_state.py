@@ -2,6 +2,7 @@
 
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -15,7 +16,11 @@ from shrinkray.adaptive_timeout import MIN_TIMEOUT, AdaptiveTimeoutPolicy
 from shrinkray.cli import InputType
 from shrinkray.history import deserialize_directory, serialize_directory
 from shrinkray.problem import InvalidInitialExample, shortlex
-from shrinkray.process import MEMORY_LIMIT_ENFORCEABLE, default_memory_limit
+from shrinkray.process import (
+    _ULIMIT_FLAG,
+    MEMORY_LIMIT_ENFORCEABLE,
+    default_memory_limit,
+)
 from shrinkray.process import kill_process_group as original_kill
 from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
 from shrinkray.state import (
@@ -4277,13 +4282,34 @@ async def test_history_records_reductions_without_captured_output(
 # if it then passes the cap was the culprit, so the limit is disabled for the
 # rest of the run.
 #
-# RLIMIT_AS cannot be enforced on macOS (see MEMORY_LIMIT_ENFORCEABLE), so a
-# real `ulimit -v`-based reproduction only works on Linux. For a deterministic,
-# cross-platform test we patch the one platform-dependent piece —
-# memory_limited_command, the wrapper that applies the cap — to simulate a test
-# that aborts under any cap, while the real subprocess machinery (and its
-# first-call bookkeeping) runs unchanged. A real end-to-end test guarded on
-# MEMORY_LIMIT_ENFORCEABLE follows.
+# A real `ulimit`-based reproduction only works where the platform's
+# memory-limit ulimit (RLIMIT_AS via `-v` on Linux, RLIMIT_DATA via `-d` on
+# OpenBSD) is actually enforced and reads "unlimited" when unset — see
+# _real_ulimit_reproducible below. For a deterministic, cross-platform test we
+# patch the one platform-dependent piece — memory_limited_command, the wrapper
+# that applies the cap — to simulate a test that aborts under any cap, while
+# the real subprocess machinery (and its first-call bookkeeping) runs
+# unchanged. A real end-to-end test guarded on _real_ulimit_reproducible
+# follows.
+
+
+def _real_ulimit_reproducible() -> bool:
+    """Whether the real-ulimit end-to-end test can run on this platform.
+
+    It needs the memory-limit ulimit to be enforced and to read "unlimited"
+    when unset, so that applying the default limit is observable and removing
+    it restores "unlimited". True on Linux (`-v`); false on macOS (not
+    enforced) and on any platform that already imposes a default cap on the
+    relevant resource (e.g. OpenBSD's data-segment limit).
+    """
+    if not MEMORY_LIMIT_ENFORCEABLE:
+        return False
+    result = subprocess.run(
+        ["/bin/sh", "-c", f"ulimit {_ULIMIT_FLAG}"],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "unlimited"
 
 
 def _fake_cap_aborts(command, memory_limit):
@@ -4432,14 +4458,17 @@ async def test_interesting_initial_under_default_limit_runs_once(tmp_path, capsy
 
 
 @pytest.mark.skipif(
-    not MEMORY_LIMIT_ENFORCEABLE,
-    reason="RLIMIT_AS (ulimit -v) is not enforced on this platform (e.g. macOS)",
+    not _real_ulimit_reproducible(),
+    reason="the platform's memory-limit ulimit is not enforced or not "
+    "'unlimited' when unset (e.g. macOS does not enforce it; OpenBSD caps "
+    "the data segment)",
 )
 async def test_default_memory_limit_auto_disabled_real_ulimit(tmp_path, capsys):
-    # End-to-end with a real address-space cap: the test is interesting only
-    # when ulimit -v is unlimited, exactly reproducing the sanitizer case.
+    # End-to-end with a real memory cap: the test is interesting only when the
+    # platform's memory-limit ulimit is unlimited, exactly reproducing the
+    # sanitizer case.
     script = tmp_path / "test.sh"
-    script.write_text('#!/bin/sh\n[ "$(ulimit -v)" = unlimited ]\n')
+    script.write_text(f'#!/bin/sh\n[ "$(ulimit {_ULIMIT_FLAG})" = unlimited ]\n')
     script.chmod(0o755)
     target = tmp_path / "target.txt"
     target.write_text("hello")

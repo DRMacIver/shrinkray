@@ -555,9 +555,7 @@ def test_qualifier_cut_index_matches_reference_scan(source: bytes):
             continue
         lo, hi = name_path
         key = tuple(t.text for t in tokens[lo:hi])
-        assert index[key] == _reference_namespace_qualifier_cuts(
-            view, name_path, decl
-        )
+        assert index[key] == _reference_namespace_qualifier_cuts(view, name_path, decl)
 
 
 def test_qualifier_cuts_consume_overlapping_matches():
@@ -920,9 +918,7 @@ def test_typedef_inlining_candidates_are_lazy():
     # first must not build every full-file rewrite: we count the whole
     # source rewrites (Replacements.apply) and check that the first
     # candidate costs far fewer of them than the whole run.
-    source = b"".join(
-        b"typedef int t%d; t%d x%d;\n" % (i, i, i) for i in range(50)
-    )
+    source = b"".join(b"typedef int t%d; t%d x%d;\n" % (i, i, i) for i in range(50))
     calls = 0
     original_apply = Replacements.apply
 
@@ -1369,7 +1365,9 @@ def test_using_with_empty_definition_is_ignored():
 
 
 def test_function_inlining_skips_empty_body():
-    assert list(function_inlining_candidates(b"void f() { }\nint main() { f(); }")) == []
+    assert (
+        list(function_inlining_candidates(b"void f() { }\nint main() { f(); }")) == []
+    )
 
 
 def test_function_inlining_skips_body_with_preprocessor_directive():

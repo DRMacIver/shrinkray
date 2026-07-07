@@ -4332,7 +4332,9 @@ def _memory_probe_state(tmp_path, *, script_body, memory_limit_explicit):
         pytest.param(False, 0, False, id="disabled_limit_nothing_to_probe"),
     ],
 )
-def test_default_memory_limit_may_block_initial(simple_state, explicit, limit, expected):
+def test_default_memory_limit_may_block_initial(
+    simple_state, explicit, limit, expected
+):
     simple_state.memory_limit_explicit = explicit
     simple_state.memory_limit = limit
     assert simple_state._default_memory_limit_may_block_initial() is expected

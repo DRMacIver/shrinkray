@@ -452,9 +452,7 @@ def test_memory_limit_disabled_gives_no_warning(tmpdir):
         pytest.param([], False, id="default"),
     ],
 )
-def test_memory_limit_explicit_threaded_to_state(
-    tmpdir, extra_args, expected_explicit
-):
+def test_memory_limit_explicit_threaded_to_state(tmpdir, extra_args, expected_explicit):
     target = tmpdir / "hello.txt"
     target.write_text("hello world", encoding="utf-8")
     script = tmpdir / "test.sh"

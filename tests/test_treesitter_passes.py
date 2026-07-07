@@ -638,10 +638,13 @@ def _python_source(draw: st.DrawFn) -> bytes:
         parts.append("import %s" % draw(st.sampled_from(_IDENTS)))
     for _ in range(draw(st.integers(0, 6))):
         name = draw(st.sampled_from(_IDENTS))
-        calls = "; ".join(
-            "%s()" % draw(st.sampled_from(_IDENTS))
-            for _ in range(draw(st.integers(0, 3)))
-        ) or "pass"
+        calls = (
+            "; ".join(
+                "%s()" % draw(st.sampled_from(_IDENTS))
+                for _ in range(draw(st.integers(0, 3)))
+            )
+            or "pass"
+        )
         parts.append("def %s():\n    %s" % (name, calls))
     return "\n".join(parts).encode()
 

@@ -3,6 +3,13 @@
 This is the changelog for [Shrink Ray](https://github.com/DRMacIver/shrinkray), a
 fast multi-format test-case reducer. Versions are calendar-based (`YY.M.D.N`).
 
+## 26.7.7.3 — 2026-07-07
+
+- Added `--restart/--no-restart` (default on). The restart phase re-reduces
+  from the original input once a fixpoint is reached, which can find smaller
+  results greedy reduction misses but costs extra work; `--no-restart` skips
+  it.
+
 ## 26.7.7.2 — 2026-07-07
 
 - Fixed quitting the TUI during a reduction occasionally reporting a

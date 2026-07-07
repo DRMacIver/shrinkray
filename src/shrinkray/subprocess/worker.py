@@ -222,6 +222,7 @@ class ReducerWorker:
         also_interesting_code = params.get("also_interesting_code")
         external_reducers = params.get("external_reducers", [])
         python_reducer = params.get("python_reducer", True)
+        restart_at_fixpoint = params.get("restart_at_fixpoint", True)
         llm_enabled = params.get("llm_enabled", False)
         llm_model = params.get("llm_model", DEFAULT_MODEL_SPEC)
         llm_only = params.get("llm_only", False)
@@ -242,6 +243,7 @@ class ReducerWorker:
             also_interesting_code=also_interesting_code,
             external_reducers=external_reducers,
             python_reducer=python_reducer,
+            restart_at_fixpoint=restart_at_fixpoint,
             llm_enabled=llm_enabled,
             llm_model=llm_model,
             llm_only=llm_only,

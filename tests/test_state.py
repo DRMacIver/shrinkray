@@ -274,11 +274,13 @@ def test_new_reducer_forwards_external_reducer_settings(tmp_path):
         history_enabled=False,
         external_reducers=[["my-reducer"]],
         python_reducer=False,
+        restart_at_fixpoint=False,
     )
     reducer = state.reducer
     assert isinstance(reducer, ShrinkRay)
     assert reducer.external_reducers == [["my-reducer"]]
     assert reducer.python_reducer is False
+    assert reducer.restart_at_fixpoint is False
     assert reducer.reducer_log_dir is None
 
 
@@ -306,11 +308,13 @@ def test_directory_new_reducer_forwards_settings(tmp_path):
         history_enabled=False,
         external_reducers=[["my-reducer"]],
         python_reducer=False,
+        restart_at_fixpoint=False,
     )
     reducer = state.reducer
     assert isinstance(reducer, DirectoryShrinkRay)
     assert reducer.external_reducers == [["my-reducer"]]
     assert reducer.python_reducer is False
+    assert reducer.restart_at_fixpoint is False
 
 
 # === ShrinkRayDirectoryState tests ===
@@ -3951,6 +3955,7 @@ def make_adaptive_state(
     timeout=5.0,
     min_timeout=0.1,
     initial=b"hello world",
+    clock=None,
 ):
     script = tmp_path / "adaptive_test.sh"
     script.write_text(script_body)
@@ -3958,6 +3963,13 @@ def make_adaptive_state(
 
     target = tmp_path / "adaptive_target.txt"
     target.write_bytes(initial)
+
+    if clock is None:
+        policy = AdaptiveTimeoutPolicy(user_timeout=timeout, min_timeout=min_timeout)
+    else:
+        policy = AdaptiveTimeoutPolicy(
+            user_timeout=timeout, min_timeout=min_timeout, clock=clock
+        )
 
     return ShrinkRayStateSingleFile(
         input_type=InputType.all,
@@ -3973,9 +3985,7 @@ def make_adaptive_state(
         seed=0,
         volume=Volume.quiet,
         history_enabled=False,
-        timeout_policy=AdaptiveTimeoutPolicy(
-            user_timeout=timeout, min_timeout=min_timeout
-        ),
+        timeout_policy=policy,
     )
 
 
@@ -4088,14 +4098,25 @@ def test_reset_for_restart_resets_timeout_policy(tmp_path):
 async def test_adaptive_timeout_unlocks_slow_reduction(tmp_path):
     """End-to-end: a reduction whose interesting form is much slower than
     the adapted timeout is still found, because the reducer raises the
-    timeout before giving up."""
+    timeout when it runs out of things to try (attempt_unstick).
+
+    The policy is given a frozen clock so the *automatic*, wall-clock-driven
+    stall exploration never fires: on a slow/loaded machine it would kick in
+    unpredictably (the reduction stalling past STALL_MIN_SECONDS) and could
+    exhaust itself on unrelated candidates, which made this test flaky. With
+    the frozen clock the raise is driven purely by attempt_unstick, which is
+    exactly the "raise before giving up" behaviour under test, and the real
+    subprocess timing (the 0.4s sleep vs the real timeout kills) is
+    unchanged."""
     script_body = """#!/bin/sh
 content=$(cat "$1")
 if [ "$content" = "hello world" ]; then exit 0; fi
 if [ "$content" = "hello" ]; then sleep 0.4; exit 0; fi
 exit 1
 """
-    state = make_adaptive_state(tmp_path, script_body, timeout=10.0, min_timeout=0.15)
+    state = make_adaptive_state(
+        tmp_path, script_body, timeout=10.0, min_timeout=0.15, clock=lambda: 0.0
+    )
     await state.problem.setup()
     await state.reducer.run()
     assert state.problem.current_test_case == b"hello"

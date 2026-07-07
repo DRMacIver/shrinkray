@@ -135,6 +135,7 @@ class ReductionClientProtocol(Protocol):
         also_interesting_code: int | None = None,
         external_reducers: list[list[str]] | None = None,
         python_reducer: bool = True,
+        restart_at_fixpoint: bool = True,
         llm_enabled: bool = False,
         llm_model: str = DEFAULT_MODEL_SPEC,
         llm_only: bool = False,
@@ -1732,6 +1733,7 @@ class ShrinkRayApp(App[None]):
         also_interesting_code: int | None = None,
         external_reducers: list[list[str]] | None = None,
         python_reducer: bool = True,
+        restart_at_fixpoint: bool = True,
         llm_enabled: bool = False,
         llm_model: str = DEFAULT_MODEL_SPEC,
         llm_only: bool = False,
@@ -1757,6 +1759,7 @@ class ShrinkRayApp(App[None]):
         self._also_interesting_code = also_interesting_code
         self._external_reducers = external_reducers or []
         self._python_reducer = python_reducer
+        self._restart_at_fixpoint = restart_at_fixpoint
         self._llm_enabled = llm_enabled
         self._llm_model = llm_model
         self._llm_only = llm_only
@@ -1931,6 +1934,7 @@ class ShrinkRayApp(App[None]):
                     also_interesting_code=self._also_interesting_code,
                     external_reducers=self._external_reducers,
                     python_reducer=self._python_reducer,
+                    restart_at_fixpoint=self._restart_at_fixpoint,
                     llm_enabled=self._llm_enabled,
                     llm_model=self._llm_model,
                     llm_only=self._llm_only,
@@ -2169,6 +2173,7 @@ def run_textual_ui(
     also_interesting_code: int | None = None,
     external_reducers: list[list[str]] | None = None,
     python_reducer: bool = True,
+    restart_at_fixpoint: bool = True,
     llm_enabled: bool = False,
     llm_model: str = DEFAULT_MODEL_SPEC,
     llm_only: bool = False,
@@ -2197,6 +2202,7 @@ def run_textual_ui(
         also_interesting_code=also_interesting_code,
         external_reducers=external_reducers,
         python_reducer=python_reducer,
+        restart_at_fixpoint=restart_at_fixpoint,
         llm_enabled=llm_enabled,
         llm_model=llm_model,
         llm_only=llm_only,

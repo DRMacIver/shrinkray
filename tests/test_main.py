@@ -21,6 +21,8 @@ from click.testing import CliRunner
 from shrinkray.__main__ import _validate_memory_limit, main, worker_main
 from shrinkray.llm_client import llm_support_available
 from shrinkray.process import default_memory_limit, interrupt_wait_and_kill
+from shrinkray.reducer import ShrinkRay
+from shrinkray.state import ShrinkRayStateSingleFile
 from shrinkray.validation import ValidationResult
 
 
@@ -2152,3 +2154,51 @@ def test_basic_ui_download_notice_omits_no_llm_when_only_grammar(tmp_path, monke
     assert result.exit_code == 0
     assert "grammar for go" in result.output
     assert "--no-llm" not in result.output
+
+
+def test_no_restart_flag_reaches_the_reducer(tmp_path, monkeypatch):
+    target = tmp_path / "target.txt"
+    target.write_text("hello world\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q hello "$1"\n')
+    script.chmod(0o755)
+
+    seen = {}
+    real_reducer = ShrinkRayStateSingleFile.new_reducer
+
+    def spy(self, problem):
+        reducer = real_reducer(self, problem)
+        assert isinstance(reducer, ShrinkRay)
+        seen["restart"] = reducer.restart_at_fixpoint
+        return reducer
+
+    monkeypatch.setattr(ShrinkRayStateSingleFile, "new_reducer", spy)
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main, [str(script), str(target), "--ui=basic", "--no-restart"]
+    )
+    assert result.exit_code == 0
+    assert seen["restart"] is False
+
+
+def test_restart_defaults_on(tmp_path, monkeypatch):
+    target = tmp_path / "target.txt"
+    target.write_text("hello world\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q hello "$1"\n')
+    script.chmod(0o755)
+
+    seen = {}
+    real_reducer = ShrinkRayStateSingleFile.new_reducer
+
+    def spy(self, problem):
+        reducer = real_reducer(self, problem)
+        assert isinstance(reducer, ShrinkRay)
+        seen["restart"] = reducer.restart_at_fixpoint
+        return reducer
+
+    monkeypatch.setattr(ShrinkRayStateSingleFile, "new_reducer", spy)
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(main, [str(script), str(target), "--ui=basic"])
+    assert result.exit_code == 0
+    assert seen["restart"] is True

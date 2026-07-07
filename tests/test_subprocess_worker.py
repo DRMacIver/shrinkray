@@ -509,6 +509,7 @@ async def test_worker_start_reduction_reads_external_reducer_params(tmp_path):
         "skip_validation": True,
         "external_reducers": [["my-reducer", "arg"]],
         "python_reducer": False,
+        "restart_at_fixpoint": False,
         "llm_enabled": True,
         "llm_model": "org/repo:model.gguf",
         "llm_only": True,
@@ -519,6 +520,7 @@ async def test_worker_start_reduction_reads_external_reducer_params(tmp_path):
     assert worker.state is not None
     assert worker.state.external_reducers == [["my-reducer", "arg"]]
     assert worker.state.python_reducer is False
+    assert worker.state.restart_at_fixpoint is False
     assert worker.state.llm_enabled is True
     assert worker.state.llm_model == "org/repo:model.gguf"
     assert worker.state.llm_only is True
@@ -549,6 +551,7 @@ async def test_worker_start_reduction_default_external_reducer_params(tmp_path):
     assert worker.state is not None
     assert worker.state.external_reducers == []
     assert worker.state.python_reducer is True
+    assert worker.state.restart_at_fixpoint is True
     assert worker.state.llm_enabled is False
     assert worker.state.llm_only is False
 
@@ -858,7 +861,9 @@ async def test_worker_start_reduction_with_c_file(tmp_path):
         "file_path": str(target),
         "test": [str(script)],
         "parallelism": 1,
-        "timeout": 1.0,
+        # Generous so the initial validation call (a real subprocess) never
+        # races a tight timeout when the suite is under load.
+        "timeout": 30.0,
         "seed": 0,
         "input_type": "all",
         "in_place": False,
@@ -888,7 +893,9 @@ async def test_worker_full_run_with_mock(tmp_path):
         "file_path": str(target),
         "test": [str(script)],
         "parallelism": 1,
-        "timeout": 1.0,
+        # Generous so the initial validation call (a real subprocess) never
+        # races a tight timeout when the suite is under load.
+        "timeout": 30.0,
         "seed": 0,
         "input_type": "all",
         "in_place": False,
@@ -2508,7 +2515,9 @@ async def test_worker_no_stderr_redirect_without_history(tmp_path):
         "file_path": str(target),
         "test": [str(script)],
         "parallelism": 1,
-        "timeout": 1.0,
+        # Generous so the initial validation call (a real subprocess) never
+        # races a tight timeout when the suite is under load.
+        "timeout": 30.0,
         "seed": 0,
         "input_type": "all",
         "in_place": False,

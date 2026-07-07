@@ -511,10 +511,15 @@ def run_problem(name: str, problem: Problem) -> dict:
             )
 
         reduction_problem.on_reduce(record)
+        # The restart-at-fixpoint phase re-explores the whole single-reduction
+        # space of the original input, which is expensive on large inputs and
+        # (on this suite) never improves the result, so this efficiency
+        # measurement runs without it. Real reductions keep it on by default.
         reducer = ShrinkRay(
             target=reduction_problem,
             enable_cpp_passes=problem.cpp,
             treesitter_language=problem.treesitter_language,
+            restart_at_fixpoint=False,
         )
         await reducer.run()
         return reduction_problem.current_test_case, reduction_problem, reducer

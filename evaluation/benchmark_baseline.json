@@ -4,12 +4,12 @@
       "name": "deep_parens",
       "initial_size": 3794,
       "final_size": 800,
-      "calls": 12880,
-      "c90": 9465,
-      "c99": 10138,
-      "tail": 2666,
-      "reductions": 1124,
-      "seconds": 5.72,
+      "calls": 12870,
+      "c90": 9448,
+      "c99": 10121,
+      "tail": 2673,
+      "reductions": 1520,
+      "seconds": 5.26,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -63,7 +63,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
           "runs": 5,
-          "calls": 19,
+          "calls": 13,
           "reductions": 2,
           "bytes_deleted": 118
         },
@@ -77,14 +77,14 @@
         {
           "pass": "debracket",
           "runs": 5,
-          "calls": 656,
+          "calls": 655,
           "reductions": 200,
           "bytes_deleted": 400
         },
         {
           "pass": "delete_byte_spans",
           "runs": 4,
-          "calls": 788,
+          "calls": 780,
           "reductions": 514,
           "bytes_deleted": 1211
         },
@@ -112,8 +112,8 @@
         {
           "pass": "replace_identifiers_with_zero",
           "runs": 3,
-          "calls": 402,
-          "reductions": 4,
+          "calls": 400,
+          "reductions": 400,
           "bytes_deleted": 801
         },
         {
@@ -154,7 +154,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 8544,
+          "calls": 8542,
           "reductions": 400,
           "bytes_deleted": 400
         },
@@ -196,7 +196,7 @@
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 24,
+          "calls": 33,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -213,12 +213,12 @@
       "name": "keep_markers",
       "initial_size": 174747,
       "final_size": 50,
-      "calls": 1232,
-      "c90": 74,
-      "c99": 132,
-      "tail": 887,
-      "reductions": 113,
-      "seconds": 9.76,
+      "calls": 1214,
+      "c90": 73,
+      "c99": 129,
+      "tail": 885,
+      "reductions": 112,
+      "seconds": 8.46,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -244,7 +244,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 2,
-          "calls": 183,
+          "calls": 172,
           "reductions": 100,
           "bytes_deleted": 117781
         },
@@ -279,7 +279,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
           "runs": 3,
-          "calls": 7,
+          "calls": 5,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -300,7 +300,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 4,
-          "calls": 132,
+          "calls": 131,
           "reductions": 4,
           "bytes_deleted": 8
         },
@@ -314,8 +314,8 @@
         {
           "pass": "reduce_integer_literals",
           "runs": 3,
-          "calls": 3,
-          "reductions": 3,
+          "calls": 2,
+          "reductions": 2,
           "bytes_deleted": 0
         },
         {
@@ -328,7 +328,7 @@
         {
           "pass": "replace_identifiers_with_zero",
           "runs": 2,
-          "calls": 4,
+          "calls": 3,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -349,7 +349,7 @@
         {
           "pass": "lexeme_based_deletions",
           "runs": 2,
-          "calls": 17,
+          "calls": 16,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -370,7 +370,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 21,
+          "calls": 18,
           "reductions": 2,
           "bytes_deleted": 6
         },
@@ -412,14 +412,14 @@
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 233,
+          "calls": 232,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 243,
+          "calls": 246,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -429,12 +429,12 @@
       "name": "already_minimal",
       "initial_size": 37,
       "final_size": 34,
-      "calls": 847,
-      "c90": 101,
-      "c99": 101,
-      "tail": 746,
+      "calls": 837,
+      "c90": 88,
+      "c99": 88,
+      "tail": 749,
       "reductions": 3,
-      "seconds": 0.55,
+      "seconds": 0.5,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -495,7 +495,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
           "runs": 3,
-          "calls": 3,
+          "calls": 2,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -516,7 +516,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 4,
-          "calls": 87,
+          "calls": 79,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -544,7 +544,7 @@
         {
           "pass": "replace_identifiers_with_zero",
           "runs": 3,
-          "calls": 4,
+          "calls": 3,
           "reductions": 1,
           "bytes_deleted": 0
         },
@@ -572,7 +572,7 @@
         {
           "pass": "normalize_identifiers",
           "runs": 2,
-          "calls": 9,
+          "calls": 7,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -586,7 +586,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 18,
+          "calls": 13,
           "reductions": 2,
           "bytes_deleted": 3
         },
@@ -628,14 +628,14 @@
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 229,
+          "calls": 237,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 244,
+          "calls": 243,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -645,12 +645,12 @@
       "name": "python_syntax",
       "initial_size": 10078,
       "final_size": 13,
-      "calls": 547,
-      "c90": 19,
-      "c99": 86,
-      "tail": 380,
+      "calls": 578,
+      "c90": 18,
+      "c99": 77,
+      "tail": 429,
       "reductions": 23,
-      "seconds": 11.46,
+      "seconds": 11.33,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -676,7 +676,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 3,
-          "calls": 46,
+          "calls": 38,
           "reductions": 8,
           "bytes_deleted": 6388
         },
@@ -711,7 +711,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
           "runs": 4,
-          "calls": 6,
+          "calls": 5,
           "reductions": 2,
           "bytes_deleted": 105
         },
@@ -732,7 +732,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 3,
-          "calls": 52,
+          "calls": 44,
           "reductions": 1,
           "bytes_deleted": 5
         },
@@ -760,7 +760,7 @@
         {
           "pass": "replace_identifiers_with_zero",
           "runs": 3,
-          "calls": 9,
+          "calls": 7,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -781,14 +781,14 @@
         {
           "pass": "lexeme_based_deletions",
           "runs": 3,
-          "calls": 2,
+          "calls": 1,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "normalize_identifiers",
           "runs": 3,
-          "calls": 25,
+          "calls": 24,
           "reductions": 1,
           "bytes_deleted": 2
         },
@@ -802,7 +802,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 2,
+          "calls": 1,
           "reductions": 1,
           "bytes_deleted": 15
         },
@@ -844,14 +844,14 @@
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 212,
+          "calls": 225,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 85,
+          "calls": 125,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -861,12 +861,12 @@
       "name": "corpus_mypy",
       "initial_size": 2537,
       "final_size": 34,
-      "calls": 3457,
-      "c90": 530,
-      "c99": 774,
-      "tail": 928,
-      "reductions": 71,
-      "seconds": 42.07,
+      "calls": 3318,
+      "c90": 510,
+      "c99": 748,
+      "tail": 833,
+      "reductions": 73,
+      "seconds": 42.02,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -878,7 +878,7 @@
         {
           "pass": "hollow",
           "runs": 14,
-          "calls": 60,
+          "calls": 59,
           "reductions": 9,
           "bytes_deleted": 357
         },
@@ -892,7 +892,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 6,
-          "calls": 271,
+          "calls": 251,
           "reductions": 1,
           "bytes_deleted": 618
         },
@@ -913,7 +913,7 @@
         {
           "pass": "remove_whitespace",
           "runs": 11,
-          "calls": 163,
+          "calls": 162,
           "reductions": 9,
           "bytes_deleted": 63
         },
@@ -927,7 +927,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
           "runs": 8,
-          "calls": 53,
+          "calls": 35,
           "reductions": 2,
           "bytes_deleted": 152
         },
@@ -941,14 +941,14 @@
         {
           "pass": "debracket",
           "runs": 8,
-          "calls": 32,
+          "calls": 30,
           "reductions": 3,
           "bytes_deleted": 6
         },
         {
           "pass": "delete_byte_spans",
-          "runs": 9,
-          "calls": 270,
+          "runs": 7,
+          "calls": 246,
           "reductions": 15,
           "bytes_deleted": 47
         },
@@ -976,8 +976,8 @@
         {
           "pass": "replace_identifiers_with_zero",
           "runs": 5,
-          "calls": 34,
-          "reductions": 4,
+          "calls": 32,
+          "reductions": 5,
           "bytes_deleted": 4
         },
         {
@@ -997,28 +997,28 @@
         {
           "pass": "lexeme_based_deletions",
           "runs": 5,
-          "calls": 34,
+          "calls": 30,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "normalize_identifiers",
           "runs": 5,
-          "calls": 112,
+          "calls": 113,
           "reductions": 3,
           "bytes_deleted": 4
         },
         {
           "pass": "line_sorter",
           "runs": 5,
-          "calls": 7,
+          "calls": 6,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 5,
-          "calls": 537,
+          "calls": 465,
           "reductions": 2,
           "bytes_deleted": 16
         },
@@ -1053,22 +1053,22 @@
         {
           "pass": "short_deletions",
           "runs": 3,
-          "calls": 746,
+          "calls": 704,
           "reductions": 2,
           "bytes_deleted": 2
         },
         {
           "pass": "lower_bytes",
           "runs": 4,
-          "calls": 522,
+          "calls": 528,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 2,
-          "calls": 516,
-          "reductions": 1,
+          "calls": 557,
+          "reductions": 2,
           "bytes_deleted": 0
         }
       ]
@@ -1077,12 +1077,12 @@
       "name": "corpus_pylint",
       "initial_size": 2403,
       "final_size": 44,
-      "calls": 2019,
-      "c90": 198,
-      "c99": 408,
-      "tail": 1057,
+      "calls": 2036,
+      "c90": 183,
+      "c99": 387,
+      "tail": 1055,
       "reductions": 58,
-      "seconds": 21.71,
+      "seconds": 21.69,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -1093,14 +1093,14 @@
         },
         {
           "pass": "hollow",
-          "runs": 10,
+          "runs": 9,
           "calls": 33,
           "reductions": 10,
           "bytes_deleted": 447
         },
         {
           "pass": "split(b'\\n')/delete_duplicates",
-          "runs": 9,
+          "runs": 8,
           "calls": 1,
           "reductions": 1,
           "bytes_deleted": 18
@@ -1108,93 +1108,93 @@
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 4,
-          "calls": 131,
+          "calls": 116,
           "reductions": 1,
           "bytes_deleted": 418
         },
         {
           "pass": "lift_braces",
-          "runs": 10,
+          "runs": 9,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "remove_indents",
-          "runs": 11,
+          "runs": 10,
           "calls": 8,
           "reductions": 3,
           "bytes_deleted": 16
         },
         {
           "pass": "remove_whitespace",
-          "runs": 9,
+          "runs": 8,
           "calls": 1,
           "reductions": 1,
           "bytes_deleted": 28
         },
         {
           "pass": "python",
-          "runs": 9,
+          "runs": 8,
           "calls": 7,
           "reductions": 7,
           "bytes_deleted": 126
         },
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
-          "runs": 6,
-          "calls": 21,
+          "runs": 5,
+          "calls": 13,
           "reductions": 2,
           "bytes_deleted": 75
         },
         {
           "pass": "split(b';')/block_deletion(1, 10)",
-          "runs": 6,
+          "runs": 5,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "debracket",
-          "runs": 6,
-          "calls": 28,
+          "runs": 5,
+          "calls": 22,
           "reductions": 2,
           "bytes_deleted": 4
         },
         {
           "pass": "delete_byte_spans",
-          "runs": 7,
-          "calls": 252,
+          "runs": 6,
+          "calls": 227,
           "reductions": 9,
           "bytes_deleted": 52
         },
         {
           "pass": "split(b'\\n')/block_deletion(11, 20)",
-          "runs": 5,
+          "runs": 4,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "reduce_integer_literals",
-          "runs": 5,
+          "runs": 4,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "replace_falsey_with_zero",
-          "runs": 5,
-          "calls": 5,
+          "runs": 4,
+          "calls": 8,
           "reductions": 1,
           "bytes_deleted": 1
         },
         {
           "pass": "replace_identifiers_with_zero",
-          "runs": 5,
-          "calls": 36,
+          "runs": 4,
+          "calls": 30,
           "reductions": 2,
-          "bytes_deleted": 2
+          "bytes_deleted": 4
         },
         {
           "pass": "combine_expressions",
@@ -1206,21 +1206,21 @@
         {
           "pass": "merge_adjacent_strings",
           "runs": 4,
-          "calls": 6,
-          "reductions": 2,
-          "bytes_deleted": 6
+          "calls": 3,
+          "reductions": 1,
+          "bytes_deleted": 2
         },
         {
           "pass": "lexeme_based_deletions",
           "runs": 4,
-          "calls": 47,
+          "calls": 35,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "normalize_identifiers",
           "runs": 4,
-          "calls": 52,
+          "calls": 54,
           "reductions": 5,
           "bytes_deleted": 23
         },
@@ -1234,9 +1234,9 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 668,
-          "reductions": 1,
-          "bytes_deleted": 4
+          "calls": 750,
+          "reductions": 2,
+          "bytes_deleted": 6
         },
         {
           "pass": "split(b'\\n')/block_deletion(21, 100)",
@@ -1276,7 +1276,7 @@
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 237,
+          "calls": 242,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -1293,12 +1293,12 @@
       "name": "corpus_ujson",
       "initial_size": 826,
       "final_size": 42,
-      "calls": 1280,
+      "calls": 1169,
       "c90": 64,
       "c99": 68,
-      "tail": 800,
+      "tail": 713,
       "reductions": 23,
-      "seconds": 0.13,
+      "seconds": 0.12,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -1310,7 +1310,7 @@
         {
           "pass": "hollow",
           "runs": 4,
-          "calls": 111,
+          "calls": 90,
           "reductions": 18,
           "bytes_deleted": 682
         },
@@ -1380,7 +1380,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 3,
-          "calls": 27,
+          "calls": 20,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -1429,7 +1429,7 @@
         {
           "pass": "lexeme_based_deletions",
           "runs": 2,
-          "calls": 6,
+          "calls": 5,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -1450,7 +1450,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 670,
+          "calls": 582,
           "reductions": 1,
           "bytes_deleted": 1
         },
@@ -1492,14 +1492,14 @@
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 197,
+          "calls": 198,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 238,
+          "calls": 243,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -1509,10 +1509,10 @@
       "name": "corpus_udlit_cpp",
       "initial_size": 834,
       "final_size": 22,
-      "calls": 1036,
-      "c90": 61,
-      "c99": 134,
-      "tail": 594,
+      "calls": 1046,
+      "c90": 59,
+      "c99": 128,
+      "tail": 632,
       "reductions": 45,
       "seconds": 0.08,
       "pass_stats": [
@@ -1540,7 +1540,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 2,
-          "calls": 3,
+          "calls": 2,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -1624,14 +1624,14 @@
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
           "runs": 7,
-          "calls": 21,
+          "calls": 14,
           "reductions": 2,
           "bytes_deleted": 34
         },
         {
           "pass": "split(b';')/block_deletion(1, 10)",
           "runs": 7,
-          "calls": 8,
+          "calls": 4,
           "reductions": 2,
           "bytes_deleted": 2
         },
@@ -1645,7 +1645,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 5,
-          "calls": 148,
+          "calls": 135,
           "reductions": 10,
           "bytes_deleted": 64
         },
@@ -1701,7 +1701,7 @@
         {
           "pass": "normalize_identifiers",
           "runs": 5,
-          "calls": 27,
+          "calls": 25,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -1715,7 +1715,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 3,
-          "calls": 73,
+          "calls": 60,
           "reductions": 2,
           "bytes_deleted": 3
         },
@@ -1750,21 +1750,21 @@
         {
           "pass": "short_deletions",
           "runs": 2,
-          "calls": 274,
+          "calls": 272,
           "reductions": 1,
           "bytes_deleted": 1
         },
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 233,
+          "calls": 237,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 169,
+          "calls": 217,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -1774,12 +1774,12 @@
       "name": "coupled_count_json",
       "initial_size": 3831,
       "final_size": 143,
-      "calls": 5325,
+      "calls": 5285,
       "c90": 35,
       "c99": 361,
-      "tail": 3083,
+      "tail": 3043,
       "reductions": 45,
-      "seconds": 165.57,
+      "seconds": 1.04,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -1997,12 +1997,12 @@
       "name": "coupled_total_text",
       "initial_size": 602,
       "final_size": 350,
-      "calls": 27532,
-      "c90": 2846,
-      "c99": 2859,
-      "tail": 8800,
-      "reductions": 356,
-      "seconds": 9.21,
+      "calls": 27325,
+      "c90": 2841,
+      "c99": 2854,
+      "tail": 8598,
+      "reductions": 404,
+      "seconds": 2.15,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -2091,8 +2091,8 @@
         {
           "pass": "reduce_integer_literals",
           "runs": 5,
-          "calls": 888,
-          "reductions": 4,
+          "calls": 892,
+          "reductions": 26,
           "bytes_deleted": 41
         },
         {
@@ -2105,8 +2105,8 @@
         {
           "pass": "replace_identifiers_with_zero",
           "runs": 5,
-          "calls": 156,
-          "reductions": 3,
+          "calls": 154,
+          "reductions": 29,
           "bytes_deleted": 58
         },
         {
@@ -2133,7 +2133,7 @@
         {
           "pass": "normalize_identifiers",
           "runs": 6,
-          "calls": 1225,
+          "calls": 1219,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2196,7 +2196,7 @@
         {
           "pass": "lower_individual_bytes",
           "runs": 2,
-          "calls": 4047,
+          "calls": 4046,
           "reductions": 62,
           "bytes_deleted": 0
         }
@@ -2206,12 +2206,12 @@
       "name": "coupled_arity_python",
       "initial_size": 947,
       "final_size": 52,
-      "calls": 11043,
+      "calls": 11028,
       "c90": 296,
-      "c99": 435,
-      "tail": 1198,
+      "c99": 431,
+      "tail": 1186,
       "reductions": 60,
-      "seconds": 40.7,
+      "seconds": 32.48,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -2307,7 +2307,7 @@
         {
           "pass": "reduce_integer_literals",
           "runs": 6,
-          "calls": 3,
+          "calls": 2,
           "reductions": 2,
           "bytes_deleted": 1
         },
@@ -2321,7 +2321,7 @@
         {
           "pass": "replace_identifiers_with_zero",
           "runs": 6,
-          "calls": 53,
+          "calls": 51,
           "reductions": 3,
           "bytes_deleted": 5
         },
@@ -2422,9 +2422,9 @@
       "name": "corpus_minisat",
       "initial_size": 2326,
       "final_size": 10,
-      "calls": 1207,
-      "c90": 795,
-      "c99": 795,
+      "calls": 1198,
+      "c90": 787,
+      "c99": 787,
       "tail": 375,
       "reductions": 4,
       "seconds": 0.33,
@@ -2453,7 +2453,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 2,
-          "calls": 789,
+          "calls": 780,
           "reductions": 2,
           "bytes_deleted": 2308
         },
@@ -2488,7 +2488,7 @@
         {
           "pass": "DimacsCNF/force_literals",
           "runs": 2,
-          "calls": 6,
+          "calls": 3,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2502,14 +2502,14 @@
         {
           "pass": "DimacsCNF/unit_propagate",
           "runs": 2,
-          "calls": 2,
+          "calls": 1,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "DimacsCNF/delete_literals",
           "runs": 2,
-          "calls": 2,
+          "calls": 1,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2530,7 +2530,7 @@
         {
           "pass": "DimacsCNF/flip_literal_signs",
           "runs": 2,
-          "calls": 2,
+          "calls": 1,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2544,14 +2544,14 @@
         {
           "pass": "DimacsCNF/merge_literals",
           "runs": 2,
-          "calls": 5,
+          "calls": 3,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "DimacsCNF/renumber_variables",
           "runs": 2,
-          "calls": 25,
+          "calls": 19,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2579,7 +2579,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 2,
-          "calls": 21,
+          "calls": 17,
           "reductions": 2,
           "bytes_deleted": 8
         },
@@ -2593,7 +2593,7 @@
         {
           "pass": "reduce_integer_literals",
           "runs": 1,
-          "calls": 61,
+          "calls": 60,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2691,14 +2691,14 @@
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 186,
+          "calls": 196,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 55,
+          "calls": 64,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -2708,12 +2708,12 @@
       "name": "corpus_go",
       "initial_size": 2288,
       "final_size": 21,
-      "calls": 1195,
-      "c90": 55,
-      "c99": 114,
-      "tail": 599,
+      "calls": 1111,
+      "c90": 54,
+      "c99": 111,
+      "tail": 592,
       "reductions": 37,
-      "seconds": 0.11,
+      "seconds": 0.1,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -2725,7 +2725,7 @@
         {
           "pass": "hollow",
           "runs": 7,
-          "calls": 29,
+          "calls": 26,
           "reductions": 13,
           "bytes_deleted": 1562
         },
@@ -2739,7 +2739,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 3,
-          "calls": 10,
+          "calls": 9,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2761,29 +2761,29 @@
           "pass": "remove_whitespace",
           "runs": 6,
           "calls": 9,
-          "reductions": 0,
-          "bytes_deleted": 0
+          "reductions": 1,
+          "bytes_deleted": 2
         },
         {
           "pass": "treesitter(go)/delete_children",
-          "runs": 7,
-          "calls": 157,
+          "runs": 6,
+          "calls": 125,
           "reductions": 10,
           "bytes_deleted": 258
         },
         {
           "pass": "treesitter(go)/delete_orphaned_declarations",
-          "runs": 6,
+          "runs": 5,
           "calls": 2,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "treesitter(go)/lift_nodes",
-          "runs": 6,
-          "calls": 104,
-          "reductions": 3,
-          "bytes_deleted": 11
+          "runs": 5,
+          "calls": 69,
+          "reductions": 2,
+          "bytes_deleted": 9
         },
         {
           "pass": "treesitter(go)/substitute_nodes",
@@ -2795,7 +2795,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
           "runs": 5,
-          "calls": 19,
+          "calls": 15,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2816,7 +2816,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 4,
-          "calls": 68,
+          "calls": 57,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2865,14 +2865,14 @@
         {
           "pass": "lexeme_based_deletions",
           "runs": 3,
-          "calls": 4,
+          "calls": 3,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "normalize_identifiers",
           "runs": 3,
-          "calls": 27,
+          "calls": 26,
           "reductions": 1,
           "bytes_deleted": 0
         },
@@ -2886,7 +2886,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 266,
+          "calls": 241,
           "reductions": 3,
           "bytes_deleted": 3
         },
@@ -2928,14 +2928,14 @@
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 238,
+          "calls": 245,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 148,
+          "calls": 170,
           "reductions": 0,
           "bytes_deleted": 0
         }

@@ -222,12 +222,33 @@ def test_a_model_echoing_the_call_is_not_retested():
     assert calls == [PY_SOURCE]
 
 
-def test_identical_calls_share_one_completion():
+def test_identical_calls_are_inlined_from_one_completion():
+    # Both calls produce the same prompt; after the first adoption the
+    # second call's splice is satisfied from the cached response.
     source = b"def f(x):\n    return x + 1\n\nprint(f(3))\nprint(f(3))\n"
-    client = FakeLLMClient(responses=["no code block here"])
+    client = FakeLLMClient(responses=["```\n(3 + 1)\n```"])
     result, _ = run_pump(inline_pump(client), source, lambda x: b"print" in x)
-    assert result == source
+    assert result == b"def f(x):\n    return x + 1\n\nprint((3 + 1))\nprint((3 + 1))\n"
     assert len(client.prompts) == 1
+
+
+def test_retries_a_fruitless_prompt_with_a_fresh_seed():
+    client = FakeLLMClient(responses=["no code block here", "```\n(3 + 1)\n```"])
+    result, _ = run_pump(inline_pump(client), PY_SOURCE, lambda x: b"print" in x)
+    assert result == b"def f(x):\n    return x + 1\n\nprint((3 + 1))\n"
+    assert len(client.prompts) == 2
+    assert client.prompts[0] == client.prompts[1]
+    assert client.seeds[0] != client.seeds[1]
+
+
+def test_retries_per_prompt_are_bounded():
+    client = FakeLLMClient()  # always answers with no code block
+    result, _ = run_pump(
+        inline_pump(client, max_prompt_attempts=3), PY_SOURCE, lambda x: b"print" in x
+    )
+    assert result == PY_SOURCE
+    assert len(client.prompts) == 3
+    assert len(set(client.prompts)) == 1
 
 
 def test_rederives_targets_after_each_adoption():

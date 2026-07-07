@@ -74,6 +74,12 @@ MAX_ADOPTIONS = 20
 # targets can't stall the reduction on one pump.
 MAX_COMPLETIONS = 50
 
+# How many completions to try per distinct prompt (with fresh seeds)
+# before giving up on that target. Sampling means a single bad answer
+# is common even when the model usually gets the rewrite right; a
+# couple of retries recovers those cheaply.
+MAX_PROMPT_ATTEMPTS = 3
+
 
 # Node types whose underscore-separated words intersect these are taken
 # to be function definitions / calls. This convention holds across the
@@ -239,6 +245,7 @@ def llm_transform_pump(
     *,
     max_adoptions: int = MAX_ADOPTIONS,
     max_completions: int = MAX_COMPLETIONS,
+    max_prompt_attempts: int = MAX_PROMPT_ATTEMPTS,
 ) -> ReductionPump[bytes]:
     """A pump applying one grammar-guided transformation with the model.
 
@@ -246,54 +253,73 @@ def llm_transform_pump(
     targets, and asks the model to rewrite one span at a time; whenever
     a spliced candidate is interesting it is adopted and the targets
     are rederived (adoption shifts every later span). Responses are
-    memoized by prompt, so rederiving doesn't re-ask the model about
-    targets it has already answered for.
+    remembered per prompt: rederived targets replay earlier answers
+    before asking again, and a prompt whose answers all failed is
+    retried with a fresh seed up to max_prompt_attempts times, since a
+    single bad sample is common even when the model usually gets the
+    rewrite right.
     """
 
     async def pump(problem: ReductionProblem[bytes]) -> bytes:
         current = problem.current_test_case
         seen = {current}
-        responses: dict[str, str] = {}
+        responses: dict[str, list[str]] = {}
         completions = 0
         adoptions = 0
-        improved = True
-        while improved and adoptions < max_adoptions:
+
+        async def try_response(response: str, span: tuple[int, int]) -> bool:
+            nonlocal current, adoptions
+            for replacement in extract_candidates(response):
+                candidate = splice(current, span, replacement.strip())
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                if await problem.is_interesting(candidate):
+                    current = candidate
+                    adoptions += 1
+                    return True
+            return False
+
+        while adoptions < max_adoptions:
             improved = False
+            asked = False
             for target in find_targets(parse_tree(language, current), current):
                 prompt = transform_prompt(target)
-                if prompt in responses:
-                    response = responses[prompt]
-                else:
-                    if completions >= max_completions:
-                        return current
-                    # The model may still be downloading or loading in
-                    # the background; wait only now that there is a
-                    # target that needs it.
-                    await client.wait_until_ready()
-                    if client.is_disabled():
-                        return current
-                    completions += 1
-                    response = await client.complete(
-                        prompt,
-                        max_tokens=completion_max_tokens(
-                            len(target.context) + len(target.text)
-                        ),
-                        seed=problem.work.random.getrandbits(32),
-                        temperature=config.temperature,
-                    )
-                    responses[prompt] = response
-                for replacement in extract_candidates(response):
-                    candidate = splice(current, target.span, replacement.strip())
-                    if candidate in seen:
-                        continue
-                    seen.add(candidate)
-                    if await problem.is_interesting(candidate):
-                        current = candidate
-                        adoptions += 1
+                cached = responses.setdefault(prompt, [])
+                # Adoption shifts spans, so a previously useless answer
+                # can produce a fresh candidate on the new state.
+                for response in cached:
+                    if await try_response(response, target.span):
                         improved = True
                         break
                 if improved:
                     break
+                if len(cached) >= max_prompt_attempts:
+                    continue
+                if completions >= max_completions:
+                    return current
+                # The model may still be downloading or loading in the
+                # background; wait only now that there is a target that
+                # needs it.
+                await client.wait_until_ready()
+                if client.is_disabled():
+                    return current
+                completions += 1
+                asked = True
+                response = await client.complete(
+                    prompt,
+                    max_tokens=completion_max_tokens(
+                        len(target.context) + len(target.text)
+                    ),
+                    seed=problem.work.random.getrandbits(32),
+                    temperature=config.temperature,
+                )
+                cached.append(response)
+                if await try_response(response, target.span):
+                    improved = True
+                    break
+            if not improved and not asked:
+                break
         return current
 
     pump.__name__ = name

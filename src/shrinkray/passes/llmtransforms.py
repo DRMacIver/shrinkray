@@ -586,10 +586,13 @@ def llm_transform_pump(
                         return True
             return False
 
+        targets: list[TransformTarget] | None = None
         while adoptions < max_adoptions:
+            if targets is None:
+                targets = find_targets(parse_tree(language, current), current)
             improved = False
             asked = False
-            for target in find_targets(parse_tree(language, current), current):
+            for target in targets:
                 prompt = transform_prompt(target)
                 cached = responses.setdefault(prompt, [])
                 # Adoption shifts spans, so a previously useless answer
@@ -624,7 +627,11 @@ def llm_transform_pump(
                 if await try_response(response, target):
                     improved = True
                     break
-            if not improved and not asked:
+            if improved:
+                # Adoption changed the test case, shifting every later
+                # span: the targets must be rederived.
+                targets = None
+            elif not asked:
                 break
         return current
 

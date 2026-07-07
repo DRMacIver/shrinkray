@@ -9,6 +9,7 @@ import contextlib
 import io
 import re
 import warnings
+from unittest.mock import patch
 
 import pytest
 import trio
@@ -464,6 +465,23 @@ def test_retries_a_fruitless_prompt_with_a_fresh_seed():
     assert len(client.prompts) == 2
     assert client.prompts[0] == client.prompts[1]
     assert client.seeds[0] != client.seeds[1]
+
+
+def test_reparses_only_after_an_adoption():
+    # Fruitless rounds leave the test case unchanged, so the target
+    # derivation (a full parse) must not be repeated for them.
+    client = FakeLLMClient()  # always answers with no code block
+    parses = []
+    real_parse = parse_tree
+
+    def counting_parse(language: str, source: bytes):
+        parses.append(source)
+        return real_parse(language, source)
+
+    with patch("shrinkray.passes.llmtransforms.parse_tree", counting_parse):
+        result, _ = run_pump(inline_pump(client), PY_SOURCE, lambda x: b"print" in x)
+    assert result == PY_SOURCE
+    assert len(parses) == 1
 
 
 def test_retries_per_prompt_are_bounded():

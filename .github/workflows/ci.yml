@@ -218,12 +218,13 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          # Full history so the base branch and its merge-base with the PR
+          # are available. A shallow fetch of the base branch is not enough:
+          # it grafts the base tip with no parents, and if the base has moved
+          # since the PR merge ref was computed, `git merge-base` in
+          # check_release_file.py finds no common ancestor and crashes.
           fetch-depth: 0
           persist-credentials: false
-      - name: Fetch base branch
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: git fetch --no-tags --depth=1 origin "$BASE_REF"
       - name: Require RELEASE.md for source changes
         env:
           BASE_REF: ${{ github.base_ref }}

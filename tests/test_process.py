@@ -10,12 +10,12 @@ import pytest
 import trio
 
 from shrinkray.process import (
-    MEMORY_RLIMIT,
+    MEMORY_LIMIT_ENFORCEABLE,
     _close_pipes_sync,
-    child_preexec,
     default_memory_limit,
     interrupt_wait_and_kill,
     kill_process_group,
+    memory_limited_command,
     parse_memory_limit,
     peak_child_rss_bytes,
     signal_group,
@@ -68,40 +68,64 @@ def test_default_memory_limit_falls_back_on_nonsense_values():
         assert default_memory_limit() == 8 * 1024**3
 
 
-# === child_preexec tests ===
-
-
-def test_child_preexec_sets_memory_rlimit():
-    with (
-        patch("shrinkray.process.os.setsid") as setsid,
-        patch("shrinkray.process.resource.setrlimit") as setrlimit,
-    ):
-        child_preexec(4 * 1024**3)()
-    setsid.assert_called_once_with()
-    setrlimit.assert_called_once_with(MEMORY_RLIMIT, (4 * 1024**3, 4 * 1024**3))
+# === memory_limited_command tests ===
+#
+# The memory limit is applied by a shell prefix in the child rather than
+# a preexec_fn: preexec_fn forces subprocess to fork, and forking a
+# process that hosts the TUI subinterpreter crashes the child.
 
 
 @pytest.mark.parametrize("limit", [None, 0, -1])
-def test_child_preexec_skips_rlimit_when_disabled(limit):
-    with (
-        patch("shrinkray.process.os.setsid") as setsid,
-        patch("shrinkray.process.resource.setrlimit") as setrlimit,
-    ):
-        child_preexec(limit)()
-    setsid.assert_called_once_with()
-    setrlimit.assert_not_called()
+def test_memory_limited_command_passes_through_when_disabled(limit):
+    command = ["./test.sh", "arg"]
+    assert memory_limited_command(command, limit) is command
 
 
-def test_child_preexec_ignores_setrlimit_failure():
-    # macOS rejects RLIMIT_AS; a failure must not stop the child launching.
-    with (
-        patch("shrinkray.process.os.setsid"),
-        patch(
-            "shrinkray.process.resource.setrlimit",
-            side_effect=ValueError("current limit exceeds maximum limit"),
-        ),
-    ):
-        child_preexec(4 * 1024**3)()  # must not raise
+def test_memory_limited_command_wraps_with_ulimit():
+    wrapped = memory_limited_command(["./test.sh", "arg"], 4 * 1024**3)
+    assert wrapped[0] == "/bin/sh"
+    assert "ulimit" in wrapped[2]
+    assert str(4 * 1024**3 // 1024) in wrapped[2]
+    assert wrapped[-2:] == ["./test.sh", "arg"]
+
+
+def test_memory_limited_command_preserves_arguments_exactly():
+    # Arguments must survive the shell wrapper byte-for-byte, including
+    # whitespace and quoting characters.
+    tricky = ["echo", "a b", "it's", '"quoted"', "$HOME", "*"]
+    wrapped = memory_limited_command(tricky, 8 * 1024**3)
+    result = subprocess.run(wrapped, capture_output=True, check=True)
+    assert result.stdout == b'a b it\'s "quoted" $HOME *\n'
+
+
+def test_memory_limited_command_runs_in_new_process_group():
+    # The wrapper execs the real command, so the child keeps the pid it
+    # was spawned with and start_new_session still makes it the leader
+    # of its own session.
+    wrapped = memory_limited_command(["/bin/sh", "-c", "echo $$"], 8 * 1024**3)
+    result = subprocess.run(
+        wrapped, capture_output=True, check=True, start_new_session=True
+    )
+    assert result.stdout.strip().isdigit()
+
+
+@pytest.mark.skipif(
+    not MEMORY_LIMIT_ENFORCEABLE, reason="platform does not enforce RLIMIT_AS"
+)
+def test_memory_limited_command_enforces_the_limit():
+    allocate = [
+        sys.executable,
+        "-c",
+        "x = bytearray(1024 * 1024 * 1024); print('allocated')",
+    ]
+    unlimited = subprocess.run(
+        memory_limited_command(allocate, None), capture_output=True
+    )
+    assert unlimited.returncode == 0, unlimited.stderr
+    limited = subprocess.run(
+        memory_limited_command(allocate, 256 * 1024 * 1024), capture_output=True
+    )
+    assert limited.returncode != 0
 
 
 # === peak_child_rss_bytes tests ===
@@ -136,7 +160,7 @@ async def test_signal_group_sends_signal_to_process_group():
     # Start a process in its own process group
     sp = await trio.lowlevel.open_process(
         [sys.executable, "-c", "import time; time.sleep(100)"],
-        preexec_fn=os.setsid,
+        start_new_session=True,
     )
     try:
         # Process should be running
@@ -180,7 +204,7 @@ async def test_interrupt_wait_and_kill_does_nothing_if_already_exited():
     # Start a process that exits immediately
     sp = await trio.lowlevel.open_process(
         [sys.executable, "-c", "pass"],
-        preexec_fn=os.setsid,
+        start_new_session=True,
     )
     # Wait for it to exit
     await sp.wait()
@@ -199,7 +223,7 @@ async def test_interrupt_wait_and_kill_kills_process_ignoring_sigint():
             "-c",
             "import signal, time; signal.signal(signal.SIGINT, lambda *a: None); time.sleep(100)",
         ],
-        preexec_fn=os.setsid,
+        start_new_session=True,
         stdout=subprocess.PIPE,
     )
 
@@ -225,7 +249,7 @@ async def test_interrupt_wait_and_kill_handles_fast_exit_after_sigint(tmp_path):
             f"pathlib.Path({str(ready_marker)!r}).touch(); "
             "time.sleep(100)",
         ],
-        preexec_fn=os.setsid,
+        start_new_session=True,
     )
 
     while not ready_marker.exists():
@@ -243,7 +267,7 @@ async def test_interrupt_wait_and_kill_tolerates_eperm_for_exited_group():
     # sequence must fall through and reap rather than crash.
     sp = await trio.lowlevel.open_process(
         [sys.executable, "-c", "import sys; sys.stdin.read()"],
-        preexec_fn=os.setsid,
+        start_new_session=True,
         stdin=subprocess.PIPE,
     )
     with patch(
@@ -259,7 +283,7 @@ async def test_interrupt_wait_and_kill_raises_when_signals_cannot_be_sent():
     # nothing can be killed and the failure must be loud.
     sp = await trio.lowlevel.open_process(
         [sys.executable, "-c", "import time; time.sleep(100)"],
-        preexec_fn=os.setsid,
+        start_new_session=True,
     )
     try:
         with patch(
@@ -281,7 +305,7 @@ async def test_interrupt_wait_and_kill_closes_pipes_before_signaling():
             "-c",
             "import sys; print('hello'); sys.stdout.flush(); import time; time.sleep(100)",
         ],
-        preexec_fn=os.setsid,
+        start_new_session=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         stdin=subprocess.PIPE,
@@ -550,7 +574,7 @@ async def test_kill_process_group_with_real_process():
             "-c",
             "import time; time.sleep(100)",
         ],
-        preexec_fn=os.setsid,
+        start_new_session=True,
     )
 
     assert sp.poll() is None

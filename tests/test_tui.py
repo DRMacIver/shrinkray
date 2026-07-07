@@ -3128,6 +3128,103 @@ def test_completed_flag_during_iteration_breaks_loop():
     run_async(run_test())
 
 
+def test_quit_during_update_stream_does_not_error():
+    """Regression test: quitting while progress updates were still
+    queued made the monitoring loop dereference the cleared client
+    (action_quit sets _client to None), which was caught by the generic
+    error handler and turned a clean quit into exit code 1."""
+
+    class QuitsMidStreamClient(FakeReductionClient):
+        def __init__(self):
+            super().__init__(updates=[])
+            self.app: ShrinkRayApp | None = None
+
+        async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate]:
+            yield ProgressUpdate(
+                status="running",
+                size=100,
+                original_size=200,
+                calls=1,
+                reductions=0,
+            )
+            # Simulate the user quitting while another update is
+            # already buffered: action_quit clears the app's client.
+            assert self.app is not None
+            self.app._client = None
+            yield ProgressUpdate(
+                status="running",
+                size=90,
+                original_size=200,
+                calls=2,
+                reductions=1,
+            )
+            self._completed = True
+
+    async def run_test():
+        fake_client = QuitsMidStreamClient()
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+        fake_client.app = app
+
+        async with app.run_test() as pilot:
+            for _ in range(20):
+                await pilot.pause()
+                await asyncio.sleep(0.02)
+                if app.is_completed:
+                    break
+
+        assert not app.return_code
+
+    run_async(run_test())
+
+
+def test_quit_as_stream_ends_does_not_report_completion():
+    """Companion to the above: the user quits and the update stream
+    ends before another update is delivered. The monitoring loop must
+    not treat that as the reduction completing."""
+
+    class QuitsAsStreamEndsClient(FakeReductionClient):
+        def __init__(self):
+            super().__init__(updates=[])
+            self.app: ShrinkRayApp | None = None
+
+        async def get_progress_updates(self) -> AsyncGenerator[ProgressUpdate]:
+            yield ProgressUpdate(
+                status="running",
+                size=100,
+                original_size=200,
+                calls=1,
+                reductions=0,
+            )
+            assert self.app is not None
+            self.app._client = None
+            self._completed = True
+
+    async def run_test():
+        fake_client = QuitsAsStreamEndsClient()
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+        )
+        fake_client.app = app
+
+        async with app.run_test() as pilot:
+            for _ in range(10):
+                await pilot.pause()
+                await asyncio.sleep(0.02)
+
+        assert not app.return_code
+        assert not app.is_completed
+
+    run_async(run_test())
+
+
 def test_run_textual_ui_exits_with_app_return_code():
     """Test run_textual_ui exits with app.return_code when set."""
 

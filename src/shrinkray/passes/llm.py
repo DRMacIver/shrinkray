@@ -247,6 +247,13 @@ def reduction_prompt(test_case: bytes, *, config: LLMConfig) -> str | None:
     )
 
 
+# Passes whose candidate generation is nondeterministic: they draw a
+# fresh random seed on every run, so a completed run that made no
+# progress does not prove a re-run at the same test case would also
+# make none. The reducer must not fingerprint-skip these.
+NONDETERMINISTIC_PASS_NAMES = frozenset({"llm_rewrite"})
+
+
 def llm_rewrite(client: LLMClient, config: LLMConfig) -> ReductionPass[bytes]:
     """A pass that asks the model for whole-file rewrites of the test case.
 

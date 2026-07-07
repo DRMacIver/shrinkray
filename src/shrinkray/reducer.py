@@ -52,7 +52,12 @@ from shrinkray.passes.genericlanguages import (
     simplify_brackets,
 )
 from shrinkray.passes.json import JSON, JSON_PASSES
-from shrinkray.passes.llm import LLMClient, LLMConfig, llm_rewrite
+from shrinkray.passes.llm import (
+    NONDETERMINISTIC_PASS_NAMES,
+    LLMClient,
+    LLMConfig,
+    llm_rewrite,
+)
 from shrinkray.passes.llmtransforms import llm_transform_pumps
 from shrinkray.passes.patching import PatchApplier, Patches
 from shrinkray.passes.python import is_python, python_reducer_command
@@ -473,9 +478,15 @@ class ShrinkRay(Reducer[bytes]):
 
         problem = self.target
 
-        # A pass that ran to completion without making progress cannot make
-        # progress on an identical test case, so skip it for free.
-        if self.pass_fingerprints.get(pass_name) == problem.current_test_case:
+        # A deterministic pass that ran to completion without making
+        # progress cannot make progress on an identical test case, so skip
+        # it for free. Nondeterministic passes (fresh seed per run) may
+        # propose different candidates, so they are never fingerprinted.
+        deterministic = pass_name not in NONDETERMINISTIC_PASS_NAMES
+        if (
+            deterministic
+            and self.pass_fingerprints.get(pass_name) == problem.current_test_case
+        ):
             return
 
         use_budget = budgeted and self.pass_probation.get(pass_name, False)
@@ -540,7 +551,7 @@ class ShrinkRay(Reducer[bytes]):
             else:
                 self.incomplete_passes.pop(pass_name, None)
                 self.pass_probation[pass_name] = not made_progress
-                if made_progress:
+                if made_progress or not deterministic:
                     self.pass_fingerprints.pop(pass_name, None)
                 else:
                     self.pass_fingerprints[pass_name] = problem.current_test_case

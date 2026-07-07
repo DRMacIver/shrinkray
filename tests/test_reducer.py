@@ -1984,6 +1984,40 @@ async def test_run_pass_skips_fruitless_pass_on_unchanged_input():
     assert invocations[0] == 2
 
 
+async def test_run_pass_does_not_fingerprint_nondeterministic_passes():
+    """A nondeterministic pass (one that draws fresh seeds per run, like
+    the LLM rewrite pass) may produce different candidates on a re-run
+    at the same test case, so a fruitless completed run must not skip
+    the next run of it."""
+
+    async def is_interesting(x):
+        return x in (b"aaaa", b"aa")
+
+    problem = BasicReductionProblem(
+        initial=b"aaaa",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+    )
+    reducer = ShrinkRay(target=problem)
+
+    invocations = [0]
+
+    async def nondeterministic(p):
+        invocations[0] += 1
+        await p.is_interesting(b"zzzz")
+
+    # A name the reducer knows is nondeterministic.
+    nondeterministic.__name__ = "llm_rewrite"
+
+    await reducer.run_pass(nondeterministic)
+    assert invocations[0] == 1
+    # No fingerprint recorded, so the pass is not skipped next time.
+    assert "llm_rewrite" not in reducer.pass_fingerprints
+
+    await reducer.run_pass(nondeterministic)
+    assert invocations[0] == 2
+
+
 async def test_run_pass_clears_fingerprint_when_pass_makes_progress():
     async def is_interesting(x):
         return x in (b"aaaa", b"aaa", b"aa")

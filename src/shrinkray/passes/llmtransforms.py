@@ -8,6 +8,20 @@ large net win. Shrink Ray implements this by hand for C and C++
 per-language knowledge of syntax, so that approach doesn't scale across
 languages.
 
+The transformations (see TRANSFORMATIONS):
+
+- inline_calls: replace a call with the called function's body,
+  arguments substituted (generalises the C/C++ simple inliner).
+- inline_definitions: replace a use of a once-bound name (variable,
+  constant, type alias, C macro) with its definition (generalises
+  typedef inlining).
+- stub_bodies: replace a function body with a minimal valid stub,
+  returning a trivial constant where one is required (generalises
+  function-def-to-decl and replace-body-with-ellipsis).
+- unroll_loops: replace a loop with its first iteration as
+  straight-line code.
+- evaluate_constants: fold a constant expression to a literal.
+
 These pumps combine two features that individually can't do the job:
 
 - A tree-sitter grammar can *identify* the ingredients of such a
@@ -89,6 +103,53 @@ MAX_PROMPT_ATTEMPTS = 3
 # method_invocation, ...
 _DEFINITION_WORDS = frozenset({"function", "method"})
 _CALL_WORDS = frozenset({"call", "invocation"})
+
+# Node types that bind a name: assignment (Python, Ruby),
+# init_declarator / variable_declarator (C, JavaScript, Java),
+# let_declaration (Rust), var_spec / const_spec (Go), type_definition /
+# alias_declaration / type_item (typedefs and type aliases), preproc_def
+# (C macros). Deliberately absent: "parameter" (default values are not
+# bindings of the call sites' values), "binary"/"unary" (expressions
+# have left/right fields but bind nothing).
+_BINDING_WORDS = frozenset(
+    {
+        "assignment",
+        "declarator",
+        "declaration",
+        "spec",
+        "item",
+        "let",
+        "definition",
+        "typedef",
+        "using",
+        "alias",
+        "def",
+    }
+)
+
+# Binding nodes whose type words intersect these carry their definition
+# in a `type` field rather than `value`/`right` (typedefs and aliases).
+_TYPE_VALUE_WORDS = frozenset({"type", "alias", "typedef"})
+
+_BINDING_NAME_FIELDS = ("name", "left", "declarator", "pattern")
+
+# Loop node types: for_statement, while_statement, for_expression,
+# loop_expression, repeat_statement, while, for, until (Ruby)...
+# Requiring a `body` field excludes non-loop matches like Python's
+# comprehension for_in_clause and Go's for_clause.
+_LOOP_WORDS = frozenset({"for", "while", "loop", "repeat", "foreach", "until"})
+
+# Expression node types eligible for constant folding: binary_operator,
+# binary_expression, unary_expression, ...
+_CONSTANT_EXPRESSION_WORDS = frozenset({"binary", "unary"})
+
+# Constant expressions shorter than this cannot usefully fold: the
+# replacement literal would be no smaller.
+MIN_CONSTANT_BYTES = 3
+
+# Function bodies at most this size are not worth stubbing: the stub
+# would be no smaller, and mechanical passes empty them anyway.
+MIN_STUB_BODY_BYTES = 16
 
 
 def _matches(node_type: str, words: frozenset[str]) -> bool:
@@ -216,14 +277,242 @@ def inline_call_targets(
     return targets
 
 
+def _binding_parts(
+    node: tree_sitter.Node,
+) -> tuple[tree_sitter.Node, tree_sitter.Node] | None:
+    """The (name, definition) children of a node binding one plain
+    identifier to a value or type, or None."""
+    if not _matches(node.type, _BINDING_WORDS):
+        return None
+    value = node.child_by_field_name("value")
+    if value is None:
+        value = node.child_by_field_name("right")
+    if value is None and _matches(node.type, _TYPE_VALUE_WORDS):
+        value = node.child_by_field_name("type")
+    if value is None:
+        return None
+    for field in _BINDING_NAME_FIELDS:
+        name = node.child_by_field_name(field)
+        if name is None:
+            continue
+        if name.child_count == 0 and "identifier" in name.type:
+            return (name, value)
+        # A structured binding (tuple pattern, expression list): not
+        # one name bound to one definition.
+        return None
+    return None
+
+
+def inline_definition_targets(
+    tree: tree_sitter.Tree, source: bytes
+) -> list[TransformTarget]:
+    """Uses of names bound once to a value or type, paired with
+    instructions to inline the definition into the use.
+
+    This generalises typedef inlining: variables, constants, type
+    aliases and C macros all bind a name whose uses can be replaced by
+    the definition, after which the binding itself is deletable. Names
+    bound more than once (reassignment, augmented assignment) are
+    skipped: their value at a given use is not the textual definition.
+    """
+    bindings: dict[bytes, tree_sitter.Node | None] = {}
+    for node in iter_nodes(tree):
+        if not node.is_named:
+            continue
+        parts = _binding_parts(node)
+        if parts is None:
+            continue
+        name_node = parts[0]
+        name = source[name_node.start_byte : name_node.end_byte]
+        bindings[name] = None if name in bindings else node
+
+    inlinable: dict[bytes, tuple[tuple[int, int], str, str]] = {}
+    for name, binding in bindings.items():
+        if binding is None:
+            continue
+        if binding.end_byte - binding.start_byte > MAX_SNIPPET_BYTES:
+            continue
+        try:
+            context = source[binding.start_byte : binding.end_byte].decode("utf-8")
+            name_text = name.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        inlinable[name] = (
+            (binding.start_byte, binding.end_byte),
+            name_text,
+            context.strip(),
+        )
+
+    targets: list[TransformTarget] = []
+    for node in iter_nodes(tree):
+        if node.child_count != 0 or "identifier" not in node.type:
+            continue
+        entry = inlinable.get(source[node.start_byte : node.end_byte])
+        if entry is None:
+            continue
+        binding_span, name_text, context = entry
+        if binding_span[0] <= node.start_byte and node.end_byte <= binding_span[1]:
+            continue
+        targets.append(
+            TransformTarget(
+                span=(node.start_byte, node.end_byte),
+                text=name_text,
+                instruction=(
+                    f"Replace this use of `{name_text}` with the value or "
+                    "type it is defined as, substituted in place. Add "
+                    "parentheses only if they are needed to keep the "
+                    "meaning unchanged."
+                ),
+                context=context,
+            )
+        )
+    return targets
+
+
+def _is_identifier_free(node: tree_sitter.Node) -> bool:
+    """Whether an expression mentions no names and makes no calls, so
+    its value is determined by the expression text alone."""
+    stack = [node]
+    while stack:
+        n = stack.pop()
+        if "identifier" in n.type or _matches(n.type, _CALL_WORDS):
+            return False
+        stack.extend(n.children)
+    return True
+
+
+def constant_expression_targets(
+    tree: tree_sitter.Tree, source: bytes
+) -> list[TransformTarget]:
+    """Maximal constant expressions, paired with instructions to fold
+    them to a literal.
+
+    Mechanical folding (combine_expressions) only handles simple
+    integer arithmetic; the model folds strings, floats, bit
+    operations, and every language's own literal syntax.
+    """
+    targets: list[TransformTarget] = []
+    stack = [tree.root_node]
+    while stack:
+        node = stack.pop()
+        if (
+            node.is_named
+            and _matches(node.type, _CONSTANT_EXPRESSION_WORDS)
+            and MIN_CONSTANT_BYTES
+            <= node.end_byte - node.start_byte
+            <= MAX_SNIPPET_BYTES
+            and _is_identifier_free(node)
+        ):
+            try:
+                text = source[node.start_byte : node.end_byte].decode("utf-8")
+            except UnicodeDecodeError:
+                text = None
+            if text is not None:
+                targets.append(
+                    TransformTarget(
+                        span=(node.start_byte, node.end_byte),
+                        text=text,
+                        instruction=(
+                            "Evaluate this constant expression and replace "
+                            "it with its simplest literal value."
+                        ),
+                        context="",
+                    )
+                )
+                # Maximal expressions only: folding a subexpression of a
+                # foldable expression is strictly worse.
+                continue
+        stack.extend(node.children)
+    return targets
+
+
+def loop_targets(tree: tree_sitter.Tree, source: bytes) -> list[TransformTarget]:
+    """Loops, paired with instructions to unroll a single iteration.
+
+    Replacing a loop with its first iteration's straight-line code
+    deletes the loop scaffolding and often unblocks deleting whatever
+    only the loop used. No mechanical pass can do the variable
+    substitution this needs.
+    """
+    targets: list[TransformTarget] = []
+    for node in iter_nodes(tree):
+        if not node.is_named or not _matches(node.type, _LOOP_WORDS):
+            continue
+        if node.child_by_field_name("body") is None:
+            continue
+        if node.end_byte - node.start_byte > MAX_SNIPPET_BYTES:
+            continue
+        try:
+            text = source[node.start_byte : node.end_byte].decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        targets.append(
+            TransformTarget(
+                span=(node.start_byte, node.end_byte),
+                text=text,
+                instruction=(
+                    "Rewrite this loop as straight-line code that executes "
+                    "the loop body exactly once, with the loop variable "
+                    "(if any) bound to the first value it would take."
+                ),
+                context="",
+            )
+        )
+    return targets
+
+
+def stub_body_targets(tree: tree_sitter.Tree, source: bytes) -> list[TransformTarget]:
+    """Function bodies, paired with instructions to replace them with a
+    minimal stub.
+
+    Mechanical hollowing empties brackets, but an empty body is invalid
+    where a return value is required (Go, Rust, non-void C++ under
+    -Werror); the model can synthesize the smallest body that still
+    returns something of the right type.
+    """
+    targets: list[TransformTarget] = []
+    for node in iter_nodes(tree):
+        if not node.is_named or not _matches(node.type, _DEFINITION_WORDS):
+            continue
+        body = node.child_by_field_name("body")
+        if body is None:
+            continue
+        if not (
+            MIN_STUB_BODY_BYTES < body.end_byte - body.start_byte <= MAX_SNIPPET_BYTES
+        ):
+            continue
+        try:
+            signature = source[node.start_byte : body.start_byte].decode("utf-8")
+            text = source[body.start_byte : body.end_byte].decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        targets.append(
+            TransformTarget(
+                span=(body.start_byte, body.end_byte),
+                text=text,
+                instruction=(
+                    "Replace this function body with the smallest body that "
+                    "still parses and type-checks: return a trivial constant "
+                    "if the function must return a value, otherwise do as "
+                    "little as possible. Keep the original body's delimiters "
+                    "and indentation style."
+                ),
+                context=signature.strip(),
+            )
+        )
+    return targets
+
+
 def transform_prompt(target: TransformTarget) -> str:
     """The prompt asking the model to rewrite one target."""
+    reference = (
+        f"For reference:\n\n```\n{target.context}\n```\n\n" if target.context else ""
+    )
     return (
         "You are helping to minimize a test case by applying a small "
         "mechanical refactoring to one piece of it.\n\n"
         f"{target.instruction}\n\n"
-        "For reference:\n\n"
-        f"```\n{target.context}\n```\n\n"
+        f"{reference}"
         "The code to rewrite is:\n\n"
         f"```\n{target.text}\n```\n\n"
         "Output only the replacement code, in a single fenced code "
@@ -326,16 +615,24 @@ def llm_transform_pump(
     return pump
 
 
+# The transformations, in rough order of expected value: the inlining
+# transformations unlock deleting whole definitions, stubbing and
+# unrolling unlock deleting what a body or loop used, and constant
+# folding mostly polishes.
+TRANSFORMATIONS: list[tuple[str, TargetFinder]] = [
+    ("llm_inline_calls", inline_call_targets),
+    ("llm_inline_definitions", inline_definition_targets),
+    ("llm_stub_bodies", stub_body_targets),
+    ("llm_unroll_loops", loop_targets),
+    ("llm_evaluate_constants", constant_expression_targets),
+]
+
+
 def llm_transform_pumps(
     client: LLMClient, config: LLMConfig, language: str
 ) -> list[ReductionPump[bytes]]:
     """The grammar-guided LLM pumps for a language."""
     return [
-        llm_transform_pump(
-            client,
-            config,
-            language,
-            f"llm_inline_calls({language})",
-            inline_call_targets,
-        ),
+        llm_transform_pump(client, config, language, f"{name}({language})", finder)
+        for name, finder in TRANSFORMATIONS
     ]

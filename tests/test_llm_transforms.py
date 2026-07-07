@@ -18,11 +18,17 @@ from shrinkray.passes.cpp import CPP_PUMPS
 from shrinkray.passes.llm import LLMConfig
 from shrinkray.passes.llmtransforms import (
     MAX_SNIPPET_BYTES,
+    MIN_CONSTANT_BYTES,
+    MIN_STUB_BODY_BYTES,
     TransformTarget,
+    constant_expression_targets,
     inline_call_targets,
+    inline_definition_targets,
     llm_transform_pump,
     llm_transform_pumps,
+    loop_targets,
     splice,
+    stub_body_targets,
     transform_prompt,
 )
 from shrinkray.passes.treesitter import parse_tree
@@ -148,6 +154,207 @@ def test_skips_undecodable_calls():
     assert targets_for("python", source) == []
 
 
+# === Finding inlinable definitions ===
+
+
+def definition_targets(language: str, source: bytes) -> list[TransformTarget]:
+    return inline_definition_targets(parse_tree(language, source), source)
+
+
+def test_finds_uses_of_a_python_variable():
+    source = b"A = 10\nprint(A + A)\n"
+    targets = definition_targets("python", source)
+    assert [t.text for t in targets] == ["A", "A"]
+    for target in targets:
+        assert source[target.span[0] : target.span[1]] == b"A"
+        assert target.span[0] > source.index(b"\n")
+        assert target.context == "A = 10"
+        assert "`A`" in target.instruction
+
+
+def test_finds_uses_of_a_c_typedef():
+    source = b"typedef unsigned long UL;\nUL y;\n"
+    (target,) = definition_targets("c", source)
+    assert target.text == "UL"
+    assert target.context == "typedef unsigned long UL;"
+
+
+def test_finds_uses_of_a_c_macro():
+    source = b"#define K 10\nint x = K;\n"
+    (target,) = definition_targets("c", source)
+    assert target.text == "K"
+    assert target.context == "#define K 10"
+
+
+def test_finds_definitions_in_other_grammars():
+    js = b"const a = 10;\nconsole.log(a);\n"
+    assert [t.text for t in definition_targets("javascript", js)] == ["a"]
+    rust = b"fn main() { let x = 5; let y = x; }\n"
+    assert [t.text for t in definition_targets("rust", rust)] == ["x"]
+    go = b"package main\nconst K = 10\nfunc main() { print(K) }\n"
+    assert [t.text for t in definition_targets("go", go)] == ["K"]
+
+
+def test_skips_reassigned_names():
+    source = b"A = 10\nA = 20\nprint(A)\n"
+    assert definition_targets("python", source) == []
+
+
+def test_skips_bindings_of_multiple_names():
+    source = b"x, y = 1, 2\nprint(x)\n"
+    assert definition_targets("python", source) == []
+
+
+def test_skips_bindings_with_no_recognised_name_field():
+    # A JavaScript class field binds via a `property` field.
+    source = b"class A { x = 5; }\nconsole.log(x);\n"
+    assert definition_targets("javascript", source) == []
+
+
+def test_skips_default_parameter_values():
+    source = b"def f(x=1):\n    return x\n\nf(2)\n"
+    assert definition_targets("python", source) == []
+
+
+def test_skips_oversized_definitions_when_inlining_definitions():
+    source = b'A = "' + b"a" * MAX_SNIPPET_BYTES + b'"\nprint(A)\n'
+    assert definition_targets("python", source) == []
+
+
+def test_skips_undecodable_definitions_when_inlining_definitions():
+    source = b'A = "\xff"\nprint(A)\n'
+    assert definition_targets("python", source) == []
+
+
+# === Finding constant expressions ===
+
+
+def constant_targets(language: str, source: bytes) -> list[TransformTarget]:
+    return constant_expression_targets(parse_tree(language, source), source)
+
+
+def test_finds_a_maximal_constant_expression():
+    source = b"print(10*2+ 1)\n"
+    (target,) = constant_targets("python", source)
+    assert target.text == "10*2+ 1"
+    assert "Evaluate" in target.instruction
+    assert target.context == ""
+
+
+def test_finds_constant_string_concatenation():
+    source = b'console.log("a" + "b");\n'
+    (target,) = constant_targets("javascript", source)
+    assert target.text == '"a" + "b"'
+
+
+def test_skips_expressions_mentioning_identifiers():
+    assert constant_targets("python", b"print(a + 1)\n") == []
+
+
+def test_skips_expressions_containing_calls():
+    assert constant_targets("python", b"print(f() + 1)\n") == []
+
+
+def test_skips_tiny_constant_expressions():
+    source = b"print(-1)\n"
+    assert len(b"-1") < MIN_CONSTANT_BYTES
+    assert constant_targets("python", source) == []
+
+
+def test_skips_oversized_constant_expressions():
+    source = b'print("' + b"a" * MAX_SNIPPET_BYTES + b'" + "b")\n'
+    assert constant_targets("python", source) == []
+
+
+def test_skips_undecodable_constant_expressions():
+    source = b'print("\xff" + "a")\n'
+    assert constant_targets("python", source) == []
+
+
+# === Finding loops ===
+
+
+def loops_for(language: str, source: bytes) -> list[TransformTarget]:
+    return loop_targets(parse_tree(language, source), source)
+
+
+def test_finds_for_and_while_loops():
+    source = b"for i in [1]:\n    print(i)\nwhile x:\n    break\n"
+    targets = loops_for("python", source)
+    assert [t.text.split()[0] for t in targets] == ["for", "while"]
+    assert all("exactly once" in t.instruction for t in targets)
+    assert all(t.context == "" for t in targets)
+
+
+def test_finds_loops_in_other_grammars():
+    go = b"package main\nfunc main() { for i := 0; i < 3; i++ { print(i) } }\n"
+    assert len(loops_for("go", go)) == 1
+    ruby = b"a = 3\nwhile a > 0 do\n  a -= 1\nend\n"
+    assert len(loops_for("ruby", ruby)) == 1
+
+
+def test_nested_loops_are_separate_targets():
+    source = b"for i in [1]:\n    for j in [2]:\n        print(i + j)\n"
+    assert len(loops_for("python", source)) == 2
+
+
+def test_skips_comprehension_clauses():
+    assert loops_for("python", b"y = [i for i in [1]]\n") == []
+
+
+def test_skips_oversized_loops():
+    source = b"for i in [1]:\n    x = '" + b"a" * MAX_SNIPPET_BYTES + b"'\n"
+    assert loops_for("python", source) == []
+
+
+def test_skips_undecodable_loops():
+    source = b'for i in [1]:\n    print("\xff")\n'
+    assert loops_for("python", source) == []
+
+
+# === Finding function bodies to stub ===
+
+
+def bodies_for(language: str, source: bytes) -> list[TransformTarget]:
+    return stub_body_targets(parse_tree(language, source), source)
+
+
+def test_finds_a_python_function_body():
+    source = b"def f(x):\n    y = x + 1\n    return y * 2\n"
+    (target,) = bodies_for("python", source)
+    assert source[target.span[0] : target.span[1]] == b"y = x + 1\n    return y * 2"
+    assert "def f(x):" in target.context
+    assert "smallest body" in target.instruction
+
+
+def test_c_function_bodies_include_their_braces():
+    source = b"int f(int x) { int y = x; return y + 1; }\n"
+    (target,) = bodies_for("c", source)
+    assert target.text.startswith("{")
+    assert target.text.endswith("}")
+
+
+def test_skips_already_small_bodies():
+    source = b"def f(x):\n    return x\n"
+    assert len(b"return x") <= MIN_STUB_BODY_BYTES
+    assert bodies_for("python", source) == []
+
+
+def test_skips_class_bodies():
+    source = b"class A:\n    x = 1\n    y = 2\n    z = 3\n    w = 4\n"
+    assert bodies_for("python", source) == []
+
+
+def test_skips_oversized_bodies():
+    source = b"def f(x):\n    return '" + b"a" * MAX_SNIPPET_BYTES + b"'\n"
+    assert bodies_for("python", source) == []
+
+
+def test_skips_undecodable_bodies():
+    source = b'def f(x):\n    y = "\xff" + "aaaaaaaa"\n    return y\n'
+    assert bodies_for("python", source) == []
+
+
 # === Prompt construction and splicing ===
 
 
@@ -163,6 +370,13 @@ def test_prompt_contains_instruction_context_and_target():
     assert target.context in prompt
     assert target.text in prompt
     assert "fenced code block" in prompt
+
+
+def test_prompt_omits_reference_block_without_context():
+    (target,) = constant_targets("python", b"print(10*2+ 1)\n")
+    prompt = transform_prompt(target)
+    assert "For reference" not in prompt
+    assert target.text in prompt
 
 
 # === The pump ===
@@ -276,6 +490,48 @@ def test_max_completions_bounds_model_calls():
     )
     assert result == source
     assert len(client.prompts) == 1
+
+
+def test_inlines_a_definition_end_to_end():
+    source = b"A = 10\nprint(A)\n"
+    client = FakeLLMClient(responses=["```\n10\n```"])
+    pump = llm_transform_pump(
+        client, LLMConfig(), "python", "llm_inline_definitions(python)",
+        inline_definition_targets,
+    )
+    result, _ = run_pump(pump, source, lambda x: b"print" in x)
+    assert result == b"A = 10\nprint(10)\n"
+
+
+def test_evaluates_a_constant_end_to_end():
+    source = b"print(10*2+ 1)\n"
+    client = FakeLLMClient(responses=["```\n21\n```"])
+    pump = llm_transform_pump(
+        client, LLMConfig(), "python", "llm_evaluate_constants(python)",
+        constant_expression_targets,
+    )
+    result, _ = run_pump(pump, source, lambda x: b"print" in x)
+    assert result == b"print(21)\n"
+
+
+def test_unrolls_a_loop_end_to_end():
+    source = b"for i in [3]:\n    print(i)\n"
+    client = FakeLLMClient(responses=["```\nprint(3)\n```"])
+    pump = llm_transform_pump(
+        client, LLMConfig(), "python", "llm_unroll_loops(python)", loop_targets
+    )
+    result, _ = run_pump(pump, source, lambda x: b"print" in x)
+    assert result == b"print(3)\n"
+
+
+def test_stubs_a_body_end_to_end():
+    source = b"def f(x):\n    y = x + 1\n    return y * 2\nprint(f)\n"
+    client = FakeLLMClient(responses=["```\npass\n```"])
+    pump = llm_transform_pump(
+        client, LLMConfig(), "python", "llm_stub_bodies(python)", stub_body_targets
+    )
+    result, _ = run_pump(pump, source, lambda x: b"print" in x)
+    assert result == b"def f(x):\n    pass\nprint(f)\n"
 
 
 class DisabledClient(RecordingClient):
@@ -395,14 +651,23 @@ def pump_names(reducer: ShrinkRay) -> list[str]:
     return [p.__name__ for p in reducer.pumps]
 
 
+LLM_PUMP_NAMES = [
+    "llm_inline_calls",
+    "llm_inline_definitions",
+    "llm_stub_bodies",
+    "llm_unroll_loops",
+    "llm_evaluate_constants",
+]
+
+
 def test_llm_transform_pumps_are_named_for_their_language():
     pumps = llm_transform_pumps(FakeLLMClient(), LLMConfig(), "python")
-    assert [p.__name__ for p in pumps] == ["llm_inline_calls(python)"]
+    assert [p.__name__ for p in pumps] == [f"{n}(python)" for n in LLM_PUMP_NAMES]
 
 
 def test_reducer_builds_llm_pumps_when_fully_configured():
     reducer = make_shrinkray(llm_client=FakeLLMClient(), treesitter_language="python")
-    assert pump_names(reducer) == ["llm_inline_calls(python)"]
+    assert pump_names(reducer) == [f"{n}(python)" for n in LLM_PUMP_NAMES]
 
 
 def test_reducer_keeps_cpp_pumps_ahead_of_llm_pumps():
@@ -412,7 +677,7 @@ def test_reducer_keeps_cpp_pumps_ahead_of_llm_pumps():
         enable_cpp_passes=True,
     )
     assert pump_names(reducer) == [p.__name__ for p in CPP_PUMPS] + [
-        "llm_inline_calls(cpp)"
+        f"{n}(cpp)" for n in LLM_PUMP_NAMES
     ]
 
 

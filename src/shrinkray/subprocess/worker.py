@@ -211,6 +211,7 @@ class ReducerWorker:
         parallelism = params.get("parallelism", os.cpu_count() or 1)
         timeout = params.get("timeout")  # None means dynamic timeout
         memory_limit = params.get("memory_limit")  # None means no limit
+        memory_limit_explicit = params.get("memory_limit_explicit", False)
         seed = params.get("seed", 0)
         input_type = InputType[params.get("input_type", "all")]
         in_place = params.get("in_place", False)
@@ -234,6 +235,7 @@ class ReducerWorker:
             test=test,
             timeout=timeout,
             memory_limit=memory_limit,
+            memory_limit_explicit=memory_limit_explicit,
             parallelism=parallelism,
             formatter=formatter,
             trivial_is_error=trivial_is_error,

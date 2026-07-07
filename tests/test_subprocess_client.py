@@ -309,6 +309,49 @@ def test_subprocess_client_start_reduction():
     asyncio.run(run())
 
 
+def test_subprocess_client_start_reduction_sends_memory_limit_explicit():
+    """start_reduction forwards memory_limit_explicit in the request params."""
+
+    async def run():
+        client = SubprocessClient()
+        captured: dict = {}
+
+        async def fake_send(command, params=None):
+            captured["command"] = command
+            captured["params"] = params
+            return Response(id="x", result={})
+
+        with patch.object(client, "send_command", side_effect=fake_send):
+            await client.start_reduction(
+                file_path="/tmp/test.txt",
+                test=["test.sh"],
+                memory_limit=8 * 1024**3,
+                memory_limit_explicit=True,
+            )
+
+        assert captured["command"] == "start"
+        assert captured["params"]["memory_limit_explicit"] is True
+
+    asyncio.run(run())
+
+
+def test_subprocess_client_start_reduction_memory_limit_explicit_defaults_false():
+    async def run():
+        client = SubprocessClient()
+        captured: dict = {}
+
+        async def fake_send(command, params=None):
+            captured["params"] = params
+            return Response(id="x", result={})
+
+        with patch.object(client, "send_command", side_effect=fake_send):
+            await client.start_reduction(file_path="/tmp/test.txt", test=["test.sh"])
+
+        assert captured["params"]["memory_limit_explicit"] is False
+
+    asyncio.run(run())
+
+
 def test_subprocess_client_handle_message_ignores_unmatched_response():
     """Test that unmatched response IDs are ignored."""
 

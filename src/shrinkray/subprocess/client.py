@@ -150,6 +150,7 @@ class SubprocessClient:
         parallelism: int | None = None,
         timeout: float | None = None,
         memory_limit: int | None = None,
+        memory_limit_explicit: bool = False,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,
@@ -170,6 +171,7 @@ class SubprocessClient:
         params: dict[str, Any] = {
             "file_path": file_path,
             "test": test,
+            "memory_limit_explicit": memory_limit_explicit,
             "seed": seed,
             "input_type": input_type,
             "in_place": in_place,

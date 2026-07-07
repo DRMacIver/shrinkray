@@ -110,7 +110,9 @@ async def run_shrink_ray(
         "K/M/G/T suffix (e.g. '4G'), with a minimum of 1 MiB. Set to 0 to "
         "disable. Defaults to the machine's physical RAM. Enforced via "
         "RLIMIT_AS, which is not honoured on macOS (there it only warns if "
-        "the initial test exceeds it)."
+        "the initial test exceeds it). When left at the default, it is "
+        "disabled automatically if the initial test only passes without it "
+        "(e.g. sanitizer builds, which abort under any address-space cap)."
     ),
 )
 @click.option(
@@ -417,6 +419,13 @@ def main(
     # If --no-history and --also-interesting not explicit, disable also-interesting
     ctx = click.get_current_context()
 
+    # Whether the user set --memory-limit themselves (vs the physical-RAM
+    # default). Only the default is auto-disabled when it blocks the initial
+    # test. Reuses the source already computed for the enforceability warning.
+    memory_limit_explicit = (
+        memory_limit_source == click.core.ParameterSource.COMMANDLINE
+    )
+
     if (
         llm_only
         and not llm
@@ -481,6 +490,7 @@ def main(
             parallelism=parallelism,
             timeout=timeout,
             memory_limit=memory_limit,
+            memory_limit_explicit=memory_limit_explicit,
             seed=seed,
             input_type=input_type.name,
             in_place=in_place,
@@ -509,6 +519,7 @@ def main(
         test=test,
         timeout=timeout,
         memory_limit=memory_limit,
+        memory_limit_explicit=memory_limit_explicit,
         parallelism=parallelism,
         formatter=formatter,
         trivial_is_error=trivial_is_error,

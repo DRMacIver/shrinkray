@@ -50,6 +50,7 @@ class FakeReductionClientForSnapshots:
         parallelism: int | None = None,
         timeout: float | None = None,
         memory_limit: int | None = None,
+        memory_limit_explicit: bool = False,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,

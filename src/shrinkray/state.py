@@ -249,6 +249,13 @@ class ShrinkRayState[TestCase](ABC):
     # memory. Enforced via RLIMIT_AS where the platform supports it.
     memory_limit: int | None = None
 
+    # Whether the user explicitly set --memory-limit. When False, memory_limit
+    # holds the physical-RAM default, which may be auto-disabled if it blocks
+    # the initial test: sanitizer builds (ASan/MSan/TSan) reserve tens of
+    # terabytes of virtual address space and abort under any address-space
+    # cap, so the default would otherwise fail them out of the box.
+    memory_limit_explicit: bool = False
+
     first_call: bool = True
     initial_exit_code: int | None = None
     can_format: bool = True
@@ -741,7 +748,73 @@ class ShrinkRayState[TestCase](ABC):
                     )
                 self.output_manager.mark_completed(test_id, recorded_code)
 
+    def _default_memory_limit_may_block_initial(self) -> bool:
+        """Whether an unset (default) memory limit is currently in effect.
+
+        The auto-disable only applies to the physical-RAM default the user
+        never asked for; an explicitly configured limit is left alone so its
+        loud, actionable failure (with a --memory-limit=0 suggestion) stands.
+        """
+        return (
+            not self.memory_limit_explicit
+            and self.memory_limit is not None
+            and self.memory_limit > 0
+        )
+
+    async def _retry_initial_without_memory_limit(
+        self, test_case: TestCase
+    ) -> ScriptRunResult:
+        """Re-run the initial test with no address-space cap.
+
+        Called when the initial test was uninteresting under the default
+        memory limit. If it now passes, the cap (not a genuine failure) was
+        the culprit — typical of sanitizer builds — so the limit is disabled
+        for the rest of the run and the user is warned. If it still fails the
+        failure is genuine, so the limit is restored and the normal
+        invalid-initial-example path is left to report it.
+        """
+        saved_limit = self.memory_limit
+        self.memory_limit = None
+        # Re-run as a fresh calibration call: the capped run's exit code and
+        # timeout measurement are discarded so the no-limit run becomes the
+        # single logical initial call.
+        self.first_call = True
+        self.timeout_policy.reset()
+        result = await self._run_for_result_once(test_case)
+        if result.exit_code == 0:
+            print(
+                "Warning: the initial interestingness test only passed with the "
+                "default --memory-limit disabled, so it has been disabled for the "
+                "rest of this run. Sanitizer builds (ASan/MSan/TSan), which reserve "
+                "huge amounts of virtual address space, are the usual cause.",
+                file=sys.stderr,
+                flush=True,
+            )
+        else:
+            self.memory_limit = saved_limit
+        return result
+
     async def run_for_result(
+        self, test_case: TestCase, debug: bool = False
+    ) -> ScriptRunResult:
+        was_first_call = self.first_call
+        result = await self._run_for_result_once(test_case, debug=debug)
+        # A default memory limit that blocks the very first (calibration) test
+        # is retried once without the cap; sanitizer builds abort under any
+        # address-space limit, so this is the difference between the flagship
+        # "reduce a sanitizer crash" workflow working and failing out of the
+        # box. The debug reruns from build_error_message never re-probe (they
+        # happen after the initial call, so was_first_call is False).
+        if (
+            not debug
+            and was_first_call
+            and result.exit_code != 0
+            and self._default_memory_limit_may_block_initial()
+        ):
+            result = await self._retry_initial_without_memory_limit(test_case)
+        return result
+
+    async def _run_for_result_once(
         self, test_case: TestCase, debug: bool = False
     ) -> ScriptRunResult:
         if self.in_place:
@@ -1097,6 +1170,20 @@ class ShrinkRayState[TestCase](ABC):
                     f"{self.initial_exit_code}. This suggests your interestingness "
                     "test exhibits nondeterministic behaviour."
                 )
+            # An explicitly configured memory limit is never auto-disabled, so
+            # point at it here in case it (not the test itself) is the problem:
+            # sanitizer builds abort under any address-space cap. The default
+            # limit reaches this branch only after a no-limit retry already
+            # failed, so the suggestion would be misleading there and is
+            # withheld.
+            if self.memory_limit_explicit and self.memory_limit:
+                lines.append(
+                    "\nNote: an address-space limit (--memory-limit) is in effect. "
+                    "Some builds — sanitizer builds (ASan/MSan/TSan) in particular — "
+                    "reserve huge amounts of virtual address space and abort under "
+                    "any such limit. If that may be the cause, rerun with "
+                    "--memory-limit=0 to disable it."
+                )
 
         return "\n".join(lines)
 
@@ -1324,6 +1411,7 @@ def load_state_for_path(
     test: list[str],
     timeout: float | None,
     memory_limit: int | None,
+    memory_limit_explicit: bool,
     parallelism: int,
     formatter: str,
     trivial_is_error: bool,
@@ -1352,6 +1440,7 @@ def load_state_for_path(
         "test": test,
         "timeout": timeout,
         "memory_limit": memory_limit,
+        "memory_limit_explicit": memory_limit_explicit,
         "base": os.path.basename(filename),
         "parallelism": parallelism,
         "filename": filename,

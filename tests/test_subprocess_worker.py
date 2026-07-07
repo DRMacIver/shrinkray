@@ -554,6 +554,37 @@ async def test_worker_start_reduction_default_external_reducer_params(tmp_path):
     assert worker.state.restart_at_fixpoint is True
     assert worker.state.llm_enabled is False
     assert worker.state.llm_only is False
+    # memory_limit_explicit defaults to False when the param is absent.
+    assert worker.state.memory_limit_explicit is False
+
+
+async def test_worker_start_reduction_reads_memory_limit_explicit(tmp_path):
+    """_start_reduction forwards memory_limit_explicit to the state."""
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    worker = ReducerWorker(output_stream=MemoryOutputStream())
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "formatter": "none",
+        "volume": "quiet",
+        "history_enabled": False,
+        "skip_validation": True,
+        "memory_limit": 8 * 1024**3,
+        "memory_limit_explicit": True,
+    }
+
+    await worker._start_reduction(params)
+
+    assert worker.state is not None
+    assert worker.state.memory_limit == 8 * 1024**3
+    assert worker.state.memory_limit_explicit is True
 
 
 async def test_worker_start_reduction_skip_validation(tmp_path):

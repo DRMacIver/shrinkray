@@ -2764,6 +2764,64 @@ def test_client_completed_breaks_loop():
     run_async(run_test())
 
 
+class FinalUpdateAfterCompletionClient(FakeReductionClient):
+    """Fake client that reports completion while updates remain queued.
+
+    The real client notices the worker's 'completed' signal and then drains
+    any progress updates still queued behind it (its generator yields them
+    after is_completed becomes True). This reproduces that: is_completed is
+    True throughout, and get_progress_updates yields every update anyway, so
+    the monitoring loop must process the final update rather than break out
+    after the first.
+    """
+
+    def __init__(self, updates):
+        super().__init__(updates=updates)
+        self._completed = True
+
+    async def get_progress_updates(self):
+        for update in self._updates:
+            yield update
+            await asyncio.sleep(0.01)
+
+
+def test_final_progress_update_delivered_when_already_completed():
+    """The last queued update must be processed even though the client
+    already reports completion (regression for dropping the final update)."""
+
+    async def run_test():
+        updates = [
+            ProgressUpdate(
+                status="Running", size=100, original_size=1000, calls=5, reductions=1
+            ),
+            ProgressUpdate(
+                status="Done", size=42, original_size=1000, calls=10, reductions=5
+            ),
+        ]
+        fake_client = FinalUpdateAfterCompletionClient(updates=updates)
+
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+            exit_on_completion=False,
+        )
+
+        async with app.run_test() as pilot:
+            for _ in range(20):
+                await pilot.pause()
+                await asyncio.sleep(0.02)
+                if app._completed:
+                    break
+
+            stats = app.query_one("#stats-display", StatsDisplay)
+            # The final update (size 42) must be the one reflected, not the
+            # earlier size-100 update that precedes it in the queue.
+            assert stats.current_size == 42
+
+    run_async(run_test())
+
+
 def test_no_exit_on_completion_shows_press_q_message():
     """Test that exit_on_completion=False shows 'Press q to exit' message."""
 
@@ -3080,8 +3138,11 @@ def test_run_textual_ui_creates_and_runs_app():
         mock_app.run.assert_called_once()
 
 
-def test_completed_flag_during_iteration_breaks_loop():
-    """Test that is_completed becoming True mid-iteration breaks the loop."""
+def test_completed_flag_mid_stream_does_not_break_loop_early():
+    """The monitoring loop must not break out as soon as is_completed turns
+    True: it processes every update the generator yields (the real generator
+    self-terminates after draining, so no manual break is needed). This
+    guards against dropping updates queued behind the completion signal."""
 
     class CompletesEarlyClient(FakeReductionClient):
         def __init__(self):
@@ -3099,10 +3160,11 @@ def test_completed_flag_during_iteration_breaks_loop():
                     reductions=i // 2,
                 )
                 await asyncio.sleep(0.01)
-                # Set completed after a few yields
+                # Report completion partway, but keep yielding: the real
+                # generator would have queued these updates and yields them
+                # while draining, so the loop must keep processing them.
                 if i >= 2:
                     self._completed = True
-                    # App should break out of loop now
 
     async def run_test():
         fake_client = CompletesEarlyClient()
@@ -3114,18 +3176,17 @@ def test_completed_flag_during_iteration_breaks_loop():
         )
 
         async with app.run_test() as pilot:
-            # Wait for updates to be processed
-            for _ in range(20):
+            # Wait for the generator to be fully drained.
+            for _ in range(40):
                 await pilot.pause()
                 await asyncio.sleep(0.02)
-                if app.is_completed:
+                if fake_client._yield_count >= 10:
                     break
 
-            # Should have completed early, not processed all 10
-            # The break happens after checking is_completed, so
-            # we should have processed 3 updates (0, 1, 2), then
-            # after 2 we set completed and break before 3
-            assert fake_client._yield_count <= 5
+            # Every yielded update was processed - none dropped on completion.
+            assert fake_client._yield_count == 10
+            stats = app.query_one("#stats-display", StatsDisplay)
+            assert stats.current_size == 100 - 9 * 10
 
     run_async(run_test())
 

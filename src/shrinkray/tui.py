@@ -1995,9 +1995,6 @@ class ShrinkRayApp(App[None]):
                     # Check if all passes are disabled
                     self._check_all_passes_disabled()
 
-                    if client.is_completed:
-                        break
-
             if self._client is None:
                 # The user quit; the app is already exiting.
                 return

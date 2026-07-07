@@ -162,6 +162,26 @@ def test_subprocess_client_close_handles_already_closed():
     asyncio.run(run())
 
 
+def test_subprocess_client_close_before_start_leaves_no_live_worker():
+    """Quitting before the subprocess exists must not leak a worker.
+
+    If close() runs while start()'s create_subprocess_exec is still in
+    flight, _process is None so close() terminates nothing. start() must
+    then notice the client was closed and tear down the freshly created
+    process itself, otherwise a worker is left running with nobody to
+    stop it."""
+
+    async def run():
+        client = SubprocessClient()
+        await client.close()
+        await client.start()
+        assert client._process is not None
+        # The worker must have been terminated, not left running.
+        assert client._process.returncode is not None
+
+    asyncio.run(run())
+
+
 def test_subprocess_client_close_terminates_process():
     async def run():
         client = SubprocessClient()

@@ -1950,7 +1950,7 @@ class ShrinkRayApp(App[None]):
                 # downloads' passes join in when they complete.
                 pending = (response.result or {}).get("pending_downloads") or []
                 if pending:
-                    self._prompt_for_downloads(pending)
+                    self._prompt_for_downloads(client, pending)
 
             # Monitor progress (client is already started and reduction is running)
             stats_display = self.query_one("#stats-display", StatsDisplay)
@@ -2090,19 +2090,31 @@ class ShrinkRayApp(App[None]):
         """Show the pass statistics modal."""
         self.push_screen(PassStatsScreen(self))
 
-    def _prompt_for_downloads(self, pending: list[dict[str, str]]) -> None:
+    def _prompt_for_downloads(
+        self, client: ReductionClientProtocol, pending: list[dict[str, str]]
+    ) -> None:
         """Ask which background downloads to allow, then tell the worker.
 
         Non-blocking: the reduction keeps running while the modal is up,
         and the worker only starts the approved downloads once the user
         confirms.
+
+        The client is passed in rather than read from ``self._client``:
+        action_quit clears ``self._client`` when the user quits during
+        startup, and reading it here could then fail while this modal is
+        still being set up.
         """
 
-        client = self._client
-        assert client is not None
-
         async def decided(disabled: list[str] | None) -> None:
-            await client.start_downloads(disabled or [])
+            try:
+                await client.start_downloads(disabled or [])
+            except Exception:
+                # The client may have been closed while the modal was up
+                # (the user quit, or a fast --no-exit-on-completion run
+                # finished and tore the worker down). Writing to the closed
+                # subprocess raises and there is nothing left to start, so
+                # ignore it rather than crash inside this screen callback.
+                pass
 
         self.push_screen(DownloadsModal(pending), decided)
 

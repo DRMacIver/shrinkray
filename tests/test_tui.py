@@ -7662,7 +7662,7 @@ def test_prompt_for_downloads_reports_decision_to_client():
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            app._prompt_for_downloads(pending)
+            app._prompt_for_downloads(fake_client, pending)
             await pilot.pause()
             modal = app.screen
             assert isinstance(modal, DownloadsModal)
@@ -7674,6 +7674,69 @@ def test_prompt_for_downloads_reports_decision_to_client():
             await pilot.pause()
 
         assert fake_client.download_decisions == [["grammar-go"]]
+
+    run_async(run_test())
+
+
+def test_prompt_for_downloads_uses_passed_client_after_quit():
+    """_prompt_for_downloads must not read self._client, which action_quit
+    clears on a quit during startup: it uses the client passed to it."""
+
+    async def run_test():
+        fake_client = FakeReductionClient(updates=[], wait_indefinitely=True)
+        await fake_client.start()
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+            exit_on_completion=False,
+        )
+        pending = [{"id": "grammar-go", "description": "tree-sitter grammar for go"}]
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # Simulate action_quit having nulled the app's client reference.
+            app._client = None
+            # Must not raise (previously an assert self._client is not None).
+            app._prompt_for_downloads(fake_client, pending)
+            await pilot.pause()
+            assert isinstance(app.screen, DownloadsModal)
+
+    run_async(run_test())
+
+
+def test_downloads_decision_swallows_closed_client_error():
+    """Confirming downloads after the client has been closed must not crash
+    inside the screen callback (e.g. a fast --no-exit-on-completion run tore
+    the worker down while the modal was up)."""
+
+    class ClosedDownloadsClient(FakeReductionClient):
+        async def start_downloads(self, disabled: list[str]) -> Response:
+            raise RuntimeError("subprocess stdin is closed")
+
+    async def run_test():
+        fake_client = ClosedDownloadsClient(updates=[], wait_indefinitely=True)
+        await fake_client.start()
+        app = ShrinkRayApp(
+            file_path="/tmp/test.txt",
+            test=["./test.sh"],
+            client=fake_client,
+            exit_on_completion=False,
+        )
+        pending = [{"id": "llm", "description": "LLM model (2.7GB)"}]
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._prompt_for_downloads(fake_client, pending)
+            await pilot.pause()
+            modal = app.screen
+            assert isinstance(modal, DownloadsModal)
+            modal.query_one("#downloads-ok", Button).press()
+            await pilot.pause()
+            await asyncio.sleep(0.05)
+            await pilot.pause()
+            # The app is still alive; the raise was swallowed.
+            assert app._return_code is None
 
     run_async(run_test())
 

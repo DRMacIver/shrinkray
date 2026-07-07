@@ -730,10 +730,17 @@ class ShrinkRay(Reducer[bytes]):
 
         # Replaying the original run's random state makes the restarted
         # run attempt the same candidates in the same order (shuffles and
-        # early-abort budgets included) until its first improvement. In
-        # particular a restart that finds nothing has re-attempted every
-        # candidate of the original run, so anything the original run
-        # ever tried remains reachable as a final result.
+        # early-abort budgets included) until its first improvement --
+        # provided the restarted run's pass set matches the original's.
+        # When passes were registered mid-run (e.g. a tree-sitter grammar
+        # finished downloading), the restart constructs its reducer with
+        # those passes present from the start, so its pass sequence and
+        # random stream diverge and the replay is only approximate.
+        # Correctness never depends on the replay: is_interesting above
+        # only ever adopts strict improvements on the fixpoint, so a
+        # restart can improve the result or leave it unchanged, nothing
+        # else. The replay just makes restarts cheap (cache hits) and
+        # deterministic when the pass set didn't change.
         restart_random = Random()
         restart_random.setstate(initial_random_state)
         restarted: BasicReductionProblem[bytes] = BasicReductionProblem(

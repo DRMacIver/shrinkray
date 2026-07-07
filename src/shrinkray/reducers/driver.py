@@ -163,7 +163,14 @@ class RemoteReductionProblem(ReductionProblem[bytes]):
         slot: list[bool] = []
         self._waiters.setdefault(test_case, deque()).append((event, slot))
         async with self._send_lock:
-            await self._send_stream.send_all(encode_query(test_case))
+            try:
+                await self._send_stream.send_all(encode_query(test_case))
+            except (trio.BrokenResourceError, trio.ClosedResourceError):
+                # Shrink ray tore down the pipe mid-query. Treat it as a clean
+                # shutdown: close() resolves this waiter (and any other) as
+                # not-interesting so the running pass unwinds instead of
+                # crashing the subprocess with a traceback.
+                self.close()
 
         self._stats.calls += 1
         await event.wait()

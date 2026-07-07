@@ -155,6 +155,37 @@ async def test_is_interesting_returns_false_when_closed() -> None:
     assert await problem.is_interesting(b"anything\n") is False
 
 
+async def test_is_interesting_tolerates_broken_send() -> None:
+    """A broken send mid-query unwinds cleanly instead of crashing the pass.
+
+    If shrink ray tears down the pipe while a query is being sent, ``send_all``
+    raises BrokenResourceError. Rather than let that propagate through the
+    running pass and crash the reducer subprocess, is_interesting treats it like
+    shutdown: it unwinds through close(), returning not-interesting.
+    """
+
+    class BrokenSendStream(trio.abc.SendStream):
+        async def send_all(self, data: bytes | bytearray | memoryview) -> None:
+            raise trio.BrokenResourceError
+
+        async def wait_send_all_might_not_block(self) -> None:
+            await trio.lowlevel.checkpoint()
+
+        async def aclose(self) -> None:
+            await trio.lowlevel.checkpoint()
+
+    problem = RemoteReductionProblem(
+        b"hello world\n",
+        send_stream=BrokenSendStream(),
+        work=WorkContext(parallelism=1),
+        sort_key=sort_key_for_initial(b"hello world\n"),
+    )
+    assert await problem.is_interesting(b"smaller\n") is False
+    # The connection is now treated as closed, so further queries short-circuit.
+    assert problem._closed is True
+    assert await problem.is_interesting(b"another\n") is False
+
+
 async def test_duplicate_concurrent_queries_all_resolve() -> None:
     problem = make_problem(b"hello world\n")
 

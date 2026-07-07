@@ -3,9 +3,10 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 import trio
-from attrs import define
+from attrs import define, field
 
 from shrinkray.passes.definitions import ReductionPass, ReductionPump
+from shrinkray.passes.llm import LLMClient
 from shrinkray.passes.python import is_python
 from shrinkray.problem import BasicReductionProblem, reflow_sort_key, shortlex
 from shrinkray.reducer import Reducer, ShrinkRay
@@ -53,6 +54,47 @@ class BasicReducer[T](Reducer[T]):
                             await self.run_pass(rp)
             if prev == self.target.current_test_case:
                 return
+
+
+@define
+class FakeLLMClient(LLMClient):
+    """Returns scripted responses in order, then empty strings."""
+
+    responses: list[str] = field(factory=list)
+    prompts: list[str] = field(factory=list)
+    seeds: list[int] = field(factory=list)
+
+    async def complete(
+        self, prompt: str, *, max_tokens: int, seed: int, temperature: float
+    ) -> str:
+        await trio.lowlevel.checkpoint()
+        self.prompts.append(prompt)
+        self.seeds.append(seed)
+        if len(self.prompts) <= len(self.responses):
+            return self.responses[len(self.prompts) - 1]
+        return ""
+
+
+@define
+class RecordingClient(FakeLLMClient):
+    """FakeLLMClient that records lifecycle events."""
+
+    events: list[str] = field(factory=list)
+
+    def start_loading(self) -> None:
+        self.events.append("start_loading")
+
+    async def wait_until_ready(self) -> None:
+        await trio.lowlevel.checkpoint()
+        self.events.append("wait_until_ready")
+
+    async def complete(
+        self, prompt: str, *, max_tokens: int, seed: int, temperature: float
+    ) -> str:
+        self.events.append("complete")
+        return await super().complete(
+            prompt, max_tokens=max_tokens, seed=seed, temperature=temperature
+        )
 
 
 def latin1_text_sort_key(data: bytes) -> Any:

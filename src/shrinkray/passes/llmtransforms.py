@@ -556,17 +556,26 @@ def llm_transform_pump(
         completions = 0
         adoptions = 0
 
-        async def try_response(response: str, span: tuple[int, int]) -> bool:
+        async def try_response(response: str, target: TransformTarget) -> bool:
             nonlocal current, adoptions
-            for replacement in extract_candidates(response):
-                candidate = splice(current, span, replacement.strip())
-                if candidate in seen:
-                    continue
-                seen.add(candidate)
-                if await problem.is_interesting(candidate):
-                    current = candidate
-                    adoptions += 1
-                    return True
+            context = target.context.encode()
+            for block in extract_candidates(response):
+                replacements = [block.strip()]
+                # Small models often echo the reference context (e.g. a
+                # function signature) ahead of the actual replacement;
+                # salvage those answers by also trying the suffix, and
+                # try it first since it is strictly smaller.
+                if context and replacements[0].startswith(context):
+                    replacements.insert(0, replacements[0][len(context) :].strip())
+                for replacement in replacements:
+                    candidate = splice(current, target.span, replacement)
+                    if candidate in seen:
+                        continue
+                    seen.add(candidate)
+                    if await problem.is_interesting(candidate):
+                        current = candidate
+                        adoptions += 1
+                        return True
             return False
 
         while adoptions < max_adoptions:
@@ -578,7 +587,7 @@ def llm_transform_pump(
                 # Adoption shifts spans, so a previously useless answer
                 # can produce a fresh candidate on the new state.
                 for response in cached:
-                    if await try_response(response, target.span):
+                    if await try_response(response, target):
                         improved = True
                         break
                 if improved:
@@ -604,7 +613,7 @@ def llm_transform_pump(
                     temperature=config.temperature,
                 )
                 cached.append(response)
-                if await try_response(response, target.span):
+                if await try_response(response, target):
                     improved = True
                     break
             if not improved and not asked:

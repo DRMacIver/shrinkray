@@ -524,6 +524,19 @@ def test_unrolls_a_loop_end_to_end():
     assert result == b"print(3)\n"
 
 
+def test_salvages_a_replacement_that_echoes_the_context():
+    # Small models often repeat the reference context (e.g. a function
+    # signature) ahead of the actual replacement; the prefixed variant
+    # must be tried too.
+    source = b"def f(x):\n    y = x + 1\n    return y * 2\nprint(f)\n"
+    client = FakeLLMClient(responses=["```\ndef f(x):\n    pass\n```"])
+    pump = llm_transform_pump(
+        client, LLMConfig(), "python", "llm_stub_bodies(python)", stub_body_targets
+    )
+    result, _ = run_pump(pump, source, lambda x: b"print" in x)
+    assert result == b"def f(x):\n    pass\nprint(f)\n"
+
+
 def test_stubs_a_body_end_to_end():
     source = b"def f(x):\n    y = x + 1\n    return y * 2\nprint(f)\n"
     client = FakeLLMClient(responses=["```\npass\n```"])

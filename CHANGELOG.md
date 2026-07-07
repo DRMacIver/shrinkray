@@ -3,6 +3,13 @@
 This is the changelog for [Shrink Ray](https://github.com/DRMacIver/shrinkray), a
 fast multi-format test-case reducer. Versions are calendar-based (`YY.M.D.N`).
 
+## 26.7.7.2 — 2026-07-07
+
+- Fixed quitting the TUI during a reduction occasionally reporting a
+  spurious error and exiting with a nonzero status.
+- When `--memory-limit` is enforced, the interestingness test is now run
+  through a small `/bin/sh` wrapper that applies the limit with `ulimit`.
+
 ## 26.7.7.1 — 2026-07-07
 
 - Reduced memory use on inputs containing a very large number of integer

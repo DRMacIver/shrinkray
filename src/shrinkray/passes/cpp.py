@@ -785,20 +785,22 @@ async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
         # namespace's qualifier from references, which is what actually
         # lets the namespace go.
         if name_path is not None:
-            qualifier_cuts = _namespace_qualifier_cuts(view, name_path, i, close)
+            qualifier_cuts = _namespace_qualifier_cuts(view, name_path, i)
             if qualifier_cuts:
                 cuts.append(splice + qualifier_cuts)
     await apply_patches(problem, Cuts(), cuts)
 
 
 def _namespace_qualifier_cuts(
-    view: TokenView, name_path: tuple[int, int], decl_start: int, decl_end: int
+    view: TokenView, name_path: tuple[int, int], decl_start: int
 ) -> list[tuple[int, int]]:
     """Find every `<path>::` qualifier that names the namespace declared
     by the tokens in [name_path[0], name_path[1]), outside the
-    declaration itself, and return cuts that delete each one (the path
-    tokens plus the trailing `::`). Deleting these turns `ns::name` into
-    `name` so the namespace can be spliced away."""
+    declaration's header, and return cuts that delete each one (the path
+    tokens plus the trailing `::`). Qualifiers inside the namespace's own
+    body count too: once the namespace is spliced away, a self-qualified
+    reference like `ns::x` dangles just like an external one. Deleting
+    these turns `ns::name` into `name` so the namespace can go."""
     tokens = view.tokens
     lo, hi = name_path
     path_texts = [tokens[k].text for k in range(lo, hi)]
@@ -807,7 +809,7 @@ def _namespace_qualifier_cuts(
     p = 0
     limit = len(tokens) - n
     while p <= limit:
-        if decl_start <= p <= decl_end:
+        if decl_start <= p <= hi:
             p += 1
             continue
         if (

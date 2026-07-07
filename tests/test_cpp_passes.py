@@ -457,6 +457,26 @@ def test_removes_namespace_and_strips_qualified_references():
     assert b"template struct Queue;" in result.replace(b"\n", b"")
 
 
+def test_strips_self_qualified_references_inside_namespace_body():
+    # A namespace whose body refers to its own members with a qualified
+    # name (`ns::x`) can only be spliced away if those inner qualifiers
+    # are stripped along with the ones outside the namespace.
+    def is_interesting(x: bytes) -> bool:
+        if b"int x" not in x or b"int z" not in x:
+            return False
+        # Simulate a compiler: `ns::` references only resolve while the
+        # namespace still exists.
+        return b"namespace ns" in x or b"ns::" not in x
+
+    result = reduce_with(
+        [remove_namespaces],
+        b"namespace ns { int x; int y = ns::x; } int z = ns::x;\n",
+        is_interesting,
+    )
+    assert b"namespace" not in result
+    assert b"ns::" not in result
+
+
 def test_strips_nested_namespace_path_qualifier():
     result = reduce_with(
         [remove_namespaces],

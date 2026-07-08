@@ -52,7 +52,12 @@ from shrinkray.passes.genericlanguages import (
     simplify_brackets,
 )
 from shrinkray.passes.json import JSON, JSON_PASSES
-from shrinkray.passes.llm import LLMClient, LLMConfig, llm_rewrite
+from shrinkray.passes.llm import (
+    NONDETERMINISTIC_PASS_NAMES,
+    LLMClient,
+    LLMConfig,
+    llm_rewrite,
+)
 from shrinkray.passes.llmtransforms import llm_transform_pumps
 from shrinkray.passes.patching import PatchApplier, Patches
 from shrinkray.passes.python import is_python, python_reducer_command
@@ -473,14 +478,21 @@ class ShrinkRay(Reducer[bytes]):
 
         problem = self.target
 
-        # A pass that ran to completion without making progress cannot make
-        # progress on an identical test case, so skip it for free.
-        if self.pass_fingerprints.get(pass_name) == problem.current_test_case:
+        # A deterministic pass that ran to completion without making
+        # progress cannot make progress on an identical test case, so skip
+        # it for free. Nondeterministic passes (fresh seed per run) may
+        # propose different candidates, so they are never fingerprinted.
+        deterministic = pass_name not in NONDETERMINISTIC_PASS_NAMES
+        if (
+            deterministic
+            and self.pass_fingerprints.get(pass_name) == problem.current_test_case
+        ):
             return
 
         use_budget = budgeted and self.pass_probation.get(pass_name, False)
         scope = trio.CancelScope()
-        last_seen = problem.current_test_case
+        started_from = problem.current_test_case
+        last_seen = started_from
         consecutive_failures = 0
         budget_exhausted = False
         made_progress = False
@@ -518,6 +530,13 @@ class ShrinkRay(Reducer[bytes]):
                 self._current_pass_scope = scope
                 await rp(self.target)
 
+            # The monitor only observes calls that fire this problem's
+            # own monitor hook; a problem that delegates its evaluations
+            # elsewhere may miss some. A changed test case is progress
+            # regardless of whether the monitor saw it happen.
+            if problem.current_test_case is not started_from:
+                made_progress = True
+
             if budget_exhausted:
                 # The pass was abandoned by its probation budget. It still
                 # has untried candidates, so it must be re-run before the
@@ -532,7 +551,7 @@ class ShrinkRay(Reducer[bytes]):
             else:
                 self.incomplete_passes.pop(pass_name, None)
                 self.pass_probation[pass_name] = not made_progress
-                if made_progress:
+                if made_progress or not deterministic:
                     self.pass_fingerprints.pop(pass_name, None)
                 else:
                     self.pass_fingerprints[pass_name] = problem.current_test_case
@@ -722,10 +741,17 @@ class ShrinkRay(Reducer[bytes]):
 
         # Replaying the original run's random state makes the restarted
         # run attempt the same candidates in the same order (shuffles and
-        # early-abort budgets included) until its first improvement. In
-        # particular a restart that finds nothing has re-attempted every
-        # candidate of the original run, so anything the original run
-        # ever tried remains reachable as a final result.
+        # early-abort budgets included) until its first improvement --
+        # provided the restarted run's pass set matches the original's.
+        # When passes were registered mid-run (e.g. a tree-sitter grammar
+        # finished downloading), the restart constructs its reducer with
+        # those passes present from the start, so its pass sequence and
+        # random stream diverge and the replay is only approximate.
+        # Correctness never depends on the replay: is_interesting above
+        # only ever adopts strict improvements on the fixpoint, so a
+        # restart can improve the result or leave it unchanged, nothing
+        # else. The replay just makes restarts cheap (cache hits) and
+        # deterministic when the pass set didn't change.
         restart_random = Random()
         restart_random.setstate(initial_random_state)
         restarted: BasicReductionProblem[bytes] = BasicReductionProblem(
@@ -876,7 +902,16 @@ class KeyProblem(ReductionProblem[bytes]):
         return self.base_problem.stats
 
     async def is_interesting(self, test_case: bytes) -> bool:
-        return await self.applier.try_apply_patch({self.key: test_case})
+        result = await self.applier.try_apply_patch({self.key: test_case})
+        # run_pass installs its per-pass call monitor on the problem the
+        # pass runs against, but the evaluation here happens on the shared
+        # underlying dict problem, which never fires this problem's
+        # monitor (and whose own monitor slot can't be borrowed: every
+        # key's reducer runs against it concurrently). Fire it here so
+        # progress detection and probation budgets work per key.
+        if self.pass_call_monitor is not None:
+            self.pass_call_monitor()
+        return result
 
     def size(self, test_case: bytes) -> int:
         return len(test_case)

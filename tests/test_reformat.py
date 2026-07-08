@@ -47,7 +47,7 @@ def test_detect_family(text, family):
         ("void f() {}", "void f()\n\n{}"),
         ("z = a + b", "z = a +\nb"),
         ("#define A 1\n#define B 2", "#define A 1 #define B 2"),
-        ("def f(x):\n    a = 1\n    b = 2", "def f(x):\n\ta = 1;b = 2"),
+        ("def f(x):\n    a = 1\n    b = 2", "def f(x):\n\ta = 1\n\tb = 2"),
         ("<p>hi</p>", "<p>\n hi\n</p>"),
         ("<!DOCTYPE html>", "<!DOCTYPE\nhtml>"),
     ],
@@ -138,6 +138,43 @@ def test_brace_directive_split():
     assert basic_format("#a 1 #b 2") == "#a 1\n#b 2\n"
 
 
+def test_brace_directive_ends_at_newline():
+    # A preprocessor directive must terminate at its own newline: the code that
+    # follows on the next line is ordinary brace content, not part of the
+    # directive. Previously the '#' swallowed everything up to the next '#'.
+    assert (
+        basic_format("#include <stdio.h>\nint main() { return 0; }\n")
+        == "#include <stdio.h>\nint main() {\n  return 0;\n}\n"
+    )
+    assert (
+        basic_format("#define FOO 1\n#define BAR 2\nint x = FOO;\n")
+        == "#define FOO 1\n#define BAR 2\nint x = FOO;\n"
+    )
+
+
+def test_brace_directive_keeps_internal_space():
+    # Inside a directive a run of whitespace between tokens is significant and
+    # must be kept (collapsed to a single space), unlike the whitespace next to
+    # punctuation the brace family drops elsewhere.
+    assert basic_format("#define FOO   BAR") == "#define FOO BAR\n"
+    # '#include <x>' keeps its space too (braces force the brace family here).
+    assert basic_format("#include <x>\n{}") == "#include <x>\n{}\n"
+
+
+def test_brace_directive_ends_at_newline_even_after_backslash():
+    # A directive ends at its newline; a trailing backslash is copied verbatim
+    # like any other character (no line-continuation join). Joining would make
+    # the output re-read as a continuation on the next pass, breaking the fixed
+    # point, so the continued line becomes ordinary content instead.
+    assert basic_format("#define A \\\n  B") == "#define A \\\nB\n"
+
+
+def test_brace_directive_preserves_string_literal():
+    # A '#' inside a string in the directive body must not end the directive.
+    out = basic_format('#error "a # b"\nx;')
+    assert out == '#error "a # b"\nx;\n'
+
+
 # === tag family ===
 
 
@@ -195,8 +232,26 @@ def test_indent_dedent():
 
 
 def test_indent_semicolon_split():
+    # One statement per line, but the ';' is preserved (basic_format only
+    # rewrites whitespace; it never deletes a non-whitespace character).
     out = basic_format("def f():\n    a = 1; b = 2")
-    assert out == "def f():\n  a = 1\n  b = 2\n"
+    assert out == "def f():\n  a = 1;\n  b = 2\n"
+
+
+def test_indent_semicolon_split_preserves_semicolons():
+    # Every ';' present in the source survives the one-statement-per-line split,
+    # including a trailing one and an empty statement.
+    assert (
+        basic_format("def f():\n    a = 1;;b = 2;")
+        == "def f():\n  a = 1;\n  ;\n  b = 2;\n"
+    )
+
+
+def test_indent_comment_is_not_split_on_semicolon():
+    # A ';' inside a '#' comment must not be treated as a statement separator:
+    # the comment text stays on the comment's line rather than being moved onto
+    # its own line as code.
+    assert basic_format("if x:\n    y  # a; b") == "if x:\n  y#a;b\n"
 
 
 def test_indent_string_spanning_brackets():
@@ -308,6 +363,48 @@ def test_property_arbitrary_text_is_idempotent(s):
     assert basic_format(once) == once
 
 
+def test_whitespace_collapse_does_not_fuse_operators():
+    # Dropping the space between two single punctuation characters must not fuse
+    # them into a longer operator token that a second pass would then re-space.
+    # 'a& &b' is two '&' tokens; it must NOT become '&&' (which would re-detect
+    # as the '&&' operator on the next pass, breaking idempotence).
+    assert basic_format("a& &b") == "a& &b\n"
+    assert basic_format("a& &b") == basic_format(basic_format("a& &b"))
+    # The genuine '&&' operator (no intervening space) is still spaced.
+    assert basic_format("a&&b") == "a && b\n"
+    # Same mechanism in the inline (tag/Python) normaliser.
+    assert basic_format("<p>a& &b</p>") == "<p>a& &b</p>\n"
+    assert basic_format("<p>a&&b</p>") == "<p>a && b</p>\n"
+
+
+def test_whitespace_collapse_does_not_fuse_comment_introducers():
+    # Collapsing '/ /' -> '//' or '/ *' -> '/*' would start a comment that the
+    # next pass tokenises differently, so those spaces are kept.
+    assert basic_format("a/ /b") == "a/ /b\n"
+    assert basic_format("a/ *b") == "a/ *b\n"
+
+
+def test_whitespace_collapse_does_not_manufacture_a_tag():
+    # Dropping the space between '<' and a tag-name character would splice them
+    # into a tag that re-detects as the tag family on the next pass. When a '>'
+    # follows (so a tag really would form) the space is kept.
+    assert basic_format("< b>") == "< b>\n"
+    assert basic_format("< b>") == basic_format(basic_format("< b>"))
+    # With no following '>' there is no tag risk, so the space still collapses.
+    assert basic_format("< b") == "<b\n"
+
+
+def test_dict_colon_in_brackets_is_not_a_python_block():
+    # A ':' inside brackets (a dict/slice literal) is not a block header colon,
+    # so an input whose only colon is bracket-enclosed must stay in the brace
+    # family. Otherwise it detects as Python once, flattens to brace-looking
+    # output, and then re-detects as brace on the next pass (a family flip).
+    src = 'd = {"x":\n     1}'
+    assert detect_family(src) == "brace"
+    once = basic_format(src)
+    assert basic_format(once) == once
+
+
 @given(ARBITRARY)
 def test_property_arbitrary_text_preserves_non_whitespace(s):
     # The formatter only ever rewrites whitespace (and inserts spacing around
@@ -389,7 +486,9 @@ def test_indent_semicolon_in_string_not_split():
 
 
 def test_indent_blank_line_and_trailing_semicolon_and_newline():
-    assert basic_format("def f():\n\n    a = 1;\n") == "def f():\n  a = 1\n"
+    # basic_format canonicalises whitespace only, so the trailing ';' is kept
+    # (blank lines and the trailing newline are still normalised away).
+    assert basic_format("def f():\n\n    a = 1;\n") == "def f():\n  a = 1;\n"
 
 
 def test_indent_unterminated_string():
@@ -408,6 +507,18 @@ def test_detect_family_colon_needs_strictly_deeper_body():
     assert detect_family("a:\nb") == "brace"  # same indent -> not a block
     assert detect_family("{\n  :\n") == "brace"  # label colon, only blanks after
     assert detect_family("class C {\n  public:\n  int x;\n}") == "brace"
+    # A header colon with only blank lines after it is not a block (no body).
+    assert detect_family("x:\n\n") == "brace"
+
+
+def test_colon_inside_multiline_string_is_not_a_block_header():
+    # A ':' at the end of an (unterminated) string that spans physical lines is
+    # inside the string, not a block header. Attributing it to an earlier line
+    # would misdetect the input as Python and flip families on the next pass.
+    src = ' |0]"cb*&|\n\t\t{B<}b0:'
+    assert detect_family(src) == "brace"
+    once = basic_format(src)
+    assert basic_format(once) == once
 
 
 @pytest.mark.parametrize(

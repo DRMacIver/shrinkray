@@ -1,5 +1,6 @@
 """Process management utilities for shrink ray."""
 
+import math
 import os
 import random
 import resource
@@ -23,6 +24,13 @@ MEMORY_RLIMIT = getattr(resource, "RLIMIT_AS", resource.RLIMIT_DATA)
 
 _MEMORY_UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
 
+# Smallest limit we accept. Below this the cap is meaningless: a value of a
+# few hundred bytes rounds down to ``ulimit -v 0`` (no address space at all),
+# making every test fail instantly, and even a kibibyte or two leaves no
+# room for the test to run. 1 MiB is a generous floor that still catches the
+# nonsensical tiny values.
+MIN_MEMORY_LIMIT = 1024**2
+
 
 def parse_memory_limit(value: str) -> int | None:
     """Parse a ``--memory-limit`` value into a byte count.
@@ -30,7 +38,9 @@ def parse_memory_limit(value: str) -> int | None:
     Accepts a plain byte count or a value with a binary K/M/G/T suffix
     (e.g. ``512M``, ``8G``, ``1.5G``). A value of zero or less, or one of
     ``none``/``off``/``disabled``/``unlimited``, disables the limit and
-    returns ``None``. Raises ``ValueError`` on anything unparseable.
+    returns ``None``. Raises ``ValueError`` on anything unparseable, on a
+    non-finite value (``inf``/``nan``), or on a positive value smaller than
+    ``MIN_MEMORY_LIMIT``.
     """
     text = value.strip().upper()
     if text in ("NONE", "OFF", "DISABLED", "UNLIMITED"):
@@ -43,9 +53,16 @@ def parse_memory_limit(value: str) -> int | None:
         amount = float(text)
     except ValueError:
         raise ValueError(f"Invalid memory limit: {value!r}")
+    if not math.isfinite(amount):
+        raise ValueError(f"Invalid memory limit: {value!r}")
     limit = int(amount * multiplier)
     if limit <= 0:
         return None
+    if limit < MIN_MEMORY_LIMIT:
+        raise ValueError(
+            f"Memory limit {value!r} is too small; the minimum is 1 MiB. "
+            "Use 0 or 'none' to disable the limit instead."
+        )
     return limit
 
 

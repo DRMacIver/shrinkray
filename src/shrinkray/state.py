@@ -249,6 +249,13 @@ class ShrinkRayState[TestCase](ABC):
     # memory. Enforced via RLIMIT_AS where the platform supports it.
     memory_limit: int | None = None
 
+    # Whether the user explicitly set --memory-limit. When False, memory_limit
+    # holds the physical-RAM default, which may be auto-disabled if it blocks
+    # the initial test: sanitizer builds (ASan/MSan/TSan) reserve tens of
+    # terabytes of virtual address space and abort under any address-space
+    # cap, so the default would otherwise fail them out of the box.
+    memory_limit_explicit: bool = False
+
     first_call: bool = True
     initial_exit_code: int | None = None
     can_format: bool = True
@@ -321,9 +328,16 @@ class ShrinkRayState[TestCase](ABC):
     # This avoids race conditions when multiple tests run in parallel
     _successful_outputs: dict[bytes, bytes] = {}
 
+    # Sort keys of the test cases whose output is stored above, keyed by the
+    # same test case bytes. record_reduction uses these to prune losing
+    # candidates' outputs while retaining any candidate that can still be
+    # adopted (see _record_reduction_history).
+    _successful_output_keys: dict[bytes, Any] = {}
+
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
         self._successful_outputs = {}  # Initialize mutable default
+        self._successful_output_keys = {}  # Initialize mutable default
         self.sweep_stale_working_files()
         self.setup_formatter()
         self._setup_history()
@@ -415,8 +429,11 @@ class ShrinkRayState[TestCase](ABC):
     def sweep_stale_working_files(self) -> None:
         """Remove any leftover temporary candidate files from a previous
         run that was killed before it could clean up after itself. Only
-        files matching this run's own ``<stem>-<hex><ext>`` pattern are
-        removed, so unrelated files are never touched."""
+        entries matching this run's own ``<stem>-<hex><ext>`` pattern are
+        removed, so unrelated files are never touched.
+
+        In in-place directory mode each candidate is a *directory*, so
+        directories are removed recursively; plain files are unlinked."""
         info = self.stale_working_file_pattern()
         if info is None:
             return
@@ -428,10 +445,13 @@ class ShrinkRayState[TestCase](ABC):
         for name in names:
             if pattern.match(name):
                 path = os.path.join(directory, name)
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
 
     @property
     def is_directory_mode(self) -> bool:
@@ -728,7 +748,73 @@ class ShrinkRayState[TestCase](ABC):
                     )
                 self.output_manager.mark_completed(test_id, recorded_code)
 
+    def _default_memory_limit_may_block_initial(self) -> bool:
+        """Whether an unset (default) memory limit is currently in effect.
+
+        The auto-disable only applies to the physical-RAM default the user
+        never asked for; an explicitly configured limit is left alone so its
+        loud, actionable failure (with a --memory-limit=0 suggestion) stands.
+        """
+        return (
+            not self.memory_limit_explicit
+            and self.memory_limit is not None
+            and self.memory_limit > 0
+        )
+
+    async def _retry_initial_without_memory_limit(
+        self, test_case: TestCase
+    ) -> ScriptRunResult:
+        """Re-run the initial test with no address-space cap.
+
+        Called when the initial test was uninteresting under the default
+        memory limit. If it now passes, the cap (not a genuine failure) was
+        the culprit — typical of sanitizer builds — so the limit is disabled
+        for the rest of the run and the user is warned. If it still fails the
+        failure is genuine, so the limit is restored and the normal
+        invalid-initial-example path is left to report it.
+        """
+        saved_limit = self.memory_limit
+        self.memory_limit = None
+        # Re-run as a fresh calibration call: the capped run's exit code and
+        # timeout measurement are discarded so the no-limit run becomes the
+        # single logical initial call.
+        self.first_call = True
+        self.timeout_policy.reset()
+        result = await self._run_for_result_once(test_case)
+        if result.exit_code == 0:
+            print(
+                "Warning: the initial interestingness test only passed with the "
+                "default --memory-limit disabled, so it has been disabled for the "
+                "rest of this run. Sanitizer builds (ASan/MSan/TSan), which reserve "
+                "huge amounts of virtual address space, are the usual cause.",
+                file=sys.stderr,
+                flush=True,
+            )
+        else:
+            self.memory_limit = saved_limit
+        return result
+
     async def run_for_result(
+        self, test_case: TestCase, debug: bool = False
+    ) -> ScriptRunResult:
+        was_first_call = self.first_call
+        result = await self._run_for_result_once(test_case, debug=debug)
+        # A default memory limit that blocks the very first (calibration) test
+        # is retried once without the cap; sanitizer builds abort under any
+        # address-space limit, so this is the difference between the flagship
+        # "reduce a sanitizer crash" workflow working and failing out of the
+        # box. The debug reruns from build_error_message never re-probe (they
+        # happen after the initial call, so was_first_call is False).
+        if (
+            not debug
+            and was_first_call
+            and result.exit_code != 0
+            and self._default_memory_limit_may_block_initial()
+        ):
+            result = await self._retry_initial_without_memory_limit(test_case)
+        return result
+
+    async def _run_for_result_once(
         self, test_case: TestCase, debug: bool = False
     ) -> ScriptRunResult:
         if self.in_place:
@@ -828,18 +914,7 @@ class ShrinkRayState[TestCase](ABC):
 
             @problem.on_reduce
             async def record_history(test_case: TestCase):
-                test_case_bytes = self._get_test_case_bytes(test_case)
-                # Use output captured at is_interesting time to avoid race conditions
-                output = self._successful_outputs.get(test_case_bytes)
-                # Keep only the adopted test case's output: it stays
-                # available for the LLM passes' prompts, while outputs of
-                # candidates that were interesting but not adopted can no
-                # longer be needed by anything.
-                self._successful_outputs.clear()
-                if output is not None:
-                    self._successful_outputs[test_case_bytes] = output
-                assert self.history_manager is not None
-                self.history_manager.record_reduction(test_case_bytes, output)
+                self._record_reduction_history(test_case)
 
         # Writing the file back can't be guaranteed atomic, so we put a lock around
         # writing successful reductions back to the original file so we don't
@@ -874,6 +949,44 @@ class ShrinkRayState[TestCase](ABC):
     def problem(self):
         return self.reducer.target
 
+    def _record_reduction_history(self, test_case: TestCase) -> None:
+        """Record an adopted reduction in history and prune stored outputs.
+
+        The recorded output is the one captured when the test case was found
+        interesting (see check_interesting), not a fresh read, so a
+        concurrently running test cannot overwrite it.
+
+        Pruning keeps the adopted test case's output (the LLM passes read it
+        from _successful_outputs) and the output of any candidate that still
+        sorts better than the adopted one: adoption only ever moves to a
+        strictly better test case, so a better-sorting stored candidate may
+        itself be adopted moments later (which happens under parallelism, when
+        several candidates are interesting at once). Everything worse than the
+        adopted candidate is a loser whose output nothing can use again, so it
+        is dropped to bound memory.
+        """
+        assert self.history_manager is not None
+        test_case_bytes = self._get_test_case_bytes(test_case)
+        output = self._successful_outputs.get(test_case_bytes)
+        adopted_key = self.problem.sort_key(test_case)
+        survivors = {
+            tcb
+            for tcb, key in self._successful_output_keys.items()
+            if key < adopted_key
+        }
+        survivors.add(test_case_bytes)
+        self._successful_outputs = {
+            tcb: out
+            for tcb, out in self._successful_outputs.items()
+            if tcb in survivors
+        }
+        self._successful_output_keys = {
+            tcb: key
+            for tcb, key in self._successful_output_keys.items()
+            if tcb in survivors
+        }
+        self.history_manager.record_reduction(test_case_bytes, output)
+
     async def check_interesting(self, test_case: TestCase) -> InterestingnessResult:
         """Run the interestingness test on test_case.
 
@@ -897,6 +1010,9 @@ class ShrinkRayState[TestCase](ABC):
                 output = self._get_last_captured_output()
                 if output is not None:
                     self._successful_outputs[test_case_bytes] = output
+                    self._successful_output_keys[test_case_bytes] = (
+                        self.problem.sort_key(test_case)
+                    )
                 return InterestingnessResult(interesting=True)
             if result.timed_out and result.timeout_used is not None:
                 timeout_used = result.timeout_used
@@ -930,6 +1046,7 @@ class ShrinkRayState[TestCase](ABC):
             pass
         # Clear stored successful outputs (no longer relevant after restart)
         self._successful_outputs.clear()
+        self._successful_output_keys.clear()
         # Forget learned timeout state: the restart point may be much
         # slower than what the timeout had adapted down to.
         self.timeout_policy.reset()
@@ -1052,6 +1169,20 @@ class ShrinkRayState[TestCase](ABC):
                     f"This exited with code 0, but previously the script exited with "
                     f"{self.initial_exit_code}. This suggests your interestingness "
                     "test exhibits nondeterministic behaviour."
+                )
+            # An explicitly configured memory limit is never auto-disabled, so
+            # point at it here in case it (not the test itself) is the problem:
+            # sanitizer builds abort under any address-space cap. The default
+            # limit reaches this branch only after a no-limit retry already
+            # failed, so the suggestion would be misleading there and is
+            # withheld.
+            if self.memory_limit_explicit and self.memory_limit:
+                lines.append(
+                    "\nNote: an address-space limit (--memory-limit) is in effect. "
+                    "Some builds — sanitizer builds (ASan/MSan/TSan) in particular — "
+                    "reserve huge amounts of virtual address space and abort under "
+                    "any such limit. If that may be the cause, rerun with "
+                    "--memory-limit=0 to disable it."
                 )
 
         return "\n".join(lines)
@@ -1280,6 +1411,7 @@ def load_state_for_path(
     test: list[str],
     timeout: float | None,
     memory_limit: int | None,
+    memory_limit_explicit: bool,
     parallelism: int,
     formatter: str,
     trivial_is_error: bool,
@@ -1308,6 +1440,7 @@ def load_state_for_path(
         "test": test,
         "timeout": timeout,
         "memory_limit": memory_limit,
+        "memory_limit_explicit": memory_limit_explicit,
         "base": os.path.basename(filename),
         "parallelism": parallelism,
         "filename": filename,

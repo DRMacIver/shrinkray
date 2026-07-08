@@ -27,6 +27,7 @@ states other passes produce.
 """
 
 import bisect
+import heapq
 import os
 import re
 import sys
@@ -142,10 +143,13 @@ def loadable_language_for_filename(filename: str) -> str | None:
         return None
     try:
         tree_sitter_language_pack.get_language(language)
-    except tree_sitter_language_pack.exceptions.Error as e:
+    except Exception as e:
         # The exception type says what failed: DownloadError for a
         # fetch, LanguageNotFoundError for a grammar this platform does
-        # not have, DynamicLoadError for a broken build, and so on. The
+        # not have, DynamicLoadError for a broken build, and so on.
+        # Loading also downloads, compiles and dlopens, so errors from
+        # outside the pack's own hierarchy (OSError on a full cache
+        # dir, a native load failure) are treated the same way. The
         # full traceback goes to stderr too (the run log in TUI mode) so
         # a broken grammar install can actually be debugged.
         traceback.print_exc()
@@ -290,7 +294,10 @@ def _names_mentioned(node: tree_sitter.Node, source: bytes) -> frozenset[bytes]:
                 if word is not None:
                     names.add(word.group())
         elif n.child_count == 0 and "identifier" in n.type:
-            names.add(source[n.start_byte : n.end_byte])
+            # A MISSING identifier inserted by error recovery is zero
+            # width; the empty bytes it covers are not a name.
+            if n.end_byte > n.start_byte:
+                names.add(source[n.start_byte : n.end_byte])
         else:
             stack.extend(n.children)
     return frozenset(names)
@@ -357,7 +364,7 @@ def _names_defined(node: tree_sitter.Node, source: bytes) -> frozenset[bytes]:
     candidates.
     """
     name_child = node.child_by_field_name("name")
-    if name_child is not None:
+    if name_child is not None and name_child.end_byte > name_child.start_byte:
         return frozenset({source[name_child.start_byte : name_child.end_byte]})
     return _names_mentioned(node, source)
 
@@ -392,6 +399,116 @@ def _covering_chain(tree: tree_sitter.Tree, lo: int, hi: int) -> list[tuple[int,
             return spans
 
 
+def _collect_orphans(
+    x_span: tuple[int, int],
+    seed_indices: list[int],
+    seed_spans: list[tuple[int, int]],
+    spans_by_index: list[tuple[int, int]],
+    ext_positions: dict[int, list[int]],
+    pos_owners: dict[int, list[int]],
+    sorted_positions: list[int],
+) -> list[tuple[int, int]]:
+    """Run one trigger's orphan cascade as an event-driven worklist.
+
+    This is an efficient equivalent of the original ``while changed``
+    fixpoint: a candidate is collected once every external occurrence of
+    its names lies inside the deleted region and its own span does not
+    overlap that region. Because the coverage condition is monotone, we
+    only revisit a candidate when a newly deleted span covers one of its
+    outstanding occurrences, rather than rescanning every candidate each
+    round.
+
+    The original scanned candidates in index order, repeatedly, adding
+    eligible ones as it went. A candidate made eligible earlier in the
+    same scan (at an index already passed) waited for the next round;
+    one made eligible ahead of the scan was taken immediately. That
+    ordering only matters when two candidate spans overlap (an import
+    declaration and one of its entries), where index order decides which
+    is collected. We reproduce it exactly: each pass processes ready
+    candidates in increasing index while deferring any that become ready
+    behind the pass's cursor to the next pass.
+    """
+    remaining: dict[int, int] = {}
+    covered: set[int] = set()
+    collected: set[int] = set(seed_indices)
+    # Deleted region as a sorted list of disjoint, merged intervals.
+    deleted: list[tuple[int, int]] = []
+    starts: list[int] = []
+    heap: list[int] = []
+    result_spans: list[tuple[int, int]] = [x_span, *seed_spans]
+
+    def add_deleted(a: int, b: int) -> None:
+        i = bisect.bisect_left(starts, a)
+        # Absorb an interval starting before ``a`` that reaches it.
+        while i > 0 and deleted[i - 1][1] >= a:
+            i -= 1
+        j = i
+        while j < len(deleted) and deleted[j][0] <= b:
+            a = min(a, deleted[j][0])
+            b = max(b, deleted[j][1])
+            j += 1
+        deleted[i:j] = [(a, b)]
+        starts[i:j] = [a]
+
+    def overlaps_deleted(a: int, b: int) -> bool:
+        j = bisect.bisect_left(starts, a)
+        if j < len(deleted) and deleted[j][0] < b:
+            return True
+        return j > 0 and deleted[j - 1][1] > a
+
+    def cover(a: int, b: int) -> None:
+        lo = bisect.bisect_left(sorted_positions, a)
+        hi = bisect.bisect_left(sorted_positions, b)
+        for k in range(lo, hi):
+            p = sorted_positions[k]
+            if p in covered:
+                continue
+            covered.add(p)
+            for owner in pos_owners[p]:
+                if owner in collected:
+                    continue
+                left = remaining.get(owner)
+                if left is None:
+                    left = len(ext_positions[owner])
+                left -= 1
+                remaining[owner] = left
+                if left == 0:
+                    heapq.heappush(heap, owner)
+
+    add_deleted(*x_span)
+    cover(*x_span)
+    for span in seed_spans:
+        add_deleted(*span)
+        cover(*span)
+
+    while heap:
+        cursor = -1
+        deferred: list[int] = []
+        progressed = False
+        while heap:
+            index = heapq.heappop(heap)
+            a, b = spans_by_index[index]
+            # A collected candidate's own span is already deleted, so
+            # this also rejects the rare re-pop of one.
+            if overlaps_deleted(a, b):
+                continue
+            if index <= cursor:
+                deferred.append(index)
+                continue
+            cursor = index
+            collected.add(index)
+            result_spans.append((a, b))
+            add_deleted(a, b)
+            cover(a, b)
+            progressed = True
+        for index in deferred:
+            heapq.heappush(heap, index)
+        if not progressed:
+            break
+
+    return sorted(set(result_spans))
+
+
 def orphaned_declaration_cuts(tree: tree_sitter.Tree, source: bytes) -> list[CutPatch]:
     """Cuts deleting a node plus declarations it leaves unreferenced.
 
@@ -404,7 +521,14 @@ def orphaned_declaration_cuts(tree: tree_sitter.Tree, source: bytes) -> list[Cut
     those. This joint deletion is what makes dead code deletable in
     languages like Go that hard-error on unused imports.
     """
-    gc_nodes = [(n, _names_defined(n, source)) for n in _gc_candidates(tree)]
+    # Zero-width nodes (from error recovery on garbage input) delete
+    # nothing and can never be covered by a deleted span, so the
+    # cascade would re-collect them forever.
+    gc_nodes = [
+        (n, _names_defined(n, source))
+        for n in _gc_candidates(tree)
+        if n.end_byte > n.start_byte
+    ]
     occurrences = _name_occurrences(
         source, {name for _, names in gc_nodes for name in names}
     )
@@ -444,61 +568,62 @@ def orphaned_declaration_cuts(tree: tree_sitter.Tree, source: bytes) -> list[Cut
             return None
         return lo, hi + 1
 
-    def is_orphaned(index: int, spans: list[tuple[int, int]]) -> bool:
-        """Whether every external reference to the candidate's names
-        lies within the deleted spans."""
-        candidate, names = gc_nodes[index]
-        own = (candidate.start_byte, candidate.end_byte)
-        for name in names:
-            for position in occurrences[name]:
-                if own[0] <= position < own[1]:
-                    continue
-                if not any(u <= position < v for u, v in spans):
-                    return False
-        return True
-
     # The nodes whose deletion orphans a candidate in one step are
     # exactly those whose span covers all its external references —
-    # a chain from the root down.
+    # a chain from the root down. Alongside the triggers we precompute,
+    # per candidate, the exact set of external occurrence positions the
+    # cascade must see deleted (``ext_positions``) and a position ->
+    # candidates index (``pos_owners``) so a newly deleted span can
+    # cheaply find the candidates it advances.
+    spans_by_index = [(n.start_byte, n.end_byte) for n, _ in gc_nodes]
     triggers: dict[tuple[int, int], list[int]] = {}
-    extents: list[tuple[int, int] | None] = []
+    ext_positions: dict[int, list[int]] = {}
+    pos_owners: dict[int, list[int]] = {}
     for index in range(len(gc_nodes)):
         extent = external_extent(index)
-        extents.append(extent)
         if extent is None:
             # Unreferenced to begin with: a plain single cut, which
             # other passes already generate, deletes it.
             continue
         for span in _covering_chain(tree, *extent):
             triggers.setdefault(span, []).append(index)
+        _, names = gc_nodes[index]
+        own_lo, own_hi = spans_by_index[index]
+        positions = {
+            position
+            for name in names
+            for position in occurrences[name]
+            if not (own_lo <= position < own_hi)
+        }
+        ext_positions[index] = sorted(positions)
+        for position in positions:
+            pos_owners.setdefault(position, []).append(index)
+    sorted_positions = sorted(pos_owners)
 
     cuts: list[CutPatch] = []
     for x_span, indices in sorted(triggers.items()):
-        spans = [x_span]
-        spans.extend(
-            (g.start_byte, g.end_byte)
+        # A candidate overlapping the deleted node is already gone.
+        seed_indices = [
+            i
             for i in indices
-            for g in [gc_nodes[i][0]]
-            # A candidate overlapping the deleted node is already gone.
-            if not (g.start_byte < x_span[1] and x_span[0] < g.end_byte)
-        )
-        if len(spans) < 2:
+            if not (
+                spans_by_index[i][0] < x_span[1] and x_span[0] < spans_by_index[i][1]
+            )
+        ]
+        if not seed_indices:
             continue
-        # Cascade: deleting these regions may orphan further
-        # declarations whose references lived inside them.
-        changed = True
-        while changed:
-            changed = False
-            for index, (candidate, _) in enumerate(gc_nodes):
-                span = (candidate.start_byte, candidate.end_byte)
-                if extents[index] is None:
-                    continue
-                if any(u < span[1] and span[0] < v for u, v in spans):
-                    continue
-                if is_orphaned(index, spans):
-                    spans.append(span)
-                    changed = True
-        cuts.append(sorted(set(spans)))
+        seed_spans = [spans_by_index[i] for i in seed_indices]
+        cuts.append(
+            _collect_orphans(
+                x_span,
+                seed_indices,
+                seed_spans,
+                spans_by_index,
+                ext_positions,
+                pos_owners,
+                sorted_positions,
+            )
+        )
     return cuts
 
 

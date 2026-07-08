@@ -13,7 +13,8 @@ to make progress.
 """
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
+from hashlib import blake2b
 
 from attrs import define
 
@@ -250,19 +251,83 @@ def match_brackets(tokens: list[Token]) -> dict[int, int]:
     return result
 
 
+# Tokens that stop an angle bracket scan dead: this can't be a
+# template argument list if one of these appears at the top level.
+_ANGLE_TERMINATORS = frozenset([b";", b"{", b"}", b")", b"]", b"&&", b"||", b"?"])
+
+# The pending '<' opens of an angle bracket scan arriving at some token:
+# the k-th element (0-based) is the token index where the scan
+# terminates if it has k+1 opens left, and running off the list means
+# it never does. Ladders are persistent linked lists so that all token
+# positions can share their common suffixes.
+type _AngleLadder = tuple[int, "_AngleLadder"] | None
+
+
+def _angle_closes(tokens: list[Token], brackets: dict[int, int]) -> dict[int, int]:
+    """For each '<' token index, the index of the '>' (or '>>') token
+    that plausibly closes it as a template argument list; '<' tokens
+    with no plausible close are absent.
+
+    A scan's future depends only on its position and how many '<' it
+    still has open, so all scans through a token can be described at
+    once by a ladder (see _AngleLadder), built in a single right to
+    left pass: '>' closes one open, '>>' closes two, a matched '(' or
+    '[' jumps the scan past the group, and terminator, string, and
+    preprocessor tokens end the scan unsuccessfully."""
+    result: dict[int, int] = {}
+    ladders: list[_AngleLadder] = [None] * (len(tokens) + 1)
+    for j in range(len(tokens) - 1, -1, -1):
+        t = tokens[j]
+        nxt = ladders[j + 1]
+        ladder: _AngleLadder
+        if t.kind in (STRING, PREPROC):
+            ladder = None
+        elif t.kind == PUNCT:
+            if t.text == b"<":
+                # A scan starting here has one open at the next token;
+                # a scan passing through gains an open.
+                if nxt is not None:
+                    result[j] = nxt[0]
+                    ladder = nxt[1]
+                else:
+                    ladder = None
+            elif t.text == b">":
+                ladder = (j, nxt)
+            elif t.text == b">>":
+                ladder = (j, (j, nxt))
+            elif t.text in (b"(", b"["):
+                m = brackets.get(j)
+                ladder = None if m is None else ladders[m + 1]
+            elif t.text in _ANGLE_TERMINATORS:
+                ladder = None
+            else:
+                ladder = nxt
+        else:
+            ladder = nxt
+        ladders[j] = ladder
+    return result
+
+
 @define(frozen=True)
 class TokenView:
     """A tokenized view of C/C++ source: the significant (non-comment)
-    tokens plus bracket matching over them."""
+    tokens plus bracket matching and angle bracket matching over them."""
 
     source: bytes
     tokens: list[Token]
     brackets: dict[int, int]
+    angle_closes: dict[int, int]
 
 
 def token_view(source: bytes) -> TokenView:
     tokens = [t for t in lex(source) if t.kind != COMMENT]
-    return TokenView(source=source, tokens=tokens, brackets=match_brackets(tokens))
+    brackets = match_brackets(tokens)
+    return TokenView(
+        source=source,
+        tokens=tokens,
+        brackets=brackets,
+        angle_closes=_angle_closes(tokens, brackets),
+    )
 
 
 # Names that can be followed by a parenthesised group without being a
@@ -333,33 +398,7 @@ def _find_angle_close(view: TokenView, i: int) -> int | None:
     """Given the index of a '<' token, find the index of the '>' (or
     '>>') token that plausibly closes it as a template argument list.
     Returns None if this doesn't look like a template argument list."""
-    tokens = view.tokens
-    depth = 1
-    j = i + 1
-    while j < len(tokens):
-        t = tokens[j]
-        if t.kind in (STRING, PREPROC):
-            return None
-        if t.kind == PUNCT:
-            if t.text == b"<":
-                depth += 1
-            elif t.text == b">":
-                depth -= 1
-                if depth == 0:
-                    return j
-            elif t.text == b">>":
-                depth -= 2
-                if depth <= 0:
-                    return j
-            elif t.text in (b"(", b"["):
-                m = view.brackets.get(j)
-                if m is None:
-                    return None
-                j = m
-            elif t.text in (b";", b"{", b"}", b")", b"]", b"&&", b"||", b"?"):
-                return None
-        j += 1
-    return None
+    return view.angle_closes.get(i)
 
 
 def _split_on_top_level_commas(
@@ -701,6 +740,12 @@ async def replace_type_with_int(problem: ReductionProblem[bytes]) -> None:
     view = token_view(source)
     tokens = view.tokens
     template_prefixes = _template_prefixes(view)
+    # Index NAME tokens by text once, so each definition can iterate just
+    # the uses of its own name instead of rescanning every token.
+    name_uses: dict[bytes, list[int]] = {}
+    for idx, tok in enumerate(tokens):
+        if tok.kind == NAME:
+            name_uses.setdefault(tok.text, []).append(idx)
     patches: list[ReplacementPatch] = []
     for k, t in enumerate(tokens):
         if t.kind != NAME or t.text not in (b"struct", b"class", b"union"):
@@ -722,35 +767,37 @@ async def replace_type_with_int(problem: ReductionProblem[bytes]) -> None:
         edits: list[tuple[int, int, bytes]] = [
             (tokens[decl_start].start, tokens[end].end, b"")
         ]
-        p = 0
-        while p < len(tokens):
+        for p in name_uses[name]:
             if decl_start <= p <= end:
-                p += 1
                 continue
-            if tokens[p].kind == NAME and tokens[p].text == name:
-                start_byte = tokens[p].start
-                span_end = tokens[p].end
-                if p + 1 < len(tokens) and tokens[p + 1].text == b"<":
-                    m = _find_angle_close(view, p + 1)
-                    if m is not None:
-                        span_end = tokens[m].end
-                        p = m
-                edits.append((start_byte, span_end, b"int"))
-            p += 1
-        # By construction these edits never overlap: the definition span
-        # is excluded from the use scan, and uses are distinct tokens.
+            span_end = tokens[p].end
+            consumed_end = p
+            if p + 1 < len(tokens) and tokens[p + 1].text == b"<":
+                m = _find_angle_close(view, p + 1)
+                if m is not None:
+                    span_end = tokens[m].end
+                    consumed_end = m
+            # A use before the definition whose consumed `<...>` span runs
+            # into it (e.g. `S< struct S : T >`) would produce an edit
+            # overlapping the deletion, making the whole candidate
+            # self-conflicting; skip it rather than waste the candidate.
+            if p < decl_start and consumed_end >= decl_start:
+                continue
+            edits.append((tokens[p].start, span_end, b"int"))
         patches.append(tuple(sorted(edits)))
     await apply_patches(problem, Replacements(), patches)
 
 
-async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
-    """Remove namespaces, in the style of clang_delta's
-    remove-namespace: either delete the whole namespace or splice its
-    contents into the enclosing scope. extern "C" blocks are handled
-    the same way."""
-    view = token_view(problem.current_test_case)
+def _find_namespace_blocks(
+    view: TokenView,
+) -> list[tuple[int, int, int, tuple[int, int] | None]]:
+    """Find namespace declarations and extern "C" blocks, returned as
+    (decl, open, close, name_path) token index tuples: the token
+    starting the declaration, its braces, and the range of tokens
+    naming the namespace (None for extern blocks and anonymous
+    namespaces)."""
     tokens = view.tokens
-    cuts: list[CutPatch] = []
+    results: list[tuple[int, int, int, tuple[int, int] | None]] = []
     for i, t in enumerate(tokens):
         if t.kind != NAME:
             continue
@@ -772,10 +819,68 @@ async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
             continue
         if j >= len(tokens) or tokens[j].text != b"{" or j not in view.brackets:
             continue
-        close = view.brackets[j]
-        cuts.append([(t.start, tokens[close].end)])
+        results.append((i, j, view.brackets[j], name_path))
+    return results
+
+
+def _qualifier_cuts_by_path(
+    view: TokenView, paths: set[tuple[bytes, ...]]
+) -> dict[tuple[bytes, ...], list[tuple[int, int]]]:
+    """For each namespace name path, find every `<path>::` qualifier in
+    the token stream and return cuts that delete each one (the path
+    tokens plus the trailing `::`). Qualifiers inside a namespace's own
+    body count too: once the namespace is spliced away, a self-qualified
+    reference like `ns::x` dangles just like an external one. Deleting
+    these turns `ns::name` into `name` so the namespace can go.
+
+    Occurrences for all paths are found from a single indexing scan
+    over the tokens, so many namespaces don't imply many full scans. A
+    path can never match inside its own namespace's header (the header
+    is the maximal run of name tokens and is followed by `{`, never
+    `::`), so the result is safely shared between all namespaces with
+    the same name."""
+    tokens = view.tokens
+    occurrences: dict[bytes, list[int]] = {path[0]: [] for path in paths}
+    for idx, tok in enumerate(tokens):
+        if tok.text in occurrences:
+            occurrences[tok.text].append(idx)
+    result: dict[tuple[bytes, ...], list[tuple[int, int]]] = {}
+    for path in paths:
+        n = len(path)
+        cuts: list[tuple[int, int]] = []
+        min_next = 0
+        for p in occurrences[path[0]]:
+            if p < min_next or p + n >= len(tokens):
+                continue
+            if (
+                all(tokens[p + k].text == path[k] for k in range(n))
+                and tokens[p + n].text == b"::"
+            ):
+                cuts.append((tokens[p].start, tokens[p + n].end))
+                min_next = p + n + 1
+        result[path] = cuts
+    return result
+
+
+async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
+    """Remove namespaces, in the style of clang_delta's
+    remove-namespace: either delete the whole namespace or splice its
+    contents into the enclosing scope. extern "C" blocks are handled
+    the same way."""
+    view = token_view(problem.current_test_case)
+    tokens = view.tokens
+    blocks = _find_namespace_blocks(view)
+    paths: set[tuple[bytes, ...]] = set()
+    for _, _, _, name_path in blocks:
+        if name_path is not None:
+            lo, hi = name_path
+            paths.add(tuple(t.text for t in tokens[lo:hi]))
+    qualifier_cuts = _qualifier_cuts_by_path(view, paths)
+    cuts: list[CutPatch] = []
+    for decl, open_idx, close, name_path in blocks:
+        cuts.append([(tokens[decl].start, tokens[close].end)])
         splice = [
-            (t.start, tokens[j].end),
+            (tokens[decl].start, tokens[open_idx].end),
             (tokens[close].start, tokens[close].end),
         ]
         cuts.append(splice)
@@ -785,41 +890,11 @@ async def remove_namespaces(problem: ReductionProblem[bytes]) -> None:
         # namespace's qualifier from references, which is what actually
         # lets the namespace go.
         if name_path is not None:
-            qualifier_cuts = _namespace_qualifier_cuts(view, name_path, i, close)
-            if qualifier_cuts:
-                cuts.append(splice + qualifier_cuts)
+            lo, hi = name_path
+            path_cuts = qualifier_cuts[tuple(t.text for t in tokens[lo:hi])]
+            if path_cuts:
+                cuts.append(splice + path_cuts)
     await apply_patches(problem, Cuts(), cuts)
-
-
-def _namespace_qualifier_cuts(
-    view: TokenView, name_path: tuple[int, int], decl_start: int, decl_end: int
-) -> list[tuple[int, int]]:
-    """Find every `<path>::` qualifier that names the namespace declared
-    by the tokens in [name_path[0], name_path[1]), outside the
-    declaration itself, and return cuts that delete each one (the path
-    tokens plus the trailing `::`). Deleting these turns `ns::name` into
-    `name` so the namespace can be spliced away."""
-    tokens = view.tokens
-    lo, hi = name_path
-    path_texts = [tokens[k].text for k in range(lo, hi)]
-    n = len(path_texts)
-    cuts: list[tuple[int, int]] = []
-    p = 0
-    limit = len(tokens) - n
-    while p <= limit:
-        if decl_start <= p <= decl_end:
-            p += 1
-            continue
-        if (
-            all(tokens[p + k].text == path_texts[k] for k in range(n))
-            and p + n < len(tokens)
-            and tokens[p + n].text == b"::"
-        ):
-            cuts.append((tokens[p].start, tokens[p + n].end))
-            p += n + 1
-        else:
-            p += 1
-    return cuts
 
 
 async def remove_template_parts(problem: ReductionProblem[bytes]) -> None:
@@ -964,28 +1039,33 @@ def find_typedefs(view: TokenView) -> list[TypedefInfo]:
     return results
 
 
-def typedef_inlining_candidates(source: bytes) -> list[bytes]:
-    """For each simple typedef, produce a variant of the source with
-    the typedef removed and every use of its name replaced by its
-    definition."""
+def _name_use_index(tokens: list[Token]) -> dict[bytes, list[int]]:
+    """Index the positions of every NAME token by its text, in a single
+    pass, so callers can iterate just the uses of a given name."""
+    index: dict[bytes, list[int]] = {}
+    for i, t in enumerate(tokens):
+        if t.kind == NAME:
+            index.setdefault(t.text, []).append(i)
+    return index
+
+
+def typedef_inlining_candidates(source: bytes) -> Iterator[bytes]:
+    """For each simple typedef, yield a variant of the source with the
+    typedef removed and every use of its name replaced by its
+    definition. Candidates are produced lazily, one at a time."""
     view = token_view(source)
     tokens = view.tokens
+    name_uses = _name_use_index(tokens)
     replacer = Replacements()
-    results: list[bytes] = []
     for td in find_typedefs(view):
         edits: list[tuple[int, int, bytes]] = [
             (tokens[td.decl_start].start, tokens[td.decl_end].end, b"")
         ]
-        for i, t in enumerate(tokens):
-            if (
-                t.kind == NAME
-                and t.text == td.name
-                and not td.decl_start <= i <= td.decl_end
-            ):
-                edits.append((t.start, t.end, td.definition))
+        for i in name_uses.get(td.name, ()):
+            if not td.decl_start <= i <= td.decl_end:
+                edits.append((tokens[i].start, tokens[i].end, td.definition))
         if len(edits) > 1:
-            results.append(replacer.apply(tuple(sorted(edits)), source))
-    return results
+            yield replacer.apply(tuple(sorted(edits)), source)
 
 
 def _single_statement_body(view: TokenView, f: FunctionInfo) -> tuple[int, int] | None:
@@ -1042,15 +1122,16 @@ def _parameter_names(view: TokenView, f: FunctionInfo) -> list[bytes] | None:
     return names
 
 
-def function_inlining_candidates(source: bytes) -> list[bytes]:
-    """For each function whose body is a single statement, produce
+def function_inlining_candidates(source: bytes) -> Iterator[bytes]:
+    """For each function whose body is a single statement, yield
     variants of the source where a call to it is replaced by the
     (parenthesised) body expression with arguments substituted for
-    parameters. This is in the style of clang_delta's simple-inliner."""
+    parameters. This is in the style of clang_delta's simple-inliner.
+    Candidates are produced lazily, one at a time."""
     view = token_view(source)
     tokens = view.tokens
+    name_uses = _name_use_index(tokens)
     replacer = Replacements()
-    results: list[bytes] = []
     for f in find_function_definitions(view):
         expr_range = _single_statement_body(view, f)
         if expr_range is None:
@@ -1061,11 +1142,9 @@ def function_inlining_candidates(source: bytes) -> list[bytes]:
         expr_lo, expr_hi = expr_range
         expr_start = tokens[expr_lo].start
         expr_end = tokens[expr_hi - 1].end
-        for i, t in enumerate(tokens):
+        for i in name_uses.get(f.name, ()):
             if (
-                t.kind != NAME
-                or t.text != f.name
-                or f.decl_starts[0] <= i <= f.body_close
+                f.decl_starts[0] <= i <= f.body_close
                 or i + 1 >= len(tokens)
                 or tokens[i + 1].text != b"("
                 or i + 1 not in view.brackets
@@ -1092,8 +1171,7 @@ def function_inlining_candidates(source: bytes) -> list[bytes]:
             expr_source = source[expr_start:expr_end]
             inlined = b"(" + replacer.apply(expr_edits, expr_source) + b")"
             call_edit = ((tokens[i].start, tokens[call_close].end, inlined),)
-            results.append(replacer.apply(call_edit, source))
-    return results
+            yield replacer.apply(call_edit, source)
 
 
 # Bound on how many candidates a pump will adopt in a single
@@ -1104,26 +1182,30 @@ MAX_PUMP_ADOPTIONS = 20
 
 
 def _candidate_pump(
-    name: str, derive: Callable[[bytes], list[bytes]]
+    name: str, derive: Callable[[bytes], Iterable[bytes]]
 ) -> ReductionPump[bytes]:
     """Build a pump from a function that derives candidate variants
     (possibly larger than the input) from the current test case.
 
     Candidates are tried in order; whenever one is interesting we adopt
     it and rederive. The result is the last interesting variant, which
-    the reducer will then try to reduce below the original."""
+    the reducer will then try to reduce below the original.
+
+    Candidates can be large, so `seen` records their blake2b digests
+    rather than the candidate bytes themselves."""
 
     async def pump(problem: ReductionProblem[bytes]) -> bytes:
         target = problem.current_test_case
-        seen = {target}
+        seen = {blake2b(target).digest()}
         adoptions = 0
         improved = True
         while improved and adoptions < MAX_PUMP_ADOPTIONS:
             improved = False
             for candidate in derive(target):
-                if candidate in seen:
+                digest = blake2b(candidate).digest()
+                if digest in seen:
                     continue
-                seen.add(candidate)
+                seen.add(digest)
                 if await problem.is_interesting(candidate):
                     target = candidate
                     adoptions += 1

@@ -53,60 +53,112 @@ async def drive_external_reducer(
     reused across calls so buffered bytes are not lost.
 
     Returns True if the reducer went idle (and is still alive), or False if it
-    exited (EOF) or timed out.
+    exited (EOF), wedged (a send blocked or the reducer fell silent with nothing
+    outstanding for ``timeout``), or the connection broke.
     """
     send_lock = trio.Lock()
 
-    async def send(data: bytes) -> None:
-        async with send_lock:
-            try:
-                await send_stream.send_all(data)
-            except (trio.BrokenResourceError, trio.ClosedResourceError):
-                # The reducer exited; nothing more to say.
-                pass
+    async def timed_send(data: bytes) -> bool:
+        """Send ``data`` to the reducer, bounded by ``timeout``.
 
-    await send(encode_feedback(problem.current_test_case, True))
+        Returns True on success. Returns False if the reducer's input is gone
+        (broken/closed) or if the send blocks for longer than ``timeout`` -- a
+        reducer that has wedged without reading its stdin. Either way a stuck
+        send can never hang the reduction.
+        """
+        with trio.move_on_after(timeout):
+            async with send_lock:
+                try:
+                    await send_stream.send_all(data)
+                except (trio.BrokenResourceError, trio.ClosedResourceError):
+                    return False
+            return True
+        return False
+
+    # Hand the reducer the current test case. If even this cannot be delivered
+    # the reducer is unusable, so give up rather than block forever.
+    if not await timed_send(encode_feedback(problem.current_test_case, True)):
+        return False
 
     # A semaphore (not a CapacityLimiter) because it is acquired by the reader
     # loop but released by the handler task, and semaphore tokens are not bound
     # to the acquiring task.
     slots = trio.Semaphore(max(parallelism, 1))
-
-    async def handle(candidate: bytes) -> None:
-        try:
-            interesting = await problem.is_interesting(candidate)
-            await send(encode_feedback(candidate, interesting))
-        finally:
-            slots.release()
-
+    # Queries dispatched but not yet answered. The idle timeout must never fire
+    # while a query is outstanding: a reducer awaiting our answer is working, not
+    # wedged. Only the reader loop increments this; only handlers decrement it.
+    outstanding = 0
     idle = False
+    # The idle timeout is measured against this deadline, refreshed whenever we
+    # return to having nothing outstanding. Malformed and blank lines do not
+    # refresh it, so a reducer that only spews garbage is still terminated.
+    deadline = trio.current_time() + timeout
+    # While a read runs with queries outstanding it is untimed; ``reader_scope``
+    # lets the handler that empties the outstanding set wake the reader so it
+    # re-arms the idle timeout the moment it becomes idle again.
+    reader_scope: trio.CancelScope | None = None
+
     async with trio.open_nursery() as nursery:
+
+        async def handle(candidate: bytes) -> None:
+            nonlocal outstanding, deadline
+            try:
+                interesting = await problem.is_interesting(candidate)
+                if not await timed_send(encode_feedback(candidate, interesting)):
+                    # The reducer stopped reading; tear the whole request down.
+                    nursery.cancel_scope.cancel()
+            finally:
+                outstanding -= 1
+                slots.release()
+                if outstanding == 0:
+                    deadline = trio.current_time() + timeout
+                    if reader_scope is not None:
+                        reader_scope.cancel()
+
         while True:
             # Acquire a slot before reading so a flood of queries can't outrun
             # our workers: once all slots are busy the pipe fills and the reducer
             # blocks on its next send.
             await slots.acquire()
+            got_line = False
             line: bytes | None = None
-            with trio.move_on_after(timeout) as scope:
+            with trio.CancelScope() as scope:
+                if outstanding == 0:
+                    # Idle: enforce the timeout so a silent reducer is terminated.
+                    scope.deadline = deadline
+                else:
+                    # Busy: read untimed, but let a completing handler wake us.
+                    reader_scope = scope
                 line = await reader.readline()
-            if scope.cancelled_caught:
+                got_line = True
+            reader_scope = None
+            if not got_line:
+                # The read was cancelled: either the idle timeout elapsed with
+                # nothing outstanding (the reducer is wedged) or a handler that
+                # just went idle woke us to re-arm the timeout.
+                slots.release()
+                if outstanding == 0 and trio.current_time() >= deadline:
+                    break
+                continue
+            if line is None:  # EOF: the reducer exited.
                 slots.release()
                 break
-            if line is None:
-                slots.release()
-                break
-            if not line.strip():
+            if not line.strip():  # Blank line: ignored, not useful activity.
                 slots.release()
                 continue
             try:
                 message = parse_from_reducer(line)
             except ValueError:
+                # Malformed line: ignored. Unlike a real message it does not
+                # refresh the idle deadline, so a reducer that only spews
+                # garbage is still eventually terminated.
                 slots.release()
                 continue
             if isinstance(message, Idle):
                 slots.release()
                 idle = True
                 break
+            outstanding += 1
             nursery.start_soon(handle, message.content)
         nursery.cancel_scope.cancel()
     return idle

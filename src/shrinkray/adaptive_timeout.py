@@ -29,7 +29,11 @@ a timeout from them:
 - When the reducer runs out of things to try (`attempt_unstick`), any
   timeouts seen since the last reduction trigger the same upward
   exploration, so a reduction never ends while a raised timeout might
-  still unlock progress.
+  still unlock progress. Such a raise has to pay off, though: if the
+  round it unlocked found no reduction, attempt_unstick refuses to raise
+  again. Without this, a candidate whose test never terminates would
+  re-arm the timeout counter every round and an uncapped reduction would
+  double the timeout and replay forever instead of finishing.
 
 Timeout results interact with result caching: a candidate that timed out
 at 5s might succeed at 10s, so cached timeout-failures are only valid
@@ -93,9 +97,10 @@ class AdaptiveTimeoutPolicy:
         rung_budget: int = RUNG_RUN_BUDGET,
     ) -> None:
         # A user timeout of infinity means no upper bound: the timeout
-        # still adapts to measured runtimes, and exploration may raise it
-        # indefinitely, so no candidate is ever permanently lost to a
-        # timeout.
+        # still adapts to measured runtimes, and exploration may keep
+        # raising it for as long as doing so keeps paying off (an unstick
+        # raise whose round finds no reduction is not repeated, so a test
+        # that never terminates cannot keep the reduction alive forever).
         if user_timeout is None:
             self.__cap = default_cap
         else:
@@ -120,6 +125,11 @@ class AdaptiveTimeoutPolicy:
         # Timeouts seen since the last reduction that happened below the
         # cap (timeouts at the cap can't be helped by raising it).
         self.__timeouts_below_cap = 0
+        # Set when attempt_unstick raised the timeout; cleared by the next
+        # reduction. While set, attempt_unstick refuses to raise again:
+        # the previous raise didn't pay off, and a hanging test would
+        # otherwise re-trigger it every round, forever.
+        self.__raised_without_reduction = False
         self.__last_progress = clock()
 
     @property
@@ -161,6 +171,7 @@ class AdaptiveTimeoutPolicy:
         self.__last_progress = self.__clock()
         self.__timeouts_below_cap = 0
         self.__exploration_exhausted = False
+        self.__raised_without_reduction = False
         self.__reset_exploration()
 
     def attempt_unstick(self) -> bool:
@@ -169,15 +180,29 @@ class AdaptiveTimeoutPolicy:
         Returns True if the timeout was raised, in which case another
         round of reduction may now make progress (previously cached
         timeout-failures become invalid and will be retried).
+
+        A slow reduction may only be unlocked several rungs above the
+        adapted timeout, so repeated fruitless raises are allowed to climb
+        towards the cap: the cap bounds the climb, and once the timeout
+        reaches it no further raise is possible. Without a cap (--timeout
+        0) there is no such bound, so a test that never terminates would
+        time out at every raised timeout, re-arm the counter, and be raised
+        forever; in that case only a single fruitless raise is allowed
+        before giving up.
         """
         if self.__exploration_exhausted:
             return False
-        if self.__timeouts_below_cap > 0 and self.__rung_timeout(
-            self.__level + 1
-        ) > self.__rung_timeout(self.__level):
+        uncapped = math.isinf(self.__cap)
+        if (
+            not (uncapped and self.__raised_without_reduction)
+            and self.__timeouts_below_cap > 0
+            and self.__rung_timeout(self.__level + 1)
+            > self.__rung_timeout(self.__level)
+        ):
             self.__level += 1
             self.__runs_at_level = 0
             self.__timeouts_at_level = 0
+            self.__raised_without_reduction = True
             return True
         if self.__level > 0:
             self.__reset_exploration()
@@ -199,6 +224,7 @@ class AdaptiveTimeoutPolicy:
         self.__timed_out_flags.clear()
         self.__timeouts_below_cap = 0
         self.__exploration_exhausted = False
+        self.__raised_without_reduction = False
         self.__reset_exploration()
         self.__last_progress = self.__clock()
 

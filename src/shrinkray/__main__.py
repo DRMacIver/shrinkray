@@ -107,9 +107,12 @@ async def run_shrink_ray(
     help=(
         "Cap the address space of each interestingness-test subprocess so a "
         "runaway test cannot exhaust host memory. Accepts a byte count or a "
-        "K/M/G/T suffix (e.g. '4G'). Set to 0 to disable. Defaults to the "
-        "machine's physical RAM. Enforced via RLIMIT_AS, which is not honoured "
-        "on macOS (there it only warns if the initial test exceeds it)."
+        "K/M/G/T suffix (e.g. '4G'), with a minimum of 1 MiB. Set to 0 to "
+        "disable. Defaults to the machine's physical RAM. Enforced via "
+        "RLIMIT_AS, which is not honoured on macOS (there it only warns if "
+        "the initial test exceeds it). When left at the default, it is "
+        "disabled automatically if the initial test only passes without it "
+        "(e.g. sanitizer builds, which abort under any address-space cap)."
     ),
 )
 @click.option(
@@ -340,7 +343,17 @@ def main(
     if timeout is not None and timeout <= 0:
         timeout = float("inf")
 
-    if memory_limit is not None and not MEMORY_LIMIT_ENFORCEABLE:
+    # Only warn about unenforceable limits when the user explicitly asked for
+    # one: the default (physical RAM) is applied silently, so macOS users are
+    # not nagged on every run for a limit they never set.
+    memory_limit_source = click.get_current_context().get_parameter_source(
+        "memory_limit"
+    )
+    if (
+        memory_limit is not None
+        and not MEMORY_LIMIT_ENFORCEABLE
+        and memory_limit_source == click.core.ParameterSource.COMMANDLINE
+    ):
         print(
             "Warning: --memory-limit cannot be enforced on this platform "
             "(macOS does not honour RLIMIT_AS); shrink ray will still warn if "
@@ -406,6 +419,13 @@ def main(
     # If --no-history and --also-interesting not explicit, disable also-interesting
     ctx = click.get_current_context()
 
+    # Whether the user set --memory-limit themselves (vs the physical-RAM
+    # default). Only the default is auto-disabled when it blocks the initial
+    # test. Reuses the source already computed for the enforceability warning.
+    memory_limit_explicit = (
+        memory_limit_source == click.core.ParameterSource.COMMANDLINE
+    )
+
     if (
         llm_only
         and not llm
@@ -470,6 +490,7 @@ def main(
             parallelism=parallelism,
             timeout=timeout,
             memory_limit=memory_limit,
+            memory_limit_explicit=memory_limit_explicit,
             seed=seed,
             input_type=input_type.name,
             in_place=in_place,
@@ -498,6 +519,7 @@ def main(
         test=test,
         timeout=timeout,
         memory_limit=memory_limit,
+        memory_limit_explicit=memory_limit_explicit,
         parallelism=parallelism,
         formatter=formatter,
         trivial_is_error=trivial_is_error,

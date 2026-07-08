@@ -350,6 +350,171 @@ async def test_drive_returns_false_on_timeout() -> None:
     assert alive is False
 
 
+class _BlockingSendStream(trio.abc.SendStream):
+    """A send stream whose send_all never completes (the peer never reads)."""
+
+    async def send_all(self, data: bytes | bytearray | memoryview) -> None:
+        await trio.sleep_forever()
+
+    async def wait_send_all_might_not_block(self) -> None:
+        await trio.lowlevel.checkpoint()
+
+    async def aclose(self) -> None:
+        await trio.lowlevel.checkpoint()
+
+
+class _CountingBlockSendStream(trio.abc.SendStream):
+    """Completes the first ``allow`` sends, then blocks forever."""
+
+    def __init__(self, allow: int) -> None:
+        self._allow = allow
+
+    async def send_all(self, data: bytes | bytearray | memoryview) -> None:
+        if self._allow > 0:
+            self._allow -= 1
+            await trio.lowlevel.checkpoint()
+            return
+        await trio.sleep_forever()
+
+    async def wait_send_all_might_not_block(self) -> None:
+        await trio.lowlevel.checkpoint()
+
+    async def aclose(self) -> None:
+        await trio.lowlevel.checkpoint()
+
+
+async def test_drive_returns_false_when_initial_send_wedges(autojump_clock) -> None:
+    """A reducer that never reads its stdin can't hang the initial send forever.
+
+    With a test case bigger than the pipe buffer and a peer that never reads,
+    the initial send would block indefinitely. It is now bounded by the timeout,
+    so drive gives up and returns False instead of hanging the whole reduction.
+    """
+    problem = make_basic_problem(b"x" * 1_000_000, lambda x: True)
+    _q_send, q_recv = memory_stream_one_way_pair()
+    reader = LineReader(q_recv)
+    with trio.fail_after(1000):
+        alive = await drive_external_reducer(
+            problem,
+            send_stream=_BlockingSendStream(),
+            reader=reader,
+            timeout=60.0,
+            parallelism=1,
+        )
+    assert alive is False
+
+
+async def test_drive_returns_false_when_handler_send_wedges(autojump_clock) -> None:
+    """A pipelining reducer that floods queries but never reads our answers can't
+    deadlock the driver: handler sends are bounded, so a wedged send tears the
+    reduction down instead of blocking forever with the reader stuck acquiring a
+    slot (the three-way mutual-flood deadlock)."""
+    problem = make_basic_problem(b"hello\n", lambda x: True, parallelism=2)
+    send_stream = _CountingBlockSendStream(allow=1)  # initial ok; answers wedge
+    q_send, q_recv = memory_stream_one_way_pair()
+    reader = LineReader(q_recv)
+    # Flood more queries than there are slots so the reader blocks acquiring one.
+    for i in range(5):
+        await q_send.send_all(encode_query(f"cand{i}\n".encode()))
+    with trio.fail_after(1000):
+        alive = await drive_external_reducer(
+            problem,
+            send_stream=send_stream,
+            reader=reader,
+            timeout=60.0,
+            parallelism=2,
+        )
+    assert alive is False
+
+
+async def test_drive_not_killed_while_query_outstanding(autojump_clock) -> None:
+    """A healthy reducer waiting for our (slow) answer is not treated as idle.
+
+    With parallelism >= 2 and one outstanding query, the reducer legitimately
+    stays silent until we answer. If the interestingness test is slower than the
+    idle timeout, the driver must not fire the idle timeout and kill a healthy
+    reducer mid-test.
+    """
+
+    async def slow(x: bytes) -> bool:
+        await trio.sleep(1.5)  # slower than the 0.5s idle timeout
+        return b"h" in x
+
+    problem: BasicReductionProblem[bytes] = BasicReductionProblem(
+        initial=b"hello\n",
+        is_interesting=slow,
+        work=WorkContext(parallelism=2),
+        sort_key=sort_key_for_initial(b"hello\n"),
+    )
+    fb_send, fb_recv = memory_stream_one_way_pair()
+    q_send, q_recv = memory_stream_one_way_pair()
+    reader = LineReader(q_recv)
+    result: list[bool] = []
+
+    with trio.fail_after(1000):
+        async with trio.open_nursery() as nursery:
+
+            @nursery.start_soon
+            async def _shrinkray() -> None:
+                result.append(
+                    await drive_external_reducer(
+                        problem,
+                        send_stream=fb_send,
+                        reader=reader,
+                        timeout=0.5,
+                        parallelism=2,
+                    )
+                )
+
+            @nursery.start_soon
+            async def _reducer() -> None:
+                fb_reader = LineReader(fb_recv)
+                first = await fb_reader.readline()
+                assert first is not None  # initial test case
+                await q_send.send_all(encode_query(b"h\n"))
+                answer = await fb_reader.readline()
+                assert answer is not None
+                content, interesting = decode_feedback(answer)
+                assert content == b"h\n"
+                assert interesting is True
+                await q_send.send_all(encode_idle())
+
+    assert result == [True]
+
+
+async def test_drive_terminates_on_endless_garbage(autojump_clock) -> None:
+    """A reducer that only spews malformed lines is still eventually terminated.
+
+    Malformed input is not useful activity, so it must not keep refreshing the
+    idle timeout; otherwise a garbage-spewing reducer would stay alive forever.
+    """
+    problem = make_basic_problem(b"hello\n", lambda x: True)
+    fb_send, _fb_recv = memory_stream_one_way_pair()
+    q_send, q_recv = memory_stream_one_way_pair()
+    reader = LineReader(q_recv)
+
+    async with trio.open_nursery() as nursery:
+
+        @nursery.start_soon
+        async def _garbage() -> None:
+            while True:
+                await q_send.send_all(b"garbage not json\n")
+                await trio.sleep(0.05)
+
+        @nursery.start_soon
+        async def _drive() -> None:
+            with trio.fail_after(50):
+                alive = await drive_external_reducer(
+                    problem,
+                    send_stream=fb_send,
+                    reader=reader,
+                    timeout=1.0,
+                    parallelism=1,
+                )
+            assert alive is False
+            nursery.cancel_scope.cancel()
+
+
 async def test_drive_returns_false_and_tolerates_broken_send() -> None:
     """A broken send stream is swallowed and EOF returns False."""
     problem = make_basic_problem(b"hello\n", lambda x: True)

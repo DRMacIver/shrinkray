@@ -1,4 +1,6 @@
+import types
 from pathlib import Path
+from unittest.mock import patch
 
 import trio
 from hypothesis import given
@@ -14,9 +16,12 @@ from shrinkray.passes.cpp import (
     PREPROC,
     PUNCT,
     STRING,
+    TokenView,
     _candidate_pump,
     _find_angle_close,
     _find_class_base_lists,
+    _find_namespace_blocks,
+    _qualifier_cuts_by_path,
     _split_on_top_level_commas,
     delete_function_definitions,
     find_function_definitions,
@@ -37,6 +42,7 @@ from shrinkray.passes.cpp import (
     typedef_inlining_candidates,
 )
 from shrinkray.passes.genericlanguages import cut_comment_like_things
+from shrinkray.passes.patching import Replacements
 from shrinkray.problem import BasicReductionProblem
 from shrinkray.work import WorkContext
 from tests.helpers import reduce_with
@@ -457,6 +463,26 @@ def test_removes_namespace_and_strips_qualified_references():
     assert b"template struct Queue;" in result.replace(b"\n", b"")
 
 
+def test_strips_self_qualified_references_inside_namespace_body():
+    # A namespace whose body refers to its own members with a qualified
+    # name (`ns::x`) can only be spliced away if those inner qualifiers
+    # are stripped along with the ones outside the namespace.
+    def is_interesting(x: bytes) -> bool:
+        if b"int x" not in x or b"int z" not in x:
+            return False
+        # Simulate a compiler: `ns::` references only resolve while the
+        # namespace still exists.
+        return b"namespace ns" in x or b"ns::" not in x
+
+    result = reduce_with(
+        [remove_namespaces],
+        b"namespace ns { int x; int y = ns::x; } int z = ns::x;\n",
+        is_interesting,
+    )
+    assert b"namespace" not in result
+    assert b"ns::" not in result
+
+
 def test_strips_nested_namespace_path_qualifier():
     result = reduce_with(
         [remove_namespaces],
@@ -466,6 +492,82 @@ def test_strips_nested_namespace_path_qualifier():
     assert b"namespace" not in result
     assert b"a::b::" not in result
     assert b"int w = v;" in result.replace(b"\n", b"")
+
+
+# === Namespace qualifier scanning ===
+#
+# All namespaces' qualifier cuts are found with a single indexed scan
+# over the tokens. These tests check that the indexed scan agrees with
+# the straightforward (but per-namespace, hence quadratic) scan it
+# replaced, kept here as a reference implementation.
+
+
+def _reference_namespace_qualifier_cuts(
+    view: TokenView, name_path: tuple[int, int], decl_start: int
+) -> list[tuple[int, int]]:
+    """Pre-index implementation of namespace qualifier scanning: walk
+    the whole token list for one namespace's path, skipping the
+    declaration header, consuming matched qualifiers."""
+    tokens = view.tokens
+    lo, hi = name_path
+    path_texts = [tokens[k].text for k in range(lo, hi)]
+    n = len(path_texts)
+    cuts: list[tuple[int, int]] = []
+    p = 0
+    limit = len(tokens) - n
+    while p <= limit:
+        if decl_start <= p <= hi:
+            p += 1
+            continue
+        if (
+            all(tokens[p + k].text == path_texts[k] for k in range(n))
+            and p + n < len(tokens)
+            and tokens[p + n].text == b"::"
+        ):
+            cuts.append((tokens[p].start, tokens[p + n].end))
+            p += n + 1
+        else:
+            p += 1
+    return cuts
+
+
+NAMESPACEY_SOURCES = st.lists(
+    st.sampled_from(
+        ["namespace", "extern", "a", "b", "x", "::", "{", "}", ";", "=", '"C"']
+    ),
+    max_size=30,
+).map(lambda parts: " ".join(parts).encode())
+
+
+@given(NAMESPACEY_SOURCES)
+def test_qualifier_cut_index_matches_reference_scan(source: bytes):
+    view = token_view(source)
+    tokens = view.tokens
+    blocks = _find_namespace_blocks(view)
+    paths: set[tuple[bytes, ...]] = set()
+    for _, _, _, name_path in blocks:
+        if name_path is not None:
+            lo, hi = name_path
+            paths.add(tuple(t.text for t in tokens[lo:hi]))
+    index = _qualifier_cuts_by_path(view, paths)
+    for decl, _, _, name_path in blocks:
+        if name_path is None:
+            continue
+        lo, hi = name_path
+        key = tuple(t.text for t in tokens[lo:hi])
+        assert index[key] == _reference_namespace_qualifier_cuts(view, name_path, decl)
+
+
+def test_qualifier_cuts_consume_overlapping_matches():
+    # After matching `a::a` followed by `::`, the scan resumes after the
+    # consumed qualifier, so the overlapping `a::a::` starting at the
+    # second `a` is not also cut.
+    source = b"namespace a::a { }\na::a::a::x;\n"
+    view = token_view(source)
+    [cuts] = _qualifier_cuts_by_path(view, {(b"a", b"::", b"a")}).values()
+    assert [source[:s] + source[e:] for s, e in cuts] == [
+        b"namespace a::a { }\na::x;\n"
+    ]
 
 
 # === remove_base_classes ===
@@ -636,6 +738,20 @@ def test_replace_type_handles_bases_and_nested_templates():
     assert b"int make();" in result.replace(b"\n", b"")
 
 
+def test_replace_type_skips_use_whose_span_overlaps_the_definition():
+    # The first use of S consumes a `<...>` span that runs into the
+    # first definition of S. Emitting an edit for it would make the
+    # candidate self-conflicting (and so useless); the overlapping use
+    # is skipped instead, so the definition can still be replaced.
+    result = reduce_with(
+        [replace_type_with_int],
+        b"S< struct S : T > ; struct S : T { }; S y;",
+        lambda x: b"{ }" in x and b"y;" in x,
+    )
+    assert b"struct S" not in result
+    assert b"{ }" in result
+
+
 def test_replace_type_does_not_touch_value_uses_that_break():
     # When the interestingness test needs the type to stay (here it
     # requires the `S s` declaration verbatim), the replace candidate is
@@ -785,14 +901,41 @@ def test_finds_struct_typedef():
 
 
 def test_typedef_inlining_candidate_replaces_uses():
-    candidates = typedef_inlining_candidates(
-        b"typedef unsigned long ul;\nul f(ul x) { return x; }\n"
+    candidates = list(
+        typedef_inlining_candidates(
+            b"typedef unsigned long ul;\nul f(ul x) { return x; }\n"
+        )
     )
     assert candidates == [b"\nunsigned long f(unsigned long x) { return x; }\n"]
 
 
 def test_typedef_with_no_uses_produces_no_candidates():
-    assert typedef_inlining_candidates(b"typedef int unused_t;\nint x;\n") == []
+    assert list(typedef_inlining_candidates(b"typedef int unused_t;\nint x;\n")) == []
+
+
+def test_typedef_inlining_candidates_are_lazy():
+    # Each typedef with a use yields one candidate. Producing just the
+    # first must not build every full-file rewrite: we count the whole
+    # source rewrites (Replacements.apply) and check that the first
+    # candidate costs far fewer of them than the whole run.
+    source = b"".join(b"typedef int t%d; t%d x%d;\n" % (i, i, i) for i in range(50))
+    calls = 0
+    original_apply = Replacements.apply
+
+    def counting_apply(self, patch, target):
+        nonlocal calls
+        calls += 1
+        return original_apply(self, patch, target)
+
+    with patch.object(Replacements, "apply", counting_apply):
+        candidates = typedef_inlining_candidates(source)
+        assert isinstance(candidates, types.GeneratorType)
+        next(candidates)
+        after_first = calls
+        rest = list(candidates)
+        after_all = calls
+    assert len(rest) == 49
+    assert after_first < after_all
 
 
 def test_inline_typedefs_pump():
@@ -818,8 +961,10 @@ def test_inline_typedefs_pump():
 
 
 def test_function_inlining_substitutes_arguments():
-    candidates = function_inlining_candidates(
-        b"int sq(int x) { return x * x; }\nint main() { return sq(3); }\n"
+    candidates = list(
+        function_inlining_candidates(
+            b"int sq(int x) { return x * x; }\nint main() { return sq(3); }\n"
+        )
     )
     assert candidates == [
         b"int sq(int x) { return x * x; }\nint main() { return ((3) * (3)); }\n"
@@ -827,36 +972,71 @@ def test_function_inlining_substitutes_arguments():
 
 
 def test_function_inlining_produces_candidate_per_call():
-    candidates = function_inlining_candidates(
-        b"int sq(int x) { return x * x; }\nint main() { return sq(3) + sq(4); }\n"
+    candidates = list(
+        function_inlining_candidates(
+            b"int sq(int x) { return x * x; }\nint main() { return sq(3) + sq(4); }\n"
+        )
     )
     assert len(candidates) == 2
 
 
+def test_function_inlining_candidates_are_lazy():
+    # Producing the first inlined candidate must not build all of them.
+    source = b"".join(
+        b"int f%d(int x) { return x; }\nint m%d() { return f%d(1); }\n" % (i, i, i)
+        for i in range(50)
+    )
+    calls = 0
+    original_apply = Replacements.apply
+
+    def counting_apply(self, patch, target):
+        nonlocal calls
+        calls += 1
+        return original_apply(self, patch, target)
+
+    with patch.object(Replacements, "apply", counting_apply):
+        candidates = function_inlining_candidates(source)
+        assert isinstance(candidates, types.GeneratorType)
+        next(candidates)
+        after_first = calls
+        rest = list(candidates)
+        after_all = calls
+    assert len(rest) == 49
+    assert after_first < after_all
+
+
 def test_function_inlining_skips_arity_mismatch():
     assert (
-        function_inlining_candidates(
-            b"int sq(int x) { return x * x; }\nint main() { return sq(3, 4); }\n"
+        list(
+            function_inlining_candidates(
+                b"int sq(int x) { return x * x; }\nint main() { return sq(3, 4); }\n"
+            )
         )
         == []
     )
 
 
 def test_function_inlining_handles_void_parameter_list():
-    candidates = function_inlining_candidates(
-        b"int five(void) { return 5; }\nint main() { return five(); }\n"
+    candidates = list(
+        function_inlining_candidates(
+            b"int five(void) { return 5; }\nint main() { return five(); }\n"
+        )
     )
     assert candidates == [b"int five(void) { return 5; }\nint main() { return (5); }\n"]
 
 
 def test_function_inlining_skips_recursive_calls():
-    assert function_inlining_candidates(b"int f(int x) { return f(x - 1); }\n") == []
+    assert (
+        list(function_inlining_candidates(b"int f(int x) { return f(x - 1); }\n")) == []
+    )
 
 
 def test_function_inlining_skips_multi_statement_bodies():
     assert (
-        function_inlining_candidates(
-            b"int f(int x) { g(); return x; }\nint main() { return f(3); }\n"
+        list(
+            function_inlining_candidates(
+                b"int f(int x) { g(); return x; }\nint main() { return f(3); }\n"
+            )
         )
         == []
     )
@@ -1022,6 +1202,86 @@ def test_angle_close_rejects_end_of_file():
     assert angle_close_text(b"a < b", 1) is None
 
 
+def _reference_find_angle_close(view: TokenView, i: int) -> int | None:
+    """Pre-precompute implementation of _find_angle_close: a fresh
+    forward scan from each '<', kept as a reference for the equivalence
+    test of the whole-stream construction."""
+    tokens = view.tokens
+    depth = 1
+    j = i + 1
+    while j < len(tokens):
+        t = tokens[j]
+        if t.kind in (STRING, PREPROC):
+            return None
+        if t.kind == PUNCT:
+            if t.text == b"<":
+                depth += 1
+            elif t.text == b">":
+                depth -= 1
+                if depth == 0:
+                    return j
+            elif t.text == b">>":
+                depth -= 2
+                if depth <= 0:
+                    return j
+            elif t.text in (b"(", b"["):
+                m = view.brackets.get(j)
+                if m is None:
+                    return None
+                j = m
+            elif t.text in (b";", b"{", b"}", b")", b"]", b"&&", b"||", b"?"):
+                return None
+        j += 1
+    return None
+
+
+ANGLE_SOUP = st.lists(
+    st.sampled_from(
+        [
+            "<",
+            ">",
+            ">>",
+            "(",
+            ")",
+            "[",
+            "]",
+            "{",
+            "}",
+            ";",
+            ",",
+            "&&",
+            "||",
+            "?",
+            "a",
+            "0",
+            '"s"',
+            "'c'",
+            "<=",
+            "<<",
+            "\n#d\n",
+        ]
+    ),
+    max_size=40,
+).map(lambda parts: " ".join(parts).encode())
+
+
+@given(ANGLE_SOUP)
+def test_angle_close_precompute_matches_reference_scan(source: bytes):
+    view = token_view(source)
+    for i, t in enumerate(view.tokens):
+        if t.kind == PUNCT and t.text == b"<":
+            assert view.angle_closes.get(i) == _reference_find_angle_close(view, i)
+
+
+def test_angle_close_can_escape_crossed_brackets():
+    # match_brackets pairs each bracket type independently, so a
+    # bracketed jump can escape an enclosing group of a different type.
+    source = b"( < [ ) x ] >"
+    view = token_view(source)
+    assert view.tokens[1].text == b"<"
+    assert _find_angle_close(view, 1) == 6
+
+
 def test_split_on_commas_ignores_unmatched_brackets():
     view = token_view(b"a, (b, c")
     pieces = _split_on_top_level_commas(view, 0, len(view.tokens))
@@ -1105,32 +1365,36 @@ def test_using_with_empty_definition_is_ignored():
 
 
 def test_function_inlining_skips_empty_body():
-    assert function_inlining_candidates(b"void f() { }\nint main() { f(); }") == []
+    assert (
+        list(function_inlining_candidates(b"void f() { }\nint main() { f(); }")) == []
+    )
 
 
 def test_function_inlining_skips_body_with_preprocessor_directive():
     source = b"int f() {\n#define A 1\nreturn 0; }\nint main() { return f(); }"
-    assert function_inlining_candidates(source) == []
+    assert list(function_inlining_candidates(source)) == []
 
 
 def test_function_inlining_skips_body_with_unmatched_bracket():
     source = b"int f() { return (x; }\nint main() { return f(); }"
-    assert function_inlining_candidates(source) == []
+    assert list(function_inlining_candidates(source)) == []
 
 
 def test_function_inlining_skips_body_with_stray_return():
     source = b"int f() { x return 0; }\nint main() { return f(); }"
-    assert function_inlining_candidates(source) == []
+    assert list(function_inlining_candidates(source)) == []
 
 
 def test_function_inlining_skips_variadic_parameters():
     source = b"int f(...) { return 0; }\nint main() { return f(); }"
-    assert function_inlining_candidates(source) == []
+    assert list(function_inlining_candidates(source)) == []
 
 
 def test_function_inlining_substitutes_pointer_parameters():
-    candidates = function_inlining_candidates(
-        b"int deref(int *p) { return *p; }\nint main() { return deref(q); }"
+    candidates = list(
+        function_inlining_candidates(
+            b"int deref(int *p) { return *p; }\nint main() { return deref(q); }"
+        )
     )
     assert candidates == [
         b"int deref(int *p) { return *p; }\nint main() { return (*(q)); }"
@@ -1170,7 +1434,7 @@ def test_template_id_without_call_is_left_alone():
 
 def test_function_inlining_skips_bare_return():
     source = b"void f() { return; }\nint main() { f(); return 0; }"
-    assert function_inlining_candidates(source) == []
+    assert list(function_inlining_candidates(source)) == []
 
 
 def test_candidate_pump_skips_already_seen_candidates():
@@ -1222,5 +1486,5 @@ def test_cpp_passes_never_crash_on_arbitrary_input(source: bytes):
 
 @given(CPPISH_SOUP)
 def test_cpp_candidate_generators_never_crash_on_arbitrary_input(source: bytes):
-    typedef_inlining_candidates(source)
-    function_inlining_candidates(source)
+    list(typedef_inlining_candidates(source))
+    list(function_inlining_candidates(source))

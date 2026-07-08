@@ -124,6 +124,7 @@ class ReductionClientProtocol(Protocol):
         parallelism: int | None = None,
         timeout: float | None = None,
         memory_limit: int | None = None,
+        memory_limit_explicit: bool = False,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,
@@ -1720,6 +1721,7 @@ class ShrinkRayApp(App[None]):
         parallelism: int | None = None,
         timeout: float | None = None,
         memory_limit: int | None = None,
+        memory_limit_explicit: bool = False,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,
@@ -1744,6 +1746,7 @@ class ShrinkRayApp(App[None]):
         self._parallelism = parallelism
         self._timeout = timeout
         self._memory_limit = memory_limit
+        self._memory_limit_explicit = memory_limit_explicit
         self._seed = seed
         self._input_type = input_type
         self._in_place = in_place
@@ -1923,6 +1926,7 @@ class ShrinkRayApp(App[None]):
                     parallelism=self._parallelism,
                     timeout=self._timeout,
                     memory_limit=self._memory_limit,
+                    memory_limit_explicit=self._memory_limit_explicit,
                     seed=self._seed,
                     input_type=self._input_type,
                     in_place=self._in_place,
@@ -1950,7 +1954,7 @@ class ShrinkRayApp(App[None]):
                 # downloads' passes join in when they complete.
                 pending = (response.result or {}).get("pending_downloads") or []
                 if pending:
-                    self._prompt_for_downloads(pending)
+                    self._prompt_for_downloads(client, pending)
 
             # Monitor progress (client is already started and reduction is running)
             stats_display = self.query_one("#stats-display", StatsDisplay)
@@ -1994,9 +1998,6 @@ class ShrinkRayApp(App[None]):
 
                     # Check if all passes are disabled
                     self._check_all_passes_disabled()
-
-                    if client.is_completed:
-                        break
 
             if self._client is None:
                 # The user quit; the app is already exiting.
@@ -2093,19 +2094,31 @@ class ShrinkRayApp(App[None]):
         """Show the pass statistics modal."""
         self.push_screen(PassStatsScreen(self))
 
-    def _prompt_for_downloads(self, pending: list[dict[str, str]]) -> None:
+    def _prompt_for_downloads(
+        self, client: ReductionClientProtocol, pending: list[dict[str, str]]
+    ) -> None:
         """Ask which background downloads to allow, then tell the worker.
 
         Non-blocking: the reduction keeps running while the modal is up,
         and the worker only starts the approved downloads once the user
         confirms.
+
+        The client is passed in rather than read from ``self._client``:
+        action_quit clears ``self._client`` when the user quits during
+        startup, and reading it here could then fail while this modal is
+        still being set up.
         """
 
-        client = self._client
-        assert client is not None
-
         async def decided(disabled: list[str] | None) -> None:
-            await client.start_downloads(disabled or [])
+            try:
+                await client.start_downloads(disabled or [])
+            except Exception:
+                # The client may have been closed while the modal was up
+                # (the user quit, or a fast --no-exit-on-completion run
+                # finished and tore the worker down). Writing to the closed
+                # subprocess raises and there is nothing left to start, so
+                # ignore it rather than crash inside this screen callback.
+                pass
 
         self.push_screen(DownloadsModal(pending), decided)
 
@@ -2161,6 +2174,7 @@ def run_textual_ui(
     parallelism: int | None = None,
     timeout: float | None = None,
     memory_limit: int | None = None,
+    memory_limit_explicit: bool = False,
     seed: int = 0,
     input_type: str = "all",
     in_place: bool = False,
@@ -2190,6 +2204,7 @@ def run_textual_ui(
         parallelism=parallelism,
         timeout=timeout,
         memory_limit=memory_limit,
+        memory_limit_explicit=memory_limit_explicit,
         seed=seed,
         input_type=input_type,
         in_place=in_place,

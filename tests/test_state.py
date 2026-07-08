@@ -2,6 +2,7 @@
 
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -15,6 +16,11 @@ from shrinkray.adaptive_timeout import MIN_TIMEOUT, AdaptiveTimeoutPolicy
 from shrinkray.cli import InputType
 from shrinkray.history import deserialize_directory, serialize_directory
 from shrinkray.problem import InvalidInitialExample, shortlex
+from shrinkray.process import (
+    _ULIMIT_FLAG,
+    MEMORY_LIMIT_ENFORCEABLE,
+    default_memory_limit,
+)
 from shrinkray.process import kill_process_group as original_kill
 from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
 from shrinkray.state import (
@@ -3930,6 +3936,45 @@ def test_sweep_tolerates_missing_directory(tmp_path):
     state.sweep_stale_working_files()
 
 
+def make_in_place_directory_state(tmp_path):
+    """Factory for an in-place directory-mode state, which writes candidate
+    *directories* named ``<base>-<hex>`` next to the target."""
+    script = tmp_path / "t.sh"
+    script.write_text("#!/bin/sh\nexit 0")
+    script.chmod(0o755)
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "a.txt").write_bytes(b"aaaa")
+    return ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=True,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="target",
+        parallelism=1,
+        initial={"a.txt": b"aaaa"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+    )
+
+
+def test_sweep_removes_stale_candidate_directory(tmp_path):
+    # In-place directory mode leaves candidate *directories* behind on a
+    # hard kill. The sweep must remove them, not just plain files.
+    state = make_in_place_directory_state(tmp_path)
+    stale_dir = tmp_path / ("target-" + "a" * 32)
+    stale_dir.mkdir()
+    (stale_dir / "leftover.txt").write_bytes(b"junk")
+
+    state.sweep_stale_working_files()
+
+    assert not stale_dir.exists()
+
+
 def test_sweep_tolerates_unlink_failure(tmp_path, monkeypatch):
     state = make_in_place_state(tmp_path)
     # Create the stale file after construction so the constructor's own
@@ -3943,6 +3988,63 @@ def test_sweep_tolerates_unlink_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "unlink", boom)
     # Must swallow the error rather than propagating it.
     state.sweep_stale_working_files()
+
+
+# === successful-output pruning tests ===
+
+
+def test_record_history_keeps_concurrent_better_candidate(tmp_path):
+    """A candidate that is interesting and sorts better than the one just
+    adopted must keep its captured output.
+
+    Under parallelism two candidates A and B can both be interesting; A is
+    adopted first and its record runs, then B (which sorts better) is
+    adopted. If recording A discarded B's stored output, B's own history
+    entry would be written without its test output and the output for the
+    now-current test case would be lost.
+    """
+    state = make_in_place_state(tmp_path)
+    # Build the reducer so state.problem (and its sort_key) is available.
+    _ = state.reducer
+    state.history_manager = MagicMock()
+
+    adopted = b"bbb"
+    better = b"aa"  # sorts before (shorter than) the adopted candidate
+    assert state.problem.sort_key(better) < state.problem.sort_key(adopted)
+    state._successful_outputs = {adopted: b"out-A", better: b"out-B"}
+    state._successful_output_keys = {
+        adopted: state.problem.sort_key(adopted),
+        better: state.problem.sort_key(better),
+    }
+
+    state._record_reduction_history(adopted)
+
+    # The better, still-adoptable candidate's output survives.
+    assert state._successful_outputs.get(better) == b"out-B"
+    # The adopted candidate's output is retained for the LLM prompts.
+    assert state._successful_outputs.get(adopted) == b"out-A"
+
+
+def test_record_history_prunes_losing_candidate(tmp_path):
+    """A candidate that was interesting but sorts worse than the adopted
+    one can never be adopted again, so its output is pruned."""
+    state = make_in_place_state(tmp_path)
+    _ = state.reducer
+    state.history_manager = MagicMock()
+
+    adopted = b"aa"
+    loser = b"cccc"  # sorts after (longer than) the adopted candidate
+    state._successful_outputs = {adopted: b"out-A", loser: b"out-L"}
+    state._successful_output_keys = {
+        adopted: state.problem.sort_key(adopted),
+        loser: state.problem.sort_key(loser),
+    }
+
+    state._record_reduction_history(adopted)
+
+    assert loser not in state._successful_outputs
+    assert loser not in state._successful_output_keys
+    assert state._successful_outputs.get(adopted) == b"out-A"
 
 
 # === adaptive timeout integration tests ===
@@ -4169,3 +4271,224 @@ async def test_history_records_reductions_without_captured_output(
     await problem.setup()
     assert await problem.is_interesting(b"hello")
     assert state._successful_outputs == {}
+
+
+# === Auto-disable of the default memory limit on the initial test ===
+#
+# Sanitizer builds (ASan/MSan/TSan) reserve tens of terabytes of virtual
+# address space and abort under ANY RLIMIT_AS, so the physical-RAM default
+# memory limit fails them out of the box. When the limit was not set by the
+# user and the initial test fails, shrink ray re-runs it once without the cap;
+# if it then passes the cap was the culprit, so the limit is disabled for the
+# rest of the run.
+#
+# A real `ulimit`-based reproduction only works where the platform's
+# memory-limit ulimit (RLIMIT_AS via `-v` on Linux, RLIMIT_DATA via `-d` on
+# OpenBSD) is actually enforced and reads "unlimited" when unset — see
+# _real_ulimit_reproducible below. For a deterministic, cross-platform test we
+# patch the one platform-dependent piece — memory_limited_command, the wrapper
+# that applies the cap — to simulate a test that aborts under any cap, while
+# the real subprocess machinery (and its first-call bookkeeping) runs
+# unchanged. A real end-to-end test guarded on _real_ulimit_reproducible
+# follows.
+
+
+def _real_ulimit_reproducible() -> bool:
+    """Whether the real-ulimit end-to-end test can run on this platform.
+
+    It needs the memory-limit ulimit to be enforced and to read "unlimited"
+    when unset, so that applying the default limit is observable and removing
+    it restores "unlimited". True on Linux (`-v`); false on macOS (not
+    enforced) and on any platform that already imposes a default cap on the
+    relevant resource (e.g. OpenBSD's data-segment limit).
+    """
+    if not MEMORY_LIMIT_ENFORCEABLE:
+        return False
+    result = subprocess.run(
+        ["/bin/sh", "-c", f"ulimit {_ULIMIT_FLAG}"],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "unlimited"
+
+
+def _fake_cap_aborts(command, memory_limit):
+    """Stand-in for memory_limited_command that models a sanitizer build.
+
+    Under any positive cap the wrapped command aborts (exit 137, as a killed
+    process would); with no cap the real command runs untouched.
+    """
+    if memory_limit:
+        return ["/bin/sh", "-c", "exit 137"]
+    return command
+
+
+def _memory_probe_state(tmp_path, *, script_body, memory_limit_explicit):
+    script = tmp_path / "test.sh"
+    script.write_text(script_body)
+    script.chmod(0o755)
+    target = tmp_path / "target.txt"
+    target.write_text("hello")
+    return ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=30.0,
+        base="target.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+        # Mirror the real default: an unset limit is the machine's physical RAM.
+        memory_limit=default_memory_limit(),
+        memory_limit_explicit=memory_limit_explicit,
+    )
+
+
+@pytest.mark.parametrize(
+    "explicit,limit,expected",
+    [
+        pytest.param(False, 1024, True, id="default_limit_probes"),
+        pytest.param(True, 1024, False, id="explicit_limit_left_alone"),
+        pytest.param(False, None, False, id="no_limit_nothing_to_probe"),
+        pytest.param(False, 0, False, id="disabled_limit_nothing_to_probe"),
+    ],
+)
+def test_default_memory_limit_may_block_initial(
+    simple_state, explicit, limit, expected
+):
+    simple_state.memory_limit_explicit = explicit
+    simple_state.memory_limit = limit
+    assert simple_state._default_memory_limit_may_block_initial() is expected
+
+
+async def test_default_memory_limit_auto_disabled_when_it_blocks_initial(
+    tmp_path, capsys
+):
+    # Passes without a cap, "aborts" under one: the sanitizer situation.
+    state = _memory_probe_state(
+        tmp_path, script_body="#!/bin/sh\nexit 0\n", memory_limit_explicit=False
+    )
+    with patch.object(state_mod, "memory_limited_command", _fake_cap_aborts):
+        await state.problem.setup()  # must not raise
+    # The default limit was disabled for the rest of the run.
+    assert state.memory_limit is None
+    # The single logical initial call is the no-limit one, which passed.
+    assert state.initial_exit_code == 0
+    assert state.first_call is False
+    err = capsys.readouterr().err
+    assert "--memory-limit" in err
+    assert "sanitizer" in err.lower()
+
+
+async def test_explicit_memory_limit_not_auto_disabled(tmp_path, capsys):
+    limit = default_memory_limit()
+    state = _memory_probe_state(
+        tmp_path, script_body="#!/bin/sh\nexit 0\n", memory_limit_explicit=True
+    )
+    with patch.object(state_mod, "memory_limited_command", _fake_cap_aborts):
+        with pytest.raises(InvalidInitialExample) as exc_info:
+            await state.problem.setup()
+        # The limit is untouched (no auto-disable, no probe).
+        assert state.memory_limit == limit
+        # The error explanation points at --memory-limit=0 as a possible fix.
+        message = await state.build_error_message(exc_info.value)
+    assert "--memory-limit=0" in message
+    # No auto-disable warning was printed.
+    assert "only passed with the" not in capsys.readouterr().err
+
+
+async def test_default_memory_limit_kept_when_failure_is_genuine(tmp_path, capsys):
+    limit = default_memory_limit()
+    # Fails with or without a cap: a genuinely uninteresting initial test.
+    state = _memory_probe_state(
+        tmp_path, script_body="#!/bin/sh\nexit 3\n", memory_limit_explicit=False
+    )
+    with patch.object(state_mod, "memory_limited_command", _fake_cap_aborts):
+        with pytest.raises(InvalidInitialExample):
+            await state.problem.setup()
+        # The no-limit retry also failed, so the limit is restored.
+        assert state.memory_limit == limit
+        # The retry's genuine exit code is what gets recorded.
+        assert state.initial_exit_code == 3
+        # A non-explicit limit that was ruled out does not suggest
+        # --memory-limit=0 (it would be misleading).
+        message = await state.build_error_message(
+            InvalidInitialExample("uninteresting")
+        )
+    assert "--memory-limit=0" not in message
+    assert "only passed with the" not in capsys.readouterr().err
+
+
+async def test_interesting_initial_under_default_limit_runs_once(tmp_path, capsys):
+    # A normally-interesting test must not trigger the probe or any extra run.
+    counter = tmp_path / "runs"
+    counter.write_text("")
+    script = tmp_path / "test.sh"
+    script.write_text(f"#!/bin/sh\nprintf x >> {counter}\nexit 0\n")
+    script.chmod(0o755)
+    target = tmp_path / "target.txt"
+    target.write_text("hello")
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=30.0,
+        base="target.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+        memory_limit=default_memory_limit(),
+        memory_limit_explicit=False,
+    )
+    await state.problem.setup()
+    # Exactly one run: no no-limit retry was needed.
+    assert counter.read_text() == "x"
+    assert state.memory_limit == default_memory_limit()
+    assert "only passed with the" not in capsys.readouterr().err
+
+
+@pytest.mark.skipif(
+    not _real_ulimit_reproducible(),
+    reason="the platform's memory-limit ulimit is not enforced or not "
+    "'unlimited' when unset (e.g. macOS does not enforce it; OpenBSD caps "
+    "the data segment)",
+)
+async def test_default_memory_limit_auto_disabled_real_ulimit(tmp_path, capsys):
+    # End-to-end with a real memory cap: the test is interesting only when the
+    # platform's memory-limit ulimit is unlimited, exactly reproducing the
+    # sanitizer case.
+    script = tmp_path / "test.sh"
+    script.write_text(f'#!/bin/sh\n[ "$(ulimit {_ULIMIT_FLAG})" = unlimited ]\n')
+    script.chmod(0o755)
+    target = tmp_path / "target.txt"
+    target.write_text("hello")
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=30.0,
+        base="target.txt",
+        parallelism=1,
+        initial=b"hello",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+        memory_limit=default_memory_limit(),
+        memory_limit_explicit=False,
+    )
+    await state.problem.setup()  # must not raise
+    assert state.memory_limit is None
+    assert "--memory-limit" in capsys.readouterr().err

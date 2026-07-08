@@ -3,6 +3,7 @@ from random import Random
 
 import pytest
 import trio
+from trio.testing import wait_all_tasks_blocked
 
 from shrinkray.work import NotFound, Volume, WorkContext, parallel_map
 
@@ -128,6 +129,24 @@ async def test_worker_map_consumer_can_stop_early(p: int, autojump_clock) -> Non
                         break
 
     assert consumed == [0, 1]
+
+
+@pytest.mark.parametrize("p", [1, 2])
+async def test_worker_map_consumer_can_close_receive_channel(p: int) -> None:
+    """Closing map's receive channel and then hitting a checkpoint before
+    leaving the context must not crash.
+
+    Regression test: at parallelism > 1 the producer's BrokenResourceError
+    was raised inside parallel_map's nursery, so it reached the handler
+    wrapped in an ExceptionGroup that `except trio.BrokenResourceError`
+    could not catch, and the group escaped to the consumer."""
+    work = WorkContext(parallelism=p)
+
+    async with work.map(list(range(10)), checkpointing_identity) as mapped:
+        assert await mapped.receive() == 0
+        await mapped.aclose()
+        # Give the producer time to attempt a send on the closed channel.
+        await wait_all_tasks_blocked()
 
 
 @pytest.mark.parametrize("p", [1, 2])

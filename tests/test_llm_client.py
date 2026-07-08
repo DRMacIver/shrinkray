@@ -235,15 +235,24 @@ async def test_background_loading_loads_once_and_serves(
 
 
 @requires_llama_cpp
-async def test_wait_until_ready_surfaces_load_failure(tmp_path):
+async def test_load_failure_disables_client_instead_of_crashing(
+    tmp_path, capsys: pytest.CaptureFixture[str]
+):
+    # An offline/flaky machine (or, here, a corrupt model file) must not
+    # crash a reduction that is running on the classical passes: a failed
+    # load permanently disables the client and warns the user, and
+    # wait_until_ready returns normally so the LLM passes skip themselves.
     bad = tmp_path / "bad.gguf"
     bad.write_bytes(b"this is not a gguf file")
     client = LlamaCppClient(
         model=LocalModel(path=str(bad)), n_gpu_layers=0, n_threads=2
     )
     client.start_loading()
-    with pytest.raises(ValueError):
-        await client.wait_until_ready()
+    await client.wait_until_ready()
+    assert client.is_disabled()
+    assert client._load_error is not None
+    warning = capsys.readouterr().err
+    assert "could not load the LLM model" in warning
 
 
 @requires_llama_cpp
@@ -425,3 +434,122 @@ async def test_aborted_generations_are_not_cached(tiny_model_path: str):
     result = await client.complete("spin", max_tokens=64, seed=3, temperature=0.0)
     assert isinstance(result, str)
     assert result  # a real completion, not the aborted empty/partial one
+
+
+# === Context-window overflow (finding: an input must never crash the run) ===
+
+
+class _RaisingLlama:
+    """A stand-in llama that overflows the context window on generation."""
+
+    def create_chat_completion(self, **kwargs: Any) -> Any:
+        raise ValueError("Requested tokens (600) exceed context window of 512")
+
+
+def test_context_window_overflow_yields_empty_not_crash(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Token-dense input (emoji, rare scripts) can clear the pass's byte
+    # limit yet overflow llama.cpp's context window, which raises
+    # ValueError. That must degrade to an empty answer, never crash.
+    client = LlamaCppClient(model=LocalModel(path="/nonexistent"))
+    monkeypatch.setattr(client, "_llama", _RaisingLlama())
+    result = client._complete_blocking(
+        "dense", max_tokens=1, seed=1, temperature=0.0, abort=threading.Event()
+    )
+    assert result == ""
+
+
+# === Generation cache is a bounded LRU (finding: unbounded growth) ===
+
+
+def test_generation_cache_is_lru_bounded():
+    client = LlamaCppClient(
+        model=LocalModel(path="/nonexistent"), generation_cache_size=2
+    )
+    client._remember_generation(("a", 1, 1, 0.0), "A")
+    client._remember_generation(("b", 1, 1, 0.0), "B")
+    client._remember_generation(("c", 1, 1, 0.0), "C")  # evicts the LRU (a)
+    assert client._cached_generation(("a", 1, 1, 0.0)) is None
+    assert client._cached_generation(("b", 1, 1, 0.0)) == "B"
+    assert client._cached_generation(("c", 1, 1, 0.0)) == "C"
+
+
+def test_generation_cache_read_refreshes_lru_order():
+    client = LlamaCppClient(
+        model=LocalModel(path="/nonexistent"), generation_cache_size=2
+    )
+    client._remember_generation(("a", 1, 1, 0.0), "A")
+    client._remember_generation(("b", 1, 1, 0.0), "B")
+    assert client._cached_generation(("a", 1, 1, 0.0)) == "A"  # refreshes a
+    client._remember_generation(("c", 1, 1, 0.0), "C")  # evicts b, not a
+    assert client._cached_generation(("b", 1, 1, 0.0)) is None
+    assert client._cached_generation(("a", 1, 1, 0.0)) == "A"
+    assert client._cached_generation(("c", 1, 1, 0.0)) == "C"
+
+
+# === Re-checking abort and cache after acquiring the lock (finding: a
+# request queued behind another generation still paid full cost) ===
+
+
+def test_complete_blocking_skips_generation_when_aborted_before_the_lock():
+    # A request cancelled while queued behind another generation must
+    # notice the abort the moment it takes the lock and return without a
+    # model load or generation. /nonexistent would fail to load if reached.
+    client = LlamaCppClient(model=LocalModel(path="/nonexistent"))
+    abort = threading.Event()
+    abort.set()
+    result = client._complete_blocking(
+        "hi", max_tokens=1, seed=1, temperature=0.0, abort=abort
+    )
+    assert result == ""
+
+
+def test_complete_blocking_serves_a_cache_hit_after_taking_the_lock():
+    # Another request may have generated exactly this while we queued for
+    # the lock; the result is served from the cache rather than
+    # regenerating (again, /nonexistent would fail if a load were reached).
+    client = LlamaCppClient(model=LocalModel(path="/nonexistent"))
+    key = ("queued", 4, 9, 0.0)
+    client._generation_cache[key] = "already generated"
+    result = client._complete_blocking(
+        "queued", max_tokens=4, seed=9, temperature=0.0, abort=threading.Event()
+    )
+    assert result == "already generated"
+
+
+class _CountingLlama:
+    """A stand-in llama that counts generations and streams one token."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self._lock = threading.Lock()
+
+    def create_chat_completion(self, **kwargs: Any) -> Any:
+        with self._lock:
+            self.calls += 1
+        return iter([{"choices": [{"delta": {"content": "hi"}}]}])
+
+
+async def test_concurrent_identical_requests_generate_once(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Two identical requests racing for the lock must not both generate:
+    # whichever loses the race is served from the cache the winner filled.
+    client = LlamaCppClient(model=LocalModel(path="/nonexistent"))
+    fake = _CountingLlama()
+    monkeypatch.setattr(client, "_llama", fake)
+
+    outcomes: list[str] = []
+
+    async def one() -> None:
+        outcomes.append(
+            await client.complete("same", max_tokens=4, seed=9, temperature=0.0)
+        )
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(one)
+        nursery.start_soon(one)
+
+    assert fake.calls == 1
+    assert outcomes == ["hi", "hi"]

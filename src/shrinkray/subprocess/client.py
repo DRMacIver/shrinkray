@@ -54,6 +54,13 @@ class SubprocessClient:
             stdout=asyncio.subprocess.PIPE,
             stderr=self._stderr_log_file,
         )
+        if self._closed:
+            # close() ran while this start() was in flight (e.g. the user
+            # quit during startup). It could not terminate this process
+            # because it did not exist yet, so tear it down now rather than
+            # leaving an orphaned worker running.
+            await self._teardown()
+            return
         self._reader_task = asyncio.create_task(self._read_output())
 
     async def _read_output(self) -> None:
@@ -143,6 +150,7 @@ class SubprocessClient:
         parallelism: int | None = None,
         timeout: float | None = None,
         memory_limit: int | None = None,
+        memory_limit_explicit: bool = False,
         seed: int = 0,
         input_type: str = "all",
         in_place: bool = False,
@@ -163,6 +171,7 @@ class SubprocessClient:
         params: dict[str, Any] = {
             "file_path": file_path,
             "test": test,
+            "memory_limit_explicit": memory_limit_explicit,
             "seed": seed,
             "input_type": input_type,
             "in_place": in_place,
@@ -282,7 +291,16 @@ class SubprocessClient:
         if self._closed:
             return
         self._closed = True
+        await self._teardown()
 
+    async def _teardown(self) -> None:
+        """Terminate the worker and release resources.
+
+        Idempotent: close() runs it once, but start() also runs it if it
+        finds the client was closed while the subprocess was being created,
+        so it must tolerate being called a second time on an already
+        cleaned-up client.
+        """
         # Cancel all pending futures first so any code awaiting send_command
         # responses (e.g. cancel() in action_quit) is unblocked immediately.
         for future in self._pending_responses.values():

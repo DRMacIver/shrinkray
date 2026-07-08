@@ -82,9 +82,13 @@ class WorkContext:
             async def do_map():
                 try:
                     await produce()
-                except trio.BrokenResourceError:
+                except* trio.BrokenResourceError:
                     # The consumer closed the receive channel (stopped
                     # reading early); there is nobody left to produce for.
+                    # This must be except*: on the parallelism > 1 path the
+                    # error is raised inside parallel_map's nursery and so
+                    # arrives wrapped in an ExceptionGroup. Anything else in
+                    # the group is re-raised.
                     pass
 
             async def produce():

@@ -3,7 +3,11 @@
 import trio
 from trio.testing import memory_stream_one_way_pair, wait_all_tasks_blocked
 
-from shrinkray.problem import ReductionProblem, sort_key_for_initial
+from shrinkray.problem import (
+    ReductionProblem,
+    default_cache_key,
+    sort_key_for_initial,
+)
 from shrinkray.reducers.driver import RemoteReductionProblem, run_reducer
 from shrinkray.reducers.protocol import (
     Idle,
@@ -121,10 +125,65 @@ async def test_is_interesting_caches_results() -> None:
     assert bytes(problem._send_stream.sent) == sent_before  # type: ignore[attr-defined]
 
 
+async def test_is_interesting_cache_keys_are_hashed() -> None:
+    """The interestingness cache keys on a short content hash, not full bytes.
+
+    A long reduction tests many distinct multi-MB candidates; keying the cache
+    on the full candidate bytes would accumulate all of them in the persistent
+    subprocess. The parent process caches short digests for exactly this reason.
+    """
+    problem = make_problem(b"hello world\n")
+    big = b"x" * 100_000 + b"\n"
+
+    async with trio.open_nursery() as nursery:
+
+        @nursery.start_soon
+        async def _() -> None:
+            await problem.is_interesting(big)
+
+        await wait_all_tasks_blocked()
+        problem.handle_feedback(big, False)
+
+    # The full candidate is not retained as a key; only its short digest is.
+    assert big not in problem._cache
+    assert list(problem._cache) == [default_cache_key(big)]
+
+
 async def test_is_interesting_returns_false_when_closed() -> None:
     problem = make_problem(b"hello world\n")
     problem.close()
     assert await problem.is_interesting(b"anything\n") is False
+
+
+async def test_is_interesting_tolerates_broken_send() -> None:
+    """A broken send mid-query unwinds cleanly instead of crashing the pass.
+
+    If shrink ray tears down the pipe while a query is being sent, ``send_all``
+    raises BrokenResourceError. Rather than let that propagate through the
+    running pass and crash the reducer subprocess, is_interesting treats it like
+    shutdown: it unwinds through close(), returning not-interesting.
+    """
+
+    class BrokenSendStream(trio.abc.SendStream):
+        async def send_all(self, data: bytes | bytearray | memoryview) -> None:
+            raise trio.BrokenResourceError
+
+        async def wait_send_all_might_not_block(self) -> None:
+            await trio.lowlevel.checkpoint()
+
+        async def aclose(self) -> None:
+            await trio.lowlevel.checkpoint()
+
+    problem = RemoteReductionProblem(
+        b"hello world\n",
+        send_stream=BrokenSendStream(),
+        work=WorkContext(parallelism=1),
+        sort_key=sort_key_for_initial(b"hello world\n"),
+    )
+    assert await problem.is_interesting(b"smaller\n") is False
+    # The connection is now treated as closed, so further queries short-circuit.
+    assert problem._closed is True
+    assert await problem.is_interesting(b"another\n") is False
 
 
 async def test_duplicate_concurrent_queries_all_resolve() -> None:

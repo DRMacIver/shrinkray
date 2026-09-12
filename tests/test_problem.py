@@ -1811,7 +1811,7 @@ async def test_replays_are_attributed_to_their_sites():
     # its bound clears the anchor, and the seed top-up brings the ledger
     # to the seed size.
     assert sites["gauntlet"] >= GAUNTLET_MIN_HITS - 1
-    assert 1 + sites["gauntlet"] + sites["seed"] - before["seed"] == ANCHOR_SEED_RUNS
+    assert 1 + sites["gauntlet"] + sites["seed"] - before["seed"] <= ANCHOR_SEED_RUNS
     await problem.measure_current(3)
     assert sites["report"] == 3
     assert sum(sites.values()) == policy(problem).replay_calls
@@ -1843,3 +1843,24 @@ async def test_anchor_is_raised_only_from_unselected_runs():
     assert problem.current_test_case == b"hello"
     assert policy(problem).anchor == 0.0
     assert policy(problem).anchor_attempts == 1
+
+
+async def test_seed_top_up_stops_once_a_raise_is_out_of_reach():
+    # Against an anchor of 0.70 a candidate that misses once is accepted
+    # on its ninth run, and the eleven top-up runs left could not raise
+    # the anchor even if they all hit, so none of them is spent.
+    outcomes = iter([True] * GAUNTLET_MIN_HITS + [False] + [True] * 100)
+
+    async def is_interesting(tc):
+        return next(outcomes)
+
+    problem = nd_problem(is_interesting)
+    policy(problem).flip()
+    policy(problem).raise_anchor(Evidence(18, 20))
+    calls_before = problem.stats.calls
+    assert await problem.is_interesting(b"hello") is True
+    ledger = problem.ledger(b"hello")
+    assert ledger.verdict is True
+    assert ledger.accepted_at is not None
+    assert problem.stats.calls - calls_before == ledger.accepted_at.runs
+    assert ledger.accepted_at.runs < ANCHOR_SEED_RUNS

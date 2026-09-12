@@ -306,6 +306,13 @@ class NondeterminismPolicy:
     def threshold(self) -> float:
         return gauntlet_threshold(self.anchor)
 
+    def raise_reachable(self, unselected: Evidence, remaining: int) -> bool:
+        """Whether `remaining` more runs after `unselected` could raise the
+        anchor on the next attempt, even if every one of them hit. When
+        they cannot, the runs are not worth spending."""
+        best = Evidence(unselected.interesting + remaining, unselected.runs + remaining)
+        return best.lower_bound(anchor_z(self.anchor_attempts + 1)) > self.anchor
+
     def raise_anchor(self, evidence: Evidence) -> None:
         """Raise the anchor to `evidence`'s lower bound if that is higher.
         `evidence` must not have been selected on: runs that decided an

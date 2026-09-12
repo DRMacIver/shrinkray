@@ -463,6 +463,20 @@ def test_repeated_raises_are_held_to_a_stricter_level():
     assert later.anchor_attempts == 201
 
 
+def test_raise_reachable_reflects_the_anchor_and_remaining_runs():
+    policy = NondeterminismPolicy()
+    policy.flip()
+    # With no anchor yet, any hits at all could raise it.
+    assert policy.raise_reachable(Evidence(0, 0), 16)
+    assert not policy.raise_reachable(Evidence(0, 0), 0)
+    policy.raise_anchor(Evidence(10, 20))
+    assert policy.raise_reachable(Evidence(0, 0), 16)
+    # Against a near-deterministic anchor no batch of the seed size can
+    # clear the stricter level a later attempt is held to.
+    policy.raise_anchor(Evidence(20, 20))
+    assert not policy.raise_reachable(Evidence(0, 0), ANCHOR_SEED_RUNS)
+
+
 def test_threshold_follows_the_anchor():
     policy = NondeterminismPolicy()
     policy.flip()

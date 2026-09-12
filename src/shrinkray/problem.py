@@ -1165,7 +1165,17 @@ class BasicReductionProblem(ReductionProblem[T]):
                 ledger.accepted_at = Evidence(
                     ledger.evidence.interesting, ledger.evidence.runs
                 )
-                while ledger.evidence.runs < ANCHOR_SEED_RUNS:
+                # Top the ledger up towards the seed size, but only while
+                # the runs could still raise the anchor: that is their
+                # only purpose, and once a miss or the anchor's level has
+                # put a raise out of reach they are wasted.
+                while (
+                    ledger.evidence.runs < ANCHOR_SEED_RUNS
+                    and policy.raise_reachable(
+                        ledger.unselected_evidence(),
+                        ANCHOR_SEED_RUNS - ledger.evidence.runs,
+                    )
+                ):
                     interesting, _, _ = await self.__execute(test_case, replay="seed")
                     ledger.evidence.record(interesting)
                 ledger.verdict = True

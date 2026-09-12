@@ -9,6 +9,12 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 PY="$HERE/.tool/bin/python"
 if command -v timeout >/dev/null 2>&1; then T=timeout; else T=gtimeout; fi
 
+# A NUL in the input would be echoed back and fake the signature (a first
+# reduction attempt shrank the CSV to a single NUL byte), so reject it.
+if [ "$(LC_ALL=C tr -d '\000' < "$1" | wc -c)" -ne "$(wc -c < "$1")" ]; then
+    exit 1
+fi
+
 out=$("$T" 60 "$PY" "$HERE/query.py" "$1" 2>/dev/null)
 rc=$?
 if [ $rc -ge 129 ] && [ $rc -ne 124 ]; then

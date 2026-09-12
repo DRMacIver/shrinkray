@@ -23,7 +23,10 @@ manifestation deterministic, so **no `test-deterministic.sh` is provided**.
 
 `test.sh` runs `query.py` and is interesting iff the process is killed by a
 signal (segfault or abort in the library) or the printed rows contain a NUL
-byte (`\x00`, uninitialised memory leaking into a cell).
+byte (`\x00`, uninitialised memory leaking into a cell). Candidates that
+themselves contain a NUL byte are rejected first: DuckDB echoes them back,
+and a first reduction attempt exploited that by shrinking the CSV to a single
+NUL byte (20 / 20 "interesting").
 
 On this machine the query never returns the correct answer: every run
 yields the wrong rows `[('b', ''), ('d', 'd'), ('f', 'f'), ('h', 'h')]` or a

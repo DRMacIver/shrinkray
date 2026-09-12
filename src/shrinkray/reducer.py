@@ -481,8 +481,13 @@ class ShrinkRay(Reducer[bytes]):
         # A deterministic pass that ran to completion without making
         # progress cannot make progress on an identical test case, so skip
         # it for free. Nondeterministic passes (fresh seed per run) may
-        # propose different candidates, so they are never fingerprinted.
-        deterministic = pass_name not in NONDETERMINISTIC_PASS_NAMES
+        # propose different candidates, so they are never fingerprinted,
+        # and under a nondeterministic interestingness test a rejected
+        # candidate may be accepted on a retry, so nothing is.
+        deterministic = (
+            pass_name not in NONDETERMINISTIC_PASS_NAMES
+            and not problem.nondeterministic
+        )
         if (
             deterministic
             and self.pass_fingerprints.get(pass_name) == problem.current_test_case
@@ -763,6 +768,7 @@ class ShrinkRay(Reducer[bytes]):
                 volume=problem.work.volume,
             ),
             sort_key=problem.sort_key,
+            nondeterministic_source=lambda: problem.nondeterministic,
         )
         reducer = ShrinkRay(
             target=restarted,
@@ -900,6 +906,10 @@ class KeyProblem(ReductionProblem[bytes]):
     @property
     def stats(self) -> ReductionStats:
         return self.base_problem.stats
+
+    @property
+    def nondeterministic(self) -> bool:
+        return self.base_problem.nondeterministic
 
     async def is_interesting(self, test_case: bytes) -> bool:
         result = await self.applier.try_apply_patch({self.key: test_case})

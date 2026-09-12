@@ -50,6 +50,13 @@ class ProgressUpdate:
     current_timeout: float | None = None
     # Fraction of recent test runs that timed out
     timeout_rate: float = 0.0
+    # Nondeterminism handling: whether the interestingness test has been
+    # seen to be nondeterministic, the lower confidence bound on the
+    # current test case's reproduction rate once it has (None before), and
+    # the calls spent on replays.
+    nondeterministic: bool = False
+    reproduction_rate: float | None = None
+    replay_calls: int = 0
     # Content preview (truncated for large files)
     content_preview: str = ""
     # Whether content is hex mode
@@ -119,6 +126,9 @@ def serialize(msg: Request | Response | ProgressUpdate) -> str:
                 "time_since_last_reduction": msg.time_since_last_reduction,
                 "current_timeout": msg.current_timeout,
                 "timeout_rate": msg.timeout_rate,
+                "nondeterministic": msg.nondeterministic,
+                "reproduction_rate": msg.reproduction_rate,
+                "replay_calls": msg.replay_calls,
                 "content_preview": msg.content_preview,
                 "hex_mode": msg.hex_mode,
                 "pass_stats": [
@@ -184,6 +194,9 @@ def deserialize(line: str) -> Request | Response | ProgressUpdate:
             time_since_last_reduction=d.get("time_since_last_reduction", 0.0),
             current_timeout=d.get("current_timeout"),
             timeout_rate=d.get("timeout_rate", 0.0),
+            nondeterministic=d.get("nondeterministic", False),
+            reproduction_rate=d.get("reproduction_rate"),
+            replay_calls=d.get("replay_calls", 0),
             content_preview=d.get("content_preview", ""),
             hex_mode=d.get("hex_mode", False),
             pass_stats=pass_stats_data,

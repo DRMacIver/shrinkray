@@ -1154,3 +1154,32 @@ def test_initialize_directory_without_record_reductions() -> None:
             assert os.path.isdir(os.path.join(manager.history_dir, "initial"))
         finally:
             os.chdir(original_cwd)
+
+
+# === get_initial_content tests ===
+
+
+def test_get_initial_content_returns_the_original() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+            manager.record_reduction(b"reduction 1")
+            assert manager.get_initial_content() == b"original"
+        finally:
+            os.chdir(original_cwd)
+
+
+def test_get_initial_content_serializes_directories() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "target", is_directory=True)
+            content = {"a.txt": b"aaa", "sub/b.txt": b"bbb"}
+            manager.initialize_directory(content, ["./test.sh"], "target")
+            assert deserialize_directory(manager.get_initial_content()) == content
+        finally:
+            os.chdir(original_cwd)

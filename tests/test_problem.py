@@ -1,10 +1,20 @@
 """Unit tests for problem module utilities and classes."""
 
+import random
 import time
 
 import pytest
 import trio
 
+from shrinkray.nondeterminism import (
+    ANCHOR_SEED_RUNS,
+    DETECTION_REPLAYS,
+    GATE_RUNS,
+    GAUNTLET_FLOOR,
+    VERIFY_INTERVAL,
+    Evidence,
+    NondeterminismPolicy,
+)
 from shrinkray.problem import (
     BasicReductionProblem,
     DumpError,
@@ -1179,3 +1189,599 @@ async def test_concurrent_uninteresting_candidates_are_cached():
     assert await problem.is_interesting(b"x") is False
     assert await problem.is_interesting(b"y") is False
     assert call_count == calls_after_concurrent_phase
+
+
+# =============================================================================
+# Nondeterminism handling
+# =============================================================================
+
+
+class Flaky:
+    """A predicate that is interesting with a fixed probability per run,
+    driven by a seeded RNG so tests are reproducible."""
+
+    def __init__(self, rate, *, seed=0, condition=None, timeouts=()):
+        self.rate = rate
+        self.random = random.Random(seed)
+        self.condition = condition or (lambda tc: True)
+        self.calls = 0
+        self.timeouts = set(timeouts)
+
+    async def __call__(self, tc):
+        await trio.lowlevel.checkpoint()
+        self.calls += 1
+        if self.calls in self.timeouts:
+            return InterestingnessResult(interesting=False, timed_out=True)
+        return self.condition(tc) and self.random.random() < self.rate
+
+
+def policy(problem) -> NondeterminismPolicy:
+    """The problem's nondeterminism policy, which these tests always set."""
+    result = problem.policy
+    assert result is not None
+    return result
+
+
+def nd_problem(is_interesting, *, initial=b"hello world", history=None, **kwargs):
+    return BasicReductionProblem(
+        initial=initial,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        policy=NondeterminismPolicy(),
+        history=history,
+        **kwargs,
+    )
+
+
+async def test_deterministic_setup_pays_the_detection_replays():
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        return True
+
+    problem = nd_problem(is_interesting)
+    await problem.setup()
+    assert calls == DETECTION_REPLAYS
+    assert not problem.nondeterministic
+    assert problem.stats.calls == DETECTION_REPLAYS
+    assert policy(problem).replay_calls == DETECTION_REPLAYS - 1
+
+
+async def test_no_policy_means_no_detection():
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello", is_interesting=is_interesting, work=WorkContext()
+    )
+    await problem.setup()
+    assert calls == 1
+    assert not problem.nondeterministic
+    assert problem.policy is None
+
+
+async def test_a_missed_startup_replay_flips_and_confirms_the_incumbent():
+    flaky = Flaky(0.5, seed=1)
+    problem = nd_problem(flaky)
+    await problem.setup()
+    assert problem.nondeterministic
+    # The confirmation batch extends to the seed size so the anchor is an
+    # honest estimate rather than the stopping rule.
+    assert policy(problem).anchor > 0.0
+    assert flaky.calls >= ANCHOR_SEED_RUNS
+    assert problem.current_test_case == b"hello world"
+
+
+async def test_startup_detection_is_reported_once():
+    flaky = Flaky(0.5, seed=1)
+    problem = nd_problem(flaky)
+    messages = []
+    problem.work.report = lambda msg, level: messages.append(msg)
+    await problem.setup()
+    assert len([m for m in messages if "ondeterministic" in m]) == 1
+
+
+async def test_timed_out_replays_are_not_detection_evidence():
+    # Replays 2 and 3 time out; the fourth reproduces. A timeout says
+    # nothing about determinism.
+    flaky = Flaky(1.0, timeouts={2, 3})
+    problem = nd_problem(flaky)
+    await problem.setup()
+    assert not problem.nondeterministic
+
+
+async def test_invalid_initial_is_still_rejected_before_detection():
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        return False
+
+    problem = nd_problem(is_interesting)
+    with pytest.raises(InvalidInitialExample):
+        await problem.setup()
+    # A test case that never reproduces is only refused once it has
+    # missed the confirmation bar's gate.
+    assert calls == GATE_RUNS
+
+
+async def test_initial_that_reproduces_rarely_is_found_within_the_gate():
+    outcomes = iter([False] * (GATE_RUNS - 1) + [True] * 200)
+
+    async def is_interesting(tc):
+        return next(outcomes)
+
+    problem = nd_problem(is_interesting)
+    await problem.setup()
+    assert problem.nondeterministic
+
+
+async def test_initial_that_misses_once_but_reproduces_is_nondeterministic():
+    # A flaky initial test case may fail its very first run; the detection
+    # replays are what decide whether it is interesting at all.
+    outcomes = iter([False, True, False, True] + [True] * 100)
+
+    async def is_interesting(tc):
+        return next(outcomes)
+
+    problem = nd_problem(is_interesting)
+    await problem.setup()
+    assert problem.nondeterministic
+    assert problem.current_test_case == b"hello world"
+    assert policy(problem).anchor > 0.0
+
+
+async def test_initial_that_only_times_out_is_invalid():
+    async def is_interesting(tc):
+        return InterestingnessResult(interesting=False, timed_out=True)
+
+    problem = nd_problem(is_interesting)
+    with pytest.raises(InvalidInitialExample):
+        await problem.setup()
+
+
+async def test_an_incumbent_that_never_reproduces_is_kept_with_a_warning():
+    # Interesting exactly once (the initial run), then never again.
+    calls = []
+
+    async def is_interesting(tc):
+        calls.append(tc)
+        return len(calls) == 1
+
+    problem = nd_problem(is_interesting)
+    messages = []
+    problem.work.report = lambda msg, level: messages.append(msg)
+    await problem.setup()
+    assert problem.nondeterministic
+    assert problem.current_test_case == b"hello world"
+    assert policy(problem).anchor < GAUNTLET_FLOOR
+    assert any("rarely" in m for m in messages)
+
+
+async def test_fast_reject_costs_one_run_and_retains_evidence():
+    flaky = Flaky(0.5, seed=3)
+    problem = nd_problem(flaky)
+    await problem.setup()
+    policy(problem).flip()
+    calls_before = flaky.calls
+
+    # Force the candidate's first run to miss.
+    flaky.random = random.Random(0)
+    flaky.rate = 0.0
+    assert await problem.is_interesting(b"hello") is False
+    assert flaky.calls == calls_before + 1
+    # Not latched: a retry runs again and accumulates.
+    assert await problem.is_interesting(b"hello") is False
+    assert flaky.calls == calls_before + 2
+    assert problem.ledger(b"hello").evidence.runs == 2
+    assert problem.ledger(b"hello").verdict is None
+
+
+async def test_gauntlet_accept_extends_to_the_seed_and_adopts():
+    flaky = Flaky(1.0)
+    problem = nd_problem(flaky)
+    await problem.setup()
+    policy(problem).flip()
+    calls_before = flaky.calls
+    assert await problem.is_interesting(b"hello") is True
+    assert problem.current_test_case == b"hello"
+    assert flaky.calls - calls_before == ANCHOR_SEED_RUNS
+    ledger = problem.ledger(b"hello")
+    assert ledger.verdict is True
+    assert ledger.evidence.runs == ANCHOR_SEED_RUNS
+    assert policy(problem).anchor == pytest.approx(
+        Evidence(ANCHOR_SEED_RUNS, ANCHOR_SEED_RUNS).lower_bound()
+    )
+    # Latched: no further runs.
+    assert await problem.is_interesting(b"hello") is True
+    assert flaky.calls - calls_before == ANCHOR_SEED_RUNS
+
+
+async def test_gauntlet_rejects_a_candidate_below_the_anchor():
+    # First run interesting, then reliably not.
+    outcomes = iter([True] + [False] * 100)
+
+    async def is_interesting(tc):
+        return next(outcomes)
+
+    problem = nd_problem(is_interesting)
+    policy(problem).flip()
+    policy(problem).raise_anchor(Evidence(ANCHOR_SEED_RUNS, ANCHOR_SEED_RUNS))
+    assert await problem.is_interesting(b"hello") is False
+    assert problem.ledger(b"hello").verdict is False
+    assert problem.current_test_case == b"hello world"
+    # Latched reject: no more runs.
+    assert await problem.is_interesting(b"hello") is False
+    assert problem.ledger(b"hello").evidence.runs == 2
+
+
+async def test_accepted_candidates_that_are_not_smaller_are_not_adopted():
+    flaky = Flaky(1.0)
+    problem = nd_problem(flaky)
+    await problem.setup()
+    policy(problem).flip()
+    anchor = policy(problem).anchor
+    assert await problem.is_interesting(b"hello world!!") is True
+    assert problem.current_test_case == b"hello world"
+    assert policy(problem).anchor == anchor
+    assert problem.stats.wasted_interesting_calls == 1
+
+
+async def test_the_anchor_never_falls():
+    flaky = Flaky(1.0)
+    problem = nd_problem(flaky)
+    await problem.setup()
+    policy(problem).flip()
+    policy(problem).raise_anchor(Evidence(ANCHOR_SEED_RUNS, ANCHOR_SEED_RUNS))
+    high = policy(problem).anchor
+    # A candidate at 90% clears nothing at the high water, but even an
+    # accepted one at a lower measured rate must not lower the anchor.
+    outcomes = iter([True] * 19 + [False] + [True] * 100)
+
+    async def is_interesting(tc):
+        return next(outcomes)
+
+    problem = nd_problem(is_interesting)
+    policy(problem).flip()
+    policy(problem).raise_anchor(Evidence(15, 20))
+    low = policy(problem).anchor
+    assert await problem.is_interesting(b"hello") is True
+    assert policy(problem).anchor >= low
+    assert policy(problem).anchor < high
+
+
+async def test_confirming_mode_drives_a_missed_first_run_to_a_verdict():
+    outcomes = iter([False] + [True] * 100)
+
+    async def is_interesting(tc):
+        return next(outcomes)
+
+    problem = nd_problem(is_interesting)
+    policy(problem).flip()
+    policy(problem).confirming = True
+    assert await problem.is_interesting(b"hello") is True
+    assert problem.current_test_case == b"hello"
+    ledger = problem.ledger(b"hello")
+    assert ledger.verdict is True
+    assert ledger.evidence.runs >= ANCHOR_SEED_RUNS
+
+
+async def test_adoption_ends_the_confirmation_sweep():
+    problem = nd_problem(Flaky(1.0))
+    policy(problem).flip()
+    policy(problem).confirming = True
+    assert await problem.is_interesting(b"hello") is True
+    assert not policy(problem).confirming
+
+
+async def test_hit_minimum_is_pinned_per_candidate():
+    problem = nd_problem(Flaky(1.0))
+    policy(problem).flip()
+    policy(problem).budget.min_hits = 6
+    assert await problem.is_interesting(b"hello") is True
+    assert problem.ledger(b"hello").min_hits == 6
+
+
+async def test_pass_call_monitor_fires_once_per_verdict():
+    problem = nd_problem(Flaky(1.0))
+    policy(problem).flip()
+    fired = []
+    problem.pass_call_monitor = lambda: fired.append(1)
+    await problem.is_interesting(b"hello")
+    assert len(fired) == 1
+
+
+async def test_periodic_verify_catches_late_nondeterminism():
+    # Deterministic for the first VERIFY_INTERVAL calls, then the current
+    # test case stops reproducing.
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        if calls <= DETECTION_REPLAYS:
+            return True
+        return tc != b"hello world"
+
+    problem = nd_problem(is_interesting)
+    await problem.setup()
+    for i in range(VERIFY_INTERVAL):
+        await problem.is_interesting(b"x" * 100 + bytes([i]))
+    assert problem.nondeterministic
+
+
+async def test_periodic_verify_ignores_timeouts():
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        if calls > DETECTION_REPLAYS and tc == b"hello world":
+            return InterestingnessResult(interesting=False, timed_out=True)
+        return tc == b"hello world"
+
+    problem = nd_problem(is_interesting)
+    await problem.setup()
+    for i in range(2 * VERIFY_INTERVAL):
+        await problem.is_interesting(b"x" * 100 + bytes([i % 256, i // 256]))
+    assert not problem.nondeterministic
+
+
+async def test_unstick_replays_the_final_result_and_flips_on_a_miss():
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        return calls <= DETECTION_REPLAYS or calls % 2 == 0
+
+    problem = nd_problem(is_interesting)
+    await problem.setup()
+    assert not problem.nondeterministic
+    assert await problem.attempt_unstick() is True
+    assert problem.nondeterministic
+
+
+async def test_unstick_of_a_deterministic_result_delegates():
+    unstick_calls = []
+
+    async def unstick():
+        unstick_calls.append(1)
+        return False
+
+    problem = nd_problem(Flaky(1.0), unstick=unstick)
+    await problem.setup()
+    assert await problem.attempt_unstick() is False
+    assert unstick_calls == [1]
+    assert not problem.nondeterministic
+
+
+async def test_unstick_under_nondeterminism_runs_one_confirmation_sweep():
+    unstick_calls = []
+
+    async def unstick():
+        unstick_calls.append(1)
+        return False
+
+    problem = nd_problem(Flaky(1.0), unstick=unstick)
+    await problem.setup()
+    policy(problem).flip()
+    assert await problem.attempt_unstick() is True
+    assert policy(problem).confirming
+    assert unstick_calls == []
+    # A confirmation sweep that changed nothing ends the sweep and falls
+    # through to the other unstick hooks.
+    assert await problem.attempt_unstick() is False
+    assert not policy(problem).confirming
+    assert unstick_calls == [1]
+
+
+async def test_measure_current_reports_fresh_evidence():
+    flaky = Flaky(1.0)
+    problem = nd_problem(flaky)
+    await problem.setup()
+    before = flaky.calls
+    evidence = await problem.measure_current(7)
+    assert (evidence.interesting, evidence.runs) == (7, 7)
+    assert flaky.calls == before + 7
+
+
+async def test_backtrack_reverts_to_the_newest_reproducing_entry():
+    # History: original reproduces always, the later entries never do.
+    reproducing = {b"hello world", b"hello worl"}
+    entries = [b"hello world", b"hello worl", b"hello wor", b"hello wo", b"hello w"]
+
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        if calls <= DETECTION_REPLAYS:
+            return True
+        return tc in reproducing
+
+    problem = nd_problem(is_interesting, history=entries)
+    await problem.setup()
+    # Walk the incumbent down to the last entry as a deterministic reducer would.
+    reproducing.update(entries)
+    for entry in entries[1:]:
+        assert await problem.is_interesting(entry) is True
+    assert problem.current_test_case == b"hello w"
+    reproducing.clear()
+    reproducing.update({b"hello world", b"hello worl"})
+    reverted = []
+    problem.on_reduce(lambda tc: _record(reverted, tc))
+
+    assert await problem.attempt_unstick() is True
+    assert problem.nondeterministic
+    assert problem.current_test_case == b"hello worl"
+    assert reverted == [b"hello worl"]
+    assert policy(problem).anchor > 0.5
+
+
+async def _record(into, tc):
+    into.append(tc)
+
+
+async def test_backtrack_with_no_history_reverts_to_the_original():
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        return calls <= DETECTION_REPLAYS + 1 or tc == b"hello world"
+
+    problem = nd_problem(is_interesting)
+    await problem.setup()
+    assert await problem.is_interesting(b"hello") is True
+    assert await problem.attempt_unstick() is True
+    assert problem.current_test_case == b"hello world"
+
+
+async def test_backtrack_keeps_the_incumbent_when_nothing_reproduces():
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        return calls <= DETECTION_REPLAYS + 1
+
+    problem = nd_problem(is_interesting, history=[b"hello world"])
+    await problem.setup()
+    assert await problem.is_interesting(b"hello") is True
+    messages = []
+    problem.work.report = lambda msg, level: messages.append(msg)
+    assert await problem.attempt_unstick() is True
+    assert problem.current_test_case == b"hello"
+    assert any("rarely" in m for m in messages)
+
+
+async def test_backtrack_scans_geometrically_then_refines():
+    # Ten entries; only the first four reproduce once the run goes
+    # nondeterministic. The scan must find entry three (the newest
+    # reproducing one) without testing every entry.
+    entries = [bytes([i]) * (20 - i) for i in range(10)]
+    reproducing = set(entries)
+    tested = []
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        if calls > DETECTION_REPLAYS:
+            tested.append(tc)
+        return tc in reproducing
+
+    problem = nd_problem(is_interesting, initial=entries[0], history=entries)
+    await problem.setup()
+    for entry in entries[1:]:
+        assert await problem.is_interesting(entry) is True
+    assert problem.current_test_case == entries[9]
+    del tested[:]
+    reproducing.intersection_update(entries[:4])
+
+    assert await problem.attempt_unstick() is True
+    assert problem.current_test_case == entries[3]
+    distinct = {tc for tc in tested if tc != entries[9]}
+    assert entries[3] in distinct
+    assert entries[4] in distinct
+    assert entries[8] in distinct
+    # The geometric scan skips most entries and the bisection only looks
+    # between the last reject and the first accept.
+    assert entries[0] not in distinct
+    assert entries[2] not in distinct
+
+
+async def test_backtrack_problem_delegates_nondeterminism():
+    problem = nd_problem(Flaky(1.0))
+    policy(problem).flip()
+    inner = problem.backtrack(b"hello world again")
+    assert inner.nondeterministic
+    assert isinstance(inner, BasicReductionProblem)
+    assert inner.policy is None
+
+
+async def test_view_delegates_nondeterminism():
+    problem = nd_problem(Flaky(1.0))
+    view = View(problem=problem, parse=lambda x: list(x), dump=bytes)
+    assert not view.nondeterministic
+    policy(problem).flip()
+    assert view.nondeterministic
+
+
+async def test_stats_count_every_replay_as_a_call():
+    flaky = Flaky(1.0)
+    problem = nd_problem(flaky)
+    await problem.setup()
+    policy(problem).flip()
+    await problem.is_interesting(b"hello")
+    assert problem.stats.calls == flaky.calls
+    assert problem.stats.reductions == 1
+
+
+async def test_measure_current_records_misses():
+    outcomes = iter([True] * DETECTION_REPLAYS + [False, True, False])
+
+    async def is_interesting(tc):
+        return next(outcomes)
+
+    problem = nd_problem(is_interesting)
+    await problem.setup()
+    evidence = await problem.measure_current(3)
+    assert (evidence.interesting, evidence.runs) == (1, 3)
+
+
+async def test_backtrack_falls_back_to_the_oldest_entry():
+    # Six entries; only the original reproduces. The geometric scan skips
+    # the oldest entry, so it must be tried separately.
+    entries = [bytes([i]) * (20 - i) for i in range(6)]
+    reproducing = set(entries)
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        return tc in reproducing
+
+    problem = nd_problem(is_interesting, initial=entries[0], history=entries)
+    await problem.setup()
+    for entry in entries[1:]:
+        assert await problem.is_interesting(entry) is True
+    reproducing.intersection_update(entries[:1])
+    assert await problem.attempt_unstick() is True
+    assert problem.current_test_case == entries[0]
+
+
+def test_base_problem_is_deterministic_by_default():
+    class Minimal(ReductionProblem[bytes]):
+        def __init__(self):
+            super().__init__(work=WorkContext())
+
+        @property
+        def current_test_case(self):
+            return b""
+
+        @property
+        def stats(self):
+            return ReductionStats()
+
+        async def is_interesting(self, test_case):
+            return True
+
+        def sort_key(self, test_case):
+            return test_case
+
+        def size(self, test_case):
+            return len(test_case)
+
+        def display(self, value):
+            return repr(value)
+
+    assert Minimal().nondeterministic is False

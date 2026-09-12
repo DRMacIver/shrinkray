@@ -66,6 +66,7 @@ class FakeReductionClientForSnapshots:
         llm_enabled: bool = False,
         llm_model: str = DEFAULT_MODEL_SPEC,
         llm_only: bool = False,
+        assume_deterministic: bool = False,
     ) -> Response:
         return Response(id="start", result={"status": "started"})
 

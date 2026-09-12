@@ -140,6 +140,7 @@ class ReductionClientProtocol(Protocol):
         llm_enabled: bool = False,
         llm_model: str = DEFAULT_MODEL_SPEC,
         llm_only: bool = False,
+        assume_deterministic: bool = False,
     ) -> Response: ...
     async def cancel(self) -> Response: ...
     async def disable_pass(self, pass_name: str) -> Response: ...
@@ -174,6 +175,9 @@ class StatsDisplay(Static):
     time_since_last_reduction = reactive(0.0)
     current_timeout: reactive[float | None] = reactive(None)
     timeout_rate = reactive(0.0)
+    nondeterministic = reactive(False)
+    reproduction_rate: reactive[float | None] = reactive(None)
+    replay_calls = reactive(0)
 
     def update_stats(self, update: ProgressUpdate) -> None:
         self.current_status = update.status
@@ -190,6 +194,9 @@ class StatsDisplay(Static):
         self.time_since_last_reduction = update.time_since_last_reduction
         self.current_timeout = update.current_timeout
         self.timeout_rate = update.timeout_rate
+        self.nondeterministic = update.nondeterministic
+        self.reproduction_rate = update.reproduction_rate
+        self.replay_calls = update.replay_calls
         self.refresh(layout=True)
 
     def render(self) -> str:
@@ -239,6 +246,14 @@ class StatsDisplay(Static):
             lines.append(
                 f"Test timeout: {self.current_timeout:.1f}s "
                 f"({self.timeout_rate * 100.0:.0f}% of recent tests timed out)"
+            )
+
+        if self.nondeterministic:
+            rate = self.reproduction_rate or 0.0
+            lines.append(
+                "Nondeterministic test: current test case reproduces at least "
+                f"{rate * 100.0:.0f}% of the time "
+                f"({self.replay_calls} calls spent on replays)"
             )
 
         # Time since last reduction
@@ -1739,6 +1754,7 @@ class ShrinkRayApp(App[None]):
         llm_enabled: bool = False,
         llm_model: str = DEFAULT_MODEL_SPEC,
         llm_only: bool = False,
+        assume_deterministic: bool = False,
     ) -> None:
         super().__init__()
         self._file_path = file_path
@@ -1766,6 +1782,7 @@ class ShrinkRayApp(App[None]):
         self._llm_enabled = llm_enabled
         self._llm_model = llm_model
         self._llm_only = llm_only
+        self._assume_deterministic = assume_deterministic
         self._latest_pass_stats: list[PassStatsData] = []
         self._current_pass_name: str = ""
         self._disabled_passes: list[str] = []
@@ -1942,6 +1959,7 @@ class ShrinkRayApp(App[None]):
                     llm_enabled=self._llm_enabled,
                     llm_model=self._llm_model,
                     llm_only=self._llm_only,
+                    assume_deterministic=self._assume_deterministic,
                 )
 
                 if response.error:
@@ -2191,6 +2209,7 @@ def run_textual_ui(
     llm_enabled: bool = False,
     llm_model: str = DEFAULT_MODEL_SPEC,
     llm_only: bool = False,
+    assume_deterministic: bool = False,
 ) -> None:
     """Run the textual TUI.
 
@@ -2221,6 +2240,7 @@ def run_textual_ui(
         llm_enabled=llm_enabled,
         llm_model=llm_model,
         llm_only=llm_only,
+        assume_deterministic=assume_deterministic,
     )
     app.run()
     if app.return_code:

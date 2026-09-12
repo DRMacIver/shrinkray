@@ -13,134 +13,137 @@ flowchart TD
     n4[formatting]
     n5[history]
     n6[llm_client]
-    n7[passes]
-    n8[passes.bytes]
-    n9[passes.cpp]
-    n10[passes.definitions]
-    n11[passes.external]
-    n12[passes.genericlanguages]
-    n13[passes.json]
-    n14[passes.llm]
-    n15[passes.llmtransforms]
-    n16[passes.patching]
-    n17[passes.python]
-    n18[passes.sat]
-    n19[passes.sequences]
-    n20[passes.treesitter]
-    n21[problem]
-    n22[process]
-    n23[reducer]
-    n24[reducers]
-    n25[reducers.driver]
-    n26[reducers.protocol]
-    n27[reducers.python]
-    n28[reformat]
-    n29[state]
-    n30[subprocess]
-    n31[subprocess.client]
-    n32[subprocess.protocol]
-    n33[subprocess.worker]
-    n34[tui]
-    n35[ui]
-    n36[validation]
-    n37[work]
+    n7[nondeterminism]
+    n8[passes]
+    n9[passes.bytes]
+    n10[passes.cpp]
+    n11[passes.definitions]
+    n12[passes.external]
+    n13[passes.genericlanguages]
+    n14[passes.json]
+    n15[passes.llm]
+    n16[passes.llmtransforms]
+    n17[passes.patching]
+    n18[passes.python]
+    n19[passes.sat]
+    n20[passes.sequences]
+    n21[passes.treesitter]
+    n22[problem]
+    n23[process]
+    n24[reducer]
+    n25[reducers]
+    n26[reducers.driver]
+    n27[reducers.protocol]
+    n28[reducers.python]
+    n29[reformat]
+    n30[state]
+    n31[subprocess]
+    n32[subprocess.client]
+    n33[subprocess.protocol]
+    n34[subprocess.worker]
+    n35[tui]
+    n36[ui]
+    n37[validation]
+    n38[work]
 
     n3 --> n6
-    n3 --> n20
-    n4 --> n28
+    n3 --> n21
+    n4 --> n29
     n5 --> n2
-    n6 --> n14
-    n8 --> n16
-    n8 --> n21
-    n9 --> n10
-    n9 --> n16
-    n9 --> n21
-    n10 --> n21
-    n11 --> n21
+    n6 --> n15
+    n9 --> n17
+    n9 --> n22
+    n10 --> n11
+    n10 --> n17
+    n10 --> n22
     n11 --> n22
-    n11 --> n26
-    n12 --> n8
-    n12 --> n10
-    n12 --> n16
-    n12 --> n21
-    n12 --> n37
-    n13 --> n10
-    n13 --> n16
-    n13 --> n21
-    n14 --> n10
-    n14 --> n21
-    n15 --> n10
-    n15 --> n14
-    n15 --> n20
-    n15 --> n21
+    n12 --> n22
+    n12 --> n23
+    n12 --> n27
+    n13 --> n9
+    n13 --> n11
+    n13 --> n17
+    n13 --> n22
+    n13 --> n38
+    n14 --> n11
+    n14 --> n17
+    n14 --> n22
+    n15 --> n11
+    n15 --> n22
+    n16 --> n11
+    n16 --> n15
     n16 --> n21
-    n17 --> n21
-    n17 --> n37
-    n18 --> n10
-    n18 --> n16
-    n18 --> n19
-    n18 --> n21
-    n19 --> n10
-    n19 --> n16
-    n19 --> n21
-    n20 --> n10
-    n20 --> n16
-    n20 --> n21
-    n21 --> n4
-    n21 --> n28
-    n21 --> n37
-    n23 --> n3
-    n23 --> n5
-    n23 --> n8
-    n23 --> n9
-    n23 --> n10
-    n23 --> n11
-    n23 --> n12
-    n23 --> n13
-    n23 --> n14
-    n23 --> n15
-    n23 --> n16
-    n23 --> n17
-    n23 --> n18
-    n23 --> n19
-    n23 --> n20
-    n23 --> n21
-    n23 --> n37
-    n25 --> n10
-    n25 --> n21
-    n25 --> n26
-    n25 --> n37
-    n27 --> n17
-    n27 --> n25
-    n29 --> n1
-    n29 --> n2
-    n29 --> n3
-    n29 --> n4
-    n29 --> n5
-    n29 --> n6
-    n29 --> n9
-    n29 --> n14
-    n29 --> n21
-    n29 --> n22
-    n29 --> n23
-    n29 --> n37
-    n30 --> n31
-    n30 --> n32
-    n31 --> n14
+    n16 --> n22
+    n17 --> n22
+    n18 --> n22
+    n18 --> n38
+    n19 --> n11
+    n19 --> n17
+    n19 --> n20
+    n19 --> n22
+    n20 --> n11
+    n20 --> n17
+    n20 --> n22
+    n21 --> n11
+    n21 --> n17
+    n21 --> n22
+    n22 --> n4
+    n22 --> n7
+    n22 --> n29
+    n22 --> n38
+    n24 --> n3
+    n24 --> n5
+    n24 --> n9
+    n24 --> n10
+    n24 --> n11
+    n24 --> n12
+    n24 --> n13
+    n24 --> n14
+    n24 --> n15
+    n24 --> n16
+    n24 --> n17
+    n24 --> n18
+    n24 --> n19
+    n24 --> n20
+    n24 --> n21
+    n24 --> n22
+    n24 --> n38
+    n26 --> n11
+    n26 --> n22
+    n26 --> n27
+    n26 --> n38
+    n28 --> n18
+    n28 --> n26
+    n30 --> n1
+    n30 --> n2
+    n30 --> n3
+    n30 --> n4
+    n30 --> n5
+    n30 --> n6
+    n30 --> n7
+    n30 --> n10
+    n30 --> n15
+    n30 --> n22
+    n30 --> n23
+    n30 --> n24
+    n30 --> n38
     n31 --> n32
-    n33 --> n2
-    n33 --> n14
-    n33 --> n21
-    n33 --> n29
-    n33 --> n32
-    n33 --> n37
-    n34 --> n4
-    n34 --> n14
-    n34 --> n31
-    n34 --> n32
-    n35 --> n21
-    n35 --> n29
-    n36 --> n2
+    n31 --> n33
+    n32 --> n15
+    n32 --> n33
+    n34 --> n2
+    n34 --> n15
+    n34 --> n22
+    n34 --> n30
+    n34 --> n33
+    n34 --> n38
+    n35 --> n4
+    n35 --> n15
+    n35 --> n32
+    n35 --> n33
+    n36 --> n22
+    n36 --> n30
+    n37 --> n2
 ```
 
 ---

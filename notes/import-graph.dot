@@ -9,6 +9,7 @@ digraph imports {
     "formatting";
     "history";
     "llm_client";
+    "nondeterminism";
     "passes";
     "passes.bytes";
     "passes.cpp";
@@ -83,6 +84,7 @@ digraph imports {
     "passes.treesitter" -> "passes.patching";
     "passes.treesitter" -> "problem";
     "problem" -> "formatting";
+    "problem" -> "nondeterminism";
     "problem" -> "reformat";
     "problem" -> "work";
     "reducer" -> "downloads";
@@ -114,6 +116,7 @@ digraph imports {
     "state" -> "formatting";
     "state" -> "history";
     "state" -> "llm_client";
+    "state" -> "nondeterminism";
     "state" -> "passes.cpp";
     "state" -> "passes.llm";
     "state" -> "problem";

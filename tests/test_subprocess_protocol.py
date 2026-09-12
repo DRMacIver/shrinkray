@@ -258,3 +258,30 @@ def test_progress_update_timeout_fields_default():
     assert isinstance(result, ProgressUpdate)
     assert result.current_timeout is None
     assert result.timeout_rate == 0.0
+
+
+def test_progress_update_nondeterminism_roundtrip():
+    original = ProgressUpdate(
+        status="Working",
+        size=500,
+        original_size=1000,
+        calls=25,
+        reductions=5,
+        nondeterministic=True,
+        reproduction_rate=0.42,
+        replay_calls=17,
+    )
+    deserialized = deserialize(serialize(original))
+    assert isinstance(deserialized, ProgressUpdate)
+    assert deserialized.nondeterministic is True
+    assert deserialized.reproduction_rate == 0.42
+    assert deserialized.replay_calls == 17
+
+
+def test_progress_update_nondeterminism_defaults():
+    line = '{"type":"progress","data":{"status":"test","size":100,"original_size":200,"calls":5,"reductions":2}}'
+    result = deserialize(line)
+    assert isinstance(result, ProgressUpdate)
+    assert result.nondeterministic is False
+    assert result.reproduction_rate is None
+    assert result.replay_calls == 0

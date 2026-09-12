@@ -10,25 +10,23 @@ from hypothesis import strategies as st
 from shrinkray.nondeterminism import (
     ANCHOR_ALPHA,
     ANCHOR_SEED_RUNS,
-    CHARGE_FLUKE_RATE,
     CONFIRM_CAP,
     CONFIRM_MIN_HITS,
     GATE_RUNS,
-    GAUNTLET_ALPHA_BUDGET,
     GAUNTLET_CAP,
     GAUNTLET_FLOOR,
     GAUNTLET_GAMMA,
     GAUNTLET_MIN_HITS,
+    INITIAL_MIN_HITS,
     MIN_HITS_CEILING,
+    MONITOR_MIN_RUNS,
     RETENTION_HIGH_WATER,
-    AlphaBudget,
     Evidence,
     NondeterminismPolicy,
     Verdict,
     anchor_z,
     confirmation_bar,
     gauntlet,
-    gauntlet_alpha,
     gauntlet_threshold,
     wilson_bound,
 )
@@ -304,100 +302,6 @@ def test_bar_operating_points():
     assert accept == pytest.approx(0.454, abs=1e-3)
 
 
-# === Alpha budget ===
-
-
-def test_gauntlet_alpha_matches_the_independent_dp():
-    for threshold in (GAUNTLET_FLOOR, 0.24, 0.839):
-        for seed in (Evidence(0, 0), Evidence(1, 1), Evidence(2, 3)):
-            for min_hits in (4, 6, 8):
-                expected, _ = exact_gauntlet_outcome_from(
-                    CHARGE_FLUKE_RATE, threshold, min_hits, seed
-                )
-                assert gauntlet_alpha(seed, threshold, min_hits) == pytest.approx(
-                    expected, abs=1e-9
-                )
-
-
-def exact_gauntlet_outcome_from(
-    p: float, threshold: float, min_hits: int, seed: Evidence
-) -> tuple[float, float]:
-    """Like exact_gauntlet_outcome but from an arbitrary seed and a raw
-    threshold (an anchor whose gauntlet threshold is exactly `threshold`)."""
-    anchor = (
-        threshold if threshold >= RETENTION_HIGH_WATER else threshold / GAUNTLET_GAMMA
-    )
-    assert gauntlet_threshold(anchor) == pytest.approx(threshold)
-    mass = {(seed.interesting, seed.runs): 1.0}
-    accept = 0.0
-    expected_runs = 0.0
-    while mass:
-        following: dict[tuple[int, int], float] = {}
-        for (hits, runs), m in mass.items():
-            verdict = gauntlet(Evidence(hits, runs), anchor, min_hits)
-            if verdict == Verdict.CONTINUE:
-                following[(hits + 1, runs + 1)] = (
-                    following.get((hits + 1, runs + 1), 0.0) + m * p
-                )
-                following[(hits, runs + 1)] = following.get(
-                    (hits, runs + 1), 0.0
-                ) + m * (1 - p)
-            else:
-                expected_runs += m * runs
-                if verdict == Verdict.ACCEPT:
-                    accept += m
-        mass = following
-    return accept, expected_runs
-
-
-def test_alpha_at_the_floor_is_the_008_figure():
-    fast = CHARGE_FLUKE_RATE * gauntlet_alpha(Evidence(1, 1), GAUNTLET_FLOOR, 4)
-    assert fast == pytest.approx(4.0e-4, abs=2e-5)
-    drive = gauntlet_alpha(Evidence(0, 0), GAUNTLET_FLOOR, 4)
-    assert drive == pytest.approx(2.9e-3, abs=1e-4)
-
-
-def test_unreachable_threshold_charges_nothing():
-    assert gauntlet_alpha(Evidence(0, 0), 0.9, 4) == 0.0
-
-
-def test_budget_affords_about_fifty_fast_floor_proposals():
-    budget = AlphaBudget()
-    charged = 0
-    while budget.charge(Evidence(0, 0), anchor=0.0, drive=False, pinned=None) == 4:
-        charged += 1
-    assert charged == 50
-
-
-def test_budget_escalates_to_the_ceiling_and_no_further():
-    budget = AlphaBudget()
-    seen = set()
-    for _ in range(200):
-        seen.add(budget.charge(Evidence(0, 0), anchor=0.0, drive=True, pinned=None))
-    assert max(seen) == MIN_HITS_CEILING
-    assert seen == set(range(GAUNTLET_MIN_HITS, MIN_HITS_CEILING + 1))
-
-
-def test_pinned_candidates_keep_their_minimum_past_the_budget():
-    budget = AlphaBudget()
-    for _ in range(200):
-        budget.charge(Evidence(0, 0), anchor=0.0, drive=True, pinned=None)
-    before = budget.remaining
-    assert budget.charge(Evidence(2, 5), anchor=0.0, drive=True, pinned=4) == 4
-    # The overdraft is exactly that candidate's own charge, nothing more.
-    charge = gauntlet_alpha(Evidence(2, 5), GAUNTLET_FLOOR, 4)
-    assert charge > 0.0
-    assert budget.remaining == pytest.approx(before - charge)
-    assert budget.remaining < 0.0
-
-
-def test_mid_anchor_proposals_are_effectively_free():
-    budget = AlphaBudget()
-    for _ in range(1000):
-        assert budget.charge(Evidence(0, 0), anchor=0.5, drive=False, pinned=None) == 4
-    assert budget.remaining > GAUNTLET_ALPHA_BUDGET * 0.9
-
-
 # === Policy ===
 
 
@@ -494,22 +398,41 @@ def test_policy_counts_replays_by_site():
     assert policy.replay_sites == {"detection": 1, "gauntlet": 2}
 
 
-def test_charge_delegates_to_the_budget():
+def test_false_accepts_escalate_the_hit_minimum_to_the_ceiling():
+    policy = NondeterminismPolicy()
+    assert policy.min_hits == INITIAL_MIN_HITS
+    for expected in range(INITIAL_MIN_HITS + 1, MIN_HITS_CEILING + 1):
+        policy.record_false_accept()
+        assert policy.min_hits == expected
+    policy.record_false_accept()
+    assert policy.min_hits == MIN_HITS_CEILING
+    assert policy.false_accepts == MIN_HITS_CEILING - INITIAL_MIN_HITS + 1
+
+
+def test_adopt_copies_the_unselected_evidence():
+    policy = NondeterminismPolicy()
+    evidence = Evidence(3, 5)
+    policy.adopt(evidence)
+    assert policy.incumbent == Evidence(3, 5)
+    evidence.record(True)
+    assert policy.incumbent == Evidence(3, 5)
+
+
+def test_incumbent_failing_needs_the_upper_bound_below_the_threshold():
     policy = NondeterminismPolicy()
     policy.flip()
-    assert policy.charge(Evidence(0, 0), pinned=None) == GAUNTLET_MIN_HITS
-    assert policy.budget.remaining < GAUNTLET_ALPHA_BUDGET
-
-
-def test_charge_uses_drive_mode_when_confirming():
-    fast = NondeterminismPolicy()
-    fast.flip()
-    fast.charge(Evidence(0, 0), pinned=None)
-    confirm = NondeterminismPolicy()
-    confirm.flip()
-    confirm.confirming = True
-    confirm.charge(Evidence(0, 0), pinned=None)
-    assert confirm.budget.remaining < fast.budget.remaining
+    policy.raise_anchor(Evidence(20, 20))
+    assert not policy.incumbent_failing()
+    # Too few replays to judge, however bad they look.
+    policy.incumbent = Evidence(0, MONITOR_MIN_RUNS - 1)
+    assert not policy.incumbent_failing()
+    policy.incumbent = Evidence(0, MONITOR_MIN_RUNS)
+    assert policy.incumbent_failing()
+    policy.incumbent = Evidence(0, 20)
+    assert policy.incumbent_failing()
+    # A healthy incumbent at the anchor's rate never trips it.
+    policy.incumbent = Evidence(40, 40)
+    assert not policy.incumbent_failing()
 
 
 def test_constants_are_consistent():

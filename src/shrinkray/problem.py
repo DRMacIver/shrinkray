@@ -896,7 +896,19 @@ class BasicReductionProblem(ReductionProblem[T]):
                 self.stats.confirmation_sweeps += 1
                 return True
             else:
+                # A confirmation sweep found nothing. Before believing the
+                # result, measure it: an incumbent that does not reproduce
+                # at the required rate is recovered from, and the next
+                # round starts from the recovered test case.
                 self.__policy.confirming = False
+                evidence = await self.measure_current(ANCHOR_SEED_RUNS)
+                for _ in range(evidence.interesting):
+                    self.__policy.incumbent.record(True)
+                for _ in range(evidence.runs - evidence.interesting):
+                    self.__policy.incumbent.record(False)
+                if self.__policy.incumbent_failing():
+                    await self.__recover()
+                    return True
         if self.__unstick is None:
             return False
         return await self.__unstick()
@@ -969,7 +981,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         assert self.__policy is not None
         if await self.__confirmation_batch(self.current_test_case, evidence):
             return
-        accepted = await self.__scan_history()
+        accepted = await self.__scan_history(self.__confirmation_batch)
         if accepted is None:
             self.work.warn(
                 "The current test case reproduces rarely (interesting on "
@@ -1005,8 +1017,10 @@ class BasicReductionProblem(ReductionProblem[T]):
             interesting, _, _ = await self.__execute(test_case, replay="confirmation")
             evidence.record(interesting)
 
-    async def __scan_history(self) -> tuple[T, Evidence] | None:
-        """Find the newest adopted test case that still reproduces.
+    async def __scan_history(
+        self, judge: Callable[[T, Evidence], Awaitable[bool]]
+    ) -> tuple[T, Evidence] | None:
+        """Find the newest adopted test case that `judge` accepts.
 
         Entries are scanned newest first at geometrically growing
         distances, then the boundary between the last rejected and the
@@ -1027,7 +1041,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         async def test(k: int) -> tuple[T, Evidence] | None:
             test_case = history[positions[k]]
             evidence = Evidence()
-            if await self.__confirmation_batch(test_case, evidence):
+            if await judge(test_case, evidence):
                 return (test_case, evidence)
             return None
 
@@ -1083,7 +1097,7 @@ class BasicReductionProblem(ReductionProblem[T]):
             assert ledger.verdict is not None
             return ledger.verdict
 
-        if self.__policy is not None and not self.__policy.active:
+        if self.__policy is not None:
             await self.__maybe_verify_current()
 
         if self.__policy is None or not self.__policy.active:
@@ -1119,6 +1133,7 @@ class BasicReductionProblem(ReductionProblem[T]):
                     # any confirmation sweep, since the fixpoint it was
                     # certifying is gone.
                     self.__policy.raise_anchor(ledger.unselected_evidence())
+                    self.__policy.adopt(ledger.unselected_evidence())
                     self.__policy.confirming = False
                 for f in self.__on_reduce_callbacks:
                     await f(test_case)
@@ -1129,17 +1144,66 @@ class BasicReductionProblem(ReductionProblem[T]):
         return result
 
     async def __maybe_verify_current(self) -> None:
-        """While the test still looks deterministic, periodically replay
-        the current test case so a nondeterministic test that reproduces
-        most of the time is caught before the reducer has walked too far
-        on single-run verdicts."""
+        """Periodically replay the current test case. While the test still
+        looks deterministic this catches a nondeterministic test that
+        reproduces most of the time before the reducer has walked too far
+        on single-run verdicts. Under nondeterministic handling it feeds
+        the incumbent monitor, which catches an incumbent that does not
+        reproduce at the rate the gauntlet required (a false accept, or
+        an anchor the incumbent never lived up to)."""
         assert self.__policy is not None
         if self.stats.calls - self.__calls_at_last_verify < VERIFY_INTERVAL:
             return
         self.__calls_at_last_verify = self.stats.calls
-        evidence = Evidence()
-        if not await self.__replays_all_reproduce(evidence, 1):
-            await self.__flip(evidence)
+        if not self.__policy.active:
+            evidence = Evidence()
+            if not await self.__replays_all_reproduce(evidence, 1):
+                await self.__flip(evidence)
+            return
+        await self.__replays_all_reproduce(
+            self.__policy.incumbent, 1, stop_on_miss=False, site="monitor"
+        )
+        if self.__policy.incumbent_failing():
+            await self.__recover()
+
+    async def __recover(self) -> None:
+        """The incumbent does not reproduce at the rate the gauntlet
+        required: treat it as a false accept, demand more of later
+        candidates, and back up through the adopted history to the newest
+        test case that clears the gauntlet."""
+        assert self.__policy is not None
+        policy = self.__policy
+        policy.record_false_accept()
+        incumbent = policy.incumbent
+        self.work.warn(
+            "The current test case reproduces less often than expected "
+            f"(interesting on {incumbent.interesting} of {incumbent.runs} "
+            f"replays); candidates now need {policy.min_hits} interesting "
+            "runs to be adopted."
+        )
+        accepted = await self.__scan_history(self.__gauntlet_batch)
+        if accepted is None:
+            self.work.warn("No earlier test case reproduces better; continuing.")
+            policy.adopt(Evidence())
+            return
+        test_case, evidence = accepted
+        self.work.warn(
+            "Backtracking to an earlier test case that reproduces (interesting "
+            f"on {evidence.interesting} of {evidence.runs} replays)."
+        )
+        await self.__set_current(test_case)
+        policy.adopt(Evidence())
+
+    async def __gauntlet_batch(self, test_case: T, evidence: Evidence) -> bool:
+        """Drive `evidence` about `test_case` to a gauntlet verdict against
+        the current anchor, at the hit minimum in force."""
+        assert self.__policy is not None
+        while True:
+            verdict = gauntlet(evidence, self.__policy.anchor, self.__policy.min_hits)
+            if verdict != Verdict.CONTINUE:
+                return verdict == Verdict.ACCEPT
+            interesting, _, _ = await self.__execute(test_case, replay="confirmation")
+            evidence.record(interesting)
 
     async def __run_gauntlet(self, test_case: T, ledger: Ledger) -> bool:
         """Judge a candidate under nondeterministic handling. Its first
@@ -1151,7 +1215,8 @@ class BasicReductionProblem(ReductionProblem[T]):
         the stopping rule."""
         assert self.__policy is not None
         policy = self.__policy
-        ledger.min_hits = policy.charge(ledger.evidence, pinned=ledger.min_hits)
+        if ledger.min_hits is None:
+            ledger.min_hits = policy.min_hits
         interesting, _, _ = await self.__execute(test_case)
         ledger.evidence.record(interesting)
         if not interesting and not policy.confirming:

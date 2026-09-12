@@ -12,6 +12,7 @@ from shrinkray.nondeterminism import (
     GATE_RUNS,
     GAUNTLET_FLOOR,
     GAUNTLET_MIN_HITS,
+    INITIAL_MIN_HITS,
     VERIFY_INTERVAL,
     Evidence,
     NondeterminismPolicy,
@@ -1398,8 +1399,8 @@ async def test_gauntlet_accept_extends_to_the_seed_and_adopts():
     assert ledger.verdict is True
     assert ledger.evidence.runs == ANCHOR_SEED_RUNS
     # The anchor is raised from the runs after the accept decision only.
-    unselected = ANCHOR_SEED_RUNS - GAUNTLET_MIN_HITS
-    assert ledger.accepted_at == Evidence(GAUNTLET_MIN_HITS, GAUNTLET_MIN_HITS)
+    unselected = ANCHOR_SEED_RUNS - INITIAL_MIN_HITS
+    assert ledger.accepted_at == Evidence(INITIAL_MIN_HITS, INITIAL_MIN_HITS)
     assert policy(problem).anchor == pytest.approx(
         Evidence(unselected, unselected).lower_bound()
     )
@@ -1488,8 +1489,11 @@ async def test_adoption_ends_the_confirmation_sweep():
 async def test_hit_minimum_is_pinned_per_candidate():
     problem = nd_problem(Flaky(1.0))
     policy(problem).flip()
-    policy(problem).budget.min_hits = 6
+    policy(problem).min_hits = 6
     assert await problem.is_interesting(b"hello") is True
+    assert problem.ledger(b"hello").min_hits == 6
+    # A later escalation does not change a candidate already pinned.
+    policy(problem).record_false_accept()
     assert problem.ledger(b"hello").min_hits == 6
 
 
@@ -1829,10 +1833,9 @@ async def test_confirmation_sweep_calls_are_counted():
 
 
 async def test_anchor_is_raised_only_from_unselected_runs():
-    # Four straight hits accept the candidate at the floor; the sixteen
-    # runs after the decision all miss. The lucky start must not move
-    # the anchor.
-    outcomes = iter([True] * GAUNTLET_MIN_HITS + [False] * 100)
+    # Straight hits accept the candidate at the floor; the runs after the
+    # decision all miss. The lucky start must not move the anchor.
+    outcomes = iter([True] * INITIAL_MIN_HITS + [False] * 100)
 
     async def is_interesting(tc):
         return next(outcomes)
@@ -1864,3 +1867,111 @@ async def test_seed_top_up_stops_once_a_raise_is_out_of_reach():
     assert ledger.accepted_at is not None
     assert problem.stats.calls - calls_before == ledger.accepted_at.runs
     assert ledger.accepted_at.runs < ANCHOR_SEED_RUNS
+
+
+async def test_incumbent_monitor_replays_the_incumbent_under_handling():
+    problem = nd_problem(Flaky(1.0))
+    await problem.setup()
+    policy(problem).flip()
+    for i in range(VERIFY_INTERVAL):
+        await problem.is_interesting(b"x" * 100 + bytes([i]))
+    assert policy(problem).replay_sites.get("monitor", 0) >= 1
+    assert policy(problem).incumbent.runs >= 1
+
+
+async def test_adoption_seeds_the_incumbent_monitor_from_unselected_runs():
+    problem = nd_problem(Flaky(1.0))
+    policy(problem).flip()
+    assert await problem.is_interesting(b"hello") is True
+    ledger = problem.ledger(b"hello")
+    assert policy(problem).incumbent == ledger.unselected_evidence()
+
+
+async def test_a_false_accept_is_detected_and_recovered_from_history():
+    # Under a two-sided test: the original always reproduces, "hello" is a
+    # bugless candidate that was spuriously interesting, and the monitor
+    # then sees it never reproduce.
+    entries = [b"hello world"]
+    accepted_once = {b"hello": 4}
+
+    async def is_interesting(tc):
+        if tc == b"hello world":
+            return True
+        if accepted_once.get(tc, 0) > 0:
+            accepted_once[tc] -= 1
+            return True
+        return False
+
+    problem = nd_problem(is_interesting, history=entries)
+    await problem.setup()
+    policy(problem).flip()
+    policy(problem).raise_anchor(Evidence(10, 20))
+    # Four straight hits accept the fluke against the anchor; the top-up
+    # runs then all miss, which seeds the monitor.
+    policy(problem).min_hits = 4
+    assert await problem.is_interesting(b"hello") is True
+    assert problem.current_test_case == b"hello"
+    reverted = []
+    problem.on_reduce(lambda tc: _record(reverted, tc))
+    # The monitor fires every VERIFY_INTERVAL calls; each replay of the
+    # incumbent misses, and once the incumbent's upper bound falls below
+    # the threshold the run recovers.
+    for i in range(12 * VERIFY_INTERVAL):
+        await problem.is_interesting(b"x" * 100 + bytes([i % 256, i // 256]))
+        if reverted:
+            break
+    assert reverted == [b"hello world"]
+    assert problem.current_test_case == reverted[0]
+    assert policy(problem).false_accepts == 1
+    assert policy(problem).min_hits == 5
+
+
+async def test_final_measurement_recovers_a_failing_result():
+    entries = [b"hello world"]
+    hits = {b"hello": 4}
+
+    async def is_interesting(tc):
+        if tc == b"hello world":
+            return True
+        if hits.get(tc, 0) > 0:
+            hits[tc] -= 1
+            return True
+        return False
+
+    problem = nd_problem(is_interesting, history=entries)
+    await problem.setup()
+    policy(problem).flip()
+    policy(problem).raise_anchor(Evidence(10, 20))
+    policy(problem).min_hits = 4
+    assert await problem.is_interesting(b"hello") is True
+    # Fixpoint: one confirmation sweep, then the final measurement.
+    assert await problem.attempt_unstick() is True
+    assert policy(problem).confirming
+    assert await problem.attempt_unstick() is True
+    assert problem.current_test_case == b"hello world"
+    assert policy(problem).false_accepts == 1
+    assert policy(problem).replay_sites["report"] == ANCHOR_SEED_RUNS
+
+
+async def test_recovery_with_nothing_better_keeps_the_incumbent():
+    calls = 0
+
+    async def is_interesting(tc):
+        nonlocal calls
+        calls += 1
+        return calls <= DETECTION_REPLAYS + 4
+
+    problem = nd_problem(is_interesting)
+    await problem.setup()
+    policy(problem).flip()
+    policy(problem).raise_anchor(Evidence(10, 20))
+    policy(problem).min_hits = 4
+    assert await problem.is_interesting(b"hello") is True
+    messages = []
+    problem.work.report = lambda msg, level: messages.append(msg)
+    policy(problem).incumbent = Evidence(0, 20)
+    assert await problem.attempt_unstick() is True  # confirmation sweep
+    assert await problem.attempt_unstick() is True  # measurement, recovery
+    assert problem.current_test_case == b"hello"
+    assert any("No earlier test case" in m for m in messages)
+    assert policy(problem).incumbent == Evidence()

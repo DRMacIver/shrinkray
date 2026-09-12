@@ -69,10 +69,26 @@ the threshold has become unreachable within `GAUNTLET_CAP` runs, and on an
 accept tops the ledger up to the seed size before latching. Adoption
 requires an accept plus a smaller sort key, and raises the anchor.
 
-**Alpha budget.** Every proposal is charged, before it runs, its exact
-false-accept probability against a 2% fluke (an exact DP over the stopping
-rule). When the per-reduction budget is spent, new candidates need more
-interesting runs, up to `MIN_HITS_CEILING`.
+**Multiplicity by feedback, not by an assumed noise model.** Hegel charges
+every proposal its exact false-accept probability against a fluke assumed
+to reproduce at 2%, and escalates the hit minimum when the budget runs
+out. That bound is only as good as the 2%: at a real background rate of
+10% the charges are fiction, and Shrink Ray proposes tens of thousands of
+candidates. Instead the run watches its incumbent. Adoption seeds the
+*incumbent monitor* with the candidate's post-decision runs, and the
+periodic verify keeps feeding it fresh replays; the final measurement
+before the reducer may finish adds twenty more. When the incumbent's upper
+bound falls below the gauntlet threshold (with at least `MONITOR_MIN_RUNS`
+replays) it did not reproduce at the rate the gauntlet required: a false
+accept, or drift the anchor never covered. The run then backtracks
+through the adopted history to the newest entry that clears the gauntlet
+at the current anchor, and raises the hit minimum by one (from
+`INITIAL_MIN_HITS` up to `MIN_HITS_CEILING`) for every candidate proposed
+from then on. A one-sided test, where nothing without the bug is ever
+interesting, never trips the monitor and pays only the small starting
+minimum; a two-sided one escalates until false accepts become rare
+relative to the run, at a cost of one detected-and-recovered event per
+escalation step.
 
 **Confirmed-dry stopping.** A fixpoint under fast sweeps is not a
 certificate, since candidates were rejected on single misses. At a fixpoint

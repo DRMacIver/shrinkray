@@ -18,10 +18,15 @@ lookup becomes a decision about an estimated reproduction rate:
   retries, so a candidate rejected on one unlucky run gains power when a
   later pass proposes it again, and rejections stay cheap (charge
   accepts, not rejects).
-- Because a reduction proposes an unbounded number of candidates, the
-  false-accept mass each proposal may spend is charged against a
-  per-reduction *alpha budget*; once it runs out, the number of
-  interesting runs an accept needs escalates.
+- A reduction proposes an unbounded number of candidates, so any fixed
+  per-proposal false-accept rate compounds. Instead of assuming a
+  background rate of spurious hits and budgeting against it, the run
+  *monitors its incumbent* with fresh replays: an incumbent that turns
+  out not to reproduce at the rate the gauntlet required is a detected
+  false accept, recovered from by backtracking through the adopted
+  history, and answered by raising the hit minimum for every later
+  candidate. Multiplicity is controlled by feedback from what actually
+  happened rather than by an assumed model of the noise.
 
 Everything here is pure arithmetic with no I/O, so each rule is tested
 directly against exact dynamic programs over its stopping rule. The
@@ -76,7 +81,10 @@ GAUNTLET_GAMMA = 0.8
 # a candidate the minimum would have accepted.
 GAUNTLET_FLOOR = 0.05
 # A single hit has lower bound 0.2065, so without a minimum every
-# threshold below that would accept a candidate on its first run.
+# threshold below that would accept a candidate on its first run. This is
+# the minimum the operating points in the tests are derived at; the
+# minimum in force starts at INITIAL_MIN_HITS and escalates with observed
+# false accepts.
 GAUNTLET_MIN_HITS = 4
 # Once the anchor is this high the incumbent is indistinguishable from
 # deterministic and gamma becomes 1.0: a deterministic region, once
@@ -88,11 +96,21 @@ RETENTION_HIGH_WATER = 0.8
 # candidate can still match within GAUNTLET_CAP.
 ANCHOR_SEED_RUNS = 20
 
-# Per-reduction false-accept budget, charged per proposal with the exact
-# accept probability of a fluke that reproduces at CHARGE_FLUKE_RATE.
-GAUNTLET_ALPHA_BUDGET = 0.02
-MIN_HITS_CEILING = 8
-CHARGE_FLUKE_RATE = 0.02
+# The hit minimum a run starts with, and how far observed false accepts
+# may escalate it. Rather than charging every proposal against an assumed
+# background rate of spurious hits, the run watches its incumbent: a
+# falsely accepted candidate (or one that reproduces far less often than
+# the anchor promised) is detected by the incumbent monitor, recovered
+# from by backtracking, and answered by demanding one more hit of every
+# later candidate. A one-sided test, where nothing without the bug is
+# ever interesting, therefore pays only the small starting minimum.
+INITIAL_MIN_HITS = 2
+MIN_HITS_CEILING = 12
+# The incumbent monitor judges the incumbent only once it has this many
+# fresh replays: against a near-deterministic anchor a single missed
+# replay would otherwise condemn an incumbent that reproduces nine times
+# in ten.
+MONITOR_MIN_RUNS = 5
 
 
 def wilson_bound(interesting: int, runs: int, *, upper: bool, z: float = Z) -> float:
@@ -200,69 +218,6 @@ def confirmation_bar(evidence: Evidence) -> Verdict:
     return Verdict.CONTINUE
 
 
-def gauntlet_alpha(seed: Evidence, threshold: float, min_hits: int) -> float:
-    """P(the gauntlet accepts | the candidate is a CHARGE_FLUKE_RATE fluke),
-    starting from `seed`: the false-accept mass one driven proposal
-    contributes. An exact dynamic program over the (interesting, runs)
-    probability mass under the per-run verdict checks."""
-    mass = {(seed.interesting, seed.runs): 1.0}
-    accept = 0.0
-    while mass:
-        following: dict[tuple[int, int], float] = {}
-        for (hits, runs), m in mass.items():
-            verdict = _gauntlet_at(Evidence(hits, runs), threshold, min_hits)
-            if verdict == Verdict.ACCEPT:
-                accept += m
-            elif verdict == Verdict.CONTINUE:
-                hit = (hits + 1, runs + 1)
-                miss = (hits, runs + 1)
-                following[hit] = following.get(hit, 0.0) + m * CHARGE_FLUKE_RATE
-                following[miss] = following.get(miss, 0.0) + m * (
-                    1.0 - CHARGE_FLUKE_RATE
-                )
-        mass = following
-    return accept
-
-
-@define
-class AlphaBudget:
-    """One reduction's false-accept spending state.
-
-    Every proposal is charged, before its outcome is known, its exact
-    false-accept mass against a fluke. Charging per proposal makes the
-    total bound the expected number of false accepts by linearity. A
-    candidate already `pinned` at a hit minimum is charged at that
-    minimum even past the budget (a stopping rule never changes mid-test,
-    and the overdraft per candidate is bounded by one charge); a new
-    candidate is pinned at the current minimum, escalated up to
-    MIN_HITS_CEILING first when the remainder cannot afford it.
-    """
-
-    remaining: float = GAUNTLET_ALPHA_BUDGET
-    min_hits: int = GAUNTLET_MIN_HITS
-
-    def charge(
-        self, seed: Evidence, *, anchor: float, drive: bool, pinned: int | None
-    ) -> int:
-        threshold = gauntlet_threshold(anchor)
-
-        def alpha(min_hits: int) -> float:
-            if drive:
-                return gauntlet_alpha(seed, threshold, min_hits)
-            recruited = Evidence(seed.interesting + 1, seed.runs + 1)
-            return CHARGE_FLUKE_RATE * gauntlet_alpha(recruited, threshold, min_hits)
-
-        if pinned is not None:
-            self.remaining -= alpha(pinned)
-            return pinned
-        while True:
-            cost = alpha(self.min_hits)
-            if cost <= self.remaining or self.min_hits >= MIN_HITS_CEILING:
-                self.remaining -= cost
-                return self.min_hits
-            self.min_hits += 1
-
-
 @define
 class NondeterminismPolicy:
     """The run-level state of nondeterminism handling.
@@ -279,7 +234,15 @@ class NondeterminismPolicy:
     active: bool = False
     anchor: float = 0.0
     confirming: bool = False
-    budget: AlphaBudget = field(factory=AlphaBudget)
+    # The hit minimum new candidates are pinned at, and the false accepts
+    # observed so far (each raises the minimum by one, up to the ceiling).
+    min_hits: int = INITIAL_MIN_HITS
+    false_accepts: int = 0
+    # Fresh, unselected evidence about the current incumbent: seeded from
+    # the runs after its accept decision and fed by the incumbent monitor.
+    # When its upper bound falls below the threshold the incumbent is not
+    # what the anchor promised, and the run backtracks.
+    incumbent: Evidence = field(factory=Evidence)
     # Attempts made to raise the anchor, which set the level each is held to.
     anchor_attempts: int = 0
     # Runs spent on replays (every run of a candidate beyond its first,
@@ -289,6 +252,7 @@ class NondeterminismPolicy:
     #   confirmation  confirmation-bar batches (incumbent and backtracking)
     #   gauntlet      reruns of a candidate until the gauntlet decides
     #   seed          topping an accepted candidate's ledger up to the seed
+    #   monitor       periodic replays of the incumbent under handling
     #   report        the final measurement for the report
     replay_calls: int = 0
     replay_interesting: int = 0
@@ -322,13 +286,25 @@ class NondeterminismPolicy:
         z = anchor_z(self.anchor_attempts)
         self.anchor = max(self.anchor, evidence.lower_bound(z))
 
+    def adopt(self, unselected: Evidence) -> None:
+        """A new incumbent: start its monitor from the runs that did not
+        take part in accepting it."""
+        self.incumbent = Evidence(unselected.interesting, unselected.runs)
+
+    def incumbent_failing(self) -> bool:
+        """Whether the incumbent's fresh evidence rules out the rate the
+        gauntlet required of it."""
+        return (
+            self.incumbent.runs >= MONITOR_MIN_RUNS
+            and self.incumbent.upper_bound() < self.threshold
+        )
+
+    def record_false_accept(self) -> None:
+        self.false_accepts += 1
+        self.min_hits = min(MIN_HITS_CEILING, self.min_hits + 1)
+
     def record_replay(self, interesting: bool, site: str) -> None:
         self.replay_calls += 1
         if interesting:
             self.replay_interesting += 1
         self.replay_sites[site] = self.replay_sites.get(site, 0) + 1
-
-    def charge(self, seed: Evidence, *, pinned: int | None) -> int:
-        return self.budget.charge(
-            seed, anchor=self.anchor, drive=self.confirming, pinned=pinned
-        )

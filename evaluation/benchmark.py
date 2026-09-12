@@ -456,6 +456,20 @@ def build_problems() -> dict[str, Problem]:
             ),
             flaky=(0.2, 0.0),
         ),
+        "flaky_markers_two_sided_q10": Problem(
+            _big_file_with_markers(),
+            contains_all(
+                b"RARE_MARKER_ALPHA", b"RARE_MARKER_BETA", b"RARE_MARKER_GAMMA"
+            ),
+            flaky=(0.5, 0.1),
+        ),
+        "flaky_markers_p90_q10": Problem(
+            _big_file_with_markers(),
+            contains_all(
+                b"RARE_MARKER_ALPHA", b"RARE_MARKER_BETA", b"RARE_MARKER_GAMMA"
+            ),
+            flaky=(0.9, 0.1),
+        ),
         "flaky_markers_two_sided": Problem(
             _big_file_with_markers(),
             contains_all(
@@ -637,6 +651,8 @@ def run_problem(name: str, problem: Problem, seed: int = 0) -> dict:
         "confirmation_sweeps": reduction_problem.stats.confirmation_sweeps,
         "confirmation_sweep_calls": reduction_problem.stats.confirmation_sweep_calls,
         "nondeterministic": reduction_problem.policy.active,
+        "false_accepts": reduction_problem.policy.false_accepts,
+        "min_hits": reduction_problem.policy.min_hits,
         "startup_refusals": 0,
         "c90": calls_to_fraction(0.90),
         "c99": calls_to_fraction(0.99),
@@ -681,7 +697,8 @@ def print_table(results: list[dict]) -> None:
                 f"{'':<24} replays by site: {sites}; merge probes "
                 f"{r['merge_probes']} costing {r['merge_probe_calls']} calls; "
                 f"{r['confirmation_sweeps']} confirmation sweeps costing "
-                f"{r['confirmation_sweep_calls']} calls"
+                f"{r['confirmation_sweep_calls']} calls; "
+                f"{r['false_accepts']} recoveries, hit minimum {r['min_hits']}"
             )
         if r["startup_refusals"]:
             print(

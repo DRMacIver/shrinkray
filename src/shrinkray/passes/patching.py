@@ -92,11 +92,16 @@ class PatchApplier[PatchType, TargetType]:
                         )
                     except Conflict:
                         return False
-                    if await self.__problem.is_reduction(with_patch_applied):
-                        self.__current_patch = attempted_patch
-                        return True
-                    else:
+                    stats = self.__problem.stats
+                    calls_before = stats.calls
+                    stats.merge_probes += 1
+                    try:
+                        if await self.__problem.is_reduction(with_patch_applied):
+                            self.__current_patch = attempted_patch
+                            return True
                         return False
+                    finally:
+                        stats.merge_probe_calls += stats.calls - calls_before
 
                 if await can_merge(to_merge):
                     merged = to_merge

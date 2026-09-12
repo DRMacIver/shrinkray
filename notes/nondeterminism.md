@@ -49,7 +49,15 @@ clears the bar, and the reduction reverts to it.
 **Anchor.** A monotone Wilson lower bound on the incumbent's reproduction
 rate, seeded from the confirmation batch extended to `ANCHOR_SEED_RUNS`
 runs and raised only when an accepted candidate is adopted. It never falls
-and is never fed by re-measurements of the standing incumbent.
+and is never fed by re-measurements of the standing incumbent. Two things
+keep the running maximum honest, because a reduction adopts hundreds of
+candidates and the luckiest of their batches looks far better than the
+rate they all share (the first benchmark showed the anchor climbing to
+0.58 on a p = 0.5 bug, after which most valid reductions were rejected at
+nearly the full cap): a raise uses only the runs recorded *after* the
+accept decision (the stopping rule selected on the earlier ones), and the
+n-th raise attempt uses a bound at the Bonferroni level for n attempts
+(`anchor_z`).
 
 **Gauntlet.** Under nondeterministic handling a candidate's first run
 recruits it: in a fast sweep a miss rejects it at the cost of that one run,
@@ -77,6 +85,10 @@ handling, since a fruitless pass may succeed on a retry.
 
 ## Differences from Hegel
 
+- Anchor raises are multiplicity-corrected and use post-decision evidence
+  only (above). Hegel takes the max over every adopted candidate's full
+  twenty-run bound, which is the selection effect behind its replay cost
+  lottery.
 - The gauntlet rejects as soon as the threshold is unreachable within the
   cap (Hegel's discovery bar has this rule, its gauntlet did not). This
   changes no accept decision and removes the cost lottery above the

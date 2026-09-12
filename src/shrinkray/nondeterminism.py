@@ -33,6 +33,7 @@ stops near-deterministic candidates from burning the whole cap.
 
 import math
 from enum import Enum, auto
+from statistics import NormalDist
 
 from attrs import define, field
 
@@ -41,6 +42,10 @@ from attrs import define, field
 # below peek after every run, so this is a tuning constant: the exact
 # operating points (in tests/test_nondeterminism.py) are the specification.
 Z = 1.96
+# The one-sided level anchor raises are held to, over all of a run's
+# attempts together (see anchor_z). 0.025 is Z's one-sided tail, so the
+# first attempt uses Z itself.
+ANCHOR_ALPHA = 0.025
 
 # Replays of the initial test case at startup, and of the final result at
 # the end, used to detect nondeterminism. A deterministic test pays this
@@ -90,7 +95,7 @@ MIN_HITS_CEILING = 8
 CHARGE_FLUKE_RATE = 0.02
 
 
-def wilson_bound(interesting: int, runs: int, *, upper: bool) -> float:
+def wilson_bound(interesting: int, runs: int, *, upper: bool, z: float = Z) -> float:
     """One side of the Wilson score interval for interesting / runs."""
     if runs <= 0:
         return 1.0 if upper else 0.0
@@ -100,12 +105,26 @@ def wilson_bound(interesting: int, runs: int, *, upper: bool) -> float:
     if interesting == runs and upper:
         return 1.0
     p = interesting / runs
-    z2 = Z * Z
+    z2 = z * z
     denominator = 1.0 + z2 / runs
     centre = p + z2 / (2.0 * runs)
-    margin = Z * math.sqrt((p * (1.0 - p) + z2 / (4.0 * runs)) / runs)
+    margin = z * math.sqrt((p * (1.0 - p) + z2 / (4.0 * runs)) / runs)
     bound = (centre + margin if upper else centre - margin) / denominator
     return min(1.0, max(0.0, bound))
+
+
+def anchor_z(attempts: int) -> float:
+    """The z for the `attempts`-th attempt to raise the anchor.
+
+    The anchor is a running maximum over every adopted candidate's bound,
+    and the maximum of many noisy bounds overshoots the rate they all
+    estimate (a reduction adopts hundreds of candidates at the same true
+    rate, and the luckiest of their twenty-run batches looks far better
+    than the rate). Each attempt therefore uses a bound at the Bonferroni
+    level for the number of attempts so far, so the chance that any raise
+    ever overshoots the true rate stays at the single-test level.
+    """
+    return max(Z, NormalDist().inv_cdf(1.0 - ANCHOR_ALPHA / max(attempts, 1)))
 
 
 @define
@@ -126,8 +145,15 @@ class Evidence:
             return 0.0
         return self.interesting / self.runs
 
-    def lower_bound(self) -> float:
-        return wilson_bound(self.interesting, self.runs, upper=False)
+    def lower_bound(self, z: float = Z) -> float:
+        return wilson_bound(self.interesting, self.runs, upper=False, z=z)
+
+    def since(self, earlier: "Evidence") -> "Evidence":
+        """The runs recorded after `earlier`, an earlier snapshot of this
+        evidence."""
+        return Evidence(
+            self.interesting - earlier.interesting, self.runs - earlier.runs
+        )
 
     def upper_bound(self) -> float:
         return wilson_bound(self.interesting, self.runs, upper=True)
@@ -254,10 +280,19 @@ class NondeterminismPolicy:
     anchor: float = 0.0
     confirming: bool = False
     budget: AlphaBudget = field(factory=AlphaBudget)
+    # Attempts made to raise the anchor, which set the level each is held to.
+    anchor_attempts: int = 0
     # Runs spent on replays (every run of a candidate beyond its first,
-    # plus detection and confirmation runs), and how many were interesting.
+    # plus detection and confirmation runs), how many were interesting,
+    # and where they were spent, by site:
+    #   detection     replays of the incumbent looking for nondeterminism
+    #   confirmation  confirmation-bar batches (incumbent and backtracking)
+    #   gauntlet      reruns of a candidate until the gauntlet decides
+    #   seed          topping an accepted candidate's ledger up to the seed
+    #   report        the final measurement for the report
     replay_calls: int = 0
     replay_interesting: int = 0
+    replay_sites: dict[str, int] = field(factory=dict)
 
     def flip(self) -> bool:
         """Switch into nondeterministic handling. Returns whether this call
@@ -272,12 +307,19 @@ class NondeterminismPolicy:
         return gauntlet_threshold(self.anchor)
 
     def raise_anchor(self, evidence: Evidence) -> None:
-        self.anchor = max(self.anchor, evidence.lower_bound())
+        """Raise the anchor to `evidence`'s lower bound if that is higher.
+        `evidence` must not have been selected on: runs that decided an
+        accept are biased upwards by the stopping rule, so callers pass
+        the runs recorded after the decision (see Evidence.since)."""
+        self.anchor_attempts += 1
+        z = anchor_z(self.anchor_attempts)
+        self.anchor = max(self.anchor, evidence.lower_bound(z))
 
-    def record_replay(self, interesting: bool) -> None:
+    def record_replay(self, interesting: bool, site: str) -> None:
         self.replay_calls += 1
         if interesting:
             self.replay_interesting += 1
+        self.replay_sites[site] = self.replay_sites.get(site, 0) + 1
 
     def charge(self, seed: Evidence, *, pinned: int | None) -> int:
         return self.budget.charge(

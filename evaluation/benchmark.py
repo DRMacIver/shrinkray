@@ -631,6 +631,11 @@ def run_problem(name: str, problem: Problem, seed: int = 0) -> dict:
         "final_rate": problem.true_rate(result),
         "bug_kept": bool(problem.predicate(result)),
         "replay_calls": reduction_problem.policy.replay_calls,
+        "replay_sites": dict(reduction_problem.policy.replay_sites),
+        "merge_probe_calls": reduction_problem.stats.merge_probe_calls,
+        "merge_probes": reduction_problem.stats.merge_probes,
+        "confirmation_sweeps": reduction_problem.stats.confirmation_sweeps,
+        "confirmation_sweep_calls": reduction_problem.stats.confirmation_sweep_calls,
         "nondeterministic": reduction_problem.policy.active,
         "startup_refusals": 0,
         "c90": calls_to_fraction(0.90),
@@ -670,6 +675,14 @@ def print_table(results: list[dict]) -> None:
         print(" ".join(f"{r[key]:{fmt}}" for _, key, fmt in TABLE_COLUMNS))
         if not r["bug_kept"]:
             print(f"{'':<24} !! result no longer satisfies the predicate")
+        if r["nondeterministic"]:
+            sites = ", ".join(f"{k} {v}" for k, v in sorted(r["replay_sites"].items()))
+            print(
+                f"{'':<24} replays by site: {sites}; merge probes "
+                f"{r['merge_probes']} costing {r['merge_probe_calls']} calls; "
+                f"{r['confirmation_sweeps']} confirmation sweeps costing "
+                f"{r['confirmation_sweep_calls']} calls"
+            )
         if r["startup_refusals"]:
             print(
                 f"{'':<24} (refused to start {r['startup_refusals']} time(s) "

@@ -407,6 +407,15 @@ class ReductionStats:
     interesting_calls: int = 0
     wasted_interesting_calls: int = 0
 
+    # Calls made by the patch applier's merge probes (testing combinations
+    # of patches that each passed on their own), and how many probes.
+    merge_probes: int = 0
+    merge_probe_calls: int = 0
+    # Under a nondeterministic test: confirmation sweeps run, and the
+    # calls made while one was running.
+    confirmation_sweeps: int = 0
+    confirmation_sweep_calls: int = 0
+
     time_of_last_reduction: float = 0.0
     start_time: float = attrs.Factory(time.time)
 
@@ -665,6 +674,15 @@ class Ledger:
     verdict: bool | None = None
     cache_valid: Callable[[], bool] | None = None
     min_hits: int | None = None
+    # A snapshot of the evidence at the moment the gauntlet accepted, so
+    # the runs after it (which the stopping rule did not select on) can
+    # be told apart when the anchor is raised.
+    accepted_at: Evidence | None = None
+
+    def unselected_evidence(self) -> Evidence:
+        """The runs recorded after the accept decision."""
+        assert self.accepted_at is not None
+        return self.evidence.since(self.accepted_at)
 
     def latched(self) -> bool:
         return self.verdict is not None and (
@@ -798,11 +816,12 @@ class BasicReductionProblem(ReductionProblem[T]):
         )
 
     async def __execute(
-        self, test_case: T, *, replay: bool = False
+        self, test_case: T, *, replay: str | None = None
     ) -> tuple[bool, bool, Callable[[], bool] | None]:
         """Run the underlying predicate once and normalize its result to
         (interesting, timed_out, cache_valid), updating the call statistics.
-        A replay is any run beyond a candidate's first."""
+        A replay is any run beyond a candidate's first; `replay` names the
+        site spending it (see NondeterminismPolicy.replay_sites)."""
         outcome = await self.__is_interesting(test_case)
         if isinstance(outcome, InterestingnessResult):
             result = (outcome.interesting, outcome.timed_out, outcome.cache_valid)
@@ -813,8 +832,11 @@ class BasicReductionProblem(ReductionProblem[T]):
             self.stats.interesting_calls += 1
         if self.current_pass_stats is not None:
             self.current_pass_stats.test_evaluations += 1
-        if replay and self.__policy is not None:
-            self.__policy.record_replay(result[0])
+        if self.__policy is not None:
+            if replay is not None:
+                self.__policy.record_replay(result[0], replay)
+            if self.__policy.confirming:
+                self.stats.confirmation_sweep_calls += 1
         return result
 
     def display(self, value: T) -> str:
@@ -871,6 +893,7 @@ class BasicReductionProblem(ReductionProblem[T]):
                 # more round in which every candidate is driven to a bound
                 # verdict; adoption during it drops back to fast sweeps.
                 self.__policy.confirming = True
+                self.stats.confirmation_sweeps += 1
                 return True
             else:
                 self.__policy.confirming = False
@@ -882,11 +905,18 @@ class BasicReductionProblem(ReductionProblem[T]):
         """Replay the current test case `runs` times and report how many
         reproduced, for the final report."""
         evidence = Evidence()
-        await self.__replays_all_reproduce(evidence, runs, stop_on_miss=False)
+        await self.__replays_all_reproduce(
+            evidence, runs, stop_on_miss=False, site="report"
+        )
         return evidence
 
     async def __replays_all_reproduce(
-        self, evidence: Evidence, runs: int, *, stop_on_miss: bool = True
+        self,
+        evidence: Evidence,
+        runs: int,
+        *,
+        stop_on_miss: bool = True,
+        site: str = "detection",
     ) -> bool:
         """Replay the current test case `runs` times concurrently, recording
         the outcomes into `evidence` (timeouts excluded: they say nothing
@@ -900,7 +930,7 @@ class BasicReductionProblem(ReductionProblem[T]):
 
             async def replay() -> None:
                 nonlocal missed
-                interesting, timed_out, _ = await self.__execute(test_case, replay=True)
+                interesting, timed_out, _ = await self.__execute(test_case, replay=site)
                 if timed_out:
                     return
                 evidence.record(interesting)
@@ -938,7 +968,6 @@ class BasicReductionProblem(ReductionProblem[T]):
         history to the newest test case that does."""
         assert self.__policy is not None
         if await self.__confirmation_batch(self.current_test_case, evidence):
-            self.__policy.raise_anchor(evidence)
             return
         accepted = await self.__scan_history()
         if accepted is None:
@@ -948,7 +977,6 @@ class BasicReductionProblem(ReductionProblem[T]):
                 "earlier test case did better. Continuing from it, but "
                 "reduction may be slow."
             )
-            self.__policy.raise_anchor(evidence)
             return
         test_case, accepted_evidence = accepted
         self.work.warn(
@@ -957,22 +985,24 @@ class BasicReductionProblem(ReductionProblem[T]):
             "replays)."
         )
         await self.__set_current(test_case)
-        self.__policy.raise_anchor(accepted_evidence)
 
     async def __confirmation_batch(self, test_case: T, evidence: Evidence) -> bool:
         """Drive `evidence` about `test_case` to a confirmation-bar verdict,
-        extending an accept to the anchor seed size so the bound estimates
-        the rate rather than the stopping rule."""
+        extending an accept to the anchor seed size and offering the
+        extension (the runs the bar did not select on) to the anchor."""
+        assert self.__policy is not None
         while True:
             verdict = confirmation_bar(evidence)
             if verdict == Verdict.REJECT:
                 return False
             if verdict == Verdict.ACCEPT:
+                accepted_at = Evidence(evidence.interesting, evidence.runs)
                 while evidence.runs < ANCHOR_SEED_RUNS:
-                    interesting, _, _ = await self.__execute(test_case, replay=True)
+                    interesting, _, _ = await self.__execute(test_case, replay="seed")
                     evidence.record(interesting)
+                self.__policy.raise_anchor(evidence.since(accepted_at))
                 return True
-            interesting, _, _ = await self.__execute(test_case, replay=True)
+            interesting, _, _ = await self.__execute(test_case, replay="confirmation")
             evidence.record(interesting)
 
     async def __scan_history(self) -> tuple[T, Evidence] | None:
@@ -1088,7 +1118,7 @@ class BasicReductionProblem(ReductionProblem[T]):
                     # its own gauntlet evidence. An improvement also ends
                     # any confirmation sweep, since the fixpoint it was
                     # certifying is gone.
-                    self.__policy.raise_anchor(ledger.evidence)
+                    self.__policy.raise_anchor(ledger.unselected_evidence())
                     self.__policy.confirming = False
                 for f in self.__on_reduce_callbacks:
                     await f(test_case)
@@ -1132,12 +1162,15 @@ class BasicReductionProblem(ReductionProblem[T]):
                 ledger.verdict = False
                 return False
             if verdict == Verdict.ACCEPT:
+                ledger.accepted_at = Evidence(
+                    ledger.evidence.interesting, ledger.evidence.runs
+                )
                 while ledger.evidence.runs < ANCHOR_SEED_RUNS:
-                    interesting, _, _ = await self.__execute(test_case, replay=True)
+                    interesting, _, _ = await self.__execute(test_case, replay="seed")
                     ledger.evidence.record(interesting)
                 ledger.verdict = True
                 return True
-            interesting, _, _ = await self.__execute(test_case, replay=True)
+            interesting, _, _ = await self.__execute(test_case, replay="gauntlet")
             ledger.evidence.record(interesting)
 
     @property

@@ -1,12 +1,14 @@
 """Tests for the nondeterminism statistics module."""
 
 import math
+from statistics import NormalDist
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from shrinkray.nondeterminism import (
+    ANCHOR_ALPHA,
     ANCHOR_SEED_RUNS,
     CHARGE_FLUKE_RATE,
     CONFIRM_CAP,
@@ -23,6 +25,7 @@ from shrinkray.nondeterminism import (
     Evidence,
     NondeterminismPolicy,
     Verdict,
+    anchor_z,
     confirmation_bar,
     gauntlet,
     gauntlet_alpha,
@@ -425,6 +428,41 @@ def test_anchor_is_monotone():
     assert policy.anchor > first
 
 
+def test_evidence_since_an_earlier_snapshot():
+    ev = Evidence(3, 5)
+    later = Evidence(7, 12)
+    assert later.since(ev) == Evidence(4, 7)
+
+
+def test_wilson_bound_tightens_with_z():
+    assert Evidence(10, 20).lower_bound(z=1.0) > Evidence(10, 20).lower_bound()
+    assert Evidence(10, 20).lower_bound(z=3.0) < Evidence(10, 20).lower_bound()
+
+
+def test_anchor_z_starts_at_z_and_grows_with_attempts():
+    assert anchor_z(0) == anchor_z(1) == 1.96
+    assert anchor_z(1) < anchor_z(10) < anchor_z(1000)
+    # The Bonferroni level: 1000 attempts share the single-test tail.
+    assert anchor_z(1000) == pytest.approx(
+        NormalDist().inv_cdf(1 - ANCHOR_ALPHA / 1000)
+    )
+
+
+def test_repeated_raises_are_held_to_a_stricter_level():
+    # The same evidence raises the anchor less the more attempts there
+    # have been, so a run of hundreds of adoptions cannot ratchet the
+    # anchor above the rate they all share by picking the luckiest batch.
+    first = NondeterminismPolicy()
+    first.flip()
+    first.raise_anchor(Evidence(16, 20))
+    later = NondeterminismPolicy()
+    later.flip()
+    later.anchor_attempts = 200
+    later.raise_anchor(Evidence(16, 20))
+    assert later.anchor < first.anchor
+    assert later.anchor_attempts == 201
+
+
 def test_threshold_follows_the_anchor():
     policy = NondeterminismPolicy()
     policy.flip()
@@ -432,12 +470,14 @@ def test_threshold_follows_the_anchor():
     assert policy.threshold == gauntlet_threshold(policy.anchor)
 
 
-def test_policy_counts_replays():
+def test_policy_counts_replays_by_site():
     policy = NondeterminismPolicy()
-    policy.record_replay(True)
-    policy.record_replay(False)
-    assert policy.replay_calls == 2
+    policy.record_replay(True, "detection")
+    policy.record_replay(False, "gauntlet")
+    policy.record_replay(False, "gauntlet")
+    assert policy.replay_calls == 3
     assert policy.replay_interesting == 1
+    assert policy.replay_sites == {"detection": 1, "gauntlet": 2}
 
 
 def test_charge_delegates_to_the_budget():

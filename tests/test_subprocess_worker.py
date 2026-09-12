@@ -3300,7 +3300,7 @@ async def test_build_progress_update_reports_nondeterminism():
     assert problem.policy is not None
     problem.policy.flip()
     problem.policy.raise_anchor(Evidence(10, 20))
-    problem.policy.record_replay(True)
+    problem.policy.record_replay(True, "detection")
     update = await worker._build_progress_update()
     assert update is not None
     assert update.nondeterministic is True

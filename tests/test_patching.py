@@ -1176,3 +1176,25 @@ def test_replacements_combine_allows_touching_spans():
 
 def test_replacements_size_is_net_bytes_removed():
     assert Replacements().size(((0, 5, b"x"), (10, 12, b""))) == 6
+
+
+async def test_merge_probes_are_counted():
+    """Every call the merge master makes to test a combination of
+    individually successful patches is attributed to merge probing."""
+
+    # Not every cut can be applied together (the shortcut of applying all
+    # patches at once fails), so successes must be merged.
+    async def is_interesting(x):
+        await trio.lowlevel.checkpoint()
+        return b"k" in x and len(x) >= 2
+
+    problem = BasicReductionProblem(
+        initial=b"kabcdefgh",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=2),
+    )
+    await apply_patches(problem, Cuts(), [[(i, i + 1)] for i in range(1, 9)])
+    assert len(problem.current_test_case) == 2
+    stats = problem.stats
+    assert stats.merge_probes > 0
+    assert 0 < stats.merge_probe_calls <= stats.calls

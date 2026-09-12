@@ -11,6 +11,7 @@ from shrinkray.nondeterminism import (
     DETECTION_REPLAYS,
     GATE_RUNS,
     GAUNTLET_FLOOR,
+    GAUNTLET_MIN_HITS,
     VERIFY_INTERVAL,
     Evidence,
     NondeterminismPolicy,
@@ -1396,8 +1397,11 @@ async def test_gauntlet_accept_extends_to_the_seed_and_adopts():
     ledger = problem.ledger(b"hello")
     assert ledger.verdict is True
     assert ledger.evidence.runs == ANCHOR_SEED_RUNS
+    # The anchor is raised from the runs after the accept decision only.
+    unselected = ANCHOR_SEED_RUNS - GAUNTLET_MIN_HITS
+    assert ledger.accepted_at == Evidence(GAUNTLET_MIN_HITS, GAUNTLET_MIN_HITS)
     assert policy(problem).anchor == pytest.approx(
-        Evidence(ANCHOR_SEED_RUNS, ANCHOR_SEED_RUNS).lower_bound()
+        Evidence(unselected, unselected).lower_bound()
     )
     # Latched: no further runs.
     assert await problem.is_interesting(b"hello") is True
@@ -1785,3 +1789,57 @@ def test_base_problem_is_deterministic_by_default():
             return repr(value)
 
     assert Minimal().nondeterministic is False
+
+
+async def test_replays_are_attributed_to_their_sites():
+    # Startup detection misses once, the incumbent confirms (extended to
+    # the seed size), a candidate then runs the gauntlet and is topped
+    # up, and the report measures the result.
+    outcomes = iter([True, False] + [True] * 500)
+
+    async def is_interesting(tc):
+        return next(outcomes)
+
+    problem = nd_problem(is_interesting)
+    await problem.setup()
+    sites = policy(problem).replay_sites
+    assert sites["detection"] == DETECTION_REPLAYS - 1
+    assert sites["confirmation"] + sites["seed"] == ANCHOR_SEED_RUNS - DETECTION_REPLAYS
+    before = dict(sites)
+    assert await problem.is_interesting(b"hello") is True
+    # The candidate's first run recruits it; the gauntlet reruns it until
+    # its bound clears the anchor, and the seed top-up brings the ledger
+    # to the seed size.
+    assert sites["gauntlet"] >= GAUNTLET_MIN_HITS - 1
+    assert 1 + sites["gauntlet"] + sites["seed"] - before["seed"] == ANCHOR_SEED_RUNS
+    await problem.measure_current(3)
+    assert sites["report"] == 3
+    assert sum(sites.values()) == policy(problem).replay_calls
+
+
+async def test_confirmation_sweep_calls_are_counted():
+    problem = nd_problem(Flaky(1.0))
+    await problem.setup()
+    policy(problem).flip()
+    assert await problem.attempt_unstick() is True
+    assert problem.stats.confirmation_sweeps == 1
+    calls_before = problem.stats.calls
+    await problem.is_interesting(b"hello")
+    assert problem.stats.confirmation_sweep_calls == problem.stats.calls - calls_before
+
+
+async def test_anchor_is_raised_only_from_unselected_runs():
+    # Four straight hits accept the candidate at the floor; the sixteen
+    # runs after the decision all miss. The lucky start must not move
+    # the anchor.
+    outcomes = iter([True] * GAUNTLET_MIN_HITS + [False] * 100)
+
+    async def is_interesting(tc):
+        return next(outcomes)
+
+    problem = nd_problem(is_interesting)
+    policy(problem).flip()
+    assert await problem.is_interesting(b"hello") is True
+    assert problem.current_test_case == b"hello"
+    assert policy(problem).anchor == 0.0
+    assert policy(problem).anchor_attempts == 1

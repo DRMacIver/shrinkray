@@ -49,7 +49,7 @@ import trio
 
 from shrinkray.nondeterminism import NondeterminismPolicy
 from shrinkray.passes.treesitter import parse_tree
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.problem import BasicReductionProblem, InvalidInitialExample
 from shrinkray.reducer import ShrinkRay
 from shrinkray.state import sort_key_for_initial
 from shrinkray.work import WorkContext
@@ -132,9 +132,7 @@ def coupled_count_json_ok(data: bytes) -> bool:
         isinstance(doc, dict)
         and isinstance(doc.get("events"), list)
         and doc.get("event_count") == len(doc["events"])
-        and any(
-            isinstance(e, dict) and e.get("type") == "crash" for e in doc["events"]
-        )
+        and any(isinstance(e, dict) and e.get("type") == "crash" for e in doc["events"])
     )
 
 
@@ -536,9 +534,9 @@ def build_problems() -> dict[str, Problem]:
 # --- running and metrics ----------------------------------------------------
 
 
-def run_problem(name: str, problem: Problem) -> dict:
+def run_problem(name: str, problem: Problem, seed: int = 0) -> dict:
     events: list[dict] = []
-    coin = random.Random(0)
+    coin = random.Random(seed)
 
     async def acond(x: bytes) -> bool:
         await trio.lowlevel.checkpoint()
@@ -582,7 +580,17 @@ def run_problem(name: str, problem: Problem) -> dict:
         return reduction_problem.current_test_case, reduction_problem, reducer
 
     start = time.monotonic()
-    result, reduction_problem, reducer = trio.run(go)
+    try:
+        result, reduction_problem, reducer = trio.run(go)
+    except InvalidInitialExample:
+        # A rarely-reproducing oracle can miss every startup replay, which
+        # is the reducer refusing to start, exactly as it would for a user.
+        # The benchmark measures the reduction, so try again on a fresh
+        # coin and report the refusal.
+        assert problem.flaky is not None
+        outcome = run_problem(name, problem, seed + 1)
+        outcome["startup_refusals"] += 1
+        return outcome
     seconds = time.monotonic() - start
 
     initial_size = len(problem.initial)
@@ -624,6 +632,7 @@ def run_problem(name: str, problem: Problem) -> dict:
         "bug_kept": bool(problem.predicate(result)),
         "replay_calls": reduction_problem.policy.replay_calls,
         "nondeterministic": reduction_problem.policy.active,
+        "startup_refusals": 0,
         "c90": calls_to_fraction(0.90),
         "c99": calls_to_fraction(0.99),
         "tail": tail_calls,
@@ -650,13 +659,22 @@ TABLE_COLUMNS = [
 
 
 def print_table(results: list[dict]) -> None:
-    header = " ".join(f"{title:{fmt}}" for title, _, fmt in TABLE_COLUMNS)
+    # Header cells take only the width and alignment of each column's
+    # format (the value format may carry a numeric precision).
+    header = " ".join(
+        f"{title:{fmt.split('.')[0].rstrip('df')}}" for title, _, fmt in TABLE_COLUMNS
+    )
     print(header)
     print("-" * len(header))
     for r in results:
         print(" ".join(f"{r[key]:{fmt}}" for _, key, fmt in TABLE_COLUMNS))
         if not r["bug_kept"]:
             print(f"{'':<24} !! result no longer satisfies the predicate")
+        if r["startup_refusals"]:
+            print(
+                f"{'':<24} (refused to start {r['startup_refusals']} time(s) "
+                "before this run)"
+            )
     total_calls = sum(r["calls"] for r in results)
     print("-" * len(header))
     print(f"{'TOTAL':<24} {total_calls:>8}")

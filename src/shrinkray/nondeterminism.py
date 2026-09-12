@@ -243,6 +243,13 @@ class NondeterminismPolicy:
     # When its upper bound falls below the threshold the incumbent is not
     # what the anchor promised, and the run backtracks.
     incumbent: Evidence = field(factory=Evidence)
+    # The same evidence pooled over every incumbent so far: the rate the
+    # reduction's incumbents have actually reproduced at. A raise must
+    # beat it, so that in a landscape where every candidate reproduces at
+    # the same rate the anchor stays where the confirmation batch put it
+    # instead of creeping up on the luckiest of hundreds of batches, and
+    # rises only where candidates genuinely reproduce more reliably.
+    pool: Evidence = field(factory=Evidence)
     # Attempts made to raise the anchor, which set the level each is held to.
     anchor_attempts: int = 0
     # Runs spent on replays (every run of a candidate beyond its first,
@@ -270,26 +277,42 @@ class NondeterminismPolicy:
     def threshold(self) -> float:
         return gauntlet_threshold(self.anchor)
 
+    @property
+    def raise_bar(self) -> float:
+        """What a raise must beat: the anchor, and the rate incumbents have
+        reproduced at so far."""
+        return max(self.anchor, self.pool.rate)
+
     def raise_reachable(self, unselected: Evidence, remaining: int) -> bool:
         """Whether `remaining` more runs after `unselected` could raise the
         anchor on the next attempt, even if every one of them hit. When
         they cannot, the runs are not worth spending."""
         best = Evidence(unselected.interesting + remaining, unselected.runs + remaining)
-        return best.lower_bound(anchor_z(self.anchor_attempts + 1)) > self.anchor
+        return best.lower_bound(anchor_z(self.anchor_attempts + 1)) > self.raise_bar
 
     def raise_anchor(self, evidence: Evidence) -> None:
-        """Raise the anchor to `evidence`'s lower bound if that is higher.
-        `evidence` must not have been selected on: runs that decided an
-        accept are biased upwards by the stopping rule, so callers pass
-        the runs recorded after the decision (see Evidence.since)."""
+        """Raise the anchor to `evidence`'s lower bound if that beats the
+        raise bar. `evidence` must not have been selected on: runs that
+        decided an accept are biased upwards by the stopping rule, so
+        callers pass the runs recorded after the decision (see
+        Evidence.since)."""
         self.anchor_attempts += 1
         z = anchor_z(self.anchor_attempts)
-        self.anchor = max(self.anchor, evidence.lower_bound(z))
+        bound = evidence.lower_bound(z)
+        if bound > self.raise_bar:
+            self.anchor = bound
+
+    def record_incumbent_run(self, interesting: bool) -> None:
+        """A fresh replay of the incumbent, from the monitor."""
+        self.incumbent.record(interesting)
+        self.pool.record(interesting)
 
     def adopt(self, unselected: Evidence) -> None:
         """A new incumbent: start its monitor from the runs that did not
-        take part in accepting it."""
+        take part in accepting it, and add them to the pool."""
         self.incumbent = Evidence(unselected.interesting, unselected.runs)
+        self.pool.interesting += unselected.interesting
+        self.pool.runs += unselected.runs
 
     def incumbent_failing(self) -> bool:
         """Whether the incumbent's fresh evidence rules out the rate the

@@ -903,9 +903,9 @@ class BasicReductionProblem(ReductionProblem[T]):
                 self.__policy.confirming = False
                 evidence = await self.measure_current(ANCHOR_SEED_RUNS)
                 for _ in range(evidence.interesting):
-                    self.__policy.incumbent.record(True)
+                    self.__policy.record_incumbent_run(True)
                 for _ in range(evidence.runs - evidence.interesting):
-                    self.__policy.incumbent.record(False)
+                    self.__policy.record_incumbent_run(False)
                 if self.__policy.incumbent_failing():
                     await self.__recover()
                     return True
@@ -1160,9 +1160,12 @@ class BasicReductionProblem(ReductionProblem[T]):
             if not await self.__replays_all_reproduce(evidence, 1):
                 await self.__flip(evidence)
             return
+        evidence = Evidence()
         await self.__replays_all_reproduce(
-            self.__policy.incumbent, 1, stop_on_miss=False, site="monitor"
+            evidence, 1, stop_on_miss=False, site="monitor"
         )
+        if evidence.runs:
+            self.__policy.record_incumbent_run(evidence.interesting == 1)
         if self.__policy.incumbent_failing():
             await self.__recover()
 

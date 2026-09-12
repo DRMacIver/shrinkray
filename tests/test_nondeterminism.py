@@ -409,13 +409,40 @@ def test_false_accepts_escalate_the_hit_minimum_to_the_ceiling():
     assert policy.false_accepts == MIN_HITS_CEILING - INITIAL_MIN_HITS + 1
 
 
-def test_adopt_copies_the_unselected_evidence():
+def test_adopt_copies_the_unselected_evidence_and_pools_it():
     policy = NondeterminismPolicy()
     evidence = Evidence(3, 5)
     policy.adopt(evidence)
     assert policy.incumbent == Evidence(3, 5)
     evidence.record(True)
     assert policy.incumbent == Evidence(3, 5)
+    policy.adopt(Evidence(1, 2))
+    assert policy.incumbent == Evidence(1, 2)
+    assert policy.pool == Evidence(4, 7)
+
+
+def test_incumbent_runs_feed_the_incumbent_and_the_pool():
+    policy = NondeterminismPolicy()
+    policy.adopt(Evidence(2, 2))
+    policy.record_incumbent_run(False)
+    assert policy.incumbent == Evidence(2, 3)
+    assert policy.pool == Evidence(2, 3)
+
+
+def test_a_raise_must_beat_the_rate_incumbents_have_shown():
+    # Incumbents have reproduced half the time over many runs. A batch
+    # whose bound does not beat that rate cannot raise the anchor, however
+    # it compares with the anchor itself; one that does, can.
+    policy = NondeterminismPolicy()
+    policy.flip()
+    policy.raise_anchor(Evidence(10, 20))
+    start = policy.anchor
+    policy.pool = Evidence(500, 1000)
+    policy.raise_anchor(Evidence(12, 18))
+    assert policy.anchor == start
+    assert not policy.raise_reachable(Evidence(0, 0), 4)
+    policy.raise_anchor(Evidence(40, 40))
+    assert policy.anchor > 0.5
 
 
 def test_incumbent_failing_needs_the_upper_bound_below_the_threshold():

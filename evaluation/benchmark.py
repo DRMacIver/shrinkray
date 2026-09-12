@@ -651,6 +651,8 @@ def run_problem(name: str, problem: Problem, seed: int = 0) -> dict:
         "confirmation_sweeps": reduction_problem.stats.confirmation_sweeps,
         "confirmation_sweep_calls": reduction_problem.stats.confirmation_sweep_calls,
         "nondeterministic": reduction_problem.policy.active,
+        "anchor": reduction_problem.policy.anchor,
+        "anchor_attempts": reduction_problem.policy.anchor_attempts,
         "false_accepts": reduction_problem.policy.false_accepts,
         "min_hits": reduction_problem.policy.min_hits,
         "startup_refusals": 0,
@@ -698,7 +700,8 @@ def print_table(results: list[dict]) -> None:
                 f"{r['merge_probes']} costing {r['merge_probe_calls']} calls; "
                 f"{r['confirmation_sweeps']} confirmation sweeps costing "
                 f"{r['confirmation_sweep_calls']} calls; "
-                f"{r['false_accepts']} recoveries, hit minimum {r['min_hits']}"
+                f"{r['false_accepts']} recoveries, hit minimum {r['min_hits']}; "
+                f"anchor {r['anchor']:.3f} after {r['anchor_attempts']} attempts"
             )
         if r["startup_refusals"]:
             print(

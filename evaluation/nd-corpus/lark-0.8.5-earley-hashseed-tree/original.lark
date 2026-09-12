@@ -1,0 +1,48 @@
+unicode_letter: /[^\W\d]/
+unicode_digit: /\d/
+
+letter : unicode_letter | "_"
+
+decimal_digit : /\d/
+
+identifier : [ "#" | "_#" ] letter ( letter | unicode_digit )*
+
+structlit       : "{" ( declaration )* [ "..." ] "}"
+declaration     : field | embedding | attribute
+embedding       : aliasexpr
+field           : label ":" ( label ":" )* expression attribute*
+label           : identifier ("=" labelexpr)*
+labelexpr       : labelname [ "?" ] | "[" aliasexpr "]"
+labelname       : identifier
+
+attribute       : "@" identifier "(" attr_tokens ")"
+attr_tokens     : ( attr_token | "(" attr_tokens ")" | "[" attr_tokens "]" | "{" attr_tokens "}" )*
+attr_token      : /[^\(\)\[\]\{\}\s]+/
+
+aliasexpr  : expression | identifier "=" expression
+
+int_lit : /\d+/
+
+operand     : literal | operandname | "(" expression ")"
+literal     : basiclit  | structlit
+basiclit    : int_lit
+operandname : identifier
+
+sourcefile : ( declaration )*
+
+primaryexpr : operand |  primaryexpr arguments
+
+
+argument       : expression
+arguments      : "(" [ ( argument ( "," argument )* ) [ "," ] ] ")"
+
+
+expression : unaryexpr
+unaryexpr  : primaryexpr
+
+start : sourcefile
+
+%import common.WS
+%import common.CNAME
+
+%ignore WS

@@ -150,6 +150,38 @@ def test_gauntlet_rejects_once_the_threshold_is_unreachable():
     assert gauntlet(Evidence(2, 2), anchor, GAUNTLET_MIN_HITS) == Verdict.CONTINUE
 
 
+def test_reject_bar_drops_a_clearly_worse_candidate_early():
+    # Anchor at the floor: rejecting on the threshold alone needs the
+    # whole cap for a candidate with no hits. Against a reject bar of 0.5
+    # four misses are enough, and a candidate that has already cleared
+    # the threshold is unaffected.
+    assert gauntlet(Evidence(0, 4), 0.0, 2) == Verdict.CONTINUE
+    assert gauntlet(Evidence(0, 4), 0.0, 2, reject_bar=0.5) == Verdict.REJECT
+    assert gauntlet(Evidence(2, 2), 0.0, 2, reject_bar=0.5) == Verdict.ACCEPT
+
+
+@given(
+    evidences,
+    st.floats(0.0, 1.0),
+    st.integers(1, MIN_HITS_CEILING),
+    st.floats(0.0, 1.0),
+)
+def test_reject_bar_never_turns_a_reject_into_anything_else(ev, anchor, min_hits, bar):
+    plain = gauntlet(ev, anchor, min_hits)
+    barred = gauntlet(ev, anchor, min_hits, reject_bar=bar)
+    if plain == Verdict.REJECT:
+        assert barred == Verdict.REJECT
+    if plain == Verdict.ACCEPT:
+        assert barred == Verdict.ACCEPT
+
+
+def test_policy_reject_bar_is_the_pools_lower_bound():
+    policy = NondeterminismPolicy()
+    assert policy.reject_bar == 0.0
+    policy.pool = Evidence(500, 1000)
+    assert policy.reject_bar == pytest.approx(Evidence(500, 1000).lower_bound())
+
+
 def test_gauntlet_can_accept_at_the_cap():
     ev = Evidence(GAUNTLET_CAP, GAUNTLET_CAP)
     assert gauntlet(ev, 0.7, GAUNTLET_MIN_HITS) == Verdict.ACCEPT

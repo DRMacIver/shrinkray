@@ -188,15 +188,30 @@ def gauntlet_threshold(anchor: float) -> float:
     return max(gamma * anchor, GAUNTLET_FLOOR)
 
 
-def gauntlet(evidence: Evidence, anchor: float, min_hits: int) -> Verdict:
-    """Decide whether a candidate's evidence clears the incumbent's anchor."""
-    return _gauntlet_at(evidence, gauntlet_threshold(anchor), min_hits)
+def gauntlet(
+    evidence: Evidence, anchor: float, min_hits: int, reject_bar: float = 0.0
+) -> Verdict:
+    """Decide whether a candidate's evidence clears the incumbent's anchor.
+
+    `reject_bar` lets a caller give up on a candidate earlier than the
+    threshold alone would: once the candidate's upper bound is below it.
+    The policy passes the rate its incumbents have reproduced at, so a
+    candidate that is clearly worse than what the reduction has been
+    adopting is dropped in a few runs instead of being driven all the way
+    down to the retention threshold (which, at low anchors, can take the
+    whole cap). This only ever forgoes a size reduction, never adopts one.
+    """
+    return _gauntlet_at(evidence, gauntlet_threshold(anchor), min_hits, reject_bar)
 
 
-def _gauntlet_at(evidence: Evidence, threshold: float, min_hits: int) -> Verdict:
+def _gauntlet_at(
+    evidence: Evidence, threshold: float, min_hits: int, reject_bar: float = 0.0
+) -> Verdict:
     if evidence.interesting >= min_hits and evidence.lower_bound() >= threshold:
         return Verdict.ACCEPT
-    if evidence.upper_bound() < threshold or evidence.runs >= GAUNTLET_CAP:
+    if evidence.upper_bound() < max(threshold, reject_bar):
+        return Verdict.REJECT
+    if evidence.runs >= GAUNTLET_CAP:
         return Verdict.REJECT
     # Even if every remaining run were interesting the bound would not
     # clear the threshold, so nothing is left to learn.
@@ -276,6 +291,13 @@ class NondeterminismPolicy:
     @property
     def threshold(self) -> float:
         return gauntlet_threshold(self.anchor)
+
+    @property
+    def reject_bar(self) -> float:
+        """The rate a candidate must not be significantly below: what the
+        reduction's incumbents have reproduced at, as a lower bound so it
+        only bites once the pool is large enough to know."""
+        return self.pool.lower_bound()
 
     @property
     def raise_bar(self) -> float:

@@ -560,16 +560,21 @@ def run_problem(name: str, problem: Problem, seed: int = 0) -> dict:
 
     async def go() -> tuple[bytes, object, object]:
         # Nondeterminism handling is on, as it is for real reductions: a
-        # deterministic oracle pays only the detection replays.
+        # deterministic oracle pays only the detection replays. The
+        # adopted history is kept in memory, standing in for the history
+        # directory a real run backtracks through.
+        history: list[bytes] = [problem.initial]
         reduction_problem: BasicReductionProblem[bytes] = BasicReductionProblem(
             initial=problem.initial,
             is_interesting=acond,
             work=WorkContext(parallelism=1),
             sort_key=sort_key_for_initial(problem.initial),
             policy=NondeterminismPolicy(),
+            history=history,
         )
 
         async def record(test_case: bytes) -> None:
+            history.append(test_case)
             stats = reduction_problem.current_pass_stats
             events.append(
                 {

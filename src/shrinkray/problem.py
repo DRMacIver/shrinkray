@@ -1202,7 +1202,12 @@ class BasicReductionProblem(ReductionProblem[T]):
         the current anchor, at the hit minimum in force."""
         assert self.__policy is not None
         while True:
-            verdict = gauntlet(evidence, self.__policy.anchor, self.__policy.min_hits)
+            verdict = gauntlet(
+                evidence,
+                self.__policy.anchor,
+                self.__policy.min_hits,
+                self.__policy.reject_bar,
+            )
             if verdict != Verdict.CONTINUE:
                 return verdict == Verdict.ACCEPT
             interesting, _, _ = await self.__execute(test_case, replay="confirmation")
@@ -1225,7 +1230,9 @@ class BasicReductionProblem(ReductionProblem[T]):
         if not interesting and not policy.confirming:
             return False
         while True:
-            verdict = gauntlet(ledger.evidence, policy.anchor, ledger.min_hits)
+            verdict = gauntlet(
+                ledger.evidence, policy.anchor, ledger.min_hits, policy.reject_bar
+            )
             if verdict == Verdict.REJECT:
                 ledger.verdict = False
                 return False

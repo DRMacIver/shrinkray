@@ -25,6 +25,17 @@ jobs:
       # pip otherwise builds from source (libcst, maturin,
       # tree-sitter-language-pack, ...), skipping several minutes of rust
       # and C compilation.
+      # The VM installs with pip, which would otherwise resolve from the
+      # ranges in pyproject.toml rather than from uv.lock like every other
+      # job. Export the lock so it builds the same versions (a newer
+      # llama-cpp-python once broke the build with a libc call OpenBSD
+      # lacks).
+      - name: Install uv
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+        with:
+          version: "latest"
+      - name: Export locked requirements for the VM
+        run: uv export --extra test --no-hashes --no-emit-project -o requirements-openbsd.txt
       - name: Restore pip and grammar caches
         id: pip-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -72,7 +83,7 @@ jobs:
             chown -R root:wheel .pip-cache .ts-cache
             python3 -m venv /home/venv
             /home/venv/bin/pip install --quiet --upgrade pip
-            /home/venv/bin/pip install --cache-dir "$PWD/.pip-cache" ".[test]"
+            /home/venv/bin/pip install --cache-dir "$PWD/.pip-cache" -r requirements-openbsd.txt .
             # tree-sitter-language-pack has no OpenBSD grammar binaries
             # and its fallback fetches Linux ones; build all the grammars
             # shrinkray maps natively instead.

@@ -1525,7 +1525,8 @@ async def test_periodic_verify_catches_late_nondeterminism():
     assert problem.nondeterministic
 
 
-async def test_periodic_verify_ignores_timeouts():
+@pytest.mark.parametrize("active", [False, True])
+async def test_periodic_verify_ignores_timeouts(active):
     calls = 0
 
     async def is_interesting(tc):
@@ -1537,9 +1538,12 @@ async def test_periodic_verify_ignores_timeouts():
 
     problem = nd_problem(is_interesting)
     await problem.setup()
+    if active:
+        policy(problem).flip()
     for i in range(2 * VERIFY_INTERVAL):
         await problem.is_interesting(b"x" * 100 + bytes([i % 256, i // 256]))
-    assert not problem.nondeterministic
+    assert problem.nondeterministic == active
+    assert policy(problem).incumbent.runs == 0
 
 
 async def test_unstick_replays_the_final_result_and_flips_on_a_miss():

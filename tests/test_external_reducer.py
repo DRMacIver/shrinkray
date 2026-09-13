@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 import trio
-from trio.testing import memory_stream_one_way_pair
+from trio.testing import memory_stream_one_way_pair, wait_all_tasks_blocked
 
 from shrinkray.passes.definitions import ReductionPass
 from shrinkray.passes.external import drive_external_reducer, external_reducer
@@ -629,3 +629,50 @@ def test_external_reducer_default_name_from_command() -> None:
 def test_external_reducer_custom_name() -> None:
     reducer_pass = external_reducer([sys.executable], name="my-reducer")
     assert reducer_pass.__name__ == "my-reducer"
+
+
+async def test_idle_waits_for_outstanding_feedback() -> None:
+    release_query = trio.Event()
+    feedback_send, feedback_recv = memory_stream_one_way_pair()
+    query_send, query_recv = memory_stream_one_way_pair()
+    returned = []
+
+    async def interesting(x):
+        if x == b"x":
+            await release_query.wait()
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello world",
+        is_interesting=interesting,
+        work=WorkContext(parallelism=2),
+    )
+    await problem.setup()
+
+    async with trio.open_nursery() as nursery:
+
+        async def parent():
+            returned.append(
+                await drive_external_reducer(
+                    problem,
+                    send_stream=feedback_send,
+                    reader=LineReader(query_recv),
+                    parallelism=2,
+                )
+            )
+
+        nursery.start_soon(parent)
+        reader = LineReader(feedback_recv)
+        assert await reader.readline() is not None
+        await query_send.send_all(encode_query(b"x"))
+        # A cancelled speculative child task can finish its pass before its
+        # already-sent query has been answered. Idle must not discard that reply.
+        await query_send.send_all(encode_idle())
+        await wait_all_tasks_blocked()
+        assert not returned
+        release_query.set()
+        reply = await reader.readline()
+        assert reply is not None
+        assert decode_feedback(reply) == (b"x", True)
+
+    assert returned == [True]

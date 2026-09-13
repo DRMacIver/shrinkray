@@ -65,6 +65,7 @@ class RemoteReductionProblem(ReductionProblem[bytes]):
         # long reduction does not accumulate every distinct multi-MB candidate.
         self._cache: dict[str, bool] = {}
         self._closed = False
+        self.__closed_event = trio.Event()
         self._stats = ReductionStats(
             initial_test_case_size=len(initial),
             current_test_case_size=len(initial),
@@ -120,6 +121,10 @@ class RemoteReductionProblem(ReductionProblem[bytes]):
         larger than what we hold: shrink ray is telling us what to reduce next
         (which may be bigger, e.g. after a pump).
         """
+        # Verdicts belong to the preceding request. The parent may have
+        # backtracked or changed its nondeterminism policy; replaying a cached
+        # success would also skip the feedback that adopts it in this request.
+        self._cache.clear()
         self.__current = content
         self._stats.current_test_case_size = len(content)
 
@@ -129,7 +134,11 @@ class RemoteReductionProblem(ReductionProblem[bytes]):
             try:
                 await self._send_stream.send_all(encode_idle())
             except (trio.BrokenResourceError, trio.ClosedResourceError):
-                pass
+                self.close()
+
+    async def wait_closed(self) -> None:
+        """Block until :meth:`close` has been called."""
+        await self.__closed_event.wait()
 
     def close(self) -> None:
         """Mark the connection closed and fail all outstanding queries.
@@ -139,6 +148,7 @@ class RemoteReductionProblem(ReductionProblem[bytes]):
         unwind rather than hang forever.
         """
         self._closed = True
+        self.__closed_event.set()
         for queue in self._waiters.values():
             # Every queued waiter is unresolved (handle_feedback removes a waiter
             # the moment it resolves it), so each still has an empty result slot.
@@ -161,10 +171,22 @@ class RemoteReductionProblem(ReductionProblem[bytes]):
 
         event = trio.Event()
         slot: list[bool] = []
-        self._waiters.setdefault(test_case, deque()).append((event, slot))
         async with self._send_lock:
+            if self._closed:
+                return False
+            # Only register once this query can be sent. A task cancelled while
+            # waiting for the lock must not consume a later query's feedback.
+            self._waiters.setdefault(test_case, deque()).append((event, slot))
             try:
                 await self._send_stream.send_all(encode_query(test_case))
+            except trio.Cancelled:
+                # send_all may have written only part of the JSON line. That
+                # connection cannot safely carry another query; close it so the
+                # parent can relaunch the reducer, rather than misroute replies.
+                self.close()
+                with trio.CancelScope(shield=True):
+                    await self._send_stream.aclose()
+                raise
             except (trio.BrokenResourceError, trio.ClosedResourceError):
                 # Shrink ray tore down the pipe mid-query. Treat it as a clean
                 # shutdown: close() resolves this waiter (and any other) as
@@ -233,6 +255,13 @@ async def run_reducer(
     reduce_send, reduce_recv = trio.open_memory_channel[None](float("inf"))
 
     async with trio.open_nursery() as nursery:
+
+        @nursery.start_soon
+        async def stop_when_closed() -> None:
+            # The output may be unusable while the parent still holds stdin
+            # open. End this session without waiting for an input-side EOF.
+            await problem.wait_closed()
+            nursery.cancel_scope.cancel()
 
         @nursery.start_soon
         async def read_messages() -> None:

@@ -88,6 +88,8 @@ async def drive_external_reducer(
     # while a query is outstanding: a reducer awaiting our answer is working, not
     # wedged. Only the reader loop increments this; only handlers decrement it.
     outstanding = 0
+    answered = trio.Event()
+    answered.set()
     idle = False
     # The idle timeout is measured against this deadline, refreshed whenever we
     # return to having nothing outstanding. Malformed and blank lines do not
@@ -111,6 +113,7 @@ async def drive_external_reducer(
                 outstanding -= 1
                 slots.release()
                 if outstanding == 0:
+                    answered.set()
                     deadline = trio.current_time() + timeout
                     if reader_scope is not None:
                         reader_scope.cancel()
@@ -156,8 +159,14 @@ async def drive_external_reducer(
                 continue
             if isinstance(message, Idle):
                 slots.release()
+                # A reducer can abandon a speculative task after sending its
+                # query. Finish that reply before reusing the connection; else
+                # the next request can be mistaken for the missing feedback.
+                await answered.wait()
                 idle = True
                 break
+            if outstanding == 0:
+                answered = trio.Event()
             outstanding += 1
             nursery.start_soon(handle, message.content)
         nursery.cancel_scope.cancel()

@@ -17,7 +17,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sized
 from datetime import timedelta
-from functools import lru_cache, total_ordering
+from functools import cached_property, lru_cache, total_ordering
 from typing import (
     Any,
     Protocol,
@@ -194,6 +194,35 @@ def natural_key(s: str) -> LazyChainedSortKey:
     return LazyChainedSortKey(functions=NATURAL_ORDERING_FUNCTIONS, value=s)
 
 
+@total_ordering
+class ReflowLayoutKey:
+    """Layout tie breakers, evaluated once and only on a canonical-content tie."""
+
+    def __init__(self, raw: str, canonical: str):
+        self.raw = raw
+        self.canonical = canonical
+
+    @cached_property
+    def key(self) -> Any:
+        return (
+            canonical_distance(self.raw, self.canonical),
+            abs(len(self.raw.splitlines()) - len(self.canonical.splitlines())),
+            natural_key(self.raw),
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ReflowLayoutKey):
+            return NotImplemented
+        return self.raw == other.raw
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, ReflowLayoutKey):
+            return NotImplemented
+        if self.raw == other.raw:
+            return False
+        return self.key < other.key
+
+
 # The cache only needs a handful of live entries: each comparison touches
 # two strings (the candidate and the current test case, which is re-keyed
 # on every comparison), plus a few more for candidates concurrently in
@@ -221,9 +250,9 @@ def reflow_sort_key(s: str) -> Any:
     canonical = basic_format(s)
     return (
         natural_key(canonical),
-        canonical_distance(s, canonical),
-        abs(len(s.splitlines()) - len(canonical.splitlines())),
-        natural_key(s),
+        # Most comparisons differ in canonical content, so computing the raw
+        # layout distance would scan both strings without affecting the order.
+        ReflowLayoutKey(s, canonical),
     )
 
 

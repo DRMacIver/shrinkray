@@ -27,6 +27,7 @@ One directory per entry, `evaluation/nd-corpus/<slug>/`:
 | entry | tool | symptom | source of nondeterminism | rate on original | deterministic variant |
 |---|---|---|---|---|---|
 | `duckdb-1.1.2-read-csv-empty-names` | duckdb 1.1.2 (PyPI) | NUL garbage / crash in `read_csv` result | uninitialised memory | 4/20 | no |
+| `jinja-3.1.4-unpack-hashseed` | Jinja2 3.1.4 (PyPI) | generated Python source differs between runs | hash seed (sets) | 15/20 | yes |
 | `jq-1.5-string-repeat-uninitialised` | jq 1.5 release binary | NUL/invalid-UTF-8 garbage in output / assertion abort | reads freed memory | 18/20 | no |
 | `lark-0.8.5-earley-hashseed-tree` | lark-parser 0.8.5 (PyPI) | parse tree differs between runs | hash seed (sets) | 10/20 | yes |
 | `lark-1.1.9-earley-ambiguous-quantifier` | lark 1.1.9 (PyPI) | parse tree differs between runs | hash seed (sets) | 7/20 | yes |

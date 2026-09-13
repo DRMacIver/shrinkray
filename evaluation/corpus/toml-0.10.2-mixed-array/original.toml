@@ -1,0 +1,5 @@
+[config]
+list = [
+  "foo",
+  { key = "value"},
+]

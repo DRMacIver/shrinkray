@@ -32,3 +32,15 @@ Observations:
 
 The remaining entries (lark 0.8.5, Z3) were not reduced in this session:
 Z3's rate had dropped to 4/20 and lark 0.8.5 takes over ten minutes.
+
+## 2026-09-13: the Jinja entry
+
+Same driver and settings, at commit 899850c (after the reject bar and the
+overhead work), on the entry added that day:
+
+| entry | original rate | size | final size | seconds | reported | reduced rate |
+|---|---|---|---|---|---|---|
+| jinja-3.1.4-unpack-hashseed | 12/20 | 139 | 18 | 103 | 9/20 | 12/20 |
+
+The result is a single two-name unpacking `set`, the smallest template that
+can still compile two ways, and reproduces at the same rate as the original.

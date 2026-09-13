@@ -1,0 +1,10 @@
+{
+  "id": "toml-0.10.2-mixed-array",
+  "status": "ok",
+  "original_bytes": 49,
+  "reduced_bytes": 12,
+  "original_nows_bytes": 35,
+  "reduced_nows_bytes": 8,
+  "seconds": 118.6,
+  "ratio": 75.5
+}

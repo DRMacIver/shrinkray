@@ -1,0 +1,23 @@
+{
+  "id": "sympy-1.8-piecewise-subs",
+  "format": "python",
+  "tool": "sympy 1.8",
+  "extension": ".py",
+  "bug_url": "https://github.com/sympy/sympy/issues/21373",
+  "symptom": "sympy 1.8 raises PolynomialError('Piecewise generators do not make sense') from subs() on an expression containing a Piecewise nested inside hyperbolic and exponential functions of real symbols: the substitution path tries to build a polynomial over Piecewise generators. The issue's reproducer only fails on the real-symbol branch and after clearing the cache, which the input does. Fixed in sympy 1.9.",
+  "oracle": {
+    "type": "venv",
+    "python": "3.10",
+    "requirements": ["sympy==1.8", "mpmath==1.2.1"],
+    "command": ["python", "{file}"]
+  },
+  "interesting": {
+    "output_contains": [
+      "site-packages/sympy/",
+      "PolynomialError: Piecewise generators do not make sense"
+    ],
+    "exit_code": 1
+  },
+  "comment": "The traceback must pass through sympy itself (the site-packages/sympy/ frame), so a candidate that merely imports and raises the exception is not interesting.",
+  "timeout": 10
+}

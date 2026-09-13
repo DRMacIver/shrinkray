@@ -1,0 +1,10 @@
+{
+  "id": "sqlparse-0.4.4-nested-list",
+  "status": "ok",
+  "original_bytes": 20000,
+  "reduced_bytes": 1983,
+  "original_nows_bytes": 20000,
+  "reduced_nows_bytes": 1982,
+  "seconds": 2924.0,
+  "ratio": 90.1
+}

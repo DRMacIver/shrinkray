@@ -5,12 +5,102 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from shrinkray.formatting import default_reformat_data
-from shrinkray.reformat import basic_format, canonical_distance, detect_family
+from shrinkray.reformat import (
+    _block_header_lines,
+    _has_python_block,
+    _inline,
+    _inline_cached,
+    _inline_uncached,
+    _logical_lines,
+    _scan_literal,
+    _split_top,
+    basic_format,
+    canonical_distance,
+    detect_family,
+)
 
 
 # An alphabet rich in the structural characters the formatter dispatches on, so
 # random inputs exercise the brace / tag / indent branches.
 STRUCTURAL = st.text(alphabet="{}[]()<>;#/*=+!&|,:\"'\\ \t\n" + "abcAB012", max_size=80)
+
+
+@given(st.one_of(STRUCTURAL, st.text(max_size=700)))
+def test_inline_cache_preserves_uncached_output(text):
+    assert _inline(text) == _inline_uncached(text)
+
+
+def test_inline_cache_bounds_both_fragment_length_and_entry_count():
+    _inline_cached.cache_clear()
+    long = "a" * 513
+    assert _inline(long) == _inline(long) == long
+    assert _inline_cached.cache_info().currsize == 0
+    assert _inline("x + 1") == "x + 1"
+    hits = _inline_cached.cache_info().hits
+    assert _inline("x + 1") == "x + 1"
+    assert _inline_cached.cache_info().hits == hits + 1
+    for i in range(300):
+        _inline(f"x + {i}")
+    assert _inline_cached.cache_info().currsize == 256
+
+
+def scalar_split(text, separator, comments):
+    """Original character-at-a-time scanner, independent of batched runs."""
+    parts = []
+    current = []
+    depth = 0
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if char in "\"'":
+            i = _scan_literal(text, i, current)
+            continue
+        if comments and char == "#":
+            end = text.find("\n", i)
+            end = len(text) if end < 0 else end
+            current.append(text[i:end])
+            i = end
+            continue
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth = max(0, depth - 1)
+        if char == separator and depth == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+        i += 1
+    if current or comments:
+        parts.append("".join(current))
+    return parts
+
+
+@given(st.one_of(STRUCTURAL, st.text(max_size=200)))
+def test_batched_scanners_match_scalar_semantics(text):
+    assert _logical_lines(text) == scalar_split(text, "\n", False)
+    for separator in (";", ":", ","):
+        assert _split_top(text, separator) == scalar_split(text, separator, True)
+
+
+@given(st.one_of(STRUCTURAL, st.text(max_size=200)))
+def test_python_block_prefilter_preserves_full_scanner_result(text):
+    lines = text.split("\n")
+    headers = _block_header_lines(text)
+    expected = False
+    for i, line in enumerate(lines[:-1]):
+        if headers[i]:
+            following = next((body for body in lines[i + 1 :] if body.strip()), None)
+            if following is not None:
+                expected |= len(following) - len(following.lstrip(" \t")) > len(
+                    line
+                ) - len(line.lstrip(" \t"))
+    assert _has_python_block(text) == expected
+
+
+@pytest.mark.parametrize("whitespace", ["", "\r", "\u0085", "\u2002", " \t\r\u2002"])
+def test_python_block_prefilter_accepts_non_newline_unicode_whitespace(whitespace):
+    assert _has_python_block("if a:" + whitespace + "\n    b\n")
 
 
 # === family detection ===

@@ -26,6 +26,7 @@ unary minus, comments).
 from __future__ import annotations
 
 import re
+from functools import cache, lru_cache
 
 
 OPS = ["==", "!=", "<=", ">=", "+=", "-=", "&&", "||", "+", "="]
@@ -136,6 +137,9 @@ def _block_header_lines(s: str) -> list[bool]:
     return result
 
 
+_POSSIBLE_BLOCK_HEADER = re.compile(r":[^\S\n]*\n")
+
+
 def _has_python_block(s: str) -> bool:
     """Whether ``s`` contains a Python-style block: a ``:``-terminated line
     directly followed by a strictly more-indented line.
@@ -147,6 +151,11 @@ def _has_python_block(s: str) -> bool:
     followed by a deeper line and stays in the brace family. This makes
     ``basic_format`` idempotent and stops C/C++ labels reading as Python.
     """
+    # Necessary but not sufficient: the colon may still be inside a literal
+    # or brackets. Avoid that full scan only when no physical line can be a
+    # header. [^\S\n] matches exactly the scanner's non-newline whitespace.
+    if _POSSIBLE_BLOCK_HEADER.search(s) is None:
+        return False
     lines = s.split("\n")
     header_colon = _block_header_lines(s)
     for k, header in enumerate(lines[:-1]):
@@ -185,7 +194,7 @@ for _op in OPS:
 _INLINE_PLAIN_RUN = re.compile(r"""[^"'\s=!<>+\-&|]+""")
 
 
-def _inline(s: str) -> str:
+def _inline_uncached(s: str) -> str:
     """Collapse whitespace and canonicalise operator spacing on a single line.
 
     Used for tag text nodes and Python statements, where '//' is not a comment,
@@ -230,6 +239,17 @@ def _inline(s: str) -> str:
         out.append(c)
         i += 1
     return "".join(out).strip()
+
+
+_inline_cached = lru_cache(maxsize=256)(_inline_uncached)
+
+
+def _inline(s: str) -> str:
+    # Neighbouring proposals share many short statements. Bound both entry
+    # count and fragment length so this cannot pin entire large test cases.
+    if len(s) <= 512:
+        return _inline_cached(s)
+    return _inline_uncached(s)
 
 
 # --- brace family ({} / ; / #) ---------------------------------------------
@@ -514,6 +534,16 @@ def _scan_literal(s: str, i: int, cur: list[str]) -> int:
     return i
 
 
+# Runs of characters the scanners below treat uniformly, so they can be
+# appended in one step instead of one character at a time.
+_LOGICAL_PLAIN_RUN = re.compile(r"""[^"'()[\]{}\n]+""")
+
+
+@cache
+def _plain_run_before(sep: str) -> re.Pattern[str]:
+    return re.compile(r"""[^"'()[\]{}#""" + re.escape(sep) + "]+")
+
+
 def _logical_lines(s: str) -> list[str]:
     """Split into logical lines; newlines inside () [] {} or strings don't split."""
     lines: list[str] = []
@@ -529,6 +559,12 @@ def _logical_lines(s: str) -> list[str]:
             depth += 1
         elif c in ")]}":
             depth = max(0, depth - 1)
+        elif c != "\n":
+            run = _LOGICAL_PLAIN_RUN.match(s, i)
+            assert run is not None
+            cur.append(run.group())
+            i = run.end()
+            continue
         if c == "\n" and depth == 0:
             lines.append("".join(cur))
             cur = []
@@ -550,6 +586,7 @@ def _split_top(s: str, sep: str) -> list[str]:
     """
     parts: list[str] = []
     cur: list[str] = []
+    plain_run = _plain_run_before(sep)
     depth = 0
     i, n = 0, len(s)
     while i < n:
@@ -567,6 +604,12 @@ def _split_top(s: str, sep: str) -> list[str]:
             depth += 1
         elif c in ")]}":
             depth = max(0, depth - 1)
+        elif c != sep:
+            run = plain_run.match(s, i)
+            assert run is not None
+            cur.append(run.group())
+            i = run.end()
+            continue
         if c == sep and depth == 0:
             parts.append("".join(cur))
             cur = []

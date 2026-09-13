@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Sequence
+from itertools import chain
 from typing import Any, TypeVar, cast
 
 import trio
@@ -176,6 +177,10 @@ class PatchApplier[PatchType, TargetType]:
 MIN_PATCH_ATTEMPTS = 250
 EARLY_ABORT_SIZE_FACTOR = 3
 
+# How many patches a worker may take from the queue between explicit
+# scheduler checkpoints.
+SCHEDULER_CHECKPOINT_INTERVAL = 64
+
 
 async def apply_patches[PatchType, TargetType](
     problem: ReductionProblem[TargetType],
@@ -211,14 +216,13 @@ async def apply_patches[PatchType, TargetType](
 
     applier = PatchApplier(patch_info, problem)
 
-    send_patches, receive_patches = trio.open_memory_channel(float("inf"))
-
     patches = list(patches)
     problem.work.random.shuffle(patches)
     patches.sort(key=patch_info.size, reverse=True)
-    for i, patch in enumerate(patches):
-        send_patches.send_nowait((i, patch))
-    send_patches.close()
+    # Workers pull from this shared iterator. Advancing it never awaits, so
+    # under trio's cooperative scheduling each patch goes to exactly one
+    # worker without any locking.
+    queue = iter(enumerate(patches))
 
     give_up_after = max(
         MIN_PATCH_ATTEMPTS, EARLY_ABORT_SIZE_FACTOR * problem.current_size
@@ -231,11 +235,14 @@ async def apply_patches[PatchType, TargetType](
             @nursery.start_soon
             async def worker() -> None:
                 nonlocal any_success
-                while True:
-                    try:
-                        i, patch = await receive_patches.receive()
-                    except trio.EndOfChannel:
-                        break
+                for attempted, (i, patch) in enumerate(queue):
+                    # Conflicting or redundant patches are rejected without
+                    # ever awaiting, so a worker could otherwise run through
+                    # a long streak of them without yielding. Check in with
+                    # the scheduler periodically, which also bounds how long
+                    # a cancellation goes unnoticed.
+                    if attempted % SCHEDULER_CHECKPOINT_INTERVAL == 0:
+                        await trio.lowlevel.checkpoint()
                     # The give-up decision is by queue position, not by a
                     # count of completed attempts: which patches fall inside
                     # the budget must not depend on parallelism or
@@ -299,25 +306,37 @@ class Cuts(Patches[CutPatch, Seq]):
         for p in patches:
             all_cuts.extend(p)
         all_cuts.sort()
-        normalized: list[list[int]] = []
+        normalized: CutPatch = []
         for start, end in all_cuts:
-            if normalized and normalized[-1][-1] >= start:
-                normalized[-1][-1] = max(normalized[-1][-1], end)
+            if normalized and normalized[-1][1] >= start:
+                previous_start, previous_end = normalized[-1]
+                if end > previous_end:
+                    normalized[-1] = (previous_start, end)
             else:
-                normalized.append([start, end])
-        return [cast(tuple[int, int], tuple(x)) for x in normalized]
+                normalized.append((start, end))
+        return normalized
 
     def apply(self, patch: CutPatch, target: Seq) -> Seq:
-        result: list[Any] = []
+        kept: list[Sequence[Any]] = []
         prev = 0
         total_deleted = 0
         for start, end in patch:
             total_deleted += end - start
-            result.extend(target[prev:start])
+            kept.append(target[prev:start])
             prev = end
-        result.extend(target[prev:])
+        kept.append(target[prev:])
+        if isinstance(target, bytes):
+            # Joining slices copies each kept byte once; the generic path
+            # below would iterate them one int at a time.
+            result = b"".join(cast(list[bytes], kept))
+        else:
+            # Every sequence type Cuts is applied to (list, tuple, ...) is
+            # constructible from an iterable of its elements, which the
+            # Sequence bound on Seq cannot express.
+            construct = cast(Callable[[Iterable[Any]], Seq], type(target))
+            result = construct(chain.from_iterable(kept))
         assert len(result) + total_deleted == len(target)
-        return type(target)(result)  # type: ignore
+        return cast(Seq, result)
 
     def size(self, patch: CutPatch) -> int:
         return sum(v - u for u, v in patch)

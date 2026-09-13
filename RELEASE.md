@@ -10,3 +10,11 @@
   replays, and the final report says how often the result reproduced.
 - New `--assume-deterministic` flag skips this detection and takes every run
   of the interestingness test as a verdict.
+- Less time spent between interestingness tests on large inputs: comparing
+  candidates, canonicalising whitespace, and applying deletions are all
+  cheaper, and passes no longer pay a scheduling round-trip for every
+  candidate they reject without running the test.
+- Fixed three races in the protocol Shrink Ray uses to talk to external
+  reducers (`--reduce-with`), each of which could make a reducer's
+  answer land on the wrong question or a reduction hang after the reducer
+  had backtracked or been cancelled.

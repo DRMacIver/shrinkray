@@ -116,6 +116,16 @@ handling, since a fruitless pass may succeed on a retry.
   from what happens before detection.
 - No pools, timelines, boost, or persistence.
 
+## Alternatives tried
+
+An alternative "retry budget" search, which treats every verdict during
+search as speculative and only accepts a result once fresh replays
+certify its expected cost to the next reproduction, was implemented and
+evaluated against this design in September 2026. It won on a few
+one-sided synthetic landscapes and lost on two-sided noise and most real
+entries, so the gauntlet above stays. See
+`notes/performance-programme-2026-09.md`.
+
 ## Measuring it
 
 `evaluation/benchmark.py` has `flaky_*` problems whose oracle flips a

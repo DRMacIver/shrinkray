@@ -1192,3 +1192,93 @@ async def test_validate_with_formatter_cleanup_nonexistent_path():
         # Should succeed - cleanup of nonexistent path is a no-op
         assert result.success
         assert result.formatter_works is True
+
+
+def _counting_script(tmp_dir: str, body: str) -> str:
+    """A test script whose exit code depends on how many times it has run,
+    tracked in a counter file next to it."""
+    counter = os.path.join(tmp_dir, "runs")
+    script = os.path.join(tmp_dir, "test.sh")
+    with open(script, "w") as f:
+        f.write(
+            f'#!/bin/sh\nprintf x >> "{counter}"\nn=$(wc -c < "{counter}")\n{body}\n'
+        )
+    os.chmod(script, os.stat(script).st_mode | stat.S_IEXEC)
+    return script
+
+
+async def test_validation_retries_a_flaky_initial_run():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_file = os.path.join(tmp_dir, "test.txt")
+        with open(test_file, "wb") as f:
+            f.write(b"test content")
+        # Fails the first run, passes the second.
+        script = _counting_script(tmp_dir, "[ $n -ge 2 ]")
+        result = await validate_initial_example(
+            file_path=test_file,
+            test=[script],
+            input_type=InputType.all,
+            in_place=False,
+            retries=3,
+        )
+        assert result.success
+        assert result.exit_code == 0
+        with open(os.path.join(tmp_dir, "runs")) as f:
+            assert f.read() == "xx"
+
+
+async def test_validation_without_retries_fails_a_flaky_initial_run():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_file = os.path.join(tmp_dir, "test.txt")
+        with open(test_file, "wb") as f:
+            f.write(b"test content")
+        script = _counting_script(tmp_dir, "[ $n -ge 2 ]")
+        result = await validate_initial_example(
+            file_path=test_file,
+            test=[script],
+            input_type=InputType.all,
+            in_place=False,
+        )
+        assert not result.success
+        assert result.temp_dirs is not None
+        for d in result.temp_dirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+async def test_validation_gives_up_after_the_retries():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_file = os.path.join(tmp_dir, "test.txt")
+        with open(test_file, "wb") as f:
+            f.write(b"test content")
+        script = _counting_script(tmp_dir, "exit 1")
+        result = await validate_initial_example(
+            file_path=test_file,
+            test=[script],
+            input_type=InputType.all,
+            in_place=False,
+            retries=2,
+        )
+        assert not result.success
+        assert result.exit_code == 1
+        with open(os.path.join(tmp_dir, "runs")) as f:
+            assert f.read() == "xxx"
+        assert result.temp_dirs is not None
+        for d in result.temp_dirs:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+def test_run_validation_forwards_retries(capsys):
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        test_file = os.path.join(tmp_dir, "test.txt")
+        with open(test_file, "wb") as f:
+            f.write(b"test content")
+        script = _counting_script(tmp_dir, "[ $n -ge 2 ]")
+        result = run_validation(
+            file_path=test_file,
+            test=[script],
+            input_type=InputType.all,
+            in_place=False,
+            retries=1,
+        )
+        assert result.success
+        assert "nondeterministic" in capsys.readouterr().err

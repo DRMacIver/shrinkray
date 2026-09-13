@@ -166,6 +166,7 @@ class SubprocessClient:
         llm_enabled: bool = False,
         llm_model: str = DEFAULT_MODEL_SPEC,
         llm_only: bool = False,
+        assume_deterministic: bool = False,
     ) -> Response:
         """Start the reduction process."""
         params: dict[str, Any] = {
@@ -187,6 +188,7 @@ class SubprocessClient:
             "llm_enabled": llm_enabled,
             "llm_model": llm_model,
             "llm_only": llm_only,
+            "assume_deterministic": assume_deterministic,
         }
         if parallelism is not None:
             params["parallelism"] = parallelism

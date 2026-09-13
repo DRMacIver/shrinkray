@@ -4,12 +4,28 @@
       "name": "deep_parens",
       "initial_size": 3794,
       "final_size": 800,
-      "calls": 12870,
-      "c90": 9448,
-      "c99": 10121,
-      "tail": 2673,
+      "calls": 13008,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 137,
+      "replay_sites": {
+        "detection": 137
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 1516,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 9547,
+      "c99": 10227,
+      "tail": 2704,
       "reductions": 1520,
-      "seconds": 5.26,
+      "seconds": 4.3,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -77,14 +93,14 @@
         {
           "pass": "debracket",
           "runs": 5,
-          "calls": 655,
+          "calls": 661,
           "reductions": 200,
           "bytes_deleted": 400
         },
         {
           "pass": "delete_byte_spans",
           "runs": 4,
-          "calls": 780,
+          "calls": 788,
           "reductions": 514,
           "bytes_deleted": 1211
         },
@@ -112,7 +128,7 @@
         {
           "pass": "replace_identifiers_with_zero",
           "runs": 3,
-          "calls": 400,
+          "calls": 404,
           "reductions": 400,
           "bytes_deleted": 801
         },
@@ -154,7 +170,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 8542,
+          "calls": 8629,
           "reductions": 400,
           "bytes_deleted": 400
         },
@@ -203,7 +219,7 @@
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 2400,
+          "calls": 2425,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -213,12 +229,28 @@
       "name": "keep_markers",
       "initial_size": 174747,
       "final_size": 50,
-      "calls": 1214,
-      "c90": 73,
-      "c99": 129,
-      "tail": 885,
+      "calls": 1234,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 19,
+      "replay_sites": {
+        "detection": 19
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 108,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 77,
+      "c99": 134,
+      "tail": 898,
       "reductions": 112,
-      "seconds": 8.46,
+      "seconds": 2.84,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -244,7 +276,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 2,
-          "calls": 172,
+          "calls": 173,
           "reductions": 100,
           "bytes_deleted": 117781
         },
@@ -300,7 +332,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 4,
-          "calls": 131,
+          "calls": 133,
           "reductions": 4,
           "bytes_deleted": 8
         },
@@ -405,21 +437,1443 @@
         {
           "pass": "short_deletions",
           "runs": 1,
-          "calls": 360,
+          "calls": 364,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 232,
+          "calls": 234,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 246,
+          "calls": 249,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
+    },
+    {
+      "name": "flaky_markers_p90",
+      "initial_size": 174747,
+      "final_size": 50,
+      "calls": 3864,
+      "final_rate": 0.9,
+      "bug_kept": true,
+      "replay_calls": 444,
+      "replay_sites": {
+        "detection": 13,
+        "confirmation": 4,
+        "seed": 15,
+        "monitor": 28,
+        "gauntlet": 364,
+        "report": 20
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 121,
+      "confirmation_sweeps": 2,
+      "confirmation_sweep_calls": 1321,
+      "nondeterministic": true,
+      "anchor": 0.7018292244757601,
+      "anchor_attempts": 2,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 92,
+      "c99": 170,
+      "tail": 2391,
+      "reductions": 117,
+      "seconds": 3.2,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 6,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 20890
+        },
+        {
+          "pass": "hollow",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 7,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 36000
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 2,
+          "calls": 216,
+          "reductions": 104,
+          "bytes_deleted": 117781
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 11,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 8,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 4
+        },
+        {
+          "pass": "python",
+          "runs": 6,
+          "calls": 8,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 6,
+          "calls": 5,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 6,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 6,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 11,
+          "calls": 372,
+          "reductions": 4,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 6,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 6,
+          "calls": 3,
+          "reductions": 2,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 5,
+          "calls": 12,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 5,
+          "calls": 39,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 5,
+          "calls": 36,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 5,
+          "calls": 41,
+          "reductions": 3,
+          "bytes_deleted": 6
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 4,
+          "calls": 1,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 5,
+          "calls": 1222,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 5,
+          "calls": 981,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 5,
+          "calls": 893,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
+    },
+    {
+      "name": "flaky_markers_p50",
+      "initial_size": 174747,
+      "final_size": 50,
+      "calls": 28800,
+      "final_rate": 0.5,
+      "bug_kept": true,
+      "replay_calls": 8963,
+      "replay_sites": {
+        "detection": 3,
+        "confirmation": 4,
+        "seed": 2330,
+        "gauntlet": 6322,
+        "monitor": 284,
+        "report": 20
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 1064,
+      "confirmation_sweeps": 1,
+      "confirmation_sweep_calls": 3889,
+      "nondeterministic": true,
+      "anchor": 0.2388117716269743,
+      "anchor_attempts": 1065,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 7675,
+      "c99": 7861,
+      "tail": 5028,
+      "reductions": 1064,
+      "seconds": 44.13,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 6,
+          "calls": 7259,
+          "reductions": 944,
+          "bytes_deleted": 9872
+        },
+        {
+          "pass": "hollow",
+          "runs": 9,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 9,
+          "calls": 12,
+          "reductions": 1,
+          "bytes_deleted": 36000
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 2,
+          "calls": 15819,
+          "reductions": 105,
+          "bytes_deleted": 128799
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 9,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 16,
+          "calls": 8,
+          "reductions": 2,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 9,
+          "calls": 19,
+          "reductions": 1,
+          "bytes_deleted": 3
+        },
+        {
+          "pass": "python",
+          "runs": 9,
+          "calls": 9,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 7,
+          "calls": 29,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 12,
+          "calls": 518,
+          "reductions": 4,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 7,
+          "calls": 27,
+          "reductions": 3,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 7,
+          "calls": 18,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 7,
+          "calls": 129,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 7,
+          "calls": 64,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 4,
+          "calls": 66,
+          "reductions": 4,
+          "bytes_deleted": 7
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 4,
+          "calls": 2,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 3,
+          "calls": 1898,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 3,
+          "calls": 1438,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 3,
+          "calls": 1438,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
+    },
+    {
+      "name": "flaky_markers_p20",
+      "initial_size": 174747,
+      "final_size": 50,
+      "calls": 55141,
+      "final_rate": 0.2,
+      "bug_kept": true,
+      "replay_calls": 26103,
+      "replay_sites": {
+        "detection": 1,
+        "confirmation": 12,
+        "seed": 3808,
+        "gauntlet": 21732,
+        "monitor": 530,
+        "report": 20
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 523,
+      "confirmation_sweeps": 5,
+      "confirmation_sweep_calls": 18524,
+      "nondeterministic": true,
+      "anchor": 0.10367543882410543,
+      "anchor_attempts": 505,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 1,
+      "c90": 10056,
+      "c99": 10760,
+      "tail": 14907,
+      "reductions": 504,
+      "seconds": 21.69,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 14,
+          "calls": 8788,
+          "reductions": 387,
+          "bytes_deleted": 4032
+        },
+        {
+          "pass": "hollow",
+          "runs": 18,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 18,
+          "calls": 19,
+          "reductions": 1,
+          "bytes_deleted": 36000
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 3,
+          "calls": 17162,
+          "reductions": 99,
+          "bytes_deleted": 134611
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 18,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 31,
+          "calls": 30,
+          "reductions": 1,
+          "bytes_deleted": 4
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 16,
+          "calls": 32,
+          "reductions": 2,
+          "bytes_deleted": 7
+        },
+        {
+          "pass": "python",
+          "runs": 18,
+          "calls": 16,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 16,
+          "calls": 90,
+          "reductions": 1,
+          "bytes_deleted": 28
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 15,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 15,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 30,
+          "calls": 2455,
+          "reductions": 2,
+          "bytes_deleted": 5
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 13,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 13,
+          "calls": 62,
+          "reductions": 2,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 13,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 13,
+          "calls": 72,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 13,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 13,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 13,
+          "calls": 274,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 13,
+          "calls": 175,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 13,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 11,
+          "calls": 224,
+          "reductions": 6,
+          "bytes_deleted": 9
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 11,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 11,
+          "calls": 33,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 11,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 11,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 14,
+          "calls": 8985,
+          "reductions": 1,
+          "bytes_deleted": 1
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 14,
+          "calls": 10108,
+          "reductions": 1,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 14,
+          "calls": 6569,
+          "reductions": 1,
+          "bytes_deleted": 0
+        }
+      ]
+    },
+    {
+      "name": "flaky_markers_two_sided_q10",
+      "initial_size": 174747,
+      "final_size": 2,
+      "calls": 12208,
+      "final_rate": 0.1,
+      "bug_kept": false,
+      "replay_calls": 7697,
+      "replay_sites": {
+        "detection": 3,
+        "confirmation": 4,
+        "seed": 2294,
+        "gauntlet": 5258,
+        "monitor": 118,
+        "report": 20
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 1074,
+      "confirmation_sweeps": 1,
+      "confirmation_sweep_calls": 115,
+      "nondeterministic": true,
+      "anchor": 0.2388117716269743,
+      "anchor_attempts": 1046,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 7710,
+      "c99": 9416,
+      "tail": 215,
+      "reductions": 1045,
+      "seconds": 43.57,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 6,
+          "calls": 7261,
+          "reductions": 944,
+          "bytes_deleted": 9872
+        },
+        {
+          "pass": "hollow",
+          "runs": 16,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 16,
+          "calls": 12,
+          "reductions": 1,
+          "bytes_deleted": 36000
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 2,
+          "calls": 2504,
+          "reductions": 83,
+          "bytes_deleted": 128544
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 16,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 27,
+          "calls": 30,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 13,
+          "calls": 140,
+          "reductions": 1,
+          "bytes_deleted": 3
+        },
+        {
+          "pass": "python",
+          "runs": 16,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 16,
+          "calls": 123,
+          "reductions": 2,
+          "bytes_deleted": 272
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 14,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 14,
+          "calls": 18,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 15,
+          "calls": 240,
+          "reductions": 5,
+          "bytes_deleted": 50
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 11,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 11,
+          "calls": 270,
+          "reductions": 4,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 11,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 11,
+          "calls": 39,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 11,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 11,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 11,
+          "calls": 60,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 11,
+          "calls": 190,
+          "reductions": 1,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 11,
+          "calls": 1,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 4,
+          "calls": 43,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 4,
+          "calls": 16,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 4,
+          "calls": 80,
+          "reductions": 1,
+          "bytes_deleted": 4
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 4,
+          "calls": 1033,
+          "reductions": 3,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 4,
+          "calls": 101,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
+    },
+    {
+      "name": "flaky_markers_p90_q10",
+      "initial_size": 174747,
+      "final_size": 50,
+      "calls": 35464,
+      "final_rate": 0.9,
+      "bug_kept": true,
+      "replay_calls": 4676,
+      "replay_sites": {
+        "detection": 4,
+        "confirmation": 32,
+        "seed": 16,
+        "gauntlet": 4252,
+        "monitor": 352,
+        "report": 20
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 91,
+      "confirmation_sweeps": 1,
+      "confirmation_sweep_calls": 949,
+      "nondeterministic": true,
+      "anchor": 0.5699064013154177,
+      "anchor_attempts": 33,
+      "false_accepts": 3,
+      "min_hits": 5,
+      "startup_refusals": 0,
+      "c90": 92,
+      "c99": 31018,
+      "tail": 2936,
+      "reductions": 98,
+      "seconds": 6.79,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 7,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 20890
+        },
+        {
+          "pass": "hollow",
+          "runs": 10,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 10,
+          "calls": 1,
+          "reductions": 1,
+          "bytes_deleted": 36000
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 3,
+          "calls": 31263,
+          "reductions": 67,
+          "bytes_deleted": 126533
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 10,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 17,
+          "calls": 7,
+          "reductions": 1,
+          "bytes_deleted": 964
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 10,
+          "calls": 12,
+          "reductions": 2,
+          "bytes_deleted": 716
+        },
+        {
+          "pass": "python",
+          "runs": 10,
+          "calls": 4,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 7,
+          "calls": 4,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 12,
+          "calls": 634,
+          "reductions": 17,
+          "bytes_deleted": 81
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 7,
+          "calls": 23,
+          "reductions": 1,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 7,
+          "calls": 106,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 7,
+          "calls": 51,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 4,
+          "calls": 33,
+          "reductions": 2,
+          "bytes_deleted": 3
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 4,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 4,
+          "calls": 1444,
+          "reductions": 2,
+          "bytes_deleted": 2
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 5,
+          "calls": 940,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 5,
+          "calls": 910,
+          "reductions": 0,
+          "bytes_deleted": 0
+        }
+      ]
+    },
+    {
+      "name": "flaky_markers_two_sided",
+      "initial_size": 174747,
+      "final_size": 50,
+      "calls": 16519,
+      "final_rate": 0.5,
+      "bug_kept": true,
+      "replay_calls": 9679,
+      "replay_sites": {
+        "detection": 3,
+        "confirmation": 12,
+        "seed": 2293,
+        "gauntlet": 7190,
+        "monitor": 161,
+        "report": 20
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 1221,
+      "confirmation_sweeps": 1,
+      "confirmation_sweep_calls": 4194,
+      "nondeterministic": true,
+      "anchor": 0.2388117716269743,
+      "anchor_attempts": 1047,
+      "false_accepts": 1,
+      "min_hits": 3,
+      "startup_refusals": 0,
+      "c90": 7710,
+      "c99": 7901,
+      "tail": 4942,
+      "reductions": 1047,
+      "seconds": 44.0,
+      "pass_stats": [
+        {
+          "pass": "cut_comment_like_things",
+          "runs": 5,
+          "calls": 7259,
+          "reductions": 944,
+          "bytes_deleted": 9872
+        },
+        {
+          "pass": "hollow",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/delete_duplicates",
+          "runs": 7,
+          "calls": 12,
+          "reductions": 1,
+          "bytes_deleted": 36000
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(10, 100)",
+          "runs": 2,
+          "calls": 1459,
+          "reductions": 90,
+          "bytes_deleted": 128798
+        },
+        {
+          "pass": "lift_braces",
+          "runs": 7,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "remove_indents",
+          "runs": 12,
+          "calls": 8,
+          "reductions": 1,
+          "bytes_deleted": 8
+        },
+        {
+          "pass": "remove_whitespace",
+          "runs": 7,
+          "calls": 29,
+          "reductions": 2,
+          "bytes_deleted": 4
+        },
+        {
+          "pass": "python",
+          "runs": 7,
+          "calls": 21,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(1, 10)",
+          "runs": 5,
+          "calls": 32,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "split(b';')/block_deletion(1, 10)",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "debracket",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "delete_byte_spans",
+          "runs": 9,
+          "calls": 389,
+          "reductions": 1,
+          "bytes_deleted": 4
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(11, 20)",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "reduce_integer_literals",
+          "runs": 5,
+          "calls": 19,
+          "reductions": 2,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_falsey_with_zero",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_identifiers_with_zero",
+          "runs": 5,
+          "calls": 13,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "combine_expressions",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "merge_adjacent_strings",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lexeme_based_deletions",
+          "runs": 5,
+          "calls": 95,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "normalize_identifiers",
+          "runs": 5,
+          "calls": 51,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "line_sorter",
+          "runs": 5,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "tokenize/block_deletion(1, 20)",
+          "runs": 3,
+          "calls": 80,
+          "reductions": 3,
+          "bytes_deleted": 11
+        },
+        {
+          "pass": "split(b'\\n')/block_deletion(21, 100)",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "replace_space_with_newlines",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "simplify_brackets",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "standard_substitutions",
+          "runs": 3,
+          "calls": 0,
+          "reductions": 0,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "short_deletions",
+          "runs": 2,
+          "calls": 2048,
+          "reductions": 1,
+          "bytes_deleted": 3
+        },
+        {
+          "pass": "lower_bytes",
+          "runs": 2,
+          "calls": 3348,
+          "reductions": 1,
+          "bytes_deleted": 0
+        },
+        {
+          "pass": "lower_individual_bytes",
+          "runs": 3,
+          "calls": 1609,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -429,12 +1883,28 @@
       "name": "already_minimal",
       "initial_size": 37,
       "final_size": 34,
-      "calls": 837,
-      "c90": 88,
-      "c99": 88,
-      "tail": 749,
+      "calls": 853,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 15,
+      "replay_sites": {
+        "detection": 15
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 21,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 92,
+      "c99": 92,
+      "tail": 761,
       "reductions": 3,
-      "seconds": 0.5,
+      "seconds": 0.55,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -516,7 +1986,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 4,
-          "calls": 79,
+          "calls": 80,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -621,21 +2091,21 @@
         {
           "pass": "short_deletions",
           "runs": 1,
-          "calls": 236,
+          "calls": 238,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 237,
+          "calls": 240,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 243,
+          "calls": 245,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -645,66 +2115,82 @@
       "name": "python_syntax",
       "initial_size": 10078,
       "final_size": 13,
-      "calls": 578,
-      "c90": 18,
-      "c99": 77,
-      "tail": 429,
+      "calls": 607,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 13,
+      "replay_sites": {
+        "detection": 13
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 17,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 22,
+      "c99": 104,
+      "tail": 430,
       "reductions": 23,
-      "seconds": 11.33,
+      "seconds": 1.78,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
-          "runs": 4,
+          "runs": 6,
           "calls": 1,
           "reductions": 1,
           "bytes_deleted": 45
         },
         {
           "pass": "hollow",
-          "runs": 6,
+          "runs": 8,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "split(b'\\n')/delete_duplicates",
-          "runs": 6,
+          "runs": 8,
           "calls": 5,
           "reductions": 3,
           "bytes_deleted": 3424
         },
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
-          "runs": 3,
+          "runs": 5,
           "calls": 38,
           "reductions": 8,
           "bytes_deleted": 6388
         },
         {
           "pass": "lift_braces",
-          "runs": 6,
+          "runs": 8,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "remove_indents",
-          "runs": 7,
-          "calls": 6,
+          "runs": 9,
+          "calls": 12,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "remove_whitespace",
-          "runs": 6,
-          "calls": 12,
+          "runs": 8,
+          "calls": 26,
           "reductions": 3,
           "bytes_deleted": 23
         },
         {
           "pass": "python",
-          "runs": 6,
-          "calls": 5,
+          "runs": 7,
+          "calls": 8,
           "reductions": 3,
           "bytes_deleted": 58
         },
@@ -788,7 +2274,7 @@
         {
           "pass": "normalize_identifiers",
           "runs": 3,
-          "calls": 24,
+          "calls": 25,
           "reductions": 1,
           "bytes_deleted": 2
         },
@@ -837,21 +2323,21 @@
         {
           "pass": "short_deletions",
           "runs": 1,
-          "calls": 70,
+          "calls": 71,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 225,
+          "calls": 217,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 125,
+          "calls": 129,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -861,73 +2347,89 @@
       "name": "corpus_mypy",
       "initial_size": 2537,
       "final_size": 34,
-      "calls": 3318,
-      "c90": 510,
-      "c99": 748,
-      "tail": 833,
+      "calls": 3389,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 40,
+      "replay_sites": {
+        "detection": 40
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 86,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 564,
+      "c99": 805,
+      "tail": 849,
       "reductions": 73,
-      "seconds": 42.02,
+      "seconds": 3.66,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
-          "runs": 9,
+          "runs": 11,
           "calls": 13,
           "reductions": 6,
           "bytes_deleted": 910
         },
         {
           "pass": "hollow",
-          "runs": 14,
-          "calls": 59,
+          "runs": 16,
+          "calls": 68,
           "reductions": 9,
           "bytes_deleted": 357
         },
         {
           "pass": "split(b'\\n')/delete_duplicates",
-          "runs": 13,
+          "runs": 15,
           "calls": 1,
           "reductions": 1,
           "bytes_deleted": 32
         },
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
-          "runs": 6,
-          "calls": 251,
+          "runs": 8,
+          "calls": 253,
           "reductions": 1,
           "bytes_deleted": 618
         },
         {
           "pass": "lift_braces",
-          "runs": 14,
+          "runs": 16,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "remove_indents",
-          "runs": 15,
-          "calls": 45,
+          "runs": 17,
+          "calls": 53,
           "reductions": 2,
           "bytes_deleted": 8
         },
         {
           "pass": "remove_whitespace",
-          "runs": 11,
-          "calls": 162,
+          "runs": 13,
+          "calls": 193,
           "reductions": 9,
           "bytes_deleted": 63
         },
         {
           "pass": "python",
-          "runs": 12,
-          "calls": 22,
-          "reductions": 11,
+          "runs": 14,
+          "calls": 23,
+          "reductions": 10,
           "bytes_deleted": 284
         },
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
           "runs": 8,
-          "calls": 35,
+          "calls": 32,
           "reductions": 2,
           "bytes_deleted": 152
         },
@@ -941,15 +2443,15 @@
         {
           "pass": "debracket",
           "runs": 8,
-          "calls": 30,
+          "calls": 32,
           "reductions": 3,
           "bytes_deleted": 6
         },
         {
           "pass": "delete_byte_spans",
-          "runs": 7,
-          "calls": 246,
-          "reductions": 15,
+          "runs": 8,
+          "calls": 252,
+          "reductions": 16,
           "bytes_deleted": 47
         },
         {
@@ -997,14 +2499,14 @@
         {
           "pass": "lexeme_based_deletions",
           "runs": 5,
-          "calls": 30,
+          "calls": 31,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "normalize_identifiers",
           "runs": 5,
-          "calls": 113,
+          "calls": 114,
           "reductions": 3,
           "bytes_deleted": 4
         },
@@ -1018,7 +2520,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 5,
-          "calls": 465,
+          "calls": 464,
           "reductions": 2,
           "bytes_deleted": 16
         },
@@ -1032,7 +2534,7 @@
         {
           "pass": "replace_space_with_newlines",
           "runs": 3,
-          "calls": 9,
+          "calls": 11,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -1053,21 +2555,21 @@
         {
           "pass": "short_deletions",
           "runs": 3,
-          "calls": 704,
+          "calls": 686,
           "reductions": 2,
           "bytes_deleted": 2
         },
         {
           "pass": "lower_bytes",
           "runs": 4,
-          "calls": 528,
+          "calls": 536,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 2,
-          "calls": 557,
+          "calls": 571,
           "reductions": 2,
           "bytes_deleted": 0
         }
@@ -1077,73 +2579,89 @@
       "name": "corpus_pylint",
       "initial_size": 2403,
       "final_size": 44,
-      "calls": 2036,
-      "c90": 183,
-      "c99": 387,
-      "tail": 1055,
-      "reductions": 58,
-      "seconds": 21.69,
+      "calls": 2080,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 27,
+      "replay_sites": {
+        "detection": 27
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 56,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 194,
+      "c99": 412,
+      "tail": 1069,
+      "reductions": 59,
+      "seconds": 2.99,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
-          "runs": 6,
-          "calls": 28,
+          "runs": 8,
+          "calls": 32,
           "reductions": 9,
           "bytes_deleted": 1139
         },
         {
           "pass": "hollow",
-          "runs": 9,
-          "calls": 33,
+          "runs": 11,
+          "calls": 41,
           "reductions": 10,
           "bytes_deleted": 447
         },
         {
           "pass": "split(b'\\n')/delete_duplicates",
-          "runs": 8,
+          "runs": 10,
           "calls": 1,
           "reductions": 1,
           "bytes_deleted": 18
         },
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
-          "runs": 4,
-          "calls": 116,
+          "runs": 6,
+          "calls": 117,
           "reductions": 1,
           "bytes_deleted": 418
         },
         {
           "pass": "lift_braces",
-          "runs": 9,
+          "runs": 11,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "remove_indents",
-          "runs": 10,
+          "runs": 12,
           "calls": 8,
           "reductions": 3,
           "bytes_deleted": 16
         },
         {
           "pass": "remove_whitespace",
-          "runs": 8,
+          "runs": 10,
           "calls": 1,
           "reductions": 1,
           "bytes_deleted": 28
         },
         {
           "pass": "python",
-          "runs": 8,
-          "calls": 7,
+          "runs": 10,
+          "calls": 8,
           "reductions": 7,
           "bytes_deleted": 126
         },
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
           "runs": 5,
-          "calls": 13,
+          "calls": 14,
           "reductions": 2,
           "bytes_deleted": 75
         },
@@ -1157,15 +2675,15 @@
         {
           "pass": "debracket",
           "runs": 5,
-          "calls": 22,
+          "calls": 25,
           "reductions": 2,
           "bytes_deleted": 4
         },
         {
           "pass": "delete_byte_spans",
           "runs": 6,
-          "calls": 227,
-          "reductions": 9,
+          "calls": 229,
+          "reductions": 10,
           "bytes_deleted": 52
         },
         {
@@ -1220,7 +2738,7 @@
         {
           "pass": "normalize_identifiers",
           "runs": 4,
-          "calls": 54,
+          "calls": 55,
           "reductions": 5,
           "bytes_deleted": 23
         },
@@ -1234,7 +2752,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 750,
+          "calls": 758,
           "reductions": 2,
           "bytes_deleted": 6
         },
@@ -1269,21 +2787,21 @@
         {
           "pass": "short_deletions",
           "runs": 1,
-          "calls": 197,
+          "calls": 199,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 242,
+          "calls": 245,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 244,
+          "calls": 246,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -1293,12 +2811,28 @@
       "name": "corpus_ujson",
       "initial_size": 826,
       "final_size": 42,
-      "calls": 1169,
-      "c90": 64,
-      "c99": 68,
-      "tail": 713,
+      "calls": 1188,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 18,
+      "replay_sites": {
+        "detection": 18
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 21,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 68,
+      "c99": 72,
+      "tail": 724,
       "reductions": 23,
-      "seconds": 0.12,
+      "seconds": 0.08,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -1380,7 +2914,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 3,
-          "calls": 20,
+          "calls": 21,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -1450,7 +2984,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 582,
+          "calls": 588,
           "reductions": 1,
           "bytes_deleted": 1
         },
@@ -1492,14 +3026,14 @@
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 198,
+          "calls": 200,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 243,
+          "calls": 245,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -1509,12 +3043,28 @@
       "name": "corpus_udlit_cpp",
       "initial_size": 834,
       "final_size": 22,
-      "calls": 1046,
-      "c90": 59,
-      "c99": 128,
-      "tail": 632,
+      "calls": 1064,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 17,
+      "replay_sites": {
+        "detection": 17
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 37,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 63,
+      "c99": 133,
+      "tail": 642,
       "reductions": 45,
-      "seconds": 0.08,
+      "seconds": 0.07,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -1645,7 +3195,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 5,
-          "calls": 135,
+          "calls": 138,
           "reductions": 10,
           "bytes_deleted": 64
         },
@@ -1750,21 +3300,21 @@
         {
           "pass": "short_deletions",
           "runs": 2,
-          "calls": 272,
+          "calls": 275,
           "reductions": 1,
           "bytes_deleted": 1
         },
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 237,
+          "calls": 239,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 217,
+          "calls": 219,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -1774,12 +3324,28 @@
       "name": "coupled_count_json",
       "initial_size": 3831,
       "final_size": 143,
-      "calls": 5285,
-      "c90": 35,
-      "c99": 361,
-      "tail": 3043,
+      "calls": 5346,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 60,
+      "replay_sites": {
+        "detection": 60
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 294,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 39,
+      "c99": 368,
+      "tail": 3078,
       "reductions": 45,
-      "seconds": 1.04,
+      "seconds": 0.99,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -1805,7 +3371,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 2,
-          "calls": 279,
+          "calls": 282,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -1868,7 +3434,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 3,
-          "calls": 100,
+          "calls": 101,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -1896,7 +3462,7 @@
         {
           "pass": "replace_identifiers_with_zero",
           "runs": 2,
-          "calls": 8,
+          "calls": 9,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -1938,7 +3504,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 3520,
+          "calls": 3555,
           "reductions": 3,
           "bytes_deleted": 3
         },
@@ -1952,7 +3518,7 @@
         {
           "pass": "replace_space_with_newlines",
           "runs": 1,
-          "calls": 26,
+          "calls": 27,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -1973,21 +3539,21 @@
         {
           "pass": "short_deletions",
           "runs": 1,
-          "calls": 329,
+          "calls": 333,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 408,
+          "calls": 412,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 418,
+          "calls": 422,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -1997,12 +3563,28 @@
       "name": "coupled_total_text",
       "initial_size": 602,
       "final_size": 350,
-      "calls": 27325,
-      "c90": 2841,
-      "c99": 2854,
-      "tail": 8598,
+      "calls": 27609,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 283,
+      "replay_sites": {
+        "detection": 283
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 554,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 2873,
+      "c99": 2886,
+      "tail": 8689,
       "reductions": 404,
-      "seconds": 2.15,
+      "seconds": 1.68,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -2028,7 +3610,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 1,
-          "calls": 299,
+          "calls": 302,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2056,7 +3638,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
           "runs": 7,
-          "calls": 791,
+          "calls": 799,
           "reductions": 2,
           "bytes_deleted": 13
         },
@@ -2077,21 +3659,21 @@
         {
           "pass": "delete_byte_spans",
           "runs": 7,
-          "calls": 733,
+          "calls": 740,
           "reductions": 44,
           "bytes_deleted": 75
         },
         {
           "pass": "split(b'\\n')/block_deletion(11, 20)",
           "runs": 6,
-          "calls": 407,
+          "calls": 414,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "reduce_integer_literals",
           "runs": 5,
-          "calls": 892,
+          "calls": 901,
           "reductions": 26,
           "bytes_deleted": 41
         },
@@ -2105,7 +3687,7 @@
         {
           "pass": "replace_identifiers_with_zero",
           "runs": 5,
-          "calls": 154,
+          "calls": 155,
           "reductions": 29,
           "bytes_deleted": 58
         },
@@ -2126,28 +3708,28 @@
         {
           "pass": "lexeme_based_deletions",
           "runs": 6,
-          "calls": 233,
+          "calls": 235,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "normalize_identifiers",
           "runs": 6,
-          "calls": 1219,
+          "calls": 1232,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "line_sorter",
           "runs": 4,
-          "calls": 238,
+          "calls": 241,
           "reductions": 238,
           "bytes_deleted": 0
         },
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 3,
-          "calls": 4718,
+          "calls": 4766,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2161,7 +3743,7 @@
         {
           "pass": "replace_space_with_newlines",
           "runs": 3,
-          "calls": 112,
+          "calls": 113,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2182,21 +3764,21 @@
         {
           "pass": "short_deletions",
           "runs": 3,
-          "calls": 5715,
+          "calls": 5772,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_bytes",
           "runs": 2,
-          "calls": 7624,
+          "calls": 7701,
           "reductions": 1,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 2,
-          "calls": 4046,
+          "calls": 4086,
           "reductions": 62,
           "bytes_deleted": 0
         }
@@ -2206,73 +3788,89 @@
       "name": "coupled_arity_python",
       "initial_size": 947,
       "final_size": 52,
-      "calls": 11028,
-      "c90": 296,
-      "c99": 431,
-      "tail": 1186,
-      "reductions": 60,
-      "seconds": 32.48,
+      "calls": 11149,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 118,
+      "replay_sites": {
+        "detection": 118
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 431,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 333,
+      "c99": 466,
+      "tail": 1195,
+      "reductions": 61,
+      "seconds": 4.59,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
-          "runs": 8,
+          "runs": 11,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "hollow",
-          "runs": 12,
-          "calls": 46,
+          "runs": 15,
+          "calls": 63,
           "reductions": 9,
           "bytes_deleted": 182
         },
         {
           "pass": "split(b'\\n')/delete_duplicates",
-          "runs": 12,
+          "runs": 15,
           "calls": 1,
           "reductions": 1,
           "bytes_deleted": 10
         },
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
-          "runs": 4,
-          "calls": 102,
+          "runs": 7,
+          "calls": 104,
           "reductions": 1,
           "bytes_deleted": 335
         },
         {
           "pass": "lift_braces",
-          "runs": 12,
+          "runs": 15,
           "calls": 0,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "remove_indents",
-          "runs": 13,
-          "calls": 16,
+          "runs": 16,
+          "calls": 19,
           "reductions": 3,
           "bytes_deleted": 12
         },
         {
           "pass": "remove_whitespace",
-          "runs": 11,
-          "calls": 29,
+          "runs": 14,
+          "calls": 33,
           "reductions": 7,
           "bytes_deleted": 33
         },
         {
           "pass": "python",
-          "runs": 11,
-          "calls": 17,
+          "runs": 14,
+          "calls": 21,
           "reductions": 7,
           "bytes_deleted": 141
         },
         {
           "pass": "split(b'\\n')/block_deletion(1, 10)",
           "runs": 9,
-          "calls": 5,
+          "calls": 6,
           "reductions": 1,
           "bytes_deleted": 88
         },
@@ -2286,14 +3884,14 @@
         {
           "pass": "debracket",
           "runs": 8,
-          "calls": 26,
+          "calls": 24,
           "reductions": 1,
           "bytes_deleted": 2
         },
         {
           "pass": "delete_byte_spans",
           "runs": 8,
-          "calls": 287,
+          "calls": 288,
           "reductions": 11,
           "bytes_deleted": 48
         },
@@ -2307,7 +3905,7 @@
         {
           "pass": "reduce_integer_literals",
           "runs": 6,
-          "calls": 2,
+          "calls": 3,
           "reductions": 2,
           "bytes_deleted": 1
         },
@@ -2321,7 +3919,7 @@
         {
           "pass": "replace_identifiers_with_zero",
           "runs": 6,
-          "calls": 51,
+          "calls": 53,
           "reductions": 3,
           "bytes_deleted": 5
         },
@@ -2363,7 +3961,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 5,
-          "calls": 1149,
+          "calls": 1179,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2398,22 +3996,22 @@
         {
           "pass": "short_deletions",
           "runs": 6,
-          "calls": 1175,
+          "calls": 1198,
           "reductions": 1,
           "bytes_deleted": 1
         },
         {
           "pass": "lower_bytes",
           "runs": 6,
-          "calls": 6460,
+          "calls": 6453,
           "reductions": 3,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 5,
-          "calls": 1508,
-          "reductions": 2,
+          "calls": 1542,
+          "reductions": 3,
           "bytes_deleted": 0
         }
       ]
@@ -2422,12 +4020,28 @@
       "name": "corpus_minisat",
       "initial_size": 2326,
       "final_size": 10,
-      "calls": 1198,
-      "c90": 787,
-      "c99": 787,
-      "tail": 375,
+      "calls": 1218,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 19,
+      "replay_sites": {
+        "detection": 19
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 38,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 798,
+      "c99": 798,
+      "tail": 383,
       "reductions": 4,
-      "seconds": 0.33,
+      "seconds": 0.14,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -2453,7 +4067,7 @@
         {
           "pass": "split(b'\\n')/block_deletion(10, 100)",
           "runs": 2,
-          "calls": 780,
+          "calls": 787,
           "reductions": 2,
           "bytes_deleted": 2308
         },
@@ -2488,7 +4102,7 @@
         {
           "pass": "DimacsCNF/force_literals",
           "runs": 2,
-          "calls": 3,
+          "calls": 4,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2551,7 +4165,7 @@
         {
           "pass": "DimacsCNF/renumber_variables",
           "runs": 2,
-          "calls": 19,
+          "calls": 20,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2691,14 +4305,14 @@
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 196,
+          "calls": 198,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 64,
+          "calls": 65,
           "reductions": 0,
           "bytes_deleted": 0
         }
@@ -2708,12 +4322,28 @@
       "name": "corpus_go",
       "initial_size": 2288,
       "final_size": 21,
-      "calls": 1111,
-      "c90": 54,
-      "c99": 111,
-      "tail": 592,
+      "calls": 1130,
+      "final_rate": 1.0,
+      "bug_kept": true,
+      "replay_calls": 18,
+      "replay_sites": {
+        "detection": 18
+      },
+      "merge_probe_calls": 0,
+      "merge_probes": 84,
+      "confirmation_sweeps": 0,
+      "confirmation_sweep_calls": 0,
+      "nondeterministic": false,
+      "anchor": 0.0,
+      "anchor_attempts": 0,
+      "false_accepts": 0,
+      "min_hits": 2,
+      "startup_refusals": 0,
+      "c90": 58,
+      "c99": 116,
+      "tail": 602,
       "reductions": 37,
-      "seconds": 0.1,
+      "seconds": 0.09,
       "pass_stats": [
         {
           "pass": "cut_comment_like_things",
@@ -2767,7 +4397,7 @@
         {
           "pass": "treesitter(go)/delete_children",
           "runs": 6,
-          "calls": 125,
+          "calls": 126,
           "reductions": 10,
           "bytes_deleted": 258
         },
@@ -2781,7 +4411,7 @@
         {
           "pass": "treesitter(go)/lift_nodes",
           "runs": 5,
-          "calls": 69,
+          "calls": 70,
           "reductions": 2,
           "bytes_deleted": 9
         },
@@ -2816,7 +4446,7 @@
         {
           "pass": "delete_byte_spans",
           "runs": 4,
-          "calls": 57,
+          "calls": 58,
           "reductions": 0,
           "bytes_deleted": 0
         },
@@ -2837,7 +4467,7 @@
         {
           "pass": "replace_falsey_with_zero",
           "runs": 3,
-          "calls": 3,
+          "calls": 4,
           "reductions": 1,
           "bytes_deleted": 1
         },
@@ -2886,7 +4516,7 @@
         {
           "pass": "tokenize/block_deletion(1, 20)",
           "runs": 2,
-          "calls": 241,
+          "calls": 243,
           "reductions": 3,
           "bytes_deleted": 3
         },
@@ -2921,21 +4551,21 @@
         {
           "pass": "short_deletions",
           "runs": 1,
-          "calls": 76,
+          "calls": 77,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_bytes",
           "runs": 1,
-          "calls": 245,
+          "calls": 247,
           "reductions": 0,
           "bytes_deleted": 0
         },
         {
           "pass": "lower_individual_bytes",
           "runs": 1,
-          "calls": 170,
+          "calls": 172,
           "reductions": 0,
           "bytes_deleted": 0
         }

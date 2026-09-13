@@ -16,7 +16,7 @@ from binaryornot.helpers import is_binary_string
 
 from shrinkray.cli import InputType
 from shrinkray.passes.llm import DEFAULT_MODEL_SPEC
-from shrinkray.problem import InvalidInitialExample
+from shrinkray.problem import BasicReductionProblem, InvalidInitialExample
 from shrinkray.state import (
     OutputCaptureManager,
     ShrinkRayStateSingleFile,
@@ -227,6 +227,7 @@ class ReducerWorker:
         llm_enabled = params.get("llm_enabled", False)
         llm_model = params.get("llm_model", DEFAULT_MODEL_SPEC)
         llm_only = params.get("llm_only", False)
+        assume_deterministic = params.get("assume_deterministic", False)
 
         self.state = load_state_for_path(
             filename=filename,
@@ -246,6 +247,7 @@ class ReducerWorker:
             external_reducers=external_reducers,
             python_reducer=python_reducer,
             restart_at_fixpoint=restart_at_fixpoint,
+            assume_deterministic=assume_deterministic,
             llm_enabled=llm_enabled,
             llm_model=llm_model,
             llm_only=llm_only,
@@ -639,6 +641,18 @@ class ReducerWorker:
                 current_timeout = policy_timeout
             timeout_rate = self.state.timeout_policy.recent_timeout_rate
 
+        # Nondeterminism handling: whether it engaged, and what it knows.
+        nondeterministic = False
+        reproduction_rate: float | None = None
+        replay_calls = 0
+        if isinstance(self.problem, BasicReductionProblem):
+            policy = self.problem.policy
+            if policy is not None:
+                nondeterministic = policy.active
+                replay_calls = policy.replay_calls
+                if policy.active:
+                    reproduction_rate = policy.anchor
+
         return ProgressUpdate(
             status=self.reducer.status if self.reducer else "",
             size=stats.current_test_case_size,
@@ -665,6 +679,9 @@ class ReducerWorker:
             new_size_history=new_entries,
             history_dir=history_dir,
             target_basename=target_basename,
+            nondeterministic=nondeterministic,
+            reproduction_rate=reproduction_rate,
+            replay_calls=replay_calls,
         )
 
     async def emit_progress_updates(self) -> None:

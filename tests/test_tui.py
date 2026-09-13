@@ -118,6 +118,7 @@ class FakeReductionClient:
         llm_enabled: bool = False,
         llm_model: str = DEFAULT_MODEL_SPEC,
         llm_only: bool = False,
+        assume_deterministic: bool = False,
     ) -> Response:
         if self._start_error:
             return Response(id="start", error=self._start_error)
@@ -3134,6 +3135,7 @@ def test_run_textual_ui_creates_and_runs_app():
             llm_enabled=False,
             llm_model=DEFAULT_MODEL_SPEC,
             llm_only=False,
+            assume_deterministic=False,
         )
 
         # Verify run() was called
@@ -7807,3 +7809,87 @@ def test_downloads_modal_ignores_other_buttons():
     event.button.id = "something-else"
     modal.on_button_pressed(event)
     assert dismissed == []
+
+
+def test_stats_display_shows_nondeterminism():
+    widget = StatsDisplay()
+    update = ProgressUpdate(
+        status="Testing",
+        size=500,
+        original_size=1000,
+        calls=20,
+        reductions=8,
+        runtime=5.0,
+        nondeterministic=True,
+        reproduction_rate=0.625,
+        replay_calls=40,
+    )
+    widget.update_stats(update)
+    rendered = widget.render()
+    assert "Nondeterministic test" in rendered
+    assert "at least 62%" in rendered
+    assert "40 calls spent on replays" in rendered
+
+
+def test_stats_display_hides_nondeterminism_when_deterministic():
+    widget = StatsDisplay()
+    update = ProgressUpdate(
+        status="Testing",
+        size=500,
+        original_size=1000,
+        calls=20,
+        reductions=8,
+        runtime=5.0,
+    )
+    widget.update_stats(update)
+    assert "Nondeterministic" not in widget.render()
+
+
+def test_stats_display_reports_unknown_reproduction_rate_as_zero():
+    widget = StatsDisplay()
+    update = ProgressUpdate(
+        status="Testing",
+        size=500,
+        original_size=1000,
+        calls=20,
+        reductions=8,
+        runtime=5.0,
+        nondeterministic=True,
+        reproduction_rate=None,
+    )
+    widget.update_stats(update)
+    assert "at least 0%" in widget.render()
+
+
+def test_app_forwards_assume_deterministic_to_the_client():
+    async def run_test():
+        mock_client = MagicMock()
+        mock_client.start = AsyncMock()
+        mock_client.start_reduction = AsyncMock(
+            return_value=Response(id="start", result={"status": "started"})
+        )
+        mock_client.close = AsyncMock()
+        mock_client.is_completed = True
+        mock_client.error_message = None
+
+        async def mock_updates():
+            return
+            yield
+
+        mock_client.get_progress_updates = mock_updates
+
+        with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
+            app = ShrinkRayApp(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+                assume_deterministic=True,
+            )
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+                mock_client.start_reduction.assert_called_once()
+                kwargs = mock_client.start_reduction.call_args.kwargs
+                assert kwargs["assume_deterministic"] is True
+
+    run_async(run_test())

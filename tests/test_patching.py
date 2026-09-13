@@ -6,8 +6,11 @@ from random import Random
 
 import pytest
 import trio
+from hypothesis import given
+from hypothesis import strategies as st
 
 from shrinkray.passes.patching import (
+    SCHEDULER_CHECKPOINT_INTERVAL,
     Conflict,
     Cuts,
     PatchApplier,
@@ -23,6 +26,36 @@ from shrinkray.work import WorkContext
 # =============================================================================
 # Cuts class tests
 # =============================================================================
+
+
+@given(
+    st.lists(
+        st.lists(
+            st.tuples(st.integers(0, 40), st.integers(0, 40)).map(
+                lambda pair: tuple(sorted(pair))
+            ),
+            max_size=20,
+        ),
+        max_size=6,
+    )
+)
+def test_combined_cuts_preserve_union_and_inputs(patches):
+    before = [list(patch) for patch in patches]
+    cuts = Cuts()
+    combined = cuts.combine(*patches)
+    expected = [
+        i
+        for i in range(40)
+        if not any(start <= i < end for patch in patches for start, end in patch)
+    ]
+    assert cuts.apply(combined, list(range(40))) == expected
+    assert cuts.apply(combined, bytes(range(40))) == bytes(expected)
+    assert cuts.apply(combined, bytearray(range(40))) == bytearray(expected)
+    assert cuts.apply(combined, tuple(range(40))) == tuple(expected)
+    assert patches == before
+    assert all(
+        left[1] < right[0] for left, right in zip(combined, combined[1:], strict=False)
+    )
 
 
 def test_cuts_empty():
@@ -206,6 +239,46 @@ async def test_apply_patches_some_not_applicable():
     await apply_patches(problem, cuts, patches)
     # 'a' should still be there
     assert problem.current_test_case[0:1] == b"a"
+
+
+@pytest.mark.parametrize("parallelism", [1, 2])
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_noop_patch_streaks_remain_cancellable(monkeypatch, cancel, parallelism):
+    """Patches that are rejected without awaiting (conflicts, no-ops) do not
+    checkpoint individually, but a streak of them still notices cancellation
+    within a bounded number of attempts."""
+    initial = b"x" * 1000
+
+    async def interesting(x):
+        return x == initial
+
+    problem = BasicReductionProblem(
+        initial=initial,
+        is_interesting=interesting,
+        work=WorkContext(parallelism=parallelism),
+    )
+    await problem.setup()
+    attempted = 0
+
+    with trio.CancelScope() as scope:
+
+        async def noop(self, patch):
+            nonlocal attempted
+            attempted += 1
+            if cancel:
+                scope.cancel()
+            return False
+
+        monkeypatch.setattr(PatchApplier, "try_apply_patch", noop)
+        await apply_patches(
+            problem, Cuts(), [[(i, i + 1)] for i in range(len(initial))]
+        )
+
+    assert scope.cancelled_caught == cancel
+    if cancel:
+        assert 1 <= attempted <= SCHEDULER_CHECKPOINT_INTERVAL
+    else:
+        assert attempted == len(initial)
 
 
 async def test_apply_patches_early_abort_gives_up(monkeypatch):
@@ -1176,3 +1249,25 @@ def test_replacements_combine_allows_touching_spans():
 
 def test_replacements_size_is_net_bytes_removed():
     assert Replacements().size(((0, 5, b"x"), (10, 12, b""))) == 6
+
+
+async def test_merge_probes_are_counted():
+    """Every call the merge master makes to test a combination of
+    individually successful patches is attributed to merge probing."""
+
+    # Not every cut can be applied together (the shortcut of applying all
+    # patches at once fails), so successes must be merged.
+    async def is_interesting(x):
+        await trio.lowlevel.checkpoint()
+        return b"k" in x and len(x) >= 2
+
+    problem = BasicReductionProblem(
+        initial=b"kabcdefgh",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=2),
+    )
+    await apply_patches(problem, Cuts(), [[(i, i + 1)] for i in range(1, 9)])
+    assert len(problem.current_test_case) == 2
+    stats = problem.stats
+    assert stats.merge_probes > 0
+    assert 0 < stats.merge_probe_calls <= stats.calls

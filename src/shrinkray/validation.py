@@ -72,8 +72,10 @@ async def _run_validation_test(
     input_type: InputType,
     in_place: bool,
     filename: str,
+    retries: int = 0,
 ) -> ValidationResult:
-    """Run the interestingness test once and check if it passes.
+    """Run the interestingness test and check if it passes, re-running a
+    failed run up to `retries` times in case the test is nondeterministic.
 
     Returns ValidationResult with success=True if the test passed (exit code 0),
     or success=False with error details if it failed.
@@ -169,21 +171,31 @@ async def _run_validation_test(
                 )
 
         result = await trio.to_thread.run_sync(run_subprocess)
+        _report_run(result)
 
-        # If we captured output (fallback mode), print it now
-        if result.stdout:
-            sys.stderr.buffer.write(result.stdout)
-            sys.stderr.flush()
-        if result.stderr:
-            sys.stderr.buffer.write(result.stderr)
-            sys.stderr.flush()
-
-        print(file=sys.stderr, flush=True)
-        print(
-            f"Exit code: {result.returncode}",
-            file=sys.stderr,
-            flush=True,
-        )
+        # A nondeterministic test may fail its first run on an interesting
+        # test case. Rather than refusing to start, retry a few times: one
+        # success means the test case is interesting and the test is
+        # nondeterministic, which the reducer then handles.
+        failures = 0
+        while result.returncode != 0 and failures < retries:
+            failures += 1
+            print(
+                f"The interestingness test has failed {failures} time(s) on "
+                "the initial test case; retrying in case it is "
+                f"nondeterministic (retry {failures} of {retries}).",
+                file=sys.stderr,
+                flush=True,
+            )
+            result = await trio.to_thread.run_sync(run_subprocess)
+            _report_run(result)
+        if failures and result.returncode == 0:
+            print(
+                "The interestingness test is nondeterministic: it failed on "
+                f"{failures} of {failures + 1} runs of the initial test case.",
+                file=sys.stderr,
+                flush=True,
+            )
 
         if result.returncode != 0:
             return ValidationResult(
@@ -254,12 +266,26 @@ async def _run_formatter(
     return result
 
 
+def _report_run(result: subprocess.CompletedProcess[bytes]) -> None:
+    """Print a completed interestingness-test run's captured output (in
+    fallback mode) and exit code to stderr."""
+    if result.stdout:
+        sys.stderr.buffer.write(result.stdout)
+        sys.stderr.flush()
+    if result.stderr:
+        sys.stderr.buffer.write(result.stderr)
+        sys.stderr.flush()
+    print(file=sys.stderr, flush=True)
+    print(f"Exit code: {result.returncode}", file=sys.stderr, flush=True)
+
+
 async def validate_initial_example(
     file_path: str,
     test: list[str],
     input_type: InputType,
     in_place: bool,
     formatter_command: list[str] | None = None,
+    retries: int = 0,
 ) -> ValidationResult:
     """Validate that the initial example passes the interestingness test.
 
@@ -298,6 +324,7 @@ async def validate_initial_example(
         input_type=input_type,
         in_place=in_place,
         filename=file_path,
+        retries=retries,
     )
 
     if not result.success:
@@ -411,6 +438,7 @@ def run_validation(
     input_type: InputType,
     in_place: bool,
     formatter_command: list[str] | None = None,
+    retries: int = 0,
 ) -> ValidationResult:
     """Run initial validation synchronously using trio.run().
 
@@ -426,6 +454,7 @@ def run_validation(
             input_type,
             in_place,
             formatter_command,
+            retries=retries,
         )
 
     return trio.run(_run)

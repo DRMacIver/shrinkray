@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import trio
 
+from shrinkray.nondeterminism import NondeterminismPolicy
 from shrinkray.passes.cpp import CPP_PASSES, CPP_PUMPS
 from shrinkray.passes.patching import PatchApplier
 from shrinkray.problem import (
@@ -2515,3 +2516,87 @@ def test_status_reports_restarting():
     assert reducer.status == "Selecting reduction pass"
     reducer._restarting = True
     assert "Re-reducing from original input" in reducer.status
+
+
+# === Nondeterministic interestingness tests ===
+
+
+async def test_run_pass_does_not_fingerprint_under_a_nondeterministic_test():
+    """Once the interestingness test is known to be nondeterministic, a
+    fruitless completed run proves nothing: the candidates it rejected may
+    be accepted on a retry, so the pass must run again next round."""
+
+    async def is_interesting(x):
+        return x in (b"aaaa", b"aa")
+
+    problem = BasicReductionProblem(
+        initial=b"aaaa",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        policy=NondeterminismPolicy(),
+    )
+    assert problem.policy is not None
+    problem.policy.flip()
+    reducer = ShrinkRay(target=problem)
+
+    invocations = [0]
+
+    async def fruitless(p):
+        invocations[0] += 1
+        await p.is_interesting(b"zzzz")
+
+    fruitless.__name__ = "fruitless"
+
+    await reducer.run_pass(fruitless)
+    assert invocations[0] == 1
+    assert "fruitless" not in reducer.pass_fingerprints
+    await reducer.run_pass(fruitless, budgeted=False)
+    assert invocations[0] == 2
+
+
+async def test_key_problem_delegates_nondeterminism():
+    async def is_interesting(x):
+        return True
+
+    base = BasicReductionProblem(
+        initial={"file1": b"aaaa"},
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        policy=NondeterminismPolicy(),
+    )
+    applier = PatchApplier(patches=UpdateKeys(), problem=base)
+    kp = KeyProblem(base_problem=base, applier=applier, key="file1")
+    assert not kp.nondeterministic
+    assert base.policy is not None
+    base.policy.flip()
+    assert kp.nondeterministic
+
+
+async def test_restart_phase_sees_the_outer_problems_nondeterminism():
+    """The restarted reduction evaluates through the outer problem, so its
+    reducer must treat passes the way the outer problem's status demands."""
+
+    async def is_interesting(x):
+        return x.count(b"a") >= 1 and b"b" not in x
+
+    problem = BasicReductionProblem(
+        initial=b"aXaXa",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        policy=NondeterminismPolicy(),
+    )
+    assert problem.policy is not None
+    problem.policy.flip()
+    reducer = ShrinkRay(target=problem, python_reducer=False)
+
+    seen: set[bool] = set()
+    original_run_pass = ShrinkRay.run_pass
+
+    async def spy(self, rp, *, budgeted=True):
+        if self.target is not problem:
+            seen.add(self.target.nondeterministic)
+        return await original_run_pass(self, rp, budgeted=budgeted)
+
+    with patch.object(ShrinkRay, "run_pass", spy):
+        await reducer.run()
+    assert seen == {True}

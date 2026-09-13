@@ -1,0 +1,24 @@
+{
+  "id": "toml-0.10.2-mixed-array",
+  "format": "toml",
+  "tool": "toml 0.10.2",
+  "extension": ".toml",
+  "bug_url": "https://github.com/uiri/toml/issues/270",
+  "symptom": "toml 0.10.2's decoder crashes with IndexError in load_array while parsing an array that mixes a string with an inline table: the array loader splits the array text on commas and then re-joins pieces it decides were split inside a value, but with a trailing comma after the inline table it re-joins past the end of the list. Unfixed in the 0.10.x line (the project is unmaintained; tomli/tomllib parse the input).",
+  "oracle": {
+    "type": "venv",
+    "python": "3.12",
+    "requirements": ["toml==0.10.2"],
+    "command": [
+      "python",
+      "-c",
+      "import sys, toml\ntoml.loads(open(sys.argv[1]).read())\n",
+      "{file}"
+    ]
+  },
+  "interesting": {
+    "output_contains": ["IndexError: list index out of range", "in load_array"],
+    "exit_code": 1
+  },
+  "timeout": 10
+}

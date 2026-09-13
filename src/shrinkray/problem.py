@@ -17,7 +17,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sized
 from datetime import timedelta
-from functools import lru_cache, total_ordering
+from functools import cached_property, lru_cache, total_ordering
 from typing import (
     Any,
     Protocol,
@@ -31,12 +31,34 @@ from attrs import define
 from humanize import naturalsize, precisedelta
 
 from shrinkray.formatting import try_decode
+from shrinkray.nondeterminism import (
+    ANCHOR_SEED_RUNS,
+    DETECTION_REPLAYS,
+    GATE_RUNS,
+    VERIFY_INTERVAL,
+    Evidence,
+    NondeterminismPolicy,
+    Verdict,
+    confirmation_bar,
+    gauntlet,
+)
 from shrinkray.reformat import basic_format, canonical_distance
 from shrinkray.work import WorkContext
 
 
 S = TypeVar("S")
 T = TypeVar("T")
+T_co = TypeVar("T_co", covariant=True)
+
+
+class BacktrackHistory(Protocol[T_co]):
+    """The test cases a reduction has adopted, oldest first: the original
+    input at index 0, then each adopted reduction. Entries may be read
+    lazily (from disk), so only indexing and length are required."""
+
+    def __len__(self) -> int: ...
+
+    def __getitem__(self, index: int, /) -> T_co: ...
 
 
 class PassStatsProtocol(Protocol):
@@ -172,6 +194,35 @@ def natural_key(s: str) -> LazyChainedSortKey:
     return LazyChainedSortKey(functions=NATURAL_ORDERING_FUNCTIONS, value=s)
 
 
+@total_ordering
+class ReflowLayoutKey:
+    """Layout tie breakers, evaluated once and only on a canonical-content tie."""
+
+    def __init__(self, raw: str, canonical: str):
+        self.raw = raw
+        self.canonical = canonical
+
+    @cached_property
+    def key(self) -> Any:
+        return (
+            canonical_distance(self.raw, self.canonical),
+            abs(len(self.raw.splitlines()) - len(self.canonical.splitlines())),
+            natural_key(self.raw),
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ReflowLayoutKey):
+            return NotImplemented
+        return self.raw == other.raw
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, ReflowLayoutKey):
+            return NotImplemented
+        if self.raw == other.raw:
+            return False
+        return self.key < other.key
+
+
 # The cache only needs a handful of live entries: each comparison touches
 # two strings (the candidate and the current test case, which is re-keyed
 # on every comparison), plus a few more for candidates concurrently in
@@ -199,9 +250,9 @@ def reflow_sort_key(s: str) -> Any:
     canonical = basic_format(s)
     return (
         natural_key(canonical),
-        canonical_distance(s, canonical),
-        abs(len(s.splitlines()) - len(canonical.splitlines())),
-        natural_key(s),
+        # Most comparisons differ in canonical content, so computing the raw
+        # layout distance would scan both strings without affecting the order.
+        ReflowLayoutKey(s, canonical),
     )
 
 
@@ -385,6 +436,15 @@ class ReductionStats:
     interesting_calls: int = 0
     wasted_interesting_calls: int = 0
 
+    # Calls made by the patch applier's merge probes (testing combinations
+    # of patches that each passed on their own), and how many probes.
+    merge_probes: int = 0
+    merge_probe_calls: int = 0
+    # Under a nondeterministic test: confirmation sweeps run, and the
+    # calls made while one was running.
+    confirmation_sweeps: int = 0
+    confirmation_sweep_calls: int = 0
+
     time_of_last_reduction: float = 0.0
     start_time: float = attrs.Factory(time.time)
 
@@ -555,6 +615,14 @@ class ReductionProblem[T](ABC):
     @abstractmethod
     def display(self, value: T) -> str: ...
 
+    @property
+    def nondeterministic(self) -> bool:
+        """Whether the interestingness test has been observed to be
+        nondeterministic. Reducers consult this because a pass that made
+        no progress on a nondeterministic test may still make progress on
+        the same test case when re-run."""
+        return False
+
     async def attempt_unstick(self) -> bool:
         """Called by reducers when a full round of reduction made no progress.
 
@@ -591,6 +659,7 @@ class ReductionProblem[T](ABC):
             sort_key=self.sort_key,
             size=self.size,
             display=self.display,
+            nondeterministic_source=lambda: self.nondeterministic,
         )
 
 
@@ -611,6 +680,43 @@ class InterestingnessResult:
 
     interesting: bool
     cache_valid: Callable[[], bool] | None = None
+    # Whether the run timed out. A timeout is a failed run for reduction
+    # purposes but says nothing about whether the test is deterministic,
+    # so nondeterminism detection ignores it.
+    timed_out: bool = False
+
+
+@define
+class Ledger:
+    """What is known about one candidate.
+
+    Under a deterministic test one run decides and `verdict` is latched
+    immediately. Under a nondeterministic test `evidence` accumulates
+    across every run of the candidate (including retries by later
+    passes), `min_hits` pins the number of interesting runs an accept
+    needs, fixed the first time the candidate is proposed so its
+    stopping rule never changes mid-test, and `verdict` latches only
+    once the gauntlet reaches a decision.
+    """
+
+    evidence: Evidence = attrs.Factory(Evidence)
+    verdict: bool | None = None
+    cache_valid: Callable[[], bool] | None = None
+    min_hits: int | None = None
+    # A snapshot of the evidence at the moment the gauntlet accepted, so
+    # the runs after it (which the stopping rule did not select on) can
+    # be told apart when the anchor is raised.
+    accepted_at: Evidence | None = None
+
+    def unselected_evidence(self) -> Evidence:
+        """The runs recorded after the accept decision."""
+        assert self.accepted_at is not None
+        return self.evidence.since(self.accepted_at)
+
+    def latched(self) -> bool:
+        return self.verdict is not None and (
+            self.cache_valid is None or self.cache_valid()
+        )
 
 
 def default_cache_key(value: Any) -> str:
@@ -633,6 +739,8 @@ class BasicReductionProblem(ReductionProblem[T]):
     - Caching of interestingness results (by content hash)
     - Statistics tracking (calls, cache hits, timing)
     - Callbacks for reduction events
+    - Handling of nondeterministic interestingness tests (see
+      shrinkray.nondeterminism), when given a policy
 
     Cached results are kept for the whole reduction (the cache holds only
     small content hashes, so this is cheap). Ordinary reduction rarely
@@ -652,8 +760,29 @@ class BasicReductionProblem(ReductionProblem[T]):
         stats: ReductionStats | None = None,
         cache_key: Callable[[Any], str] = default_cache_key,
         unstick: Callable[[], Awaitable[bool]] | None = None,
+        policy: NondeterminismPolicy | None = None,
+        history: BacktrackHistory[T] | None = None,
+        nondeterministic_source: Callable[[], bool] | None = None,
     ):
+        """
+        `policy`, when given, turns on nondeterminism handling: the initial
+        test case is replayed at setup and the current one periodically and
+        at the end to detect a nondeterministic test, and once detected,
+        candidates must clear the policy's gauntlet before adoption. Without
+        one every run is taken as a verdict.
+
+        `history` is the sequence of test cases this reduction has adopted,
+        oldest first (the original input, then each reduction), used to
+        backtrack to a reproducing test case when nondeterminism is only
+        detected after the reducer has adopted candidates on single runs.
+        Without one, only the original input is available to backtrack to.
+
+        `nondeterministic_source` is for problems that delegate their
+        evaluations to another problem (the restart phase, pumps), so the
+        reducer running them sees the delegate's determinism status.
+        """
         super().__init__(work=work)
+        self.__initial = initial
         self.__current = initial
         self.__sort_key = sort_key
         self.__size = size
@@ -665,36 +794,79 @@ class BasicReductionProblem(ReductionProblem[T]):
         else:
             self._stats = stats
 
-        # Maps cache keys to (result, cache_valid). Entries with a
-        # cache_valid function are only served while it returns True.
-        self.__is_interesting_cache: dict[
-            str, tuple[bool, Callable[[], bool] | None]
-        ] = {}
+        self.__ledgers: dict[str, Ledger] = {}
         self.__cache_key = cache_key
         self.__is_interesting = is_interesting
         self.__unstick = unstick
+        self.__policy = policy
+        self.__history = history
+        self.__nondeterministic_source = nondeterministic_source
         self.__on_reduce_callbacks: list[Callable[[T], Awaitable[None]]] = []
-        self.__current = initial
         self.__has_set_up = False
+        self.__calls_at_last_verify = 0
 
     async def setup(self) -> None:
         if self.__has_set_up:
             return
         self.__has_set_up = True
-        result, _ = await self.__run_is_interesting(self.current_test_case)
-        if not result:
-            raise InvalidInitialExample(
-                f"Initial example ({self.display(self.current_test_case)}) does not satisfy interestingness test."
-            )
+        result, timed_out, _ = await self.__execute(self.current_test_case)
+        if self.__policy is None:
+            if not result:
+                raise self.__invalid_initial()
+            return
+        # The initial test case is the one run we did not select for being
+        # interesting, so its first run counts as evidence like any replay.
+        # A first run that misses is not yet a verdict either: a flaky
+        # initial test case may fail its first run and reproduce on the
+        # replays, in which case it is interesting and the test is
+        # nondeterministic.
+        evidence = Evidence()
+        if not timed_out:
+            evidence.record(result)
+        all_reproduced = await self.__replays_all_reproduce(
+            evidence, DETECTION_REPLAYS - 1, stop_on_miss=result
+        )
+        # An initial test case that has not reproduced yet gets the
+        # confirmation bar's gate: it is only invalid once it has missed
+        # GATE_RUNS times in a row, so a rarely-reproducing one is not
+        # refused on a handful of unlucky runs.
+        attempts = DETECTION_REPLAYS
+        while evidence.interesting == 0 and attempts < GATE_RUNS:
+            attempts += 1
+            await self.__replays_all_reproduce(evidence, 1)
+        if evidence.interesting == 0:
+            raise self.__invalid_initial()
+        if not (result and all_reproduced):
+            await self.__flip(evidence)
 
-    async def __run_is_interesting(
-        self, test_case: T
-    ) -> tuple[bool, Callable[[], bool] | None]:
-        """Run the underlying predicate and normalize its result."""
+    def __invalid_initial(self) -> InvalidInitialExample:
+        return InvalidInitialExample(
+            f"Initial example ({self.display(self.current_test_case)}) does not satisfy interestingness test."
+        )
+
+    async def __execute(
+        self, test_case: T, *, replay: str | None = None
+    ) -> tuple[bool, bool, Callable[[], bool] | None]:
+        """Run the underlying predicate once and normalize its result to
+        (interesting, timed_out, cache_valid), updating the call statistics.
+        A replay is any run beyond a candidate's first; `replay` names the
+        site spending it (see NondeterminismPolicy.replay_sites)."""
         outcome = await self.__is_interesting(test_case)
         if isinstance(outcome, InterestingnessResult):
-            return outcome.interesting, outcome.cache_valid
-        return outcome, None
+            result = (outcome.interesting, outcome.timed_out, outcome.cache_valid)
+        else:
+            result = (outcome, False, None)
+        self.stats.calls += 1
+        if result[0]:
+            self.stats.interesting_calls += 1
+        if self.current_pass_stats is not None:
+            self.current_pass_stats.test_evaluations += 1
+        if self.__policy is not None:
+            if replay is not None:
+                self.__policy.record_replay(result[0], replay)
+            if self.__policy.confirming:
+                self.stats.confirmation_sweep_calls += 1
+        return result
 
     def display(self, value: T) -> str:
         return self.__display(value)
@@ -702,6 +874,26 @@ class BasicReductionProblem(ReductionProblem[T]):
     @property
     def stats(self) -> ReductionStats:
         return self._stats
+
+    @property
+    def policy(self) -> NondeterminismPolicy | None:
+        return self.__policy
+
+    @property
+    def nondeterministic(self) -> bool:
+        if self.__policy is not None:
+            return self.__policy.active
+        if self.__nondeterministic_source is not None:
+            return self.__nondeterministic_source()
+        return False
+
+    def ledger(self, test_case: T) -> Ledger:
+        """What is known about `test_case`, for inspection."""
+        return self.__ledgers[self.__cache_key(test_case)]
+
+    @property
+    def backtrack_history(self) -> BacktrackHistory[T] | None:
+        return self.__history
 
     def sort_key(self, test_case: T) -> Any:
         return self.__sort_key(test_case)
@@ -716,9 +908,212 @@ class BasicReductionProblem(ReductionProblem[T]):
 
     async def attempt_unstick(self) -> bool:
         await trio.lowlevel.checkpoint()
+        if self.__policy is not None:
+            if not self.__policy.active:
+                # The final check for a test that looked deterministic all
+                # the way through: replay the result before believing it.
+                evidence = Evidence()
+                if not await self.__replays_all_reproduce(evidence, DETECTION_REPLAYS):
+                    await self.__flip(evidence)
+                    return True
+            elif not self.__policy.confirming:
+                # Fast sweeps reject a candidate on one missed run, so a
+                # fixpoint reached that way is not a certificate. Run one
+                # more round in which every candidate is driven to a bound
+                # verdict; adoption during it drops back to fast sweeps.
+                self.__policy.confirming = True
+                self.stats.confirmation_sweeps += 1
+                return True
+            else:
+                # A confirmation sweep found nothing. Before believing the
+                # result, measure it: an incumbent that does not reproduce
+                # at the required rate is recovered from, and the next
+                # round starts from the recovered test case.
+                self.__policy.confirming = False
+                evidence = await self.measure_current(ANCHOR_SEED_RUNS)
+                for _ in range(evidence.interesting):
+                    self.__policy.record_incumbent_run(True)
+                for _ in range(evidence.runs - evidence.interesting):
+                    self.__policy.record_incumbent_run(False)
+                if self.__policy.incumbent_failing():
+                    await self.__recover()
+                    return True
         if self.__unstick is None:
             return False
         return await self.__unstick()
+
+    async def measure_current(self, runs: int) -> Evidence:
+        """Replay the current test case `runs` times and report how many
+        reproduced, for the final report."""
+        evidence = Evidence()
+        await self.__replays_all_reproduce(
+            evidence, runs, stop_on_miss=False, site="report"
+        )
+        return evidence
+
+    async def __replays_all_reproduce(
+        self,
+        evidence: Evidence,
+        runs: int,
+        *,
+        stop_on_miss: bool = True,
+        site: str = "detection",
+    ) -> bool:
+        """Replay the current test case `runs` times concurrently, recording
+        the outcomes into `evidence` (timeouts excluded: they say nothing
+        about determinism). Returns whether every completed run reproduced.
+        With `stop_on_miss` the remaining replays are cancelled on the
+        first miss."""
+        test_case = self.current_test_case
+        missed = False
+
+        async with trio.open_nursery() as nursery:
+
+            async def replay() -> None:
+                nonlocal missed
+                interesting, timed_out, _ = await self.__execute(test_case, replay=site)
+                if timed_out:
+                    return
+                evidence.record(interesting)
+                if not interesting:
+                    missed = True
+                    if stop_on_miss:
+                        nursery.cancel_scope.cancel()
+
+            for _ in range(runs):
+                nursery.start_soon(replay)
+        return not missed
+
+    async def __flip(self, evidence: Evidence) -> None:
+        """Switch into nondeterministic handling, `evidence` being the
+        replays of the current test case that revealed it."""
+        assert self.__policy is not None
+        self.__policy.flip()
+        self.work.warn(
+            "Nondeterministic interestingness test detected: the current test "
+            "case did not reproduce on a replay. From now on candidates are "
+            "confirmed by repeated runs before being adopted, which costs "
+            "more calls but keeps the result reproducing."
+        )
+        # Nothing recorded before the flip was a verdict, but every run was
+        # a sample: keep the evidence and forget the conclusions.
+        for ledger in self.__ledgers.values():
+            ledger.verdict = None
+            ledger.cache_valid = None
+        self.__policy.confirming = False
+        await self.__confirm_or_backtrack(evidence)
+
+    async def __confirm_or_backtrack(self, evidence: Evidence) -> None:
+        """The current test case was adopted on single runs. Confirm that
+        it reproduces, and if it does not, back up through the adopted
+        history to the newest test case that does."""
+        assert self.__policy is not None
+        if await self.__confirmation_batch(self.current_test_case, evidence):
+            return
+        accepted = await self.__scan_history(self.__confirmation_batch)
+        if accepted is None:
+            self.work.warn(
+                "The current test case reproduces rarely (interesting on "
+                f"{evidence.interesting} of {evidence.runs} replays) and no "
+                "earlier test case did better. Continuing from it, but "
+                "reduction may be slow."
+            )
+            return
+        test_case, accepted_evidence = accepted
+        self.work.warn(
+            "Backtracking to an earlier test case that reproduces (interesting "
+            f"on {accepted_evidence.interesting} of {accepted_evidence.runs} "
+            "replays)."
+        )
+        await self.__set_current(test_case)
+
+    async def __confirmation_batch(self, test_case: T, evidence: Evidence) -> bool:
+        """Drive `evidence` about `test_case` to a confirmation-bar verdict,
+        extending an accept to the anchor seed size and offering the
+        extension (the runs the bar did not select on) to the anchor."""
+        assert self.__policy is not None
+        while True:
+            verdict = confirmation_bar(evidence)
+            if verdict == Verdict.REJECT:
+                return False
+            if verdict == Verdict.ACCEPT:
+                accepted_at = Evidence(evidence.interesting, evidence.runs)
+                while evidence.runs < ANCHOR_SEED_RUNS:
+                    interesting, _, _ = await self.__execute(test_case, replay="seed")
+                    evidence.record(interesting)
+                self.__policy.raise_anchor(evidence.since(accepted_at))
+                return True
+            interesting, _, _ = await self.__execute(test_case, replay="confirmation")
+            evidence.record(interesting)
+
+    async def __scan_history(
+        self, judge: Callable[[T, Evidence], Awaitable[bool]]
+    ) -> tuple[T, Evidence] | None:
+        """Find the newest adopted test case that `judge` accepts.
+
+        Entries are scanned newest first at geometrically growing
+        distances, then the boundary between the last rejected and the
+        first accepted entry is refined by bisection. Under uncertainty
+        this is biased towards older (larger) entries, which is the safe
+        direction: an older entry can only reproduce better.
+        """
+        history: BacktrackHistory[T] = (
+            self.__history if self.__history is not None else [self.__initial]
+        )
+        current = self.current_test_case
+        positions = [
+            i for i in range(len(history) - 1, -1, -1) if history[i] != current
+        ]
+        if not positions:
+            return None
+
+        async def test(k: int) -> tuple[T, Evidence] | None:
+            test_case = history[positions[k]]
+            evidence = Evidence()
+            if await judge(test_case, evidence):
+                return (test_case, evidence)
+            return None
+
+        # Every position is tested at most once: the geometric scan stops
+        # at the first accept, the oldest entry is only tried when the scan
+        # skipped it, and the bisection stays strictly between the last
+        # reject and the accept.
+        rejected = -1
+        accepted: tuple[int, tuple[T, Evidence]] | None = None
+        k = 0
+        while k < len(positions):
+            result = await test(k)
+            if result is not None:
+                accepted = (k, result)
+                break
+            rejected = k
+            k = 2 * k + 1
+        if accepted is None:
+            oldest = len(positions) - 1
+            result = await test(oldest) if oldest > rejected else None
+            if result is None:
+                return None
+            accepted = (oldest, result)
+        while accepted[0] - rejected > 1:
+            mid = (accepted[0] + rejected) // 2
+            result = await test(mid)
+            if result is not None:
+                accepted = (mid, result)
+            else:
+                rejected = mid
+        return accepted[1]
+
+    async def __set_current(self, test_case: T) -> None:
+        """Adopt `test_case` by backtracking rather than by reduction. It
+        still counts as a reduction event and fires the reduction
+        callbacks: the file on disk and the history directory must follow
+        the current test case, whichever direction it moved."""
+        self.stats.reductions += 1
+        self.stats.time_of_last_reduction = time.time()
+        self.stats.current_test_case_size = self.size(test_case)
+        self.__current = test_case
+        for f in self.__on_reduce_callbacks:
+            await f(test_case)
 
     async def is_interesting(self, test_case: T) -> bool:
         """Returns true if this test_case is interesting."""
@@ -726,23 +1121,27 @@ class BasicReductionProblem(ReductionProblem[T]):
         if test_case == self.current_test_case:
             return True
         cache_key = self.__cache_key(test_case)
-        try:
-            cached_result, cache_valid = self.__is_interesting_cache[cache_key]
-            if cache_valid is None or cache_valid():
-                return cached_result
-        except KeyError:
-            pass
-        result, cache_valid = await self.__run_is_interesting(test_case)
-        self.__is_interesting_cache[cache_key] = (result, cache_valid)
+        ledger = self.__ledgers.get(cache_key)
+        if ledger is not None and ledger.latched():
+            assert ledger.verdict is not None
+            return ledger.verdict
+
+        if self.__policy is not None:
+            await self.__maybe_verify_current()
+
+        if self.__policy is None or not self.__policy.active:
+            result, _, cache_valid = await self.__execute(test_case)
+            ledger = Ledger(verdict=result, cache_valid=cache_valid)
+            ledger.evidence.record(result)
+            self.__ledgers[cache_key] = ledger
+        else:
+            if ledger is None:
+                ledger = Ledger()
+                self.__ledgers[cache_key] = ledger
+            result = await self.__run_gauntlet(test_case, ledger)
+
         self.stats.failed_reductions += 1
-        self.stats.calls += 1
-
-        # Update current pass stats if a pass is running
-        if self.current_pass_stats is not None:
-            self.current_pass_stats.test_evaluations += 1
-
         if result:
-            self.stats.interesting_calls += 1
             if self.sort_key(test_case) < self.sort_key(self.current_test_case):
                 self.stats.failed_reductions -= 1
                 self.stats.reductions += 1
@@ -756,6 +1155,15 @@ class BasicReductionProblem(ReductionProblem[T]):
 
                 self.stats.current_test_case_size = self.size(test_case)
                 self.__current = test_case
+                if self.__policy is not None and self.__policy.active:
+                    # The one validated event that may move the anchor: an
+                    # accepted candidate becoming the incumbent, priced on
+                    # its own gauntlet evidence. An improvement also ends
+                    # any confirmation sweep, since the fixpoint it was
+                    # certifying is gone.
+                    self.__policy.raise_anchor(ledger.unselected_evidence())
+                    self.__policy.adopt(ledger.unselected_evidence())
+                    self.__policy.confirming = False
                 for f in self.__on_reduce_callbacks:
                     await f(test_case)
             else:
@@ -763,6 +1171,121 @@ class BasicReductionProblem(ReductionProblem[T]):
         if self.pass_call_monitor is not None:
             self.pass_call_monitor()
         return result
+
+    async def __maybe_verify_current(self) -> None:
+        """Periodically replay the current test case. While the test still
+        looks deterministic this catches a nondeterministic test that
+        reproduces most of the time before the reducer has walked too far
+        on single-run verdicts. Under nondeterministic handling it feeds
+        the incumbent monitor, which catches an incumbent that does not
+        reproduce at the rate the gauntlet required (a false accept, or
+        an anchor the incumbent never lived up to)."""
+        assert self.__policy is not None
+        if self.stats.calls - self.__calls_at_last_verify < VERIFY_INTERVAL:
+            return
+        self.__calls_at_last_verify = self.stats.calls
+        if not self.__policy.active:
+            evidence = Evidence()
+            if not await self.__replays_all_reproduce(evidence, 1):
+                await self.__flip(evidence)
+            return
+        evidence = Evidence()
+        await self.__replays_all_reproduce(
+            evidence, 1, stop_on_miss=False, site="monitor"
+        )
+        if evidence.runs:
+            self.__policy.record_incumbent_run(evidence.interesting == 1)
+        if self.__policy.incumbent_failing():
+            await self.__recover()
+
+    async def __recover(self) -> None:
+        """The incumbent does not reproduce at the rate the gauntlet
+        required: treat it as a false accept, demand more of later
+        candidates, and back up through the adopted history to the newest
+        test case that clears the gauntlet."""
+        assert self.__policy is not None
+        policy = self.__policy
+        policy.record_false_accept()
+        incumbent = policy.incumbent
+        self.work.warn(
+            "The current test case reproduces less often than expected "
+            f"(interesting on {incumbent.interesting} of {incumbent.runs} "
+            f"replays); candidates now need {policy.min_hits} interesting "
+            "runs to be adopted."
+        )
+        accepted = await self.__scan_history(self.__gauntlet_batch)
+        if accepted is None:
+            self.work.warn("No earlier test case reproduces better; continuing.")
+            policy.adopt(Evidence())
+            return
+        test_case, evidence = accepted
+        self.work.warn(
+            "Backtracking to an earlier test case that reproduces (interesting "
+            f"on {evidence.interesting} of {evidence.runs} replays)."
+        )
+        await self.__set_current(test_case)
+        policy.adopt(Evidence())
+
+    async def __gauntlet_batch(self, test_case: T, evidence: Evidence) -> bool:
+        """Drive `evidence` about `test_case` to a gauntlet verdict against
+        the current anchor, at the hit minimum in force."""
+        assert self.__policy is not None
+        while True:
+            verdict = gauntlet(
+                evidence,
+                self.__policy.anchor,
+                self.__policy.min_hits,
+                self.__policy.reject_bar,
+            )
+            if verdict != Verdict.CONTINUE:
+                return verdict == Verdict.ACCEPT
+            interesting, _, _ = await self.__execute(test_case, replay="confirmation")
+            evidence.record(interesting)
+
+    async def __run_gauntlet(self, test_case: T, ledger: Ledger) -> bool:
+        """Judge a candidate under nondeterministic handling. Its first
+        run recruits it: in a fast sweep a miss rejects it at the cost of
+        that one run (the evidence is kept, so a later retry has more
+        power), while a hit starts the gauntlet against the incumbent's
+        anchor. An accept tops the ledger up to the anchor seed size before
+        latching, so the bound that may raise the anchor is not biased by
+        the stopping rule."""
+        assert self.__policy is not None
+        policy = self.__policy
+        if ledger.min_hits is None:
+            ledger.min_hits = policy.min_hits
+        interesting, _, _ = await self.__execute(test_case)
+        ledger.evidence.record(interesting)
+        if not interesting and not policy.confirming:
+            return False
+        while True:
+            verdict = gauntlet(
+                ledger.evidence, policy.anchor, ledger.min_hits, policy.reject_bar
+            )
+            if verdict == Verdict.REJECT:
+                ledger.verdict = False
+                return False
+            if verdict == Verdict.ACCEPT:
+                ledger.accepted_at = Evidence(
+                    ledger.evidence.interesting, ledger.evidence.runs
+                )
+                # Top the ledger up towards the seed size, but only while
+                # the runs could still raise the anchor: that is their
+                # only purpose, and once a miss or the anchor's level has
+                # put a raise out of reach they are wasted.
+                while (
+                    ledger.evidence.runs < ANCHOR_SEED_RUNS
+                    and policy.raise_reachable(
+                        ledger.unselected_evidence(),
+                        ANCHOR_SEED_RUNS - ledger.evidence.runs,
+                    )
+                ):
+                    interesting, _, _ = await self.__execute(test_case, replay="seed")
+                    ledger.evidence.record(interesting)
+                ledger.verdict = True
+                return True
+            interesting, _, _ = await self.__execute(test_case, replay="gauntlet")
+            ledger.evidence.record(interesting)
 
     @property
     def current_test_case(self) -> T:
@@ -833,6 +1356,10 @@ class View[S, T](ReductionProblem[T]):
 
     async def attempt_unstick(self) -> bool:
         return await self.__problem.attempt_unstick()
+
+    @property
+    def nondeterministic(self) -> bool:
+        return self.__problem.nondeterministic
 
     def sort_key(self, test_case: T) -> Any:
         if self.__sort_key is not None:

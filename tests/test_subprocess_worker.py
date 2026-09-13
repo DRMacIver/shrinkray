@@ -17,7 +17,8 @@ import trio.testing
 import shrinkray.subprocess.worker
 from shrinkray.adaptive_timeout import AdaptiveTimeoutPolicy
 from shrinkray.downloads import GrammarDownload
-from shrinkray.problem import InvalidInitialExample
+from shrinkray.nondeterminism import Evidence, NondeterminismPolicy
+from shrinkray.problem import BasicReductionProblem, InvalidInitialExample
 from shrinkray.state import ShrinkRayDirectoryState, ShrinkRayStateSingleFile
 from shrinkray.subprocess.protocol import (
     ProgressUpdate,
@@ -31,6 +32,7 @@ from shrinkray.subprocess.worker import (
     ReducerWorker,
     main,
 )
+from shrinkray.work import WorkContext
 
 
 # === ReducerWorker initialization tests ===
@@ -3231,3 +3233,76 @@ async def test_worker_start_downloads_requires_state():
     worker = ReducerWorker(output_stream=MemoryOutputStream())
     response = worker._handle_start_downloads("req-1", {"disabled": []})
     assert response.error == "State not available"
+
+
+async def test_worker_start_reduction_forwards_assume_deterministic(tmp_path):
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/bash\nexit 0")
+    script.chmod(0o755)
+
+    worker = ReducerWorker(output_stream=MemoryOutputStream())
+    params = {
+        "file_path": str(target),
+        "test": [str(script)],
+        "parallelism": 1,
+        "timeout": 1.0,
+        "formatter": "none",
+        "volume": "quiet",
+        "history_enabled": False,
+        "skip_validation": True,
+        "assume_deterministic": True,
+    }
+    await worker._start_reduction(params)
+    assert worker.state is not None
+    assert worker.state.assume_deterministic is True
+    problem = worker.state.problem
+    assert isinstance(problem, BasicReductionProblem)
+    assert problem.policy is None
+
+
+@pytest.mark.trio
+async def test_build_progress_update_reports_nondeterminism():
+    async def is_interesting(tc):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"hello",
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=1),
+        policy=NondeterminismPolicy(),
+    )
+    worker = ReducerWorker()
+    worker.reducer = None
+    worker.problem = problem
+    worker.state = Mock()
+    worker.state.timeout_policy = AdaptiveTimeoutPolicy(user_timeout=math.inf)
+    worker.state.parallel_tasks_running = 0
+    worker.state.output_manager = None
+    worker.state.history_manager = None
+
+    update = await worker._build_progress_update()
+    assert update is not None
+    assert update.nondeterministic is False
+    assert update.reproduction_rate is None
+
+    # A problem without a policy (--assume-deterministic) reports nothing.
+    worker.problem = BasicReductionProblem(
+        initial=b"hello", is_interesting=is_interesting, work=WorkContext()
+    )
+    update = await worker._build_progress_update()
+    assert update is not None
+    assert update.nondeterministic is False
+    assert update.replay_calls == 0
+    worker.problem = problem
+
+    assert problem.policy is not None
+    problem.policy.flip()
+    problem.policy.raise_anchor(Evidence(10, 20))
+    problem.policy.record_replay(True, "detection")
+    update = await worker._build_progress_update()
+    assert update is not None
+    assert update.nondeterministic is True
+    assert update.reproduction_rate == pytest.approx(Evidence(10, 20).lower_bound())
+    assert update.replay_calls == 1

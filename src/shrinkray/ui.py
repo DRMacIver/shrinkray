@@ -54,11 +54,27 @@ class BasicUI[TestCase](ShrinkRayUI[TestCase]):
             flush=True,
         )
         prev_reduction = 0
+        announced_nondeterminism = False
         while True:
             initial = self.state.initial
-            current = self.state.problem.current_test_case
-            size = self.state.problem.size
+            problem = self.state.problem
+            current = problem.current_test_case
+            size = problem.size
             reduction = size(initial) - size(current)
+            if problem.nondeterministic and not announced_nondeterminism:
+                announced_nondeterminism = True
+                print(
+                    "Nondeterministic interestingness test detected: candidates "
+                    "are now confirmed by repeated runs before being adopted.",
+                    flush=True,
+                )
+            if reduction < prev_reduction:
+                print(
+                    f"Backtracked to a test case of {humanize.naturalsize(size(current))} "
+                    "that reproduces the bug more reliably",
+                    flush=True,
+                )
+                prev_reduction = reduction
             if reduction > prev_reduction:
                 print(
                     f"Reduced test case to {humanize.naturalsize(size(current))} "

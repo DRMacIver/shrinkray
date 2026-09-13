@@ -269,6 +269,15 @@ cd "$WORK"
             with open(os.path.join(subdir, output_name), "wb") as f:
                 f.write(output)
 
+    def get_initial_content(self) -> bytes:
+        """Get the content of the original input this run started from, in
+        the same form as get_reduction_content."""
+        target_path = os.path.join(self.history_dir, "initial", self.target_basename)
+        if self.is_directory:
+            return serialize_directory(self._read_directory_content(target_path))
+        with open(target_path, "rb") as f:
+            return f.read()
+
     def get_reduction_content(self, reduction_number: int) -> bytes:
         """Get the content of a specific reduction.
 

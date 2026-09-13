@@ -1,0 +1,24 @@
+{
+  "id": "sqlparse-0.4.4-nested-list",
+  "format": "sql",
+  "tool": "sqlparse 0.4.4",
+  "extension": ".sql",
+  "bug_url": "https://github.com/andialbrecht/sqlparse/security/advisories/GHSA-2m57-hf25-phgg",
+  "symptom": "sqlparse 0.4.4 recurses once per nesting level when flattening a parsed statement, so a deeply nested bracket list (the advisory's proof of concept is 10,000 levels) raises RecursionError from sqlparse.sql.TokenList.flatten instead of returning a result. Fixed in 0.5.0, which flattens iteratively. Like the other deep-nesting entries, the minimal reproducer is still around a thousand levels deep, so this entry measures how quickly shrink ray strips nesting rather than how small it can go.",
+  "oracle": {
+    "type": "venv",
+    "python": "3.12",
+    "requirements": ["sqlparse==0.4.4"],
+    "command": [
+      "python",
+      "-c",
+      "import sys, sqlparse\nsqlparse.parse(open(sys.argv[1]).read())\n",
+      "{file}"
+    ]
+  },
+  "interesting": {
+    "output_contains": ["RecursionError: maximum recursion depth exceeded", "in flatten"],
+    "exit_code": 1
+  },
+  "timeout": 10
+}

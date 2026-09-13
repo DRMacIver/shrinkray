@@ -18,8 +18,10 @@ import trio
 from attrs import define
 from click.testing import CliRunner
 
+import shrinkray.__main__ as main_module
 from shrinkray.__main__ import _validate_memory_limit, main, worker_main
 from shrinkray.llm_client import llm_support_available
+from shrinkray.nondeterminism import GATE_RUNS
 from shrinkray.process import default_memory_limit, interrupt_wait_and_kill
 from shrinkray.reducer import ShrinkRay
 from shrinkray.state import ShrinkRayStateSingleFile
@@ -2255,3 +2257,78 @@ def test_restart_defaults_on(tmp_path, monkeypatch):
     result = runner.invoke(main, [str(script), str(target), "--ui=basic"])
     assert result.exit_code == 0
     assert seen["restart"] is True
+
+
+def test_assume_deterministic_flag_disables_the_policy(tmp_path, monkeypatch):
+    target = tmp_path / "target.txt"
+    target.write_text("hello world\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q hello "$1"\n')
+    script.chmod(0o755)
+
+    seen = {}
+    real_reducer = ShrinkRayStateSingleFile.new_reducer
+
+    def spy(self, problem):
+        seen["policy"] = problem.policy
+        return real_reducer(self, problem)
+
+    monkeypatch.setattr(ShrinkRayStateSingleFile, "new_reducer", spy)
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(
+        main, [str(script), str(target), "--ui=basic", "--assume-deterministic"]
+    )
+    assert result.exit_code == 0
+    assert seen["policy"] is None
+
+
+def test_nondeterminism_detection_is_on_by_default(tmp_path, monkeypatch):
+    target = tmp_path / "target.txt"
+    target.write_text("hello world\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q hello "$1"\n')
+    script.chmod(0o755)
+
+    seen = {}
+    real_reducer = ShrinkRayStateSingleFile.new_reducer
+
+    def spy(self, problem):
+        seen["policy"] = problem.policy
+        return real_reducer(self, problem)
+
+    monkeypatch.setattr(ShrinkRayStateSingleFile, "new_reducer", spy)
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(main, [str(script), str(target), "--ui=basic"])
+    assert result.exit_code == 0
+    assert seen["policy"] is not None
+    assert not seen["policy"].active
+
+
+@pytest.mark.parametrize(
+    "flag, retries",
+    [
+        pytest.param([], GATE_RUNS - 1, id="default"),
+        pytest.param(["--assume-deterministic"], 0, id="assume-deterministic"),
+    ],
+)
+def test_validation_retries_follow_assume_deterministic(
+    tmp_path, monkeypatch, flag, retries
+):
+    target = tmp_path / "target.txt"
+    target.write_text("hello world\n")
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\ngrep -q hello "$1"\n')
+    script.chmod(0o755)
+
+    seen = {}
+    real_validation = main_module.run_validation
+
+    def spy(**kwargs):
+        seen["retries"] = kwargs["retries"]
+        return real_validation(**kwargs)
+
+    monkeypatch.setattr(main_module, "run_validation", spy)
+    runner = CliRunner(catch_exceptions=False)
+    result = runner.invoke(main, [str(script), str(target), "--ui=basic", *flag])
+    assert result.exit_code == 0
+    assert seen["retries"] == retries

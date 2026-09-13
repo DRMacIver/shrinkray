@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,7 +16,7 @@ import shrinkray.state as state_mod
 from shrinkray.adaptive_timeout import MIN_TIMEOUT, AdaptiveTimeoutPolicy
 from shrinkray.cli import InputType
 from shrinkray.history import deserialize_directory, serialize_directory
-from shrinkray.problem import InvalidInitialExample, shortlex
+from shrinkray.problem import BasicReductionProblem, InvalidInitialExample, shortlex
 from shrinkray.process import (
     _ULIMIT_FLAG,
     MEMORY_LIMIT_ENFORCEABLE,
@@ -24,12 +25,14 @@ from shrinkray.process import (
 from shrinkray.process import kill_process_group as original_kill
 from shrinkray.reducer import DirectoryShrinkRay, ShrinkRay
 from shrinkray.state import (
+    HistoryBacktrackSource,
     MemoryLimitExceededOnInitial,
     OutputCaptureManager,
     ScriptRunResult,
     ShrinkRayDirectoryState,
     ShrinkRayStateSingleFile,
     TimeoutExceededOnInitial,
+    load_state_for_path,
     sort_key_for_initial,
 )
 from shrinkray.work import Volume
@@ -1408,6 +1411,7 @@ async def test_print_exit_message_no_reduction(tmp_path, capsys):
     # Mock a problem where the result is DIFFERENT but SAME LENGTH as initial
     # This triggers the "Some changes were made but no bytes were deleted" branch
     problem = MagicMock()
+    problem.nondeterministic = False
     problem.current_test_case = (
         b"world hello"  # Different content, same length (11 bytes)
     )
@@ -1572,6 +1576,7 @@ async def test_print_exit_message_formatting_increase(tmp_path, capsys):
 
     # Mock a problem where the result is smaller than initial but formatting adds bytes
     problem = MagicMock()
+    problem.nondeterministic = False
     problem.current_test_case = b"ab"  # 2 bytes (reduced from 10)
     problem.stats.initial_test_case_size = 10
     problem.stats.start_time = 0
@@ -4087,6 +4092,7 @@ def make_adaptive_state(
         seed=0,
         volume=Volume.quiet,
         history_enabled=False,
+        assume_deterministic=True,
         timeout_policy=policy,
     )
 
@@ -4426,6 +4432,7 @@ async def test_default_memory_limit_kept_when_failure_is_genuine(tmp_path, capsy
 
 async def test_interesting_initial_under_default_limit_runs_once(tmp_path, capsys):
     # A normally-interesting test must not trigger the probe or any extra run.
+    # (Nondeterminism detection adds its own replays, so it is off here.)
     counter = tmp_path / "runs"
     counter.write_text("")
     script = tmp_path / "test.sh"
@@ -4447,6 +4454,7 @@ async def test_interesting_initial_under_default_limit_runs_once(tmp_path, capsy
         seed=0,
         volume=Volume.quiet,
         history_enabled=False,
+        assume_deterministic=True,
         memory_limit=default_memory_limit(),
         memory_limit_explicit=False,
     )
@@ -4492,3 +4500,189 @@ async def test_default_memory_limit_auto_disabled_real_ulimit(tmp_path, capsys):
     await state.problem.setup()  # must not raise
     assert state.memory_limit is None
     assert "--memory-limit" in capsys.readouterr().err
+
+
+# === Nondeterminism handling ===
+
+
+def make_nd_state(tmp_path, script_body="#!/bin/sh\nexit 0", **overrides):
+    script = tmp_path / "nd_test.sh"
+    script.write_text(script_body)
+    script.chmod(0o755)
+    target = tmp_path / "nd_target.txt"
+    target.write_bytes(b"hello world")
+    kwargs: dict[str, Any] = {
+        "input_type": InputType.all,
+        "in_place": False,
+        "test": [str(script)],
+        "filename": str(target),
+        "timeout": 5.0,
+        "base": "nd_target.txt",
+        "parallelism": 1,
+        "initial": b"hello world",
+        "formatter": "none",
+        "trivial_is_error": False,
+        "seed": 0,
+        "volume": Volume.quiet,
+        "history_enabled": False,
+    }
+    kwargs.update(overrides)
+    return ShrinkRayStateSingleFile(**kwargs)
+
+
+def basic_problem(state) -> BasicReductionProblem:
+    problem = state.problem
+    assert isinstance(problem, BasicReductionProblem)
+    return problem
+
+
+def test_problem_has_a_nondeterminism_policy_by_default(tmp_path):
+    state = make_nd_state(tmp_path)
+    assert basic_problem(state).policy is not None
+    assert not state.problem.nondeterministic
+
+
+def test_assume_deterministic_disables_the_policy(tmp_path):
+    state = make_nd_state(tmp_path, assume_deterministic=True)
+    assert basic_problem(state).policy is None
+
+
+async def test_timed_out_results_are_flagged(tmp_path):
+    state = make_adaptive_state(tmp_path, "#!/bin/sh\nsleep 5", min_timeout=0.1)
+    state.first_call = False
+    state.timeout_policy.record_completion(0.02, interesting=True)
+    outcome = await state.check_interesting(b"hello")
+    assert outcome.timed_out
+
+
+async def test_completed_results_are_not_flagged_as_timed_out(tmp_path):
+    state = make_adaptive_state(tmp_path, "#!/bin/sh\nexit 1")
+    outcome = await state.check_interesting(b"hello")
+    assert not outcome.timed_out
+
+
+def test_history_backtrack_source_reads_the_run_history(tmp_path):
+    state = make_nd_state(
+        tmp_path, history_enabled=True, history_base_dir=str(tmp_path)
+    )
+    problem = state.problem
+    assert state.history_manager is not None
+    state._record_reduction_history(b"hello worl")
+    state._record_reduction_history(b"hello wor")
+    source = HistoryBacktrackSource(state)
+    assert len(source) == 3
+    assert source[0] == b"hello world"
+    assert source[1] == b"hello worl"
+    assert source[2] == b"hello wor"
+    with pytest.raises(IndexError):
+        source[3]
+    with pytest.raises(IndexError):
+        source[-1]
+    del problem
+
+
+def test_history_backtrack_source_decodes_directories(tmp_path):
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/sh\nexit 0")
+    script.chmod(0o755)
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "a.txt").write_text("file a")
+    state = ShrinkRayDirectoryState(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="target",
+        parallelism=1,
+        initial={"a.txt": b"file a"},
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=True,
+        history_base_dir=str(tmp_path),
+    )
+    state.problem  # initialises the history manager
+    state._record_reduction_history({"a.txt": b"file"})
+    source = HistoryBacktrackSource(state)
+    assert len(source) == 2
+    assert source[0] == {"a.txt": b"file a"}
+    assert source[1] == {"a.txt": b"file"}
+
+
+def test_problem_gets_the_history_when_history_is_recorded(tmp_path):
+    state = make_nd_state(
+        tmp_path, history_enabled=True, history_base_dir=str(tmp_path)
+    )
+    assert basic_problem(state).backtrack_history is not None
+
+
+def test_problem_gets_no_history_when_only_also_interesting_is_recorded(tmp_path):
+    state = make_nd_state(
+        tmp_path,
+        history_enabled=False,
+        also_interesting_code=42,
+        history_base_dir=str(tmp_path),
+    )
+    assert state.history_manager is not None
+    assert basic_problem(state).backtrack_history is None
+
+
+async def test_exit_message_reports_reproduction_when_nondeterministic(
+    tmp_path, capsys
+):
+    state = make_nd_state(tmp_path)
+    problem = basic_problem(state)
+    assert problem.policy is not None
+    problem.policy.flip()
+    await state.print_exit_message(problem)
+    out = capsys.readouterr().out
+    assert "interestingness test is nondeterministic" in out
+    assert "interesting on 20 of 20 replays" in out
+
+
+async def test_exit_message_says_nothing_about_a_deterministic_test(tmp_path, capsys):
+    state = make_nd_state(tmp_path)
+    await state.print_exit_message(state.problem)
+    assert "nondeterministic" not in capsys.readouterr().out
+
+
+async def test_directory_exit_message_reports_reproduction(directory_state, capsys):
+    problem = basic_problem(directory_state)
+    assert problem.policy is not None
+    problem.policy.flip()
+    await directory_state.print_exit_message(problem)
+    out = capsys.readouterr().out
+    assert "All done!" in out
+    assert "interestingness test is nondeterministic" in out
+
+
+def test_load_state_for_path_passes_assume_deterministic(tmp_path):
+    target = tmp_path / "t.txt"
+    target.write_bytes(b"hello")
+    state = load_state_for_path(
+        filename=str(target),
+        input_type=InputType.all,
+        in_place=False,
+        test=["true"],
+        timeout=None,
+        memory_limit=None,
+        memory_limit_explicit=False,
+        parallelism=1,
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+        also_interesting_code=None,
+        external_reducers=[],
+        python_reducer=True,
+        restart_at_fixpoint=True,
+        llm_enabled=False,
+        llm_model="x",
+        llm_only=False,
+        assume_deterministic=True,
+    )
+    assert state.assume_deterministic is True

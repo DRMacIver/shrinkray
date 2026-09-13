@@ -87,3 +87,38 @@ async def test_basic_ui_run_prints_reduction_message():
     assert "Reduced" in output
     assert "deleted" in output
     assert "50" in output or "Bytes" in output  # Size should be mentioned
+
+
+async def test_basic_ui_announces_nondeterminism_and_backtracks(autojump_clock):
+    """The basic UI reports the switch to nondeterministic handling once,
+    and reports a backtrack (the test case growing) rather than staying
+    silent about a file that just got bigger."""
+    mock_state = MagicMock()
+    mock_problem = MagicMock()
+    mock_state.initial = b"x" * 100
+    mock_problem.current_test_case = b"x" * 50
+    mock_problem.size = len
+    mock_problem.nondeterministic = False
+    mock_state.problem = mock_problem
+
+    ui = BasicUI(state=mock_state)
+    captured = io.StringIO()
+    old_stdout = sys.stdout
+    try:
+        sys.stdout = captured
+        async with trio.open_nursery() as nursery:
+
+            async def run_ui():
+                await ui.run(nursery)
+
+            nursery.start_soon(run_ui)
+            await trio.sleep(1)
+            mock_problem.nondeterministic = True
+            mock_problem.current_test_case = b"x" * 80
+            await trio.sleep(10)
+            nursery.cancel_scope.cancel()
+    finally:
+        sys.stdout = old_stdout
+    output = captured.getvalue()
+    assert output.count("Nondeterministic interestingness test detected") == 1
+    assert "Backtracked to a test case of 80 Bytes" in output

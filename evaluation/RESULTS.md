@@ -34,7 +34,10 @@ each removed.
 | shrinkray-json-deep-nesting | json | python json (deep-nesting regression) | 1495 | 608 | 602 | 59.3% | 55.8 |
 | shrinkray-libcst-deep-nesting | python | libcst 1.8.6 (deep-nesting regression) | 4378 | 800 | 800 | 81.7% | 1125.9 |
 | splr0172-eliminate-assert | cnf | splr 0.17.2 (debug-assertions) | 3148 | 329 | 209 | 89.5% | — |
+| sqlparse-0.4.4-nested-list | sql | sqlparse 0.4.4 | 20000 | 1983 | 1982 | 90.1% | 2924.0 |
+| sympy-1.8-piecewise-subs | python | sympy 1.8 | 188 | 98 | 81 | 47.9% | 944.9 |
 | terser-5151-forof-empty-pattern-crash | javascript | terser 5.15.1 | 2945 | 24 | 22 | 99.2% | 44.3 |
+| toml-0.10.2-mixed-array | toml | toml 0.10.2 | 49 | 12 | 8 | 75.5% | 118.6 |
 | tsc-5.8.2-object-entries-setstate-crash | typescript | typescript 5.8.2 (tsc) | 1637 | 80 | 46 | 95.1% | 242.3 |
 | ujson-510-indent-buffer-overflow | json | ujson 5.1.0 | 826 | 110 | 92 | 86.7% | 102.1 |
 

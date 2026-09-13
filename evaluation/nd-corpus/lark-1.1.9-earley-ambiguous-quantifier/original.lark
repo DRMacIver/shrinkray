@@ -1,0 +1,11 @@
+start: factor+
+
+?factor: atom quantifier?
+
+quantifier: "*" | "+" | "?"
+
+?atom: DOT | printable_char
+
+printable_char: /[ -~]/
+
+DOT: "."

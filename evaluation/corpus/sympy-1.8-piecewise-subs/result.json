@@ -1,0 +1,10 @@
+{
+  "id": "sympy-1.8-piecewise-subs",
+  "status": "ok",
+  "original_bytes": 188,
+  "reduced_bytes": 98,
+  "original_nows_bytes": 159,
+  "reduced_nows_bytes": 81,
+  "seconds": 944.9,
+  "ratio": 47.9
+}

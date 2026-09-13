@@ -27,6 +27,8 @@ evaluation/
 ├── llm_prompt_experiment.py # measure LLM prompt variants (validity rate, size gain per generation)
 ├── RESULTS.md    # generated tables + hand-written analysis
 ├── corpus/<id>/  # one directory per bug
+├── nd_corpus.py  # reduce the nondeterministic-bug corpus and re-measure reproduction rates
+├── nd-corpus/    # real bugs whose interestingness test is flaky (see nd-corpus/README.md)
 ├── sortkey/      # sort-key tuning corpus (see sortkey/README.md)
 └── creduce/      # c-reduce comparison driver (C/C++ entries)
 ```

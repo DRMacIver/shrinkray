@@ -19,9 +19,11 @@ from hypothesis import strategies as st
 
 from shrinkray.problem import (
     LazyChainedSortKey,
+    ReflowLayoutKey,
     natural_key,
     reflow_sort_key,
 )
+from shrinkray.reformat import basic_format, canonical_distance
 
 
 # =============================================================================
@@ -327,6 +329,41 @@ def test_hypothesis_transitive(a, b, c):
 # =============================================================================
 
 
+@given(st.text(max_size=100), st.text(max_size=100))
+@example("a + b", "a+b")
+@example("a\n b", "a b")
+def test_reflow_order_matches_eager_layout_tiebreakers(a, b):
+    def eager(s):
+        canonical = basic_format(s)
+        return (
+            natural_key(canonical),
+            canonical_distance(s, canonical),
+            abs(len(s.splitlines()) - len(canonical.splitlines())),
+            natural_key(s),
+        )
+
+    assert (reflow_sort_key(a) < reflow_sort_key(b)) == (eager(a) < eager(b))
+    assert (reflow_sort_key(a) == reflow_sort_key(b)) == (eager(a) == eager(b))
+
+
+def test_distinct_canonical_content_does_not_compute_layout_distance(monkeypatch):
+    calls = []
+
+    def distance(raw, canonical):
+        calls.append(raw)
+        return canonical_distance(raw, canonical)
+
+    monkeypatch.setattr("shrinkray.problem.canonical_distance", distance)
+    assert reflow_sort_key("x + y") < reflow_sort_key("x + y + z")
+    assert not calls
+    # Whitespace variants still need the original layout preference.
+    assert reflow_sort_key("x + y") < reflow_sort_key("x+y")
+    assert calls
+    count = len(calls)
+    assert reflow_sort_key("x + y") < reflow_sort_key("x+y")
+    assert len(calls) == count
+
+
 @example(" ")
 @example("\n")
 @example("\x1e")
@@ -564,3 +601,12 @@ def test_real_removing_comments():
     with_comment = "x = 1  # set x"
     without_comment = "x = 1"
     assert is_preferred(without_comment, with_comment)
+
+
+def test_layout_keys_handle_identity_and_unrelated_types():
+    a = ReflowLayoutKey("a", "a\n")
+    assert a == ReflowLayoutKey("a", "a\n")
+    assert not a < ReflowLayoutKey("a", "a\n")
+    assert a != object()
+    with pytest.raises(TypeError):
+        assert a < object()

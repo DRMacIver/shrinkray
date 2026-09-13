@@ -39,6 +39,7 @@ column, which varies with machine load.
 import argparse
 import ast
 import json as json_module
+import random
 import sys
 import time
 import warnings
@@ -46,8 +47,9 @@ from pathlib import Path
 
 import trio
 
+from shrinkray.nondeterminism import NondeterminismPolicy
 from shrinkray.passes.treesitter import parse_tree
-from shrinkray.problem import BasicReductionProblem
+from shrinkray.problem import BasicReductionProblem, InvalidInitialExample
 from shrinkray.reducer import ShrinkRay
 from shrinkray.state import sort_key_for_initial
 from shrinkray.work import WorkContext
@@ -130,9 +132,7 @@ def coupled_count_json_ok(data: bytes) -> bool:
         isinstance(doc, dict)
         and isinstance(doc.get("events"), list)
         and doc.get("event_count") == len(doc["events"])
-        and any(
-            isinstance(e, dict) and e.get("type") == "crash" for e in doc["events"]
-        )
+        and any(isinstance(e, dict) and e.get("type") == "crash" for e in doc["events"])
     )
 
 
@@ -385,6 +385,7 @@ class Problem:
         *,
         cpp: bool = False,
         treesitter_language: str | None = None,
+        flaky: tuple[float, float] | None = None,
     ):
         self.initial = initial
         self.predicate = predicate
@@ -393,6 +394,20 @@ class Problem:
         # for this language (as it does when reducing a file with the
         # matching extension), so their efficiency is measured too.
         self.treesitter_language = treesitter_language
+        # When set, (p, q): the oracle is nondeterministic, reporting a test
+        # case that satisfies the predicate as interesting with probability
+        # p and one that does not with probability q (background flakiness;
+        # 0 for the common one-sided case where only the bug is flaky).
+        # Measures the nondeterminism handling: its call cost, how much
+        # size it gives up, and whether the result keeps the bug.
+        self.flaky = flaky
+
+    def true_rate(self, data: bytes) -> float:
+        """The oracle's actual probability of calling `data` interesting."""
+        if self.flaky is None:
+            return 1.0 if self.predicate(data) else 0.0
+        p, q = self.flaky
+        return p if self.predicate(data) else q
 
 
 def _corpus_file(entry: str, filename: str) -> bytes:
@@ -413,6 +428,54 @@ def build_problems() -> dict[str, Problem]:
             contains_all(
                 b"RARE_MARKER_ALPHA", b"RARE_MARKER_BETA", b"RARE_MARKER_GAMMA"
             ),
+        ),
+        # Nondeterministic oracles over the marker problem. One-sided: the
+        # bug reproduces with probability p and nothing else is ever
+        # interesting, so the only risks are lost reductions and a result
+        # that reproduces less often than the input. Two-sided adds a
+        # background rate at which any candidate is spuriously
+        # interesting, the case where reduction can lose the bug entirely.
+        "flaky_markers_p90": Problem(
+            _big_file_with_markers(),
+            contains_all(
+                b"RARE_MARKER_ALPHA", b"RARE_MARKER_BETA", b"RARE_MARKER_GAMMA"
+            ),
+            flaky=(0.9, 0.0),
+        ),
+        "flaky_markers_p50": Problem(
+            _big_file_with_markers(),
+            contains_all(
+                b"RARE_MARKER_ALPHA", b"RARE_MARKER_BETA", b"RARE_MARKER_GAMMA"
+            ),
+            flaky=(0.5, 0.0),
+        ),
+        "flaky_markers_p20": Problem(
+            _big_file_with_markers(),
+            contains_all(
+                b"RARE_MARKER_ALPHA", b"RARE_MARKER_BETA", b"RARE_MARKER_GAMMA"
+            ),
+            flaky=(0.2, 0.0),
+        ),
+        "flaky_markers_two_sided_q10": Problem(
+            _big_file_with_markers(),
+            contains_all(
+                b"RARE_MARKER_ALPHA", b"RARE_MARKER_BETA", b"RARE_MARKER_GAMMA"
+            ),
+            flaky=(0.5, 0.1),
+        ),
+        "flaky_markers_p90_q10": Problem(
+            _big_file_with_markers(),
+            contains_all(
+                b"RARE_MARKER_ALPHA", b"RARE_MARKER_BETA", b"RARE_MARKER_GAMMA"
+            ),
+            flaky=(0.9, 0.1),
+        ),
+        "flaky_markers_two_sided": Problem(
+            _big_file_with_markers(),
+            contains_all(
+                b"RARE_MARKER_ALPHA", b"RARE_MARKER_BETA", b"RARE_MARKER_GAMMA"
+            ),
+            flaky=(0.5, 0.02),
         ),
         # Already minimal: pure measure of stopping / no-progress overhead.
         "already_minimal": Problem(
@@ -485,22 +548,33 @@ def build_problems() -> dict[str, Problem]:
 # --- running and metrics ----------------------------------------------------
 
 
-def run_problem(name: str, problem: Problem) -> dict:
+def run_problem(name: str, problem: Problem, seed: int = 0) -> dict:
     events: list[dict] = []
+    coin = random.Random(seed)
 
     async def acond(x: bytes) -> bool:
         await trio.lowlevel.checkpoint()
-        return problem.predicate(x)
+        if problem.flaky is None:
+            return problem.predicate(x)
+        return coin.random() < problem.true_rate(x)
 
     async def go() -> tuple[bytes, object, object]:
+        # Nondeterminism handling is on, as it is for real reductions: a
+        # deterministic oracle pays only the detection replays. The
+        # adopted history is kept in memory, standing in for the history
+        # directory a real run backtracks through.
+        history: list[bytes] = [problem.initial]
         reduction_problem: BasicReductionProblem[bytes] = BasicReductionProblem(
             initial=problem.initial,
             is_interesting=acond,
             work=WorkContext(parallelism=1),
             sort_key=sort_key_for_initial(problem.initial),
+            policy=NondeterminismPolicy(),
+            history=history,
         )
 
         async def record(test_case: bytes) -> None:
+            history.append(test_case)
             stats = reduction_problem.current_pass_stats
             events.append(
                 {
@@ -525,7 +599,17 @@ def run_problem(name: str, problem: Problem) -> dict:
         return reduction_problem.current_test_case, reduction_problem, reducer
 
     start = time.monotonic()
-    result, reduction_problem, reducer = trio.run(go)
+    try:
+        result, reduction_problem, reducer = trio.run(go)
+    except InvalidInitialExample:
+        # A rarely-reproducing oracle can miss every startup replay, which
+        # is the reducer refusing to start, exactly as it would for a user.
+        # The benchmark measures the reduction, so try again on a fresh
+        # coin and report the refusal.
+        assert problem.flaky is not None
+        outcome = run_problem(name, problem, seed + 1)
+        outcome["startup_refusals"] += 1
+        return outcome
     seconds = time.monotonic() - start
 
     initial_size = len(problem.initial)
@@ -554,11 +638,29 @@ def run_problem(name: str, problem: Problem) -> dict:
         for s in reducer.pass_stats.get_stats_in_order()
     ]
 
+    assert reduction_problem.policy is not None
     return {
         "name": name,
         "initial_size": initial_size,
         "final_size": final_size,
         "calls": calls,
+        # For nondeterministic oracles: how often the result really
+        # reproduces, whether it still satisfies the predicate, and the
+        # calls the handling spent on replays.
+        "final_rate": problem.true_rate(result),
+        "bug_kept": bool(problem.predicate(result)),
+        "replay_calls": reduction_problem.policy.replay_calls,
+        "replay_sites": dict(reduction_problem.policy.replay_sites),
+        "merge_probe_calls": reduction_problem.stats.merge_probe_calls,
+        "merge_probes": reduction_problem.stats.merge_probes,
+        "confirmation_sweeps": reduction_problem.stats.confirmation_sweeps,
+        "confirmation_sweep_calls": reduction_problem.stats.confirmation_sweep_calls,
+        "nondeterministic": reduction_problem.policy.active,
+        "anchor": reduction_problem.policy.anchor,
+        "anchor_attempts": reduction_problem.policy.anchor_attempts,
+        "false_accepts": reduction_problem.policy.false_accepts,
+        "min_hits": reduction_problem.policy.min_hits,
+        "startup_refusals": 0,
         "c90": calls_to_fraction(0.90),
         "c99": calls_to_fraction(0.99),
         "tail": tail_calls,
@@ -578,16 +680,39 @@ TABLE_COLUMNS = [
     ("c90", "c90", ">8"),
     ("c99", "c99", ">8"),
     ("tail", "tail", ">7"),
+    ("rate", "final_rate", ">5.2f"),
+    ("replays", "replay_calls", ">7"),
     ("secs", "seconds", ">7"),
 ]
 
 
 def print_table(results: list[dict]) -> None:
-    header = " ".join(f"{title:{fmt}}" for title, _, fmt in TABLE_COLUMNS)
+    # Header cells take only the width and alignment of each column's
+    # format (the value format may carry a numeric precision).
+    header = " ".join(
+        f"{title:{fmt.split('.')[0].rstrip('df')}}" for title, _, fmt in TABLE_COLUMNS
+    )
     print(header)
     print("-" * len(header))
     for r in results:
         print(" ".join(f"{r[key]:{fmt}}" for _, key, fmt in TABLE_COLUMNS))
+        if not r["bug_kept"]:
+            print(f"{'':<24} !! result no longer satisfies the predicate")
+        if r["nondeterministic"]:
+            sites = ", ".join(f"{k} {v}" for k, v in sorted(r["replay_sites"].items()))
+            print(
+                f"{'':<24} replays by site: {sites}; merge probes "
+                f"{r['merge_probes']} costing {r['merge_probe_calls']} calls; "
+                f"{r['confirmation_sweeps']} confirmation sweeps costing "
+                f"{r['confirmation_sweep_calls']} calls; "
+                f"{r['false_accepts']} recoveries, hit minimum {r['min_hits']}; "
+                f"anchor {r['anchor']:.3f} after {r['anchor_attempts']} attempts"
+            )
+        if r["startup_refusals"]:
+            print(
+                f"{'':<24} (refused to start {r['startup_refusals']} time(s) "
+                "before this run)"
+            )
     total_calls = sum(r["calls"] for r in results)
     print("-" * len(header))
     print(f"{'TOTAL':<24} {total_calls:>8}")

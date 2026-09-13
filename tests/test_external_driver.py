@@ -1,5 +1,6 @@
 """Unit tests for the external reducer driver (RemoteReductionProblem)."""
 
+import pytest
 import trio
 from trio.testing import memory_stream_one_way_pair, wait_all_tasks_blocked
 
@@ -371,3 +372,162 @@ async def test_run_reducer_skips_blank_lines() -> None:
             assert idle_line is not None
             assert isinstance(parse_from_reducer(idle_line), Idle)
             await feedback_send.aclose()
+
+
+@pytest.mark.parametrize("first_verdict", [False, True])
+async def test_restart_rechecks_cached_verdicts(first_verdict) -> None:
+    initial = b"hello world\n"
+    problem = make_problem(initial)
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(problem.is_interesting, b"x\n")
+        await wait_all_tasks_blocked()
+        assert problem.handle_feedback(b"x\n", first_verdict)
+
+    problem.set_current(initial)
+    results = []
+    async with trio.open_nursery() as nursery:
+
+        async def query():
+            results.append(await problem.is_interesting(b"x\n"))
+
+        nursery.start_soon(query)
+        await wait_all_tasks_blocked()
+        # The parent's policy may have changed or backtracked since the last
+        # request. It must decide this proposal again, including former hits.
+        assert problem.handle_feedback(b"x\n", not first_verdict)
+
+    assert results == [not first_verdict]
+    assert problem.current_test_case == (initial if first_verdict else b"x\n")
+
+
+async def test_cancelled_query_waiting_to_send_leaves_no_phantom_reply() -> None:
+    problem = make_problem()
+    scope = trio.CancelScope()
+    await problem._send_lock.acquire()
+    async with trio.open_nursery() as nursery:
+
+        async def cancelled_query():
+            with scope:
+                await problem.is_interesting(b"x")
+
+        nursery.start_soon(cancelled_query)
+        await wait_all_tasks_blocked()
+        scope.cancel()
+    problem._send_lock.release()
+    assert not problem._waiters
+
+    results = []
+    async with trio.open_nursery() as nursery:
+
+        async def retry():
+            results.append(await problem.is_interesting(b"x"))
+
+        nursery.start_soon(retry)
+        await wait_all_tasks_blocked()
+        assert problem.handle_feedback(b"x", False)
+    assert results == [False]
+
+
+async def test_connection_closed_while_query_waits_for_send_lock() -> None:
+    problem = make_problem()
+    results = []
+    await problem._send_lock.acquire()
+
+    async def query():
+        results.append(await problem.is_interesting(b"x"))
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(query)
+        await wait_all_tasks_blocked()
+        problem.close()
+        problem._send_lock.release()
+    assert results == [False]
+    assert not problem._waiters
+
+
+async def test_cancelled_partial_query_closes_the_connection() -> None:
+    class PartialSendStream(CollectingSendStream):
+        closed = False
+
+        async def send_all(self, data: bytes | bytearray | memoryview) -> None:
+            self.sent.extend(data[:1])
+            await trio.sleep_forever()
+
+        async def aclose(self) -> None:
+            self.closed = True
+            await trio.lowlevel.checkpoint()
+
+    stream = PartialSendStream()
+    problem = RemoteReductionProblem(
+        b"hello world",
+        send_stream=stream,
+        work=WorkContext(parallelism=1),
+        sort_key=sort_key_for_initial(b"hello world"),
+    )
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(problem.is_interesting, b"x")
+        await wait_all_tasks_blocked()
+        nursery.cancel_scope.cancel()
+
+    assert stream.closed
+    assert problem._closed
+    assert not problem._waiters
+    assert not await problem.is_interesting(b"y")
+
+
+async def test_cancelled_sent_query_still_consumes_its_own_reply() -> None:
+    problem = make_problem()
+    scope = trio.CancelScope()
+    async with trio.open_nursery() as nursery:
+
+        async def first():
+            with scope:
+                await problem.is_interesting(b"x")
+
+        nursery.start_soon(first)
+        await wait_all_tasks_blocked()
+        scope.cancel()
+
+    results = []
+    async with trio.open_nursery() as nursery:
+
+        async def second():
+            results.append(await problem.is_interesting(b"x"))
+
+        nursery.start_soon(second)
+        await wait_all_tasks_blocked()
+        assert problem.handle_feedback(b"x", False)
+        await wait_all_tasks_blocked()
+        assert not results
+        assert problem.handle_feedback(b"x", True)
+
+    assert results == [True]
+    assert not problem._waiters
+
+
+@pytest.mark.parametrize("send_query", [False, True])
+async def test_broken_output_ends_session_without_waiting_for_input(
+    autojump_clock,
+    send_query,
+) -> None:
+    class BrokenSendStream(CollectingSendStream):
+        async def send_all(self, data: bytes | bytearray | memoryview) -> None:
+            raise trio.BrokenResourceError
+
+    feedback_send, feedback_recv = memory_stream_one_way_pair()
+    await feedback_send.send_all(encode_feedback(b"hello world", True))
+
+    async def propose(problem):
+        await problem.is_interesting(b"x")
+
+    # In a subprocess, closing the duplicated output fd does not close the
+    # original stdout fd. The parent may therefore still await output/EOF and
+    # cannot be relied on to close its input before this session can terminate.
+    with trio.fail_after(1):
+        await run_reducer(
+            [propose] if send_query else [],
+            stdin_stream=feedback_recv,
+            stdout_stream=BrokenSendStream(),
+        )
+    await feedback_send.aclose()

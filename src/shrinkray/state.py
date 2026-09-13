@@ -32,6 +32,7 @@ from shrinkray.history import (
     serialize_directory,
 )
 from shrinkray.llm_client import LlamaCppClient
+from shrinkray.nondeterminism import ANCHOR_SEED_RUNS, NondeterminismPolicy
 from shrinkray.passes.cpp import C_FILE_EXTENSIONS
 from shrinkray.passes.llm import (
     DEFAULT_MODEL_SPEC,
@@ -300,6 +301,12 @@ class ShrinkRayState[TestCase](ABC):
     # reaches a fixpoint (see ShrinkRay.restart_at_fixpoint). On by
     # default; the evaluation harnesses disable it for speed.
     restart_at_fixpoint: bool = True
+
+    # Skip nondeterminism detection (the replays of the initial test case
+    # at startup, of the current one periodically, and of the result at
+    # the end) and take every run of the interestingness test as a
+    # verdict. See shrinkray.nondeterminism.
+    assume_deterministic: bool = False
 
     # LLM passes: whether they run at all, the model they use (a local
     # .gguf path or a Hugging Face repo:filename), and whether they
@@ -891,12 +898,17 @@ class ShrinkRayState[TestCase](ABC):
             parallelism=self.parallelism,
         )
 
+        history: HistoryBacktrackSource[TestCase] | None = None
+        if self.history_manager is not None and self.history_manager.record_reductions:
+            history = HistoryBacktrackSource(self)
         problem: BasicReductionProblem[TestCase] = BasicReductionProblem(
             is_interesting=self.check_interesting,
             initial=self.initial,
             work=work,
             sort_key=sort_key_for_initial(self.initial),
             unstick=self._attempt_unstick,
+            policy=None if self.assume_deterministic else NondeterminismPolicy(),
+            history=history,
             **self.extra_problem_kwargs,
         )
 
@@ -1021,6 +1033,7 @@ class ShrinkRayState[TestCase](ABC):
                     cache_valid=lambda: self.timeout_policy.cached_timeout_valid(
                         timeout_used
                     ),
+                    timed_out=True,
                 )
             return InterestingnessResult(interesting=False)
 
@@ -1060,6 +1073,27 @@ class ShrinkRayState[TestCase](ABC):
     def _set_initial_for_restart(self, content: bytes) -> None:
         """Set the initial test case for restart. Subclasses implement."""
         ...
+
+    @abstractmethod
+    def _test_case_from_bytes(self, content: bytes) -> TestCase:
+        """Decode a test case stored in the history directory (the form
+        HistoryManager.get_reduction_content returns)."""
+        ...
+
+    async def nondeterminism_summary(self, problem) -> str | None:
+        """What the final report says about a nondeterministic test: how
+        often the final test case reproduced on fresh replays, and what the
+        replays cost. None when the test was never seen to be
+        nondeterministic."""
+        if not problem.nondeterministic:
+            return None
+        evidence = await problem.measure_current(ANCHOR_SEED_RUNS)
+        return (
+            "The interestingness test is nondeterministic. The final test case "
+            f"was interesting on {evidence.interesting} of {evidence.runs} "
+            f"replays; {problem.policy.replay_calls} calls were spent on "
+            "replays in total."
+        )
 
     def _initialize_history_manager(self) -> None:
         """Initialize the history manager. Subclasses can override for different modes."""
@@ -1235,6 +1269,9 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
     def _set_initial_for_restart(self, content: bytes) -> None:
         self.initial = content
 
+    def _test_case_from_bytes(self, content: bytes) -> bytes:
+        return content
+
     def setup_formatter(self):
         if self.formatter.lower() == "none":
 
@@ -1325,6 +1362,9 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
                 print(
                     f"Running reformatting resulted in an increase of {humanize.naturalsize(formatting_increase)}."
                 )
+            summary = await self.nondeterminism_summary(problem)
+            if summary is not None:
+                print(summary)
 
 
 class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
@@ -1369,6 +1409,9 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
         # Deserialize and update initial directory content
         self.initial = deserialize_directory(content)
 
+    def _test_case_from_bytes(self, content: bytes) -> dict[str, bytes]:
+        return deserialize_directory(content)
+
     def _initialize_history_manager(self) -> None:
         """Initialize the history manager in directory mode."""
         assert self.history_manager is not None
@@ -1401,6 +1444,37 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
 
     async def print_exit_message(self, problem):
         print("All done!")
+        summary = await self.nondeterminism_summary(problem)
+        if summary is not None:
+            print(summary)
+
+
+class HistoryBacktrackSource[TestCase]:
+    """The adopted test cases of a run, read back from its history
+    directory on demand: the original input at index 0, then each recorded
+    reduction. This is what nondeterminism handling backtracks through
+    when a late-detected nondeterministic test turns out not to reproduce
+    on the current test case."""
+
+    def __init__(self, state: ShrinkRayState[TestCase]) -> None:
+        self.state = state
+
+    @property
+    def manager(self) -> HistoryManager:
+        assert self.state.history_manager is not None
+        return self.state.history_manager
+
+    def __len__(self) -> int:
+        return self.manager.reduction_counter + 1
+
+    def __getitem__(self, index: int) -> TestCase:
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        if index == 0:
+            content = self.manager.get_initial_content()
+        else:
+            content = self.manager.get_reduction_content(index)
+        return self.state._test_case_from_bytes(content)
 
 
 def load_state_for_path(
@@ -1425,6 +1499,7 @@ def load_state_for_path(
     llm_enabled: bool,
     llm_model: str,
     llm_only: bool,
+    assume_deterministic: bool = False,
 ) -> ShrinkRayState[Any]:
     """Read `filename` from disk and build the appropriate reduction state.
 
@@ -1456,6 +1531,7 @@ def load_state_for_path(
         "llm_enabled": llm_enabled,
         "llm_model": llm_model,
         "llm_only": llm_only,
+        "assume_deterministic": assume_deterministic,
     }
     if os.path.isdir(filename):
         initial = {}

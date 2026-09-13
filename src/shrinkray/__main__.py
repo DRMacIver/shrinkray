@@ -20,6 +20,7 @@ from shrinkray.cli import (
 )
 from shrinkray.formatting import determine_formatter_command
 from shrinkray.llm_client import llm_support_available
+from shrinkray.nondeterminism import GATE_RUNS
 from shrinkray.passes.llm import (
     DEFAULT_MODEL_SPEC,
     parse_model_spec,
@@ -219,6 +220,18 @@ This behaviour can be disabled by passing --trivial-is-not-error.
 """,
 )
 @click.option(
+    "--assume-deterministic",
+    is_flag=True,
+    default=False,
+    help="""
+Skip nondeterminism detection. By default Shrink Ray replays the initial test case
+a few times at startup, the current one occasionally, and the result at the end;
+if any replay disagrees, it switches to confirming candidates by repeated runs so
+that the result keeps reproducing the bug. With this flag every run of the
+interestingness test is taken as a verdict, saving those replays.
+""",
+)
+@click.option(
     "--exit-on-completion/--no-exit-on-completion",
     default=True,
     help="Exit automatically when reduction completes (TUI only). Default: exit on completion.",
@@ -339,6 +352,7 @@ def main(
     llm: bool,
     llm_model: str,
     llm_only: bool,
+    assume_deterministic: bool,
 ) -> None:
     if timeout is not None and timeout <= 0:
         timeout = float("inf")
@@ -402,6 +416,10 @@ def main(
         input_type=input_type,
         in_place=in_place,
         formatter_command=formatter_command,
+        # A nondeterministic test may fail its first run on the initial
+        # test case; like the reducer, only give up once it has missed
+        # GATE_RUNS times in a row.
+        retries=0 if assume_deterministic else GATE_RUNS - 1,
     )
 
     if not validation_result.success:
@@ -507,6 +525,7 @@ def main(
             llm_enabled=llm_enabled,
             llm_model=llm_model,
             llm_only=llm_only,
+            assume_deterministic=assume_deterministic,
         )
         return
 
@@ -533,6 +552,7 @@ def main(
         llm_enabled=llm_enabled,
         llm_model=llm_model,
         llm_only=llm_only,
+        assume_deterministic=assume_deterministic,
     )
 
     # The basic UI has no modal: report what will be fetched and proceed.

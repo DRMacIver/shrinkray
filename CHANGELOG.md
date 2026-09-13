@@ -3,6 +3,29 @@
 This is the changelog for [Shrink Ray](https://github.com/DRMacIver/shrinkray), a
 fast multi-format test-case reducer. Versions are calendar-based (`YY.M.D.N`).
 
+## 26.9.13.0 — 2026-09-13
+
+- Shrink Ray now handles nondeterministic interestingness tests (tests that
+  only sometimes reproduce the bug). By default it replays the initial test
+  case a few times at startup, the current one occasionally, and the result at
+  the end; if any replay disagrees, it switches to confirming candidates by
+  repeated runs before adopting them, so that reduction cannot walk the test
+  case down to something that no longer reproduces the bug, keeps checking
+  that the current test case still reproduces as often as it should, and
+  backtracks through the run's history to a reproducing test case when it
+  does not. The TUI shows the estimated reproduction rate and the calls spent on
+  replays, and the final report says how often the result reproduced.
+- New `--assume-deterministic` flag skips this detection and takes every run
+  of the interestingness test as a verdict.
+- Less time spent between interestingness tests on large inputs: comparing
+  candidates, canonicalising whitespace, and applying deletions are all
+  cheaper, and passes no longer pay a scheduling round-trip for every
+  candidate they reject without running the test.
+- Fixed three races in the protocol Shrink Ray uses to talk to external
+  reducers (`--reduce-with`), each of which could make a reducer's
+  answer land on the wrong question or a reduction hang after the reducer
+  had backtracked or been cancelled.
+
 ## 26.7.8.0 — 2026-07-08
 
 - Fixed several ways a reduction could hang or never finish: certain malformed

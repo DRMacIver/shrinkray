@@ -22,6 +22,23 @@ reducer does something, never what it does.
 | Tuple normalisation in `Cuts.combine` and slice-joining in `Cuts.apply` (`patching.py`) | Combining 1.2–2.6x faster; applying to bytes 8x–1000x faster (allocation-free slicing instead of an int-at-a-time rebuild) | Neutral; copying rarely dominates oracle cost |
 | Patch workers pull from a shared iterator with a scheduler checkpoint every 64 patches instead of a channel receive per patch | Scheduler iterations on a large synthetic nondeterministic problem fell from ~565,000 to ~32,000; wall time 14.5 s to 6.7 s (parallelism 1, cheap oracle) | The one change that is visible end to end on cheap oracles |
 
+Measured together on `evaluation/benchmark.py` (cheap in-process oracles,
+parallelism 1, idle machine, 2026-09-13), the tip of the branch before this
+cleanup versus after it:
+
+| Problems | Wall time, after / before |
+| --- | --- |
+| All 19 problems | 0.42 (444 s to 187 s) |
+| Python-syntax-constrained (`python_syntax`, `corpus_mypy`, `corpus_pylint`, `coupled_arity_python`) | 0.09–0.16 |
+| `flaky_*` nondeterministic problems | 0.34–0.54 (partly fewer calls, from the reject bar) |
+| `keep_markers`, `deep_parens`, `coupled_total_text` | 0.31, 0.76, 0.74 |
+
+Interestingness calls on the deterministic problems were within a few of
+the previous tip, so this is overhead, not search. With a real oracle
+costing hundreds of milliseconds per call these gains are diluted by
+the oracle, which is what the programme's neutral whole-run results on
+real corpus entries show.
+
 Also kept: three real races in the external-reducer protocol, found when
 the experiment's driver stalled (see the commit `fix: close three races
 in the external reducer protocol`), and a `reject_bar` in the gauntlet

@@ -1,4 +1,9 @@
-- Fix cancellation, in-place reduction, and restart races that could leave an incorrect or incomplete result on disk.
+- Fix cancellation, in-place reduction, and restart races that could leave an incorrect or incomplete result on disk. Staging files left next to the target by a hard kill are now cleaned up on the next run.
 - Fix concurrent nondeterminism detection, reject timed-out tests even when their signal handlers exit successfully, and report unexpected worker exits instead of hanging.
-- Bound speculative work and directory reduction concurrency, reduce blocking disk I/O, and coalesce pending progress updates while preserving graph history.
-- Apply timeout and explicit memory limits during initial validation, and clean up validation subprocesses on cancellation.
+- Under a nondeterministic interestingness test, a candidate whose run times out is no longer counted as a failed reproduction, and is retried once the adaptive timeout is raised.
+- Directory reductions now run the initial test case before reducing, so timeout calibration, the default memory-limit retry and nondeterminism detection see the original input.
+- Restarting from a history entry is refused once the reduction has finished, keeps the exclusions of earlier restarts, and reports a restart that failed after stopping the reduction as an error rather than a completed reduction.
+- Bound speculative work and directory reduction concurrency, reduce blocking disk I/O, and coalesce pending progress updates while preserving graph history. Test outputs kept for the LLM passes are now pruned even with `--no-history`.
+- Apply timeout and explicit memory limits during initial validation, and clean up validation subprocesses on cancellation. A validation run that times out reports the timeout it exceeded and how to raise it.
+- Record each also-interesting test case once, even when a nondeterministic test reaches its exit code on several runs.
+- Quitting the TUI while the worker is still starting no longer reports an error, and a killed test process is given longer to disappear before the reduction gives up on it.

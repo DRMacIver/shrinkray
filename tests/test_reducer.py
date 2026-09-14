@@ -12,6 +12,7 @@ from shrinkray.problem import (
     BasicReductionProblem,
     Format,
     InterestingnessResult,
+    InvalidInitialExample,
     ParseError,
     shortlex,
 )
@@ -2600,6 +2601,20 @@ async def test_restart_phase_sees_the_outer_problems_nondeterminism():
     with patch.object(ShrinkRay, "run_pass", spy):
         await reducer.run()
     assert seen == {True}
+
+
+async def test_directory_shrinkray_validates_the_initial_example():
+    # The TUI skips validation in the worker and relies on the reducer's
+    # setup to run the initial test case (and detect nondeterminism).
+    async def interesting(value):
+        return False
+
+    problem = BasicReductionProblem(
+        initial={"a.txt": b"a"}, is_interesting=interesting, work=WorkContext()
+    )
+    reducer = DirectoryShrinkRay(target=problem, python_reducer=False)
+    with pytest.raises(InvalidInitialExample):
+        await reducer.run()
 
 
 async def test_directory_bounds_active_file_reducers(monkeypatch):

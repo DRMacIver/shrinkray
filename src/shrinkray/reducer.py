@@ -946,6 +946,9 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     restart_at_fixpoint: bool = True
 
     async def run(self):
+        # As for a single file: the initial test case has to be run before
+        # any candidate, for calibration and nondeterminism detection.
+        await self.target.setup()
         if self.llm_client is not None and self.downloads is None:
             # As in ShrinkRay.run: overlap the model load with the cheap
             # passes of the per-file reductions.

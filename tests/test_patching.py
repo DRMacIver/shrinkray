@@ -9,6 +9,7 @@ import trio
 from hypothesis import given
 from hypothesis import strategies as st
 
+from shrinkray.nondeterminism import VERIFY_INTERVAL, Evidence, NondeterminismPolicy
 from shrinkray.passes.patching import (
     SCHEDULER_CHECKPOINT_INTERVAL,
     Conflict,
@@ -525,18 +526,25 @@ async def test_cancelled_merge_master_does_not_orphan_queued_waiters():
     happened to become master). This can happen in directory mode, where
     per-key reducers share one PatchApplier but cancel their own passes
     independently."""
-    a_direct_tested = trio.Event()
+    a_held = trio.Event()
     release_a = trio.Event()
+    c_held = trio.Event()
+    release_c = trio.Event()
     master_blocked = trio.Event()
 
     async def is_interesting(x):
-        if x == b"ay":
+        if x == b"xbz":
             # Task A's direct candidate: hold A here until B has finished,
-            # so that A's merge validation has new patches to combine.
-            a_direct_tested.set()
+            # so that A's merge validation has B's patch to combine with.
+            a_held.set()
             await release_a.wait()
             return True
-        if x == b"ab":
+        if x == b"xyc":
+            # Task C's direct candidate, held until A is the merge master.
+            c_held.set()
+            await release_c.wait()
+            return True
+        if x == b"abz":
             # A, now merge master, is validating the combination of B's
             # applied patch with its own. Park it so it can be cancelled.
             master_blocked.set()
@@ -544,9 +552,9 @@ async def test_cancelled_merge_master_does_not_orphan_queued_waiters():
         return True
 
     problem = BasicReductionProblem(
-        initial=b"xy",
+        initial=b"xyz",
         is_interesting=is_interesting,
-        work=WorkContext(parallelism=2),
+        work=WorkContext(parallelism=3),
     )
     applier = PatchApplier(SetPatches(apply_byte_assignments), problem)
     results = {}
@@ -559,22 +567,24 @@ async def test_cancelled_merge_master_does_not_orphan_queued_waiters():
             async def task_a():
                 with a_scope:
                     results["a"] = await applier.try_apply_patch(
-                        frozenset({(0, ord("a"))})
+                        frozenset({(1, ord("b"))})
                     )
 
-            await a_direct_tested.wait()
-            # B completes in full while A is suspended, so A's later merge
-            # validation combines B's patch with A's.
-            results["b"] = await applier.try_apply_patch(frozenset({(1, ord("b"))}))
+            @nursery.start_soon
+            async def task_c():
+                results["c"] = await applier.try_apply_patch(frozenset({(2, ord("c"))}))
+
+            await a_held.wait()
+            await c_held.wait()
+            # B completes in full while A and C are suspended. Its candidate
+            # sorts below theirs, so it is adopted and they cannot be.
+            results["b"] = await applier.try_apply_patch(frozenset({(0, ord("a"))}))
             release_a.set()
             await master_blocked.wait()
 
             # A is now the merge master, blocked in validation. C queues up
             # behind it and waits for a merge result.
-            @nursery.start_soon
-            async def task_c():
-                results["c"] = await applier.try_apply_patch(frozenset({(0, ord("c"))}))
-
+            release_c.set()
             await trio.testing.wait_all_tasks_blocked()
             a_scope.cancel()
 
@@ -1254,20 +1264,23 @@ def test_replacements_size_is_net_bytes_removed():
 async def test_merge_probes_are_counted():
     """Every call the merge master makes to test a combination of
     individually successful patches is attributed to merge probing."""
+    held = 0
+    release = trio.Event()
 
-    # Not every cut can be applied together (the shortcut of applying all
-    # patches at once fails), so successes must be merged.
     async def is_interesting(x):
-        await trio.lowlevel.checkpoint()
-        return b"k" in x and len(x) >= 2
+        nonlocal held
+        if x in RACED_CANDIDATES:
+            held += 1
+            await release.wait()
+        return True
 
     problem = BasicReductionProblem(
-        initial=b"kabcdefgh",
-        is_interesting=is_interesting,
-        work=WorkContext(parallelism=2),
+        initial=b"xyz", is_interesting=is_interesting, work=WorkContext(parallelism=3)
     )
-    await apply_patches(problem, Cuts(), [[(i, i + 1)] for i in range(1, 9)])
-    assert len(problem.current_test_case) == 2
+    applier = PatchApplier(SetPatches(apply_byte_assignments), problem)
+    results = await race_patches(applier, lambda: held, release)
+    assert results == {"direct": True, "b": True, "c": True}
+    assert problem.current_test_case == b"abc"
     stats = problem.stats
     assert stats.merge_probes > 0
     assert 0 < stats.merge_probe_calls <= stats.calls
@@ -1282,3 +1295,166 @@ async def test_apply_patches_accepts_single_use_iterables():
     )
     await apply_patches(problem, Cuts(), iter([[(0, 1)], [(1, 2)]]))
     assert len(problem.current_test_case) == 1
+
+
+# =============================================================================
+# Merge-master accounting
+# =============================================================================
+
+
+# A direct candidate assigning "a" at position 0 sorts below any candidate
+# that assigns a later position, so it is adopted and the raced candidates
+# (held until all are in flight) are interesting but not adoptable: they
+# have to go through the merge queue.
+RACED_CANDIDATES = (b"xbz", b"xyc")
+
+
+async def race_patches(applier, held, release):
+    """Race the patches for RACED_CANDIDATES against a directly adopted
+    one on the initial test case b"xyz". `held()` reports how many raced
+    candidates the oracle is holding; `release` lets them go."""
+    results = {}
+    async with trio.open_nursery() as nursery:
+        for name, position in (("b", 1), ("c", 2)):
+
+            @nursery.start_soon
+            async def racer(name=name, position=position):
+                results[name] = await applier.try_apply_patch(
+                    frozenset({(position, ord(name))})
+                )
+
+        while held() < 2:
+            await trio.sleep(0.01)
+        results["direct"] = await applier.try_apply_patch(frozenset({(0, ord("a"))}))
+        release.set()
+    return results
+
+
+async def test_cancelled_merge_master_reports_merged_patches_as_applied():
+    """When the merge master is cancelled part-way through a round, the
+    patches its probes have already merged (and the problem has adopted)
+    must be reported as applied; only the rest are unapplied."""
+    target = b"vwxyz"
+    letters = b"abcde"
+    held = 0
+    release = trio.Event()
+    scopes: dict[trio.lowlevel.Task, trio.CancelScope] = {}
+
+    def assigned(x: bytes) -> int:
+        return sum(1 for byte in x if byte in letters)
+
+    async def is_interesting(x):
+        nonlocal held
+        if assigned(x) == 1 and x[0] != ord("a"):
+            # Hold the four raced candidates until all are in flight.
+            held += 1
+            await release.wait()
+            return True
+        if assigned(x) == 5:
+            return False
+        if assigned(x) == 4:
+            # The master is probing its second merge of the round after
+            # one succeeded: cancel it here.
+            scopes[trio.lowlevel.current_task()].cancel()
+            await trio.sleep_forever()
+        return True
+
+    problem = BasicReductionProblem(
+        initial=target,
+        is_interesting=is_interesting,
+        work=WorkContext(parallelism=5),
+    )
+    applier = PatchApplier(SetPatches(apply_byte_assignments), problem)
+    results = {}
+
+    with trio.fail_after(10):
+        async with trio.open_nursery() as nursery:
+            for position in range(1, 5):
+
+                @nursery.start_soon
+                async def racer(position=position):
+                    scope = trio.CancelScope()
+                    scopes[trio.lowlevel.current_task()] = scope
+                    with scope:
+                        results[position] = await applier.try_apply_patch(
+                            frozenset({(position, letters[position])})
+                        )
+
+            while held < 4:
+                await trio.sleep(0.01)
+            # The direct candidate sorts below every raced one: adopted.
+            results[0] = await applier.try_apply_patch(frozenset({(0, letters[0])}))
+            release.set()
+
+    assert results[0] is True
+    current = problem.current_test_case
+    assert assigned(current) == 3
+    # One racer became merge master and was cancelled mid-round, so it
+    # has no result; of the other three, the one whose patch a probe
+    # merged before the cancellation is applied and the rest are not.
+    reported = {
+        position: results[position] for position in range(1, 5) if position in results
+    }
+    assert len(reported) == 3
+    applied = [position for position, result in reported.items() if result]
+    assert len(applied) == 1
+    assert current[applied[0]] == letters[applied[0]]
+    assert all(
+        current[position] == target[position]
+        for position, result in reported.items()
+        if not result
+    )
+
+
+async def test_failed_full_merge_is_not_probed_again():
+    """After the full prefix fails, the search for a shorter prefix must
+    not re-probe the full one."""
+    held = 0
+    release = trio.Event()
+
+    async def is_interesting(x):
+        nonlocal held
+        if x in RACED_CANDIDATES:
+            held += 1
+            await release.wait()
+            return True
+        return x != b"abc"
+
+    problem = BasicReductionProblem(
+        initial=b"xyz", is_interesting=is_interesting, work=WorkContext(parallelism=3)
+    )
+    applier = PatchApplier(SetPatches(apply_byte_assignments), problem)
+    results = await race_patches(applier, lambda: held, release)
+
+    # One raced patch merges with the adopted one; the other cannot join.
+    assert results["direct"] is True
+    assert sorted(results[name] for name in ("b", "c")) == [False, True]
+    # The adopted patch's own probe, then one round probing the first
+    # raced patch and one probing the second, which is not repeated.
+    assert problem.stats.merge_probes == 3
+
+
+async def test_apply_patches_applies_patches_to_the_test_case_they_describe():
+    """If the current test case changes under the shortcut (here a backtrack
+    by nondeterminism recovery), the individual patches are still applied
+    to the test case they were computed for, not to the new current."""
+    tested = []
+
+    async def is_interesting(x):
+        tested.append(x)
+        return x == b"abcdXYZ"
+
+    policy = NondeterminismPolicy(active=True, anchor=0.5, incumbent=Evidence(0, 100))
+    problem = BasicReductionProblem(
+        initial=b"abcd",
+        is_interesting=is_interesting,
+        work=WorkContext(),
+        policy=policy,
+        history=[b"abcdXYZ", b"abcd"],
+    )
+    problem.stats.calls = VERIFY_INTERVAL
+    await apply_patches(problem, Cuts(), [[(0, 1)], [(2, 3)]])
+    assert problem.current_test_case == b"abcdXYZ"
+    assert b"bcd" in tested
+    assert b"abd" in tested
+    assert not any(x.endswith(b"XYZ") and len(x) < 7 for x in tested)

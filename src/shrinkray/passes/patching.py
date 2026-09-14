@@ -52,10 +52,18 @@ class SetPatches[T, TargetType](Patches[frozenset[T], TargetType]):
 
 
 class PatchApplier[PatchType, TargetType]:
+    """Applies patches to `initial_test_case` (by default the problem's
+    current test case at construction) and keeps the set of patches known
+    to be jointly interesting, so that candidates build on each other.
+
+    Patches are computed against a particular test case, so the applier
+    must be bound to that one even if the problem has since moved on."""
+
     def __init__(
         self,
         patches: Patches[PatchType, TargetType],
         problem: ReductionProblem[TargetType],
+        initial_test_case: TargetType | None = None,
     ):
         self.__patches = patches
         self.__problem = problem
@@ -63,26 +71,34 @@ class PatchApplier[PatchType, TargetType]:
         self.__merge_queue: list[tuple[PatchType, trio.MemorySendChannel[bool]]] = []
         self.__merge_lock = trio.Lock()
 
+        # The patches found jointly interesting so far, which candidates
+        # build on. It may run ahead of the current test case (a candidate
+        # built on an older set can be adopted after a merge); the next
+        # candidate built on it puts the merged patches back.
         self.__current_patch = self.__patches.empty
-        self.__initial_test_case = problem.current_test_case
+        self.__initial_test_case = (
+            problem.current_test_case
+            if initial_test_case is None
+            else initial_test_case
+        )
 
     async def __possibly_become_merge_master(self):
         try:
             self.__merge_lock.acquire_nowait()
         except trio.WouldBlock:
             return False
+        merged_so_far = 0
         try:
             while self.__merge_queue:
+                # More patches can come in while we're merging and it ends
+                # up fiddly and unreliable if we try to merge those as part
+                # of this round, so we leave them for the next one.
                 base_patch = self.__current_patch
                 to_merge = len(self.__merge_queue)
+                merged_so_far = 0
 
-                async def can_merge(k):
-                    # More patches can come in while we're merging and it
-                    # ends up fiddly and unreliable if we try to merge
-                    # those as part of this pass, so we just skip them
-                    # and will handle them on the next pass.
-                    if k > to_merge:
-                        return False
+                async def can_merge(k: int) -> bool:
+                    nonlocal merged_so_far
                     try:
                         attempted_patch = self.__patches.combine(
                             base_patch,
@@ -99,22 +115,29 @@ class PatchApplier[PatchType, TargetType]:
                     try:
                         if await self.__problem.is_reduction(with_patch_applied):
                             self.__current_patch = attempted_patch
+                            merged_so_far = max(merged_so_far, k)
                             return True
                         return False
                     finally:
                         stats.merge_probe_calls += stats.calls - calls_before
 
+                async def can_merge_shorter(k: int) -> bool:
+                    # The full prefix has just failed; the search for a
+                    # shorter one need not probe it again.
+                    return k < to_merge and await can_merge(k)
+
                 if await can_merge(to_merge):
                     merged = to_merge
                 else:
-                    merged = await self.__problem.work.find_large_integer(can_merge)
+                    merged = await self.__problem.work.find_large_integer(
+                        can_merge_shorter
+                    )
 
                 assert merged <= to_merge
 
                 for _, send_result in self.__merge_queue[:merged]:
                     send_result.send_nowait(True)
 
-                assert merged <= to_merge
                 if merged < to_merge:
                     self.__merge_queue[merged][1].send_nowait(False)
                     del self.__merge_queue[: merged + 1]
@@ -123,10 +146,10 @@ class PatchApplier[PatchType, TargetType]:
         finally:
             # If we were cancelled mid-merge, tasks already queued would
             # otherwise wait forever for a result that no one is going to
-            # send. Report their patches as not applied; a later pass can
-            # still retry them.
-            for _, send_result in self.__merge_queue:
-                send_result.send_nowait(False)
+            # send. The patches a probe of this round merged are applied;
+            # the rest are not, and a later pass can still retry them.
+            for i, (_, send_result) in enumerate(self.__merge_queue):
+                send_result.send_nowait(i < merged_so_far)
             del self.__merge_queue[:]
             self.__merge_lock.release()
 
@@ -215,7 +238,10 @@ async def apply_patches[PatchType, TargetType](
     except Conflict:
         pass
 
-    applier = PatchApplier(patch_info, problem)
+    # The current test case may have moved on during the shortcut (a
+    # backtrack under nondeterminism handling); the patches describe
+    # `before` and are applied to it.
+    applier = PatchApplier(patch_info, problem, initial_test_case=before)
 
     problem.work.random.shuffle(patches)
     patches.sort(key=patch_info.size, reverse=True)

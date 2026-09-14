@@ -26,6 +26,10 @@ from shrinkray.state import DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT
 class _ValidationTimedOut(Exception):
     """The interestingness test did not finish within its timeout."""
 
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
 
 @dataclass
 class ValidationResult:
@@ -223,10 +227,10 @@ async def _run_validation_test(
             temp_dirs=temp_dirs,
         )
 
-    except _ValidationTimedOut as e:
+    except _ValidationTimedOut as timed_out:
         return ValidationResult(
             success=False,
-            error_message=str(e),
+            error_message=timed_out.message,
             temp_dirs=temp_dirs,
         )
     except Exception as e:

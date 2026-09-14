@@ -106,7 +106,9 @@ Once a commit starts, it shields its callbacks from cancellation. History snapsh
 
 ## Worker lifecycle
 
-A history restart first validates the requested entry, cancels the old reducer, and waits for all its cleanup and commits to finish. The replacement reducer starts only after state reset and the target write complete.
+A history restart first validates the requested entry (and is refused once the reduction is no longer running), cancels the old reducer, and waits for all its cleanup and commits to finish. The replacement reducer is installed, and the worker marked running again, before the run loop is released to start it; the target write follows and is best effort. A restart that fails after the old reducer was cancelled ends the worker with that error rather than a completion.
+
+Directory reduction runs the initial test case through the problem's setup before any candidate, as single-file reduction does, so the calibration call, the default memory-limit retry and startup nondeterminism detection all see the initial input.
 
 Worker stdout uses a Trio file-descriptor stream, so a full pipe can be cancelled without blocking the scheduler. The asyncio client coalesces pending progress messages, preserving incremental graph samples, and resolves outstanding commands on EOF or reader failure. Validation subprocesses have bounded runtimes and process-group cleanup as well.
 

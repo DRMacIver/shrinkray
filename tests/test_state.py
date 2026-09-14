@@ -2,6 +2,7 @@
 
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -4713,3 +4714,68 @@ async def test_atomic_target_write_recreates_missing_target(simple_state):
     target.unlink()
     await simple_state.write_test_case_to_file(str(target), b"recovered")
     assert target.read_bytes() == b"recovered"
+
+
+async def test_atomic_target_write_sets_only_permission_bits(simple_state, monkeypatch):
+    # os.stat's st_mode carries the file-type bits too; only the permission
+    # bits may be handed to chmod.
+    modes = []
+    original_chmod = os.chmod
+
+    def recording_chmod(path, mode, **kwargs):
+        modes.append(mode)
+        original_chmod(path, mode, **kwargs)
+
+    monkeypatch.setattr("shrinkray.state.os.chmod", recording_chmod)
+    await simple_state.write_test_case_to_file(simple_state.filename, b"new")
+    assert modes and all(mode == stat.S_IMODE(mode) for mode in modes)
+
+
+def test_sweep_removes_stale_staging_file(tmp_path):
+    # A hard kill between staging a target write and renaming it into
+    # place leaves the staging file behind; the next run sweeps it.
+    target = tmp_path / "test.txt"
+    stale = tmp_path / (".test.txt.shrinkray-" + "c" * 32)
+    stale.write_bytes(b"junk")
+    unrelated = tmp_path / ".test.txt.shrinkray-notes"
+    unrelated.write_bytes(b"keep")
+    simple_state_factory(tmp_path, target)
+    assert not stale.exists()
+    assert unrelated.read_bytes() == b"keep"
+
+
+def test_sweep_of_staging_files_follows_the_target_symlink(tmp_path):
+    # Staging files are created next to the file the target resolves to.
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    real = real_dir / "actual.txt"
+    real.write_text("hello world")
+    target = tmp_path / "test.txt"
+    target.symlink_to(real)
+    stale = real_dir / (".actual.txt.shrinkray-" + "d" * 32)
+    stale.write_bytes(b"junk")
+    simple_state_factory(tmp_path, target)
+    assert not stale.exists()
+
+
+def simple_state_factory(tmp_path, target):
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/sh\nexit 0")
+    script.chmod(0o755)
+    if not target.exists():
+        target.write_text("hello world")
+    return ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+    )

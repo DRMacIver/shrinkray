@@ -6,6 +6,7 @@ import random
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -430,32 +431,36 @@ class ShrinkRayState[TestCase](ABC):
         )
         return os.path.dirname(abspath), pattern
 
+    def stale_file_patterns(self) -> "list[tuple[str, re.Pattern[str]]]":
+        """Directory and filename regex pairs for every kind of temporary
+        file this state creates next to the user's files and normally
+        removes itself, so that a previous run's leftovers can be swept."""
+        info = self.stale_working_file_pattern()
+        return [] if info is None else [info]
+
     def sweep_stale_working_files(self) -> None:
-        """Remove any leftover temporary candidate files from a previous
-        run that was killed before it could clean up after itself. Only
-        entries matching this run's own ``<stem>-<hex><ext>`` pattern are
-        removed, so unrelated files are never touched.
+        """Remove any leftover temporary files from a previous run that was
+        killed before it could clean up after itself. Only entries matching
+        this run's own patterns (see stale_file_patterns) are removed, so
+        unrelated files are never touched.
 
         In in-place directory mode each candidate is a *directory*, so
         directories are removed recursively; plain files are unlinked."""
-        info = self.stale_working_file_pattern()
-        if info is None:
-            return
-        directory, pattern = info
-        try:
-            names = os.listdir(directory)
-        except OSError:
-            return
-        for name in names:
-            if pattern.match(name):
-                path = os.path.join(directory, name)
-                if os.path.isdir(path):
-                    shutil.rmtree(path, ignore_errors=True)
-                else:
-                    try:
-                        os.unlink(path)
-                    except OSError:
-                        pass
+        for directory, pattern in self.stale_file_patterns():
+            try:
+                names = os.listdir(directory)
+            except OSError:
+                continue
+            for name in names:
+                if pattern.match(name):
+                    path = os.path.join(directory, name)
+                    if os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                    else:
+                        try:
+                            os.unlink(path)
+                        except OSError:
+                            pass
 
     @property
     def is_directory_mode(self) -> bool:
@@ -1003,9 +1008,7 @@ class ShrinkRayState[TestCase](ABC):
         async with self.is_interesting_limiter:
             result = await self.run_for_result(test_case)
             if not result.timed_out:
-                self._check_also_interesting(
-                    result.exit_code, test_case, result.output
-                )
+                self._check_also_interesting(result.exit_code, test_case, result.output)
             if result.exit_code == 0 and not result.timed_out:
                 test_case_bytes = self._get_test_case_bytes(test_case)
                 if result.output is not None:
@@ -1312,22 +1315,39 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
                 check=False,
             )
 
+    def staging_file_pattern(self) -> "tuple[str, re.Pattern[str]]":
+        """Directory and filename regex for the staging files that atomic
+        writes of the target create beside the file it resolves to (see
+        write_test_case_to_file_impl)."""
+        directory, basename = os.path.split(os.path.realpath(self.filename))
+        pattern = re.compile(re.escape(f".{basename}.shrinkray-") + r"[0-9a-f]{32}\Z")
+        return directory, pattern
+
+    def stale_file_patterns(self) -> "list[tuple[str, re.Pattern[str]]]":
+        return [*super().stale_file_patterns(), self.staging_file_pattern()]
+
     async def write_test_case_to_file_impl(self, working: str, test_case: bytes):
         if os.path.abspath(working) != os.path.abspath(self.filename):
             async with await trio.open_file(working, "wb") as o:
                 await o.write(test_case)
             return
 
+        # The target is replaced atomically so that a crash or kill mid-write
+        # can never leave it truncated: the new content is staged in a
+        # sibling file and renamed over the file the target resolves to,
+        # which keeps a symlinked target a symlink and preserves its mode.
         def write() -> None:
             target = os.path.realpath(working)
-            fd, staging = tempfile.mkstemp(
-                prefix=".shrinkray-", dir=os.path.dirname(target)
+            directory, basename = os.path.split(target)
+            staging = os.path.join(
+                directory, f".{basename}.shrinkray-{os.urandom(16).hex()}"
             )
+            fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             try:
                 with os.fdopen(fd, "wb") as output:
                     output.write(test_case)
                 try:
-                    mode = os.stat(target).st_mode
+                    mode = stat.S_IMODE(os.stat(target).st_mode)
                 except FileNotFoundError:
                     mode = 0o600
                 os.chmod(staging, mode)

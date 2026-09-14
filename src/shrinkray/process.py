@@ -179,6 +179,12 @@ def kill_process_group(sp: "trio.Process") -> None:
         pass
 
 
+# How long a process is given to disappear after SIGKILL before we give up
+# on it. Tearing down a large process can take a while on a loaded machine,
+# and giving up aborts the whole reduction, so this is generous.
+KILL_REAP_TIMEOUT = 5.0
+
+
 async def interrupt_wait_and_kill(sp: "trio.Process", delay: float = 0.1) -> None:
     """Interrupt a process, wait for it to exit, and kill it if necessary."""
     await trio.lowlevel.checkpoint()
@@ -207,7 +213,7 @@ async def interrupt_wait_and_kill(sp: "trio.Process", delay: float = 0.1) -> Non
             except (ProcessLookupError, PermissionError):
                 pass
 
-        with trio.move_on_after(delay):
+        with trio.move_on_after(KILL_REAP_TIMEOUT):
             await sp.wait()
 
         if sp.returncode is None:

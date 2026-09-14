@@ -440,6 +440,25 @@ def test_record_also_interesting_creates_numbered_directories() -> None:
             os.chdir(original_cwd)
 
 
+def test_record_also_interesting_skips_repeated_content() -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmpdir)
+            manager = HistoryManager.create(["./test.sh"], "buggy.c")
+            manager.initialize(b"original", ["./test.sh"], "buggy.c")
+
+            manager.record_also_interesting(b"case 1")
+            manager.record_also_interesting(b"case 1")
+            manager.record_also_interesting(b"case 2")
+
+            also_interesting_dir = os.path.join(manager.history_dir, "also-interesting")
+            assert sorted(os.listdir(also_interesting_dir)) == ["0001", "0002"]
+            assert manager.also_interesting_counter == 2
+        finally:
+            os.chdir(original_cwd)
+
+
 def test_record_also_interesting_writes_file() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         original_cwd = os.getcwd()

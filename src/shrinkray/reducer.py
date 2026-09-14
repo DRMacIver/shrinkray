@@ -315,15 +315,16 @@ class ShrinkRay(Reducer[bytes]):
         ]
     )
 
-    # Number of consecutive failed calls after which a pass on probation
-    # (one whose previous completed run made no progress) is abandoned for
-    # now. Abandoned passes are recorded in incomplete_passes and re-run
-    # without a budget before the reducer finishes, so this only affects
-    # when their work happens, not whether it does.
+    # A pass on probation (one whose previous completed run made no
+    # progress) is abandoned for now once its consecutive failed calls
+    # exceed this. Abandoned passes are recorded in incomplete_passes and
+    # re-run without a budget before the reducer finishes, so this only
+    # affects when their work happens, not whether it does.
     probation_budget: int = 25
 
-    # Passes whose previous completed run made no progress. Such a pass
-    # gets only probation_budget consecutive failures on its next run.
+    # Passes whose previous completed run made no progress. Such a pass is
+    # abandoned on its next run once its consecutive failures exceed
+    # probation_budget.
     pass_probation: dict[str, bool] = attrs.Factory(dict)
 
     # Passes whose most recent run was cut short by the probation budget,
@@ -641,31 +642,24 @@ class ShrinkRay(Reducer[bytes]):
                         """
                         Watcher task that cancels the current reduction pass as
                         soon as it stops looking like a good idea to keep running
-                        it. Current criteria:
+                        it, checking every 5s. Current criteria:
 
-                        1. If it's been more than 5s since the last successful reduction.
-                        2. If the reduction rate of the task has dropped under 50% of its
-                           best so far.
+                        1. Nothing was reduced in the last 5s.
+                        2. The average bytes deleted per 5s interval since the
+                           pass started has dropped under 50% of its best so far
+                           (an early burst that has tailed off into a trickle).
                         """
                         iters = 0
                         initial_size = self.target.current_size
-                        best_reduction_rate: float | None = None
+                        best_reduction_rate = 0.0
 
                         while True:
                             iters += 1
-                            deleted = initial_size - self.target.current_size
-
                             current = self.target.current_test_case
                             await trio.sleep(5)
+                            deleted = initial_size - self.target.current_size
                             rate = deleted / iters
-
-                            if (
-                                best_reduction_rate is None
-                                or rate > best_reduction_rate
-                            ):
-                                best_reduction_rate = rate
-
-                            assert best_reduction_rate is not None
+                            best_reduction_rate = max(best_reduction_rate, rate)
 
                             if (
                                 rate < 0.5 * best_reduction_rate
@@ -946,6 +940,9 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     restart_at_fixpoint: bool = True
 
     async def run(self):
+        # As for a single file: the initial test case has to be run before
+        # any candidate, for calibration and nondeterminism detection.
+        await self.target.setup()
         if self.llm_client is not None and self.downloads is None:
             # As in ShrinkRay.run: overlap the model load with the cheap
             # passes of the per-file reductions.
@@ -970,7 +967,16 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     async def shrink_values(self):
         async with trio.open_nursery() as nursery:
             applier = PatchApplier(patches=UpdateKeys(), problem=self.target)
-            for k in self.target.current_test_case.keys():
+            # A snapshot: the per-file reducers replace the current dict
+            # rather than mutating it, but the workers below must not
+            # depend on that.
+            keys = iter(list(self.target.current_test_case))
+
+            async def reduce_files() -> None:
+                for k in keys:
+                    await reduce_file(k)
+
+            async def reduce_file(k: str) -> None:
                 key_problem = KeyProblem(
                     base_problem=self.target,
                     applier=applier,
@@ -1001,4 +1007,12 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
                     llm_only=self.llm_only,
                     restart_at_fixpoint=self.restart_at_fixpoint,
                 )
-                nursery.start_soon(key_shrinkray.run)
+                await key_shrinkray.run()
+
+            for _ in range(
+                min(
+                    len(self.target.current_test_case),
+                    max(1, self.target.work.parallelism),
+                )
+            ):
+                nursery.start_soon(reduce_files)

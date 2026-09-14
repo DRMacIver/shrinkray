@@ -2,6 +2,7 @@
 
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -1146,8 +1147,11 @@ async def test_run_for_result_in_place_cleanup_handles_unlink_error(
 async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
     """Test that the process group is killed when the task is cancelled."""
     script = tmp_path / "test.sh"
-    # Script that sleeps forever
-    script.write_text("#!/bin/sh\nsleep 1000")
+    started = tmp_path / "started"
+    # Script that announces itself and then sleeps forever. The test
+    # cancels only once the script is running, so the cancellation
+    # cannot land before the process has been spawned on a loaded machine.
+    script.write_text(f"#!/bin/sh\ntouch {started}\nsleep 1000")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1176,8 +1180,11 @@ async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
         original_kill(sp)
 
     monkeypatch.setattr(state_mod, "kill_process_group", tracking_kill)
-    with trio.move_on_after(0.5):
-        await state.run_for_result(b"hello")
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(state.run_for_result, b"hello")
+        while not started.exists():
+            await trio.sleep(0.01)
+        nursery.cancel_scope.cancel()
 
     assert kill_called[0]
 
@@ -2616,10 +2623,11 @@ def test_state_with_history_enabled_creates_output_manager(tmp_path):
     assert state.output_manager is not None
 
 
-def test_get_last_captured_output_with_no_output_manager(tmp_path):
-    """Test _get_last_captured_output returns None when output_manager is None."""
+async def test_run_script_captures_no_output_without_output_manager(tmp_path):
+    """Without an output manager the test's output is discarded, so the
+    run result carries none."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/sh\nexit 0")
+    script.write_text("#!/bin/sh\necho captured\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2641,13 +2649,17 @@ def test_get_last_captured_output_with_no_output_manager(tmp_path):
         history_enabled=False,  # Disable history to not create output_manager
     )
 
-    assert state._get_last_captured_output() is None
+    assert state.output_manager is None
+    result = await state.run_script_on_file(str(target), cwd=str(tmp_path))
+    assert result.exit_code == 0
+    assert result.output is None
 
 
-def test_get_last_captured_output_with_no_output_available(tmp_path):
-    """Test _get_last_captured_output returns None when no output is available."""
+async def test_run_script_returns_captured_output(tmp_path):
+    """With an output manager the run result carries the test's combined
+    stdout and stderr, read back as soon as the test finishes."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/sh\nexit 0")
+    script.write_text("#!/bin/sh\necho out\necho err >&2\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2670,45 +2682,10 @@ def test_get_last_captured_output_with_no_output_available(tmp_path):
         history_base_dir=str(tmp_path),
     )
 
-    # Output manager exists but has no output yet
     assert state.output_manager is not None
-    assert state._get_last_captured_output() is None
-
-
-def test_get_last_captured_output_returns_stored_output(tmp_path):
-    """Test _get_last_captured_output returns the stored _last_test_output."""
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/sh\nexit 0")
-    script.chmod(0o755)
-
-    target = tmp_path / "test.txt"
-    target.write_text("hello")
-
-    state = ShrinkRayStateSingleFile(
-        input_type=InputType.arg,
-        in_place=False,
-        test=[str(script)],
-        filename=str(target),
-        timeout=5.0,
-        base="test.txt",
-        parallelism=1,
-        initial=b"hello",
-        formatter="none",
-        trivial_is_error=True,
-        seed=0,
-        volume=Volume.quiet,
-        history_enabled=True,
-        history_base_dir=str(tmp_path),
-    )
-
-    # _get_last_captured_output returns _last_test_output (set during run_script_on_file)
-    assert state._get_last_captured_output() is None
-
-    # Directly set the stored output (simulating what run_script_on_file does)
-    state._last_test_output = b"test output content"
-
-    output = state._get_last_captured_output()
-    assert output == b"test output content"
+    result = await state.run_script_on_file(str(target), cwd=str(tmp_path))
+    assert result.exit_code == 0
+    assert result.output == b"out\nerr\n"
 
 
 async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
@@ -2758,8 +2735,8 @@ async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
     )
     assert run_result.exit_code == 0
 
-    # The OSError was caught, so _last_test_output should be None
-    assert state._last_test_output is None
+    # The OSError was caught, so the run carries no output.
+    assert run_result.output is None
 
 
 def test_directory_state_get_test_case_bytes_returns_serialized(tmp_path):
@@ -3515,17 +3492,8 @@ async def test_also_interesting_records_directory_mode(tmp_path):
 
 
 @pytest.mark.trio
-async def test_history_counter_never_lags_stats_reductions(tmp_path):
-    """Regression: history_manager.reduction_counter must be at least as large
-    as problem.stats.reductions at every scheduling point.
-
-    The progress update loop emits reductions=stats.reductions while
-    record_reduction() populates the history directory. If the callback that
-    writes to the history runs after a yielding callback (like the one that
-    writes the test case to disk), the emit loop can observe reductions=N
-    while the Nth reduction directory doesn't exist yet. A concurrent
-    restart_from(N) request then fails with "Reduction N not found".
-    """
+async def test_history_counter_agrees_after_commit(tmp_path):
+    """Progress readers wait for persistence before exposing a reduction."""
     script = tmp_path / "test.sh"
     script.write_text('#!/bin/sh\ngrep -q KEEP "$1"')
     script.chmod(0o755)
@@ -3568,6 +3536,8 @@ async def test_history_counter_never_lags_stats_reductions(tmp_path):
 
     async def observer():
         while True:
+            assert isinstance(problem, BasicReductionProblem)
+            await problem.wait_for_commit()
             r = problem.stats.reductions
             c = history_manager.reduction_counter
             if r > c:
@@ -3672,6 +3642,11 @@ async def test_reset_for_restart_clears_reducer(tmp_path):
 
     # Exclusion set should be set
     assert state.excluded_test_cases == {b"excluded"}
+
+    # A later restart adds to the exclusions rather than replacing them:
+    # the values reduced to before the first restart stay rejected.
+    state.reset_for_restart(b"worl", {b"excluded again"})
+    assert state.excluded_test_cases == {b"excluded", b"excluded again"}
 
 
 @pytest.mark.trio
@@ -3998,7 +3973,7 @@ def test_sweep_tolerates_unlink_failure(tmp_path, monkeypatch):
 # === successful-output pruning tests ===
 
 
-def test_record_history_keeps_concurrent_better_candidate(tmp_path):
+async def test_record_history_keeps_concurrent_better_candidate(tmp_path):
     """A candidate that is interesting and sorts better than the one just
     adopted must keep its captured output.
 
@@ -4022,7 +3997,7 @@ def test_record_history_keeps_concurrent_better_candidate(tmp_path):
         better: state.problem.sort_key(better),
     }
 
-    state._record_reduction_history(adopted)
+    state._prune_successful_outputs(adopted)
 
     # The better, still-adoptable candidate's output survives.
     assert state._successful_outputs.get(better) == b"out-B"
@@ -4030,7 +4005,7 @@ def test_record_history_keeps_concurrent_better_candidate(tmp_path):
     assert state._successful_outputs.get(adopted) == b"out-A"
 
 
-def test_record_history_prunes_losing_candidate(tmp_path):
+async def test_record_history_prunes_losing_candidate(tmp_path):
     """A candidate that was interesting but sorts worse than the adopted
     one can never be adopted again, so its output is pruned."""
     state = make_in_place_state(tmp_path)
@@ -4045,7 +4020,7 @@ def test_record_history_prunes_losing_candidate(tmp_path):
         loser: state.problem.sort_key(loser),
     }
 
-    state._record_reduction_history(adopted)
+    state._prune_successful_outputs(adopted)
 
     assert loser not in state._successful_outputs
     assert loser not in state._successful_output_keys
@@ -4267,11 +4242,46 @@ async def test_adopted_reductions_keep_their_test_output(tmp_path):
     assert b"still interesting" in output
 
 
-async def test_history_records_reductions_without_captured_output(
-    tmp_path, monkeypatch
-):
+async def test_successful_outputs_are_pruned_without_history(tmp_path):
+    # With history off nothing recorded outputs to disk, but the LLM passes
+    # still read them, so losers must be pruned or they accumulate.
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\necho "still interesting"\ngrep -q hello "$1"\n')
+    script.chmod(0o755)
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+    )
+    assert state.history_manager is None
+    (tmp_path / "out").mkdir()
+    state.output_manager = OutputCaptureManager(output_dir=str(tmp_path / "out"))
+    problem = state.problem
+    loser = b"hello world!!"
+    state._successful_outputs[loser] = b"out"
+    state._successful_output_keys[loser] = problem.sort_key(loser)
+    await problem.setup()
+    assert await problem.is_interesting(b"hello")
+    assert list(state._successful_outputs) == [b"hello"]
+    assert list(state._successful_output_keys) == [b"hello"]
+
+
+async def test_history_records_reductions_without_captured_output(tmp_path):
     state = _history_output_state(tmp_path)
-    monkeypatch.setattr(state, "_get_last_captured_output", lambda: None)
+    # Without an output manager the test's output is never captured.
+    state.output_manager = None
     _ = state.reducer
     problem = state.problem
     await problem.setup()
@@ -4561,14 +4571,14 @@ async def test_completed_results_are_not_flagged_as_timed_out(tmp_path):
     assert not outcome.timed_out
 
 
-def test_history_backtrack_source_reads_the_run_history(tmp_path):
+async def test_history_backtrack_source_reads_the_run_history(tmp_path):
     state = make_nd_state(
         tmp_path, history_enabled=True, history_base_dir=str(tmp_path)
     )
     problem = state.problem
     assert state.history_manager is not None
-    state._record_reduction_history(b"hello worl")
-    state._record_reduction_history(b"hello wor")
+    await state._record_reduction_history(b"hello worl")
+    await state._record_reduction_history(b"hello wor")
     source = HistoryBacktrackSource(state)
     assert len(source) == 3
     assert source[0] == b"hello world"
@@ -4581,7 +4591,7 @@ def test_history_backtrack_source_reads_the_run_history(tmp_path):
     del problem
 
 
-def test_history_backtrack_source_decodes_directories(tmp_path):
+async def test_history_backtrack_source_decodes_directories(tmp_path):
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
@@ -4605,7 +4615,7 @@ def test_history_backtrack_source_decodes_directories(tmp_path):
         history_base_dir=str(tmp_path),
     )
     state.problem  # initialises the history manager
-    state._record_reduction_history({"a.txt": b"file"})
+    await state._record_reduction_history({"a.txt": b"file"})
     source = HistoryBacktrackSource(state)
     assert len(source) == 2
     assert source[0] == {"a.txt": b"file a"}
@@ -4686,3 +4696,127 @@ def test_load_state_for_path_passes_assume_deterministic(tmp_path):
         assume_deterministic=True,
     )
     assert state.assume_deterministic is True
+
+
+async def test_timeout_exit_zero_is_not_interesting(simple_state):
+    async def run(test_case, debug=False):
+        return ScriptRunResult(exit_code=0, timed_out=True, timeout_used=1.0)
+
+    simple_state.run_for_result = run
+    outcome = await simple_state.check_interesting(b"a")
+    assert not outcome.interesting
+    assert outcome.timed_out
+    assert outcome.cache_valid is not None
+
+
+async def test_basename_attempt_restores_incumbent(simple_state):
+    simple_state.in_place = True
+    simple_state.input_type = InputType.basename
+    problem = simple_state.problem
+
+    async def run(working, **kwargs):
+        assert Path(working).read_bytes() == b"rejected"
+        return ScriptRunResult(exit_code=1)
+
+    simple_state.run_script_on_file = run
+    assert not await problem.is_interesting(b"rejected")
+    assert Path(simple_state.filename).read_bytes() == problem.current_test_case
+
+
+async def test_atomic_target_write_preserves_original_on_failure(
+    simple_state, monkeypatch
+):
+    original = Path(simple_state.filename).read_bytes()
+
+    def fail_replace(source, target):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("shrinkray.state.os.replace", fail_replace)
+    with pytest.raises(OSError, match="disk full"):
+        await simple_state.write_test_case_to_file(simple_state.filename, b"new")
+    assert Path(simple_state.filename).read_bytes() == original
+    assert not list(Path(simple_state.filename).parent.glob(".shrinkray-*"))
+
+
+async def test_atomic_target_write_preserves_symlink_and_mode(simple_state):
+    target = Path(simple_state.filename)
+    real = target.with_suffix(".real")
+    target.rename(real)
+    real.chmod(0o751)
+    target.symlink_to(real)
+    await simple_state.write_test_case_to_file(str(target), b"new")
+    assert target.is_symlink()
+    assert real.read_bytes() == b"new"
+    assert real.stat().st_mode & 0o777 == 0o751
+
+
+async def test_atomic_target_write_recreates_missing_target(simple_state):
+    target = Path(simple_state.filename)
+    target.unlink()
+    await simple_state.write_test_case_to_file(str(target), b"recovered")
+    assert target.read_bytes() == b"recovered"
+
+
+async def test_atomic_target_write_sets_only_permission_bits(simple_state, monkeypatch):
+    # os.stat's st_mode carries the file-type bits too; only the permission
+    # bits may be handed to chmod.
+    modes = []
+    original_chmod = os.chmod
+
+    def recording_chmod(path, mode, **kwargs):
+        modes.append(mode)
+        original_chmod(path, mode, **kwargs)
+
+    monkeypatch.setattr("shrinkray.state.os.chmod", recording_chmod)
+    await simple_state.write_test_case_to_file(simple_state.filename, b"new")
+    assert modes and all(mode == stat.S_IMODE(mode) for mode in modes)
+
+
+def test_sweep_removes_stale_staging_file(tmp_path):
+    # A hard kill between staging a target write and renaming it into
+    # place leaves the staging file behind; the next run sweeps it.
+    target = tmp_path / "test.txt"
+    stale = tmp_path / (".test.txt.shrinkray-" + "c" * 32)
+    stale.write_bytes(b"junk")
+    unrelated = tmp_path / ".test.txt.shrinkray-notes"
+    unrelated.write_bytes(b"keep")
+    simple_state_factory(tmp_path, target)
+    assert not stale.exists()
+    assert unrelated.read_bytes() == b"keep"
+
+
+def test_sweep_of_staging_files_follows_the_target_symlink(tmp_path):
+    # Staging files are created next to the file the target resolves to.
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    real = real_dir / "actual.txt"
+    real.write_text("hello world")
+    target = tmp_path / "test.txt"
+    target.symlink_to(real)
+    stale = real_dir / (".actual.txt.shrinkray-" + "d" * 32)
+    stale.write_bytes(b"junk")
+    simple_state_factory(tmp_path, target)
+    assert not stale.exists()
+
+
+def simple_state_factory(tmp_path, target):
+    script = tmp_path / "test.sh"
+    script.write_text("#!/bin/sh\nexit 0")
+    script.chmod(0o755)
+    if not target.exists():
+        target.write_text("hello world")
+    return ShrinkRayStateSingleFile(
+        input_type=InputType.all,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+    )

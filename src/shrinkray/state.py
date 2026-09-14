@@ -6,6 +6,7 @@ import random
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -116,6 +117,7 @@ class ScriptRunResult:
     # which timeout (in seconds) it was subject to.
     timed_out: bool = False
     timeout_used: float | None = None
+    output: bytes | None = None
 
 
 @define
@@ -275,11 +277,6 @@ class ShrinkRayState[TestCase](ABC):
     # Stores the output from the last debug run
     _last_debug_output: str = ""
 
-    # Stores the output from the most recently completed test (for history recording)
-    # This is read immediately after the test's output file is closed to avoid
-    # race conditions with other parallel tests
-    _last_test_output: bytes | None = None
-
     # Optional output manager for capturing test output (TUI mode or history)
     output_manager: OutputCaptureManager | None = None
 
@@ -343,6 +340,7 @@ class ShrinkRayState[TestCase](ABC):
 
     def __attrs_post_init__(self):
         self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
+        self._target_lock = trio.Lock()
         self._successful_outputs = {}  # Initialize mutable default
         self._successful_output_keys = {}  # Initialize mutable default
         self.sweep_stale_working_files()
@@ -433,32 +431,36 @@ class ShrinkRayState[TestCase](ABC):
         )
         return os.path.dirname(abspath), pattern
 
+    def stale_file_patterns(self) -> "list[tuple[str, re.Pattern[str]]]":
+        """Directory and filename regex pairs for every kind of temporary
+        file this state creates next to the user's files and normally
+        removes itself, so that a previous run's leftovers can be swept."""
+        info = self.stale_working_file_pattern()
+        return [] if info is None else [info]
+
     def sweep_stale_working_files(self) -> None:
-        """Remove any leftover temporary candidate files from a previous
-        run that was killed before it could clean up after itself. Only
-        entries matching this run's own ``<stem>-<hex><ext>`` pattern are
-        removed, so unrelated files are never touched.
+        """Remove any leftover temporary files from a previous run that was
+        killed before it could clean up after itself. Only entries matching
+        this run's own patterns (see stale_file_patterns) are removed, so
+        unrelated files are never touched.
 
         In in-place directory mode each candidate is a *directory*, so
         directories are removed recursively; plain files are unlinked."""
-        info = self.stale_working_file_pattern()
-        if info is None:
-            return
-        directory, pattern = info
-        try:
-            names = os.listdir(directory)
-        except OSError:
-            return
-        for name in names:
-            if pattern.match(name):
-                path = os.path.join(directory, name)
-                if os.path.isdir(path):
-                    shutil.rmtree(path, ignore_errors=True)
-                else:
-                    try:
-                        os.unlink(path)
-                    except OSError:
-                        pass
+        for directory, pattern in self.stale_file_patterns():
+            try:
+                names = os.listdir(directory)
+            except OSError:
+                continue
+            for name in names:
+                if pattern.match(name):
+                    path = os.path.join(directory, name)
+                    if os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                    else:
+                        try:
+                            os.unlink(path)
+                        except OSError:
+                            pass
 
     @property
     def is_directory_mode(self) -> bool:
@@ -490,29 +492,17 @@ class ShrinkRayState[TestCase](ABC):
                 output_dir=self._output_tempdir.name
             )
 
-    def _get_last_captured_output(self) -> bytes | None:
-        """Get the output from the most recently completed test.
-
-        Returns the output content if available, None otherwise.
-        This returns the output that was captured immediately when the test
-        completed, avoiding race conditions with other parallel tests.
-        """
-        return self._last_test_output
-
-    def _check_also_interesting(self, exit_code: int, test_case: TestCase) -> None:
-        """Check if exit code matches also-interesting and record if so.
-
-        Args:
-            exit_code: The exit code from the test
-            test_case: The test case that was tested
-        """
+    def _check_also_interesting(
+        self, exit_code: int, test_case: TestCase, output: bytes | None
+    ) -> None:
+        """Record `test_case` as also-interesting if `exit_code` is the
+        also-interesting code, with `output` as its captured test output."""
         if (
             self.also_interesting_code is not None
             and exit_code == self.also_interesting_code
             and self.history_manager is not None
         ):
             test_case_bytes = self._get_test_case_bytes(test_case)
-            output = self._get_last_captured_output()
             self.history_manager.record_also_interesting(test_case_bytes, output)
 
     def reducer_log_dir(self) -> str | None:
@@ -653,6 +643,7 @@ class ShrinkRayState[TestCase](ABC):
             kwargs["stderr"] = subprocess.DEVNULL
 
         sp = None
+        captured_output: bytes | None = None
         try:
             async with trio.open_nursery() as nursery:
 
@@ -714,7 +705,7 @@ class ShrinkRayState[TestCase](ABC):
                 assert result is not None
                 exit_code = result
 
-                return ScriptRunResult(
+                run_result = ScriptRunResult(
                     exit_code=result,
                     timed_out=timed_out,
                     timeout_used=effective_timeout if timed_out else None,
@@ -730,19 +721,18 @@ class ShrinkRayState[TestCase](ABC):
             # because group children may still be alive.
             if sp is not None:
                 kill_process_group(sp)
-            # Clean up output file handle and capture output immediately
+            # Close the output file and read it back now, before the output
+            # manager can recycle it for another test.
             if output_file_handle is not None:
                 output_file_handle.close()
-                # Read the output file NOW, before any other test can interfere
-                # This avoids race conditions where get_current_output() returns
-                # a different test's partial output
-                # output_path must be set since it's assigned with output_file_handle
+                # output_path is assigned together with output_file_handle
                 assert output_path is not None
                 try:
                     with open(output_path, "rb") as f:
-                        self._last_test_output = f.read()
+                        with trio.CancelScope(shield=True):
+                            captured_output = await trio.to_thread.run_sync(f.read)
                 except OSError:
-                    self._last_test_output = None
+                    captured_output = None
             if test_id is not None and self.output_manager is not None:
                 if exit_code is not None:
                     recorded_code = exit_code
@@ -754,6 +744,7 @@ class ShrinkRayState[TestCase](ABC):
                         returncode if returncode is not None else -int(signal.SIGKILL)
                     )
                 self.output_manager.mark_completed(test_id, recorded_code)
+        return attrs.evolve(run_result, output=captured_output)
 
     def _default_memory_limit_may_block_initial(self) -> bool:
         """Whether an unset (default) memory limit is currently in effect.
@@ -827,13 +818,19 @@ class ShrinkRayState[TestCase](ABC):
         if self.in_place:
             if self.input_type == InputType.basename:
                 working = self.filename
-                await self.write_test_case_to_file(working, test_case)
-
-                return await self.run_script_on_file(
-                    working=working,
-                    debug=debug,
-                    cwd=os.getcwd(),
-                )
+                async with self._target_lock:
+                    try:
+                        await self.write_test_case_to_file(working, test_case)
+                        return await self.run_script_on_file(
+                            working=working,
+                            debug=debug,
+                            cwd=os.getcwd(),
+                        )
+                    finally:
+                        with trio.CancelScope(shield=True):
+                            await self.write_test_case_to_file(
+                                working, self.problem.current_test_case
+                            )
             else:
                 # Absolute so that cleanup in the finally below can't be
                 # defeated by the working directory changing between here
@@ -912,26 +909,26 @@ class ShrinkRayState[TestCase](ABC):
             **self.extra_problem_kwargs,
         )
 
-        # Initialize history and register callback if enabled.
-        # The history callback must be registered FIRST so it runs before any
-        # other on_reduce callback has a chance to yield to the scheduler.
-        # record_reduction is fully synchronous: by running it before the
-        # file-write callback (which awaits on a lock and file I/O), we ensure
-        # the history directory is always consistent with stats.reductions at
-        # every scheduling point. Otherwise emit_progress_updates can wake up
-        # between the two callbacks and report a reduction that the history
-        # manager hasn't written yet, which breaks restart_from_reduction.
+        # Every adoption prunes the outputs stored for candidates that can
+        # no longer be adopted, or they would accumulate for the whole run.
+        @problem.on_reduce
+        async def prune_outputs(test_case: TestCase):
+            self._prune_successful_outputs(test_case)
+
+        # Commits serialize callbacks and progress waits for the commit, so
+        # history writes can leave the scheduler free without publishing an
+        # entry before its contents have reached disk.
         if self.history_manager is not None:
             self._initialize_history_manager()
 
             @problem.on_reduce
             async def record_history(test_case: TestCase):
-                self._record_reduction_history(test_case)
+                await self._record_reduction_history(test_case)
 
         # Writing the file back can't be guaranteed atomic, so we put a lock around
         # writing successful reductions back to the original file so we don't
         # write some confused combination of reductions.
-        write_lock = trio.Lock()
+        write_lock = self._target_lock
 
         @problem.on_reduce
         async def _(test_case: TestCase):
@@ -961,12 +958,9 @@ class ShrinkRayState[TestCase](ABC):
     def problem(self):
         return self.reducer.target
 
-    def _record_reduction_history(self, test_case: TestCase) -> None:
-        """Record an adopted reduction in history and prune stored outputs.
-
-        The recorded output is the one captured when the test case was found
-        interesting (see check_interesting), not a fresh read, so a
-        concurrently running test cannot overwrite it.
+    def _prune_successful_outputs(self, test_case: TestCase) -> None:
+        """Drop the stored outputs of candidates that `test_case`'s adoption
+        has made unadoptable.
 
         Pruning keeps the adopted test case's output (the LLM passes read it
         from _successful_outputs) and the output of any candidate that still
@@ -977,9 +971,7 @@ class ShrinkRayState[TestCase](ABC):
         adopted candidate is a loser whose output nothing can use again, so it
         is dropped to bound memory.
         """
-        assert self.history_manager is not None
         test_case_bytes = self._get_test_case_bytes(test_case)
-        output = self._successful_outputs.get(test_case_bytes)
         adopted_key = self.problem.sort_key(test_case)
         survivors = {
             tcb
@@ -997,7 +989,20 @@ class ShrinkRayState[TestCase](ABC):
             for tcb, key in self._successful_output_keys.items()
             if tcb in survivors
         }
-        self.history_manager.record_reduction(test_case_bytes, output)
+
+    async def _record_reduction_history(self, test_case: TestCase) -> None:
+        """Record an adopted reduction in history.
+
+        The recorded output is the one captured when the test case was found
+        interesting (see check_interesting), not a fresh read, so a
+        concurrently running test cannot overwrite it.
+        """
+        assert self.history_manager is not None
+        test_case_bytes = self._get_test_case_bytes(test_case)
+        output = self._successful_outputs.get(test_case_bytes)
+        await trio.to_thread.run_sync(
+            self.history_manager.record_reduction, test_case_bytes, output
+        )
 
     async def check_interesting(self, test_case: TestCase) -> InterestingnessResult:
         """Run the interestingness test on test_case.
@@ -1014,14 +1019,12 @@ class ShrinkRayState[TestCase](ABC):
 
         async with self.is_interesting_limiter:
             result = await self.run_for_result(test_case)
-            self._check_also_interesting(result.exit_code, test_case)
-            if result.exit_code == 0:
-                # Capture output now while still in the limiter to avoid race conditions
-                # where another test starts and overwrites the "current" output
+            if not result.timed_out:
+                self._check_also_interesting(result.exit_code, test_case, result.output)
+            if result.exit_code == 0 and not result.timed_out:
                 test_case_bytes = self._get_test_case_bytes(test_case)
-                output = self._get_last_captured_output()
-                if output is not None:
-                    self._successful_outputs[test_case_bytes] = output
+                if result.output is not None:
+                    self._successful_outputs[test_case_bytes] = result.output
                     self._successful_output_keys[test_case_bytes] = (
                         self.problem.sort_key(test_case)
                     )
@@ -1049,9 +1052,10 @@ class ShrinkRayState[TestCase](ABC):
 
         Args:
             new_initial: The new initial test case content
-            excluded: Set of test cases to reject as uninteresting
+            excluded: Set of test cases to reject as uninteresting, in
+                addition to those excluded by earlier restarts
         """
-        self.excluded_test_cases = excluded
+        self.excluded_test_cases = (self.excluded_test_cases or set()) | excluded
         # Clear cached reducer so it will be recreated on next access
         try:
             del self._cached_reducer
@@ -1324,9 +1328,48 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
                 check=False,
             )
 
+    def staging_file_pattern(self) -> "tuple[str, re.Pattern[str]]":
+        """Directory and filename regex for the staging files that atomic
+        writes of the target create beside the file it resolves to (see
+        write_test_case_to_file_impl)."""
+        directory, basename = os.path.split(os.path.realpath(self.filename))
+        pattern = re.compile(re.escape(f".{basename}.shrinkray-") + r"[0-9a-f]{32}\Z")
+        return directory, pattern
+
+    def stale_file_patterns(self) -> "list[tuple[str, re.Pattern[str]]]":
+        return [*super().stale_file_patterns(), self.staging_file_pattern()]
+
     async def write_test_case_to_file_impl(self, working: str, test_case: bytes):
-        async with await trio.open_file(working, "wb") as o:
-            await o.write(test_case)
+        if os.path.abspath(working) != os.path.abspath(self.filename):
+            async with await trio.open_file(working, "wb") as o:
+                await o.write(test_case)
+            return
+
+        # The target is replaced atomically so that a crash or kill mid-write
+        # can never leave it truncated: the new content is staged in a
+        # sibling file and renamed over the file the target resolves to,
+        # which keeps a symlinked target a symlink and preserves its mode.
+        def write() -> None:
+            target = os.path.realpath(working)
+            directory, basename = os.path.split(target)
+            staging = os.path.join(
+                directory, f".{basename}.shrinkray-{os.urandom(16).hex()}"
+            )
+            fd = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                with os.fdopen(fd, "wb") as output:
+                    output.write(test_case)
+                try:
+                    mode = stat.S_IMODE(os.stat(target).st_mode)
+                except FileNotFoundError:
+                    mode = 0o600
+                os.chmod(staging, mode)
+                os.replace(staging, target)
+            finally:
+                if os.path.exists(staging):
+                    os.unlink(staging)
+
+        await trio.to_thread.run_sync(write)
 
     async def print_exit_message(self, problem):
         formatting_increase = 0
@@ -1334,8 +1377,8 @@ class ShrinkRayStateSingleFile(ShrinkRayState[bytes]):
         reformatted = await self.attempt_format(final_result)
         if reformatted != final_result:
             # attempt_format only returns a different value if is_interesting was True
-            async with await trio.open_file(self.filename, "wb") as o:
-                await o.write(reformatted)
+            with trio.CancelScope(shield=True):
+                await self.write_test_case_to_file(self.filename, reformatted)
             formatting_increase = max(0, len(reformatted) - len(final_result))
             final_result = reformatted
 
@@ -1424,13 +1467,16 @@ class ShrinkRayDirectoryState(ShrinkRayState[dict[str, bytes]]):
     async def write_test_case_to_file_impl(
         self, working: str, test_case: dict[str, bytes]
     ):
-        shutil.rmtree(working, ignore_errors=True)
-        os.makedirs(working, exist_ok=True)
-        for k, v in test_case.items():
-            f = os.path.join(working, k)
-            os.makedirs(os.path.dirname(f), exist_ok=True)
-            async with await trio.open_file(f, "wb") as o:
-                await o.write(v)
+        def write() -> None:
+            shutil.rmtree(working, ignore_errors=True)
+            os.makedirs(working, exist_ok=True)
+            for k, v in test_case.items():
+                f = os.path.join(working, k)
+                os.makedirs(os.path.dirname(f), exist_ok=True)
+                with open(f, "wb") as output:
+                    output.write(v)
+
+        await trio.to_thread.run_sync(write)
 
     async def format_data(self, test_case: dict[str, bytes]) -> dict[str, bytes] | None:
         # Formatting not supported for directory reduction

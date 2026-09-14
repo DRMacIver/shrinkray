@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from shrinkray.subprocess.client import SubprocessClient
-from shrinkray.subprocess.protocol import ProgressUpdate, Response
+from shrinkray.subprocess.protocol import ProgressUpdate, Response, serialize
 
 
 # === SubprocessClient unit tests ===
@@ -1336,5 +1336,103 @@ def test_subprocess_client_start_downloads_sends_command():
             "start_downloads", {"disabled": ["llm", "grammar-go"]}
         )
         assert response.result == {"status": "downloads_started"}
+
+    asyncio.run(run())
+
+
+def test_eof_resolves_outstanding_commands():
+    async def run():
+        client = SubprocessClient()
+        process = MagicMock()
+        process.stdout = asyncio.StreamReader()
+        process.stdout.feed_eof()
+        client._process = process
+        future = asyncio.get_running_loop().create_future()
+        client._pending_responses["pending"] = future
+        await client._read_output()
+        assert client.is_completed
+        assert future.done()
+        with pytest.raises(RuntimeError, match="closed"):
+            await future
+        assert not client._pending_responses
+
+    asyncio.run(run())
+
+
+def test_closing_the_client_is_not_reported_as_a_worker_failure():
+    async def run():
+        client = SubprocessClient()
+        process = MagicMock()
+        process.stdout = asyncio.StreamReader()  # never fed: read blocks
+        client._process = process
+        reader = asyncio.create_task(client._read_output())
+        await asyncio.sleep(0)
+        # close() marks the client closed and then cancels the reader.
+        client._closed = True
+        reader.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await reader
+        assert client.is_completed
+        assert client.error_message is None
+
+    asyncio.run(run())
+
+
+def test_cancelled_command_removes_pending_request():
+    async def run():
+        client = SubprocessClient()
+        client._process = MagicMock()
+        client._process.stdin.drain = AsyncMock()
+        task = asyncio.create_task(client.send_command("status"))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not client._pending_responses
+
+    asyncio.run(run())
+
+
+def test_progress_coalescing_preserves_graph_samples():
+    async def run():
+        client = SubprocessClient()
+
+        for size in range(100, 0, -1):
+            await client._handle_message(
+                serialize(
+                    ProgressUpdate(
+                        status="running",
+                        original_size=100,
+                        calls=100 - size,
+                        reductions=100 - size,
+                        size=size,
+                        new_size_history=[(float(100 - size), size)],
+                    )
+                )
+            )
+        assert client._progress_queue.qsize() == 1
+        update = client._progress_queue.get_nowait()
+        assert update.size == 1
+        assert len(update.new_size_history) == 100
+
+    asyncio.run(run())
+
+
+def test_eof_after_completion_clears_cancelled_and_pending_requests():
+    async def run():
+        client = SubprocessClient()
+        client._completed = True
+        client._process = MagicMock()
+        client._process.stdout = asyncio.StreamReader()
+        client._process.stdout.feed_eof()
+        cancelled = asyncio.get_running_loop().create_future()
+        cancelled.cancel()
+        pending = asyncio.get_running_loop().create_future()
+        client._pending_responses.update(cancelled=cancelled, pending=pending)
+        await client._read_output()
+        with pytest.raises(RuntimeError, match="closed"):
+            await pending
+        assert not client._pending_responses
+        assert client.error_message is None
 
     asyncio.run(run())

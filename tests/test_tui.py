@@ -1227,6 +1227,42 @@ def test_app_successful_start_covers_no_error_branch():
     run_async(run_test())
 
 
+def test_quit_while_worker_starts_does_not_report_an_error():
+    """Quitting during client.start() closes the client; the reduction
+    must not then be started on the closed client and reported as a
+    failure."""
+
+    async def run_test():
+        app_holder: list[ShrinkRayApp] = []
+        mock_client = MagicMock()
+
+        async def start():
+            await app_holder[0].action_quit()
+
+        mock_client.start = start
+        mock_client.start_reduction = AsyncMock()
+        mock_client.close = AsyncMock()
+        mock_client.is_completed = False
+        mock_client.error_message = None
+
+        with patch("shrinkray.tui.SubprocessClient", return_value=mock_client):
+            app = ShrinkRayApp(
+                file_path="/tmp/test.txt",
+                test=["./test.sh"],
+            )
+            app_holder.append(app)
+
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await asyncio.sleep(0.1)
+                await pilot.pause()
+
+        mock_client.start_reduction.assert_not_called()
+        assert not app.return_code
+
+    run_async(run_test())
+
+
 def test_app_handles_exception_in_run_reduction():
     """Test that app handles exceptions during reduction."""
 

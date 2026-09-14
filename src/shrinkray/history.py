@@ -7,6 +7,7 @@ allowing analysis and reproduction of reduction runs.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -14,7 +15,7 @@ import shlex
 import shutil
 from datetime import datetime
 
-from attrs import define
+from attrs import Factory, define
 
 from shrinkray.cli import InputType
 
@@ -60,6 +61,11 @@ class HistoryManager:
     record_reductions: bool = True  # If False, only record also-interesting
     is_directory: bool = False  # True if target is a directory
     input_type: InputType = InputType.all  # How the test receives the test case
+    # Digests of the also-interesting test cases recorded so far. Under a
+    # nondeterministic test the same candidate is run many times, and each
+    # run exiting with the also-interesting code would otherwise record it
+    # again.
+    _also_interesting_digests: set[bytes] = Factory(set)
 
     @classmethod
     def create(
@@ -245,6 +251,10 @@ cd "$WORK"
             test_case: The file content (or serialized directory content)
             output: Combined stdout/stderr from the test, or None if not captured
         """
+        digest = hashlib.sha256(test_case).digest()
+        if digest in self._also_interesting_digests:
+            return
+        self._also_interesting_digests.add(digest)
         self.also_interesting_counter += 1
         subdir = os.path.join(
             self.history_dir,
@@ -322,6 +332,7 @@ cd "$WORK"
         Raises:
             FileNotFoundError: If the reduction doesn't exist
         """
+        restart_content = self.get_reduction_content(reduction_number)
         excluded_test_cases: set[bytes] = set()
         reductions_dir = os.path.join(self.history_dir, "reductions")
         also_interesting_dir = os.path.join(self.history_dir, "also-interesting")
@@ -365,7 +376,6 @@ cd "$WORK"
         self.reduction_counter = reduction_number
 
         # Return content to restart from
-        restart_content = self.get_reduction_content(reduction_number)
         return restart_content, excluded_test_cases
 
     # === Directory mode methods ===

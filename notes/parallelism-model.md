@@ -62,7 +62,9 @@ Patch application (`apply_patches`) runs at the full configured parallelism. The
 
 ## Backpressure
 
-`WorkContext.map` (and the underlying `parallel_map`) use bounded channels to prevent unbounded work creation. The `map` result channel buffer is `parallelism + 1`, which limits in-flight work and prevents memory exhaustion on large inputs.
+`parallel_map` uses a semaphore whose tokens cover both running evaluations and results waiting for their turn in the ordered output. A slow early result therefore cannot allow later results to accumulate without bound. Tokens are released when results reach the bounded output channel. `WorkContext.map` adds a result buffer of `parallelism + 1`; `filter` also uses a bounded channel.
+
+Directory reduction starts at most `parallelism` per-file reducers. Each may speculate internally, while the state-level oracle limiter continues to cap the total number of running interestingness tests.
 
 ## Structured Concurrency
 
@@ -94,6 +96,22 @@ async with trio.open_nursery() as nursery:
     nursery.cancel_scope.cancel()  # Cancel watcher when done
 ```
 
+## Adoption and persistence
+
+Oracle calls remain concurrent. Calls for the same candidate share an in-flight event so only one task drives that candidate's evidence at a time. If that task is cancelled, waiters retry.
+
+A problem-level lock serializes accepted-result commits and periodic incumbent verification. Verification keeps its evidence attached to the incumbent it actually replayed. Before adoption, candidates recheck whether nondeterminism handling engaged or the required reproduction rate rose while they were running.
+
+Once a commit starts, it shields its callbacks from cancellation. History snapshots run in a worker thread; single-file targets use atomic replacement preserving symlinks and permissions. Directory writes also run outside the Trio loop. Progress reporting waits for the commit before exposing its history entry. In-place basename attempts share the target-write lock and restore the incumbent in a cancellation-safe `finally` block.
+
+## Worker lifecycle
+
+A history restart first validates the requested entry (and is refused once the reduction is no longer running), cancels the old reducer, and waits for all its cleanup and commits to finish. The replacement reducer is installed, and the worker marked running again, before the run loop is released to start it; the target write follows and is best effort. A restart that fails after the old reducer was cancelled ends the worker with that error rather than a completion.
+
+Directory reduction runs the initial test case through the problem's setup before any candidate, as single-file reduction does, so the calibration call, the default memory-limit retry and startup nondeterminism detection all see the initial input.
+
+Worker stdout uses a Trio file-descriptor stream, so a full pipe can be cancelled without blocking the scheduler. The asyncio client coalesces pending progress messages, preserving incremental graph samples, and resolves outstanding commands on EOF or reader failure. Validation subprocesses have bounded runtimes and process-group cleanup as well.
+
 ## The Merge Master Pattern
 
 The merge master pattern is how `PatchApplier` coordinates parallel patch testing while making progress. See [patching-system.md](patching-system.md) for a detailed explanation.
@@ -111,7 +129,8 @@ self.is_interesting_limiter = trio.CapacityLimiter(max(self.parallelism, 1))
 # handles exclusion sets, --also-interesting, and output capture):
 async def is_interesting(self, test_case):
     async with self.is_interesting_limiter:
-        return await self.run_for_exit_code(test_case) == 0
+        result = await self.run_for_result(test_case)
+        return result.exit_code == 0 and not result.timed_out
 ```
 
 This prevents overwhelming the system with subprocess spawns.

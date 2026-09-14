@@ -338,3 +338,41 @@ def test_workcontext_custom_volume():
     """Test WorkContext with custom volume."""
     work = WorkContext(volume=Volume.debug)
     assert work.volume == Volume.debug
+
+
+async def test_parallel_map_bounds_unconsumed_work():
+    calls = []
+
+    async def evaluate(value):
+        calls.append(value)
+        await trio.lowlevel.checkpoint()
+        return value
+
+    async with parallel_map(range(10000), evaluate, parallelism=2) as results:
+        assert await results.receive() == 0
+        await wait_all_tasks_blocked()
+        assert len(calls) <= 6
+
+
+async def test_filter_bounds_unconsumed_matches():
+    calls = []
+
+    async def matches(value):
+        calls.append(value)
+        await trio.lowlevel.checkpoint()
+        return True
+
+    async with WorkContext(parallelism=2).filter(range(10000), matches) as results:
+        assert await results.receive() == 0
+        await wait_all_tasks_blocked()
+        assert len(calls) < 30
+
+
+async def test_filter_consumer_can_close_receive_channel():
+    async def matches(value):
+        return True
+
+    async with WorkContext(parallelism=2).filter(range(100), matches) as results:
+        await results.receive()
+        await results.aclose()
+        await wait_all_tasks_blocked()

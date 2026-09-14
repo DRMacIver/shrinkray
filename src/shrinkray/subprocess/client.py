@@ -25,7 +25,7 @@ class SubprocessClient:
     def __init__(self, debug_mode: bool = False):
         self._process: asyncio.subprocess.Process | None = None
         self._pending_responses: dict[str, asyncio.Future[Response]] = {}
-        self._progress_queue: asyncio.Queue[ProgressUpdate] = asyncio.Queue()
+        self._progress_queue: asyncio.Queue[ProgressUpdate] = asyncio.Queue(maxsize=1)
         self._reader_task: asyncio.Task | None = None
         self._completed = False
         self._closed = False
@@ -68,20 +68,34 @@ class SubprocessClient:
         if self._process is None or self._process.stdout is None:
             return
 
-        buffer = b""
-        while True:
-            try:
-                chunk = await self._process.stdout.read(4096)
-                if not chunk:
+        try:
+            buffer = b""
+            while True:
+                try:
+                    chunk = await self._process.stdout.read(4096)
+                    if not chunk:
+                        break
+                    buffer += chunk
+                    while b"\n" in buffer:
+                        line, buffer = buffer.split(b"\n", 1)
+                        if line:
+                            await self._handle_message(line.decode("utf-8"))
+                except Exception:
+                    traceback.print_exc()
                     break
-                buffer += chunk
-                while b"\n" in buffer:
-                    line, buffer = buffer.split(b"\n", 1)
-                    if line:
-                        await self._handle_message(line.decode("utf-8"))
-            except Exception:
-                traceback.print_exc()
-                break
+        finally:
+            if not self._completed:
+                self._completed = True
+                # Output ending while the client is being closed is the
+                # close itself, not a worker failure.
+                if not self._closed:
+                    self._error_message = "Subprocess output closed before completion"
+            for future in self._pending_responses.values():
+                if not future.done():
+                    future.set_exception(
+                        RuntimeError(self._error_message or "Subprocess closed")
+                    )
+            self._pending_responses.clear()
 
     async def _handle_message(self, line: str) -> None:
         """Handle a message from the subprocess."""
@@ -92,7 +106,11 @@ class SubprocessClient:
             return
 
         if isinstance(msg, ProgressUpdate):
-            await self._progress_queue.put(msg)
+            if self._progress_queue.full():
+                previous = self._progress_queue.get_nowait()
+                previous.new_size_history.extend(msg.new_size_history)
+                msg.new_size_history = previous.new_size_history
+            self._progress_queue.put_nowait(msg)
         elif isinstance(msg, Response):
             # Check for completion or error signal (unsolicited responses with empty id)
             if msg.id == "":
@@ -131,17 +149,13 @@ class SubprocessClient:
         future: asyncio.Future[Response] = asyncio.get_event_loop().create_future()
         self._pending_responses[request_id] = future
 
-        # Send request
-        line = serialize(request) + "\n"
-        self._process.stdin.write(line.encode("utf-8"))
-        await self._process.stdin.drain()
-
-        # Wait for response
         try:
+            line = serialize(request) + "\n"
+            self._process.stdin.write(line.encode("utf-8"))
+            await self._process.stdin.drain()
             return await future
-        except Exception:
+        finally:
             self._pending_responses.pop(request_id, None)
-            raise
 
     async def start_reduction(
         self,

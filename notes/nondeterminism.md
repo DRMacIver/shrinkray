@@ -37,6 +37,14 @@ replay that is not interesting flips the run into nondeterministic handling,
 which is sticky. Timed-out replays are ignored: a timeout says nothing
 about determinism. `--assume-deterministic` skips all of this.
 
+Under handling, a candidate run that times out is not a sample either: the
+candidate is rejected for as long as the timeout it ran under stands (the
+rejection is retried after a raise, as under a deterministic test) without
+the timeout entering its ledger, and a timed-out seed run just ends the
+top-up. The batches that judge fallback test cases (confirmation and
+recovery) do count a timeout as a miss, so that they stay bounded and err
+towards the older entry.
+
 **Confirmation and backtracking.** At the flip the current test case was
 adopted on single runs and may not reproduce. It faces the confirmation
 bar (accept on the fourth interesting run, reject on none in ten or when

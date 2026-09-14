@@ -56,7 +56,7 @@ The core engine that applies patches in parallel with intelligent merging.
 
 Workers call `try_apply_patch()` in parallel. When a patch passes its interestingness test, the worker adds it to a merge queue and then attempts to acquire the merge lock.
 
-**Important:** While a merge master is active, all other workers must wait for the merge to complete or reject their patch. This serialises the actual state updates while allowing parallel testing.
+**Important:** While a merge master is active, other workers keep testing their candidates in parallel; only a worker whose patch passed waits for the master to merge it. This serialises the actual state updates while allowing parallel testing.
 
 One worker becomes the "merge master" and processes the queue:
 
@@ -67,7 +67,8 @@ One worker becomes the "merge master" and processes the queue:
 
 **Important caveats:**
 - The subset found is **not necessarily maximal** - we don't retry patches once they fail (until the next pass invocation), and applying some patches might unlock others (e.g., deleting a variable's use allows deleting its assignment)
-- The only guarantee is: if any patches can be applied, at least one will be applied
+- The only guarantee is: if any patches can be applied, at least one will be applied. If the master is cancelled mid-round (directory mode, where per-file reducers share an applier but cancel their passes independently), the patches its probes have already merged are reported as applied and the rest as not, so a later pass can retry them.
+- Probes build on the patch set the round started with. A candidate adopted directly during the round (it sorted below the current test case on its own) is queued like any other; until the master reaches it, a probe of the patches queued ahead of it can fail on the sort-key check alone, because it lacks that adopted patch. Those patches are dropped for this pass at no interestingness-call cost.
 
 ### Finding Compatible Patches
 

@@ -19,6 +19,16 @@ from dataclasses import dataclass
 import trio
 
 from shrinkray.cli import InputType
+from shrinkray.process import run_managed_process
+from shrinkray.state import DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT
+
+
+class _ValidationTimedOut(Exception):
+    """The interestingness test did not finish within its timeout."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
 
 
 @dataclass
@@ -73,6 +83,8 @@ async def _run_validation_test(
     in_place: bool,
     filename: str,
     retries: int = 0,
+    timeout: float | None = None,
+    memory_limit: int | None = None,
 ) -> ValidationResult:
     """Run the interestingness test and check if it passes, re-running a
     failed run up to `retries` times in case the test is nondeterministic.
@@ -96,9 +108,10 @@ async def _run_validation_test(
                 # Write directly to original file
                 with open(working, "rb") as reader:
                     existing_content = reader.read()
-                if existing_content != initial_content:
-                    restore_path = working
-                    restore_content = existing_content
+                # Even an identical rewrite can be cancelled after truncation,
+                # before any backup exists. Always restore the original.
+                restore_path = working
+                restore_content = existing_content
                 async with await trio.open_file(working, "wb") as f:
                     await f.write(initial_content)
             else:
@@ -140,37 +153,36 @@ async def _run_validation_test(
             with open(working, "rb") as f:
                 stdin_data = f.read()
 
-        # Run subprocess with real-time output streaming
-        # We use subprocess.run in a thread because trio.run_process doesn't
-        # properly support file descriptor inheritance for streaming output.
-        def run_subprocess() -> subprocess.CompletedProcess[bytes]:
-            # Try to stream output directly to stderr if possible
-            # This allows real-time output visibility for slow tests
+        async def run_subprocess() -> subprocess.CompletedProcess[bytes]:
             try:
-                stderr_fd = sys.stderr.fileno()
-                return subprocess.run(
-                    command,
-                    cwd=cwd,
-                    stdin=subprocess.DEVNULL if stdin_data is None else None,
-                    stdout=stderr_fd,
-                    stderr=stderr_fd,
-                    input=stdin_data,
-                    check=False,
-                )
+                output_fd = sys.stderr.fileno()
             except (io.UnsupportedOperation, OSError):
-                # Falls back to capturing if stderr doesn't have a real file
-                # descriptor (e.g., when running under pytest with capture)
-                return subprocess.run(
+                output_fd = None
+            # Without a configured timeout the initial call gets the same
+            # calibration bound the reducer would give it.
+            if timeout is None:
+                effective_timeout = DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT
+                advice = "Pass --timeout to allow a slower test."
+            else:
+                effective_timeout = timeout
+                advice = "Try raising or disabling --timeout."
+            try:
+                return await run_managed_process(
                     command,
                     cwd=cwd,
-                    stdin=subprocess.DEVNULL if stdin_data is None else None,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
                     input=stdin_data,
-                    check=False,
+                    output_fd=output_fd,
+                    timeout=effective_timeout,
+                    memory_limit=memory_limit,
+                )
+            except subprocess.TimeoutExpired:
+                raise _ValidationTimedOut(
+                    f"Interestingness test timed out after {effective_timeout:g}s "
+                    f"on the initial test case. {advice}\n\n"
+                    f"To reproduce:\n{_format_command_for_display(command, cwd)}"
                 )
 
-        result = await trio.to_thread.run_sync(run_subprocess)
+        result = await run_subprocess()
         _report_run(result)
 
         # A nondeterministic test may fail its first run on an interesting
@@ -187,7 +199,7 @@ async def _run_validation_test(
                 file=sys.stderr,
                 flush=True,
             )
-            result = await trio.to_thread.run_sync(run_subprocess)
+            result = await run_subprocess()
             _report_run(result)
         if failures and result.returncode == 0:
             print(
@@ -215,6 +227,12 @@ async def _run_validation_test(
             temp_dirs=temp_dirs,
         )
 
+    except _ValidationTimedOut as timed_out:
+        return ValidationResult(
+            success=False,
+            error_message=timed_out.message,
+            temp_dirs=temp_dirs,
+        )
     except Exception as e:
         traceback.print_exc()
         return ValidationResult(
@@ -242,15 +260,7 @@ async def _run_formatter(
         flush=True,
     )
 
-    def run_subprocess() -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run(
-            formatter_command,
-            input=content,
-            capture_output=True,
-            check=False,
-        )
-
-    result = await trio.to_thread.run_sync(run_subprocess)
+    result = await run_managed_process(formatter_command, input=content)
 
     # Show stderr from formatter if any
     if result.stderr:
@@ -286,6 +296,8 @@ async def validate_initial_example(
     in_place: bool,
     formatter_command: list[str] | None = None,
     retries: int = 0,
+    timeout: float | None = None,
+    memory_limit: int | None = None,
 ) -> ValidationResult:
     """Validate that the initial example passes the interestingness test.
 
@@ -325,6 +337,8 @@ async def validate_initial_example(
         in_place=in_place,
         filename=file_path,
         retries=retries,
+        timeout=timeout,
+        memory_limit=memory_limit,
     )
 
     if not result.success:
@@ -397,6 +411,8 @@ async def validate_initial_example(
                 input_type=input_type,
                 in_place=in_place,
                 filename=file_path,
+                timeout=timeout,
+                memory_limit=memory_limit,
             )
 
             # Clean up temp dirs from formatted test
@@ -439,6 +455,8 @@ def run_validation(
     in_place: bool,
     formatter_command: list[str] | None = None,
     retries: int = 0,
+    timeout: float | None = None,
+    memory_limit: int | None = None,
 ) -> ValidationResult:
     """Run initial validation synchronously using trio.run().
 
@@ -455,6 +473,8 @@ def run_validation(
             in_place,
             formatter_command,
             retries=retries,
+            timeout=timeout,
+            memory_limit=memory_limit,
         )
 
     return trio.run(_run)

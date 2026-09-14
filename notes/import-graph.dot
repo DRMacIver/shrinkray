@@ -140,4 +140,6 @@ digraph imports {
     "ui" -> "problem";
     "ui" -> "state";
     "validation" -> "cli";
+    "validation" -> "process";
+    "validation" -> "state";
 }

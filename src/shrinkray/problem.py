@@ -707,6 +707,7 @@ class Ledger:
     # the runs after it (which the stopping rule did not select on) can
     # be told apart when the anchor is raised.
     accepted_at: Evidence | None = None
+    adoption_pending: bool = False
 
     def unselected_evidence(self) -> Evidence:
         """The runs recorded after the accept decision."""
@@ -804,6 +805,10 @@ class BasicReductionProblem(ReductionProblem[T]):
         self.__on_reduce_callbacks: list[Callable[[T], Awaitable[None]]] = []
         self.__has_set_up = False
         self.__calls_at_last_verify = 0
+        self.__state_lock = trio.Lock()
+        self.__commit_done = trio.Event()
+        self.__commit_done.set()
+        self.__in_flight: dict[str, trio.Event] = {}
 
     async def setup(self) -> None:
         if self.__has_set_up:
@@ -1061,10 +1066,22 @@ class BasicReductionProblem(ReductionProblem[T]):
             self.__history if self.__history is not None else [self.__initial]
         )
         current = self.current_test_case
-        positions = [
-            i for i in range(len(history) - 1, -1, -1) if history[i] != current
-        ]
-        if not positions:
+        positions: list[int] = []
+        cursor = len(history) - 1
+
+        def ensure_position(k: int) -> bool:
+            # Discover the filtered index lazily. This preserves the search
+            # order even after backtracking has repeated an incumbent in
+            # history, without reading older entries when a recent one works.
+            nonlocal cursor
+            while len(positions) <= k and cursor >= 0:
+                index = cursor
+                cursor -= 1
+                if history[index] != current:
+                    positions.append(index)
+            return k < len(positions)
+
+        if not ensure_position(0):
             return None
 
         async def test(k: int) -> tuple[T, Evidence] | None:
@@ -1081,7 +1098,7 @@ class BasicReductionProblem(ReductionProblem[T]):
         rejected = -1
         accepted: tuple[int, tuple[T, Evidence]] | None = None
         k = 0
-        while k < len(positions):
+        while ensure_position(k):
             result = await test(k)
             if result is not None:
                 accepted = (k, result)
@@ -1108,38 +1125,101 @@ class BasicReductionProblem(ReductionProblem[T]):
         still counts as a reduction event and fires the reduction
         callbacks: the file on disk and the history directory must follow
         the current test case, whichever direction it moved."""
-        self.stats.reductions += 1
-        self.stats.time_of_last_reduction = time.time()
-        self.stats.current_test_case_size = self.size(test_case)
-        self.__current = test_case
-        for f in self.__on_reduce_callbacks:
-            await f(test_case)
+        with trio.CancelScope(shield=True):
+            self.stats.reductions += 1
+            self.stats.time_of_last_reduction = time.time()
+            self.stats.current_test_case_size = self.size(test_case)
+            self.__current = test_case
+            await self.__notify_reduction(test_case)
 
     async def is_interesting(self, test_case: T) -> bool:
-        """Returns true if this test_case is interesting."""
+        # Only one task drives a candidate's ledger. Waiters retry after its
+        # owner finishes or is cancelled; unrelated candidates stay parallel.
         await trio.lowlevel.checkpoint()
         if test_case == self.current_test_case:
             return True
-        cache_key = self.__cache_key(test_case)
+        key = self.__cache_key(test_case)
+        while key in self.__in_flight:
+            await self.__in_flight[key].wait()
+        event = trio.Event()
+        self.__in_flight[key] = event
+        try:
+            return await self.__test_candidate(test_case, key)
+        finally:
+            del self.__in_flight[key]
+            event.set()
+
+    async def __test_candidate(self, test_case: T, cache_key: str) -> bool:
+        """Returns true if this test_case is interesting."""
+        # The wait for a previous owner may have ended with its adoption.
+        if test_case == self.current_test_case:
+            return True
         ledger = self.__ledgers.get(cache_key)
         if ledger is not None and ledger.latched():
             assert ledger.verdict is not None
+            if ledger.adoption_pending:
+                # The previous owner was cancelled while waiting to commit,
+                # so this cached success still has to adopt the improvement.
+                return await self.__finish_candidate(test_case, ledger, ledger.verdict)
             return ledger.verdict
 
         if self.__policy is not None:
             await self.__maybe_verify_current()
 
-        if self.__policy is None or not self.__policy.active:
-            result, _, cache_valid = await self.__execute(test_case)
-            ledger = Ledger(verdict=result, cache_valid=cache_valid)
-            ledger.evidence.record(result)
+        if ledger is None:
+            ledger = Ledger()
             self.__ledgers[cache_key] = ledger
+        if self.__policy is None or not self.__policy.active:
+            result, timed_out, cache_valid = await self.__execute(test_case)
+            if not timed_out:
+                ledger.evidence.record(result)
+            ledger.verdict = result
+            ledger.cache_valid = cache_valid
         else:
-            if ledger is None:
-                ledger = Ledger()
-                self.__ledgers[cache_key] = ledger
             result = await self.__run_gauntlet(test_case, ledger)
 
+        ledger.adoption_pending = result
+        return await self.__finish_candidate(test_case, ledger, result)
+
+    async def __finish_candidate(
+        self, test_case: T, ledger: Ledger, result: bool
+    ) -> bool:
+        while True:
+            async with self.__state_lock:
+                if (
+                    self.__policy is not None
+                    and self.__policy.active
+                    and (
+                        ledger.min_hits is None
+                        or (
+                            result
+                            and ledger.accepted_at is not None
+                            and gauntlet(
+                                ledger.accepted_at,
+                                self.__policy.anchor,
+                                ledger.min_hits,
+                                self.__policy.reject_bar,
+                            )
+                            != Verdict.ACCEPT
+                        )
+                    )
+                ):
+                    # Detection or another adoption may have raised the bar
+                    # during execution, seeding, or the wait for this lock.
+                    ledger.verdict = None
+                    ledger.cache_valid = None
+                    ledger.accepted_at = None
+                else:
+                    with trio.CancelScope(shield=True):
+                        await self.__record_result(test_case, ledger, result)
+                        ledger.adoption_pending = False
+                    break
+            result = await self.__run_gauntlet(test_case, ledger)
+        if self.pass_call_monitor is not None:
+            self.pass_call_monitor()
+        return result
+
+    async def __record_result(self, test_case: T, ledger: Ledger, result: bool) -> None:
         self.stats.failed_reductions += 1
         if result:
             if self.sort_key(test_case) < self.sort_key(self.current_test_case):
@@ -1164,13 +1244,22 @@ class BasicReductionProblem(ReductionProblem[T]):
                     self.__policy.raise_anchor(ledger.unselected_evidence())
                     self.__policy.adopt(ledger.unselected_evidence())
                     self.__policy.confirming = False
-                for f in self.__on_reduce_callbacks:
-                    await f(test_case)
+                await self.__notify_reduction(test_case)
             else:
                 self.stats.wasted_interesting_calls += 1
-        if self.pass_call_monitor is not None:
-            self.pass_call_monitor()
-        return result
+
+    async def __notify_reduction(self, test_case: T) -> None:
+        done = self.__commit_done = trio.Event()
+        try:
+            for callback in self.__on_reduce_callbacks:
+                await callback(test_case)
+        finally:
+            done.set()
+
+    async def wait_for_commit(self) -> None:
+        """Wait for persistence, without blocking progress on oracle replays."""
+        while not self.__commit_done.is_set():
+            await self.__commit_done.wait()
 
     async def __maybe_verify_current(self) -> None:
         """Periodically replay the current test case. While the test still
@@ -1180,23 +1269,26 @@ class BasicReductionProblem(ReductionProblem[T]):
         the incumbent monitor, which catches an incumbent that does not
         reproduce at the rate the gauntlet required (a false accept, or
         an anchor the incumbent never lived up to)."""
-        assert self.__policy is not None
         if self.stats.calls - self.__calls_at_last_verify < VERIFY_INTERVAL:
             return
-        self.__calls_at_last_verify = self.stats.calls
-        if not self.__policy.active:
+        async with self.__state_lock:
+            assert self.__policy is not None
+            if self.stats.calls - self.__calls_at_last_verify < VERIFY_INTERVAL:
+                return
+            self.__calls_at_last_verify = self.stats.calls
+            if not self.__policy.active:
+                evidence = Evidence()
+                if not await self.__replays_all_reproduce(evidence, 1):
+                    await self.__flip(evidence)
+                return
             evidence = Evidence()
-            if not await self.__replays_all_reproduce(evidence, 1):
-                await self.__flip(evidence)
-            return
-        evidence = Evidence()
-        await self.__replays_all_reproduce(
-            evidence, 1, stop_on_miss=False, site="monitor"
-        )
-        if evidence.runs:
-            self.__policy.record_incumbent_run(evidence.interesting == 1)
-        if self.__policy.incumbent_failing():
-            await self.__recover()
+            await self.__replays_all_reproduce(
+                evidence, 1, stop_on_miss=False, site="monitor"
+            )
+            if evidence.runs:
+                self.__policy.record_incumbent_run(evidence.interesting == 1)
+            if self.__policy.incumbent_failing():
+                await self.__recover()
 
     async def __recover(self) -> None:
         """The incumbent does not reproduce at the rate the gauntlet
@@ -1228,7 +1320,13 @@ class BasicReductionProblem(ReductionProblem[T]):
 
     async def __gauntlet_batch(self, test_case: T, evidence: Evidence) -> bool:
         """Drive `evidence` about `test_case` to a gauntlet verdict against
-        the current anchor, at the hit minimum in force."""
+        the current anchor, at the hit minimum in force.
+
+        Here, as in the confirmation batch, a run that times out counts
+        as a miss: these batches judge whether a test case the run may
+        fall back to reproduces within the run's timeout, and treating
+        the timeout as a miss keeps the batch bounded and errs towards
+        the older, larger entry."""
         assert self.__policy is not None
         while True:
             verdict = gauntlet(
@@ -1254,7 +1352,9 @@ class BasicReductionProblem(ReductionProblem[T]):
         policy = self.__policy
         if ledger.min_hits is None:
             ledger.min_hits = policy.min_hits
-        interesting, _, _ = await self.__execute(test_case)
+        interesting, timed_out, cache_valid = await self.__execute(test_case)
+        if timed_out:
+            return self.__reject_for_timeout(ledger, cache_valid)
         ledger.evidence.record(interesting)
         if not interesting and not policy.confirming:
             return False
@@ -1272,7 +1372,9 @@ class BasicReductionProblem(ReductionProblem[T]):
                 # Top the ledger up towards the seed size, but only while
                 # the runs could still raise the anchor: that is their
                 # only purpose, and once a miss or the anchor's level has
-                # put a raise out of reach they are wasted.
+                # put a raise out of reach they are wasted. A seed run
+                # that times out is not a sample either way and ends the
+                # top-up; the accept itself stands.
                 while (
                     ledger.evidence.runs < ANCHOR_SEED_RUNS
                     and policy.raise_reachable(
@@ -1280,12 +1382,34 @@ class BasicReductionProblem(ReductionProblem[T]):
                         ANCHOR_SEED_RUNS - ledger.evidence.runs,
                     )
                 ):
-                    interesting, _, _ = await self.__execute(test_case, replay="seed")
+                    interesting, timed_out, _ = await self.__execute(
+                        test_case, replay="seed"
+                    )
+                    if timed_out:
+                        break
                     ledger.evidence.record(interesting)
                 ledger.verdict = True
                 return True
-            interesting, _, _ = await self.__execute(test_case, replay="gauntlet")
+            interesting, timed_out, cache_valid = await self.__execute(
+                test_case, replay="gauntlet"
+            )
+            if timed_out:
+                return self.__reject_for_timeout(ledger, cache_valid)
             ledger.evidence.record(interesting)
+
+    def __reject_for_timeout(
+        self, ledger: Ledger, cache_valid: Callable[[], bool] | None
+    ) -> bool:
+        """A candidate run timed out. That says nothing about whether the
+        candidate reproduces, so it is not evidence, but the candidate
+        cannot be adopted under the current timeout: reject it, for as
+        long as `cache_valid` says the timeout it ran under still stands,
+        keeping the evidence it has for a retry after a raise. Without a
+        validity condition nothing is latched, so the next proposal of
+        the candidate runs it again, as after a missed fast-sweep run."""
+        ledger.verdict = None if cache_valid is None else False
+        ledger.cache_valid = cache_valid
+        return False
 
     @property
     def current_test_case(self) -> T:

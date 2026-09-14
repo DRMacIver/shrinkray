@@ -86,7 +86,10 @@ class SubprocessClient:
         finally:
             if not self._completed:
                 self._completed = True
-                self._error_message = "Subprocess output closed before completion"
+                # Output ending while the client is being closed is the
+                # close itself, not a worker failure.
+                if not self._closed:
+                    self._error_message = "Subprocess output closed before completion"
             for future in self._pending_responses.values():
                 if not future.done():
                     future.set_exception(

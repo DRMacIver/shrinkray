@@ -1359,6 +1359,25 @@ def test_eof_resolves_outstanding_commands():
     asyncio.run(run())
 
 
+def test_closing_the_client_is_not_reported_as_a_worker_failure():
+    async def run():
+        client = SubprocessClient()
+        process = MagicMock()
+        process.stdout = asyncio.StreamReader()  # never fed: read blocks
+        client._process = process
+        reader = asyncio.create_task(client._read_output())
+        await asyncio.sleep(0)
+        # close() marks the client closed and then cancels the reader.
+        client._closed = True
+        reader.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await reader
+        assert client.is_completed
+        assert client.error_message is None
+
+    asyncio.run(run())
+
+
 def test_cancelled_command_removes_pending_request():
     async def run():
         client = SubprocessClient()

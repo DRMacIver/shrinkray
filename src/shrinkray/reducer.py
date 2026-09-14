@@ -970,7 +970,10 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     async def shrink_values(self):
         async with trio.open_nursery() as nursery:
             applier = PatchApplier(patches=UpdateKeys(), problem=self.target)
-            keys = iter(self.target.current_test_case)
+            # A snapshot: the per-file reducers replace the current dict
+            # rather than mutating it, but the workers below must not
+            # depend on that.
+            keys = iter(list(self.target.current_test_case))
 
             async def reduce_files() -> None:
                 for k in keys:

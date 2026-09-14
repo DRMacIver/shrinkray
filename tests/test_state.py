@@ -3997,7 +3997,7 @@ async def test_record_history_keeps_concurrent_better_candidate(tmp_path):
         better: state.problem.sort_key(better),
     }
 
-    await state._record_reduction_history(adopted)
+    state._prune_successful_outputs(adopted)
 
     # The better, still-adoptable candidate's output survives.
     assert state._successful_outputs.get(better) == b"out-B"
@@ -4020,7 +4020,7 @@ async def test_record_history_prunes_losing_candidate(tmp_path):
         loser: state.problem.sort_key(loser),
     }
 
-    await state._record_reduction_history(adopted)
+    state._prune_successful_outputs(adopted)
 
     assert loser not in state._successful_outputs
     assert loser not in state._successful_output_keys
@@ -4240,6 +4240,42 @@ async def test_adopted_reductions_keep_their_test_output(tmp_path):
     assert list(state._successful_outputs) == [b"hello"]
     output = state._successful_outputs[b"hello"]
     assert b"still interesting" in output
+
+
+async def test_successful_outputs_are_pruned_without_history(tmp_path):
+    # With history off nothing recorded outputs to disk, but the LLM passes
+    # still read them, so losers must be pruned or they accumulate.
+    script = tmp_path / "test.sh"
+    script.write_text('#!/bin/sh\necho "still interesting"\ngrep -q hello "$1"\n')
+    script.chmod(0o755)
+    target = tmp_path / "test.txt"
+    target.write_text("hello world")
+    state = ShrinkRayStateSingleFile(
+        input_type=InputType.arg,
+        in_place=False,
+        test=[str(script)],
+        filename=str(target),
+        timeout=5.0,
+        base="test.txt",
+        parallelism=1,
+        initial=b"hello world",
+        formatter="none",
+        trivial_is_error=True,
+        seed=0,
+        volume=Volume.quiet,
+        history_enabled=False,
+    )
+    assert state.history_manager is None
+    (tmp_path / "out").mkdir()
+    state.output_manager = OutputCaptureManager(output_dir=str(tmp_path / "out"))
+    problem = state.problem
+    loser = b"hello world!!"
+    state._successful_outputs[loser] = b"out"
+    state._successful_output_keys[loser] = problem.sort_key(loser)
+    await problem.setup()
+    assert await problem.is_interesting(b"hello")
+    assert list(state._successful_outputs) == [b"hello"]
+    assert list(state._successful_output_keys) == [b"hello"]
 
 
 async def test_history_records_reductions_without_captured_output(tmp_path):

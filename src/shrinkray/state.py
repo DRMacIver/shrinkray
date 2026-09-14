@@ -909,6 +909,12 @@ class ShrinkRayState[TestCase](ABC):
             **self.extra_problem_kwargs,
         )
 
+        # Every adoption prunes the outputs stored for candidates that can
+        # no longer be adopted, or they would accumulate for the whole run.
+        @problem.on_reduce
+        async def prune_outputs(test_case: TestCase):
+            self._prune_successful_outputs(test_case)
+
         # Commits serialize callbacks and progress waits for the commit, so
         # history writes can leave the scheduler free without publishing an
         # entry before its contents have reached disk.
@@ -952,12 +958,9 @@ class ShrinkRayState[TestCase](ABC):
     def problem(self):
         return self.reducer.target
 
-    async def _record_reduction_history(self, test_case: TestCase) -> None:
-        """Record an adopted reduction in history and prune stored outputs.
-
-        The recorded output is the one captured when the test case was found
-        interesting (see check_interesting), not a fresh read, so a
-        concurrently running test cannot overwrite it.
+    def _prune_successful_outputs(self, test_case: TestCase) -> None:
+        """Drop the stored outputs of candidates that `test_case`'s adoption
+        has made unadoptable.
 
         Pruning keeps the adopted test case's output (the LLM passes read it
         from _successful_outputs) and the output of any candidate that still
@@ -968,9 +971,7 @@ class ShrinkRayState[TestCase](ABC):
         adopted candidate is a loser whose output nothing can use again, so it
         is dropped to bound memory.
         """
-        assert self.history_manager is not None
         test_case_bytes = self._get_test_case_bytes(test_case)
-        output = self._successful_outputs.get(test_case_bytes)
         adopted_key = self.problem.sort_key(test_case)
         survivors = {
             tcb
@@ -988,6 +989,17 @@ class ShrinkRayState[TestCase](ABC):
             for tcb, key in self._successful_output_keys.items()
             if tcb in survivors
         }
+
+    async def _record_reduction_history(self, test_case: TestCase) -> None:
+        """Record an adopted reduction in history.
+
+        The recorded output is the one captured when the test case was found
+        interesting (see check_interesting), not a fresh read, so a
+        concurrently running test cannot overwrite it.
+        """
+        assert self.history_manager is not None
+        test_case_bytes = self._get_test_case_bytes(test_case)
+        output = self._successful_outputs.get(test_case_bytes)
         await trio.to_thread.run_sync(
             self.history_manager.record_reduction, test_case_bytes, output
         )

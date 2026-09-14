@@ -1935,6 +1935,10 @@ class ShrinkRayApp(App[None]):
                 self._owns_client = True
 
                 await client.start()
+                if self._client is not client:
+                    # The user quit while the worker was starting; the
+                    # client has already been closed.
+                    return
 
                 # Start the reduction - validation was already done by main()
                 response = await client.start_reduction(

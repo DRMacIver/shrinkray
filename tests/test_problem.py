@@ -1979,3 +1979,263 @@ async def test_recovery_with_nothing_better_keeps_the_incumbent():
     assert problem.current_test_case == b"hello"
     assert any("No earlier test case" in m for m in messages)
     assert policy(problem).incumbent == Evidence()
+
+
+async def test_policy_flip_during_candidate_execution():
+    started = trio.Event()
+    release = trio.Event()
+    policy = NondeterminismPolicy()
+    candidate_calls = 0
+    incumbent_calls = 0
+
+    async def interesting(value):
+        nonlocal candidate_calls, incumbent_calls
+        if value == b"a":
+            candidate_calls += 1
+            started.set()
+            await release.wait()
+        if value == b"original":
+            incumbent_calls += 1
+            return incumbent_calls > 1
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"original",
+        is_interesting=interesting,
+        work=WorkContext(parallelism=2),
+        policy=policy,
+    )
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(problem.is_interesting, b"a")
+        await started.wait()
+        problem.stats.calls = VERIFY_INTERVAL
+        await problem.is_interesting(b"verification trigger")
+        release.set()
+    assert candidate_calls >= INITIAL_MIN_HITS
+    assert problem.current_test_case == b"a"
+
+
+async def test_adoption_callbacks_complete_on_cancellation():
+    async def interesting(value):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"original", is_interesting=interesting, work=WorkContext()
+    )
+    persisted = []
+    with trio.CancelScope() as scope:
+
+        @problem.on_reduce
+        async def persist(value):
+            scope.cancel()
+            await trio.lowlevel.checkpoint()
+            persisted.append(value)
+
+        await problem.is_interesting(b"a")
+    assert persisted == [problem.current_test_case]
+
+
+@pytest.mark.parametrize("result", [False, True])
+async def test_duplicate_candidates_share_execution(result):
+    started = trio.Event()
+    release = trio.Event()
+    calls = 0
+
+    async def interesting(value):
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return result
+
+    problem = BasicReductionProblem(
+        initial=b"original", is_interesting=interesting, work=WorkContext(parallelism=2)
+    )
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(problem.is_interesting, b"a")
+        await started.wait()
+        nursery.start_soon(problem.is_interesting, b"a")
+        await trio.testing.wait_all_tasks_blocked()
+        release.set()
+    assert calls == 1
+
+
+async def test_backtracking_reads_only_probed_history_entries():
+    reads = []
+
+    class History:
+        def __len__(self):
+            return 10000
+
+        def __getitem__(self, index):
+            reads.append(index)
+            return b"x" * (10001 - index)
+
+    async def interesting(value):
+        return True
+
+    policy = NondeterminismPolicy(active=True, anchor=0.5)
+    problem = BasicReductionProblem(
+        initial=b"xx",
+        is_interesting=interesting,
+        work=WorkContext(),
+        policy=policy,
+        history=History(),
+    )
+    # Trigger recovery through the public incumbent monitor.
+    policy.incumbent = Evidence(0, 100)
+    problem.stats.calls = VERIFY_INTERVAL
+    await problem.is_interesting(b"longer candidate")
+    assert len(reads) < 20
+
+
+async def test_cached_success_commits_after_previous_owner_cancelled():
+    persisting = trio.Event()
+    release = trio.Event()
+    calls = []
+
+    async def interesting(value):
+        calls.append(value)
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"original", is_interesting=interesting, work=WorkContext()
+    )
+
+    @problem.on_reduce
+    async def persist(value):
+        if value == b"bb":
+            persisting.set()
+            await release.wait()
+
+    scope = trio.CancelScope()
+
+    async def cancelled_candidate():
+        with scope:
+            await problem.is_interesting(b"a")
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(problem.is_interesting, b"bb")
+        await persisting.wait()
+        nursery.start_soon(cancelled_candidate)
+        await trio.testing.wait_all_tasks_blocked()
+        scope.cancel()
+        await trio.testing.wait_all_tasks_blocked()
+        release.set()
+    assert problem.current_test_case == b"bb"
+    assert await problem.is_interesting(b"a")
+    assert problem.current_test_case == b"a"
+    assert calls.count(b"a") == 1
+
+
+async def test_backtracking_skips_repeated_incumbent_in_history():
+    async def interesting(value):
+        return value == b"original"
+
+    policy = NondeterminismPolicy(active=True, anchor=0.5, incumbent=Evidence(0, 100))
+    problem = BasicReductionProblem(
+        initial=b"x",
+        is_interesting=interesting,
+        work=WorkContext(),
+        policy=policy,
+        history=[b"original", b"x", b"other"],
+    )
+    problem.stats.calls = VERIFY_INTERVAL
+    assert not await problem.is_interesting(b"probe")
+    assert problem.current_test_case == b"original"
+
+
+async def test_candidate_rechecks_anchor_before_adoption():
+    persisting = trio.Event()
+    release = trio.Event()
+    policy = NondeterminismPolicy(active=True)
+
+    async def interesting(value):
+        return True
+
+    problem = BasicReductionProblem(
+        initial=b"original",
+        is_interesting=interesting,
+        work=WorkContext(parallelism=2),
+        policy=policy,
+    )
+
+    @problem.on_reduce
+    async def persist(value):
+        if value == b"bb":
+            policy.anchor = 0.0
+            persisting.set()
+            await release.wait()
+
+    results = []
+
+    async def candidate():
+        results.append(await problem.is_interesting(b"a"))
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(problem.is_interesting, b"bb")
+        await persisting.wait()
+        nursery.start_soon(candidate)
+        await trio.testing.wait_all_tasks_blocked()
+        policy.anchor = 0.95
+        release.set()
+    assert results == [False]
+    assert problem.current_test_case == b"bb"
+
+
+async def test_cached_adoption_is_not_repeated_after_backtracking():
+    reject_candidate = False
+
+    async def interesting(value):
+        return value == b"original" or (value == b"a" and not reject_candidate)
+
+    policy = NondeterminismPolicy(active=True, anchor=0.5)
+    history = [b"original"]
+    problem = BasicReductionProblem(
+        initial=b"original",
+        is_interesting=interesting,
+        work=WorkContext(),
+        policy=policy,
+        history=history,
+    )
+
+    @problem.on_reduce
+    async def record(value):
+        history.append(value)
+
+    assert await problem.is_interesting(b"a")
+    reject_candidate = True
+    policy.incumbent = Evidence(0, 100)
+    problem.stats.calls = VERIFY_INTERVAL
+    assert not await problem.is_interesting(b"probe")
+    assert problem.current_test_case == b"original"
+    # An old verdict may answer a query but must not undo recovery.
+    assert await problem.is_interesting(b"a")
+    assert problem.current_test_case == b"original"
+    assert not problem.ledger(b"a").adoption_pending
+
+
+async def test_progress_waits_for_writes_but_not_oracle_verification(autojump_clock):
+    started = trio.Event()
+    release = trio.Event()
+
+    async def interesting(value):
+        if value == b"original":
+            started.set()
+            await release.wait()
+            return True
+        return False
+
+    problem = BasicReductionProblem(
+        initial=b"original",
+        is_interesting=interesting,
+        work=WorkContext(),
+        policy=NondeterminismPolicy(),
+    )
+    problem.stats.calls = VERIFY_INTERVAL
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(problem.is_interesting, b"probe")
+        await started.wait()
+        with trio.fail_after(1):
+            await problem.wait_for_commit()
+        release.set()

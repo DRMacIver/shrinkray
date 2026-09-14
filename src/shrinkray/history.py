@@ -322,6 +322,7 @@ cd "$WORK"
         Raises:
             FileNotFoundError: If the reduction doesn't exist
         """
+        restart_content = self.get_reduction_content(reduction_number)
         excluded_test_cases: set[bytes] = set()
         reductions_dir = os.path.join(self.history_dir, "reductions")
         also_interesting_dir = os.path.join(self.history_dir, "also-interesting")
@@ -365,7 +366,6 @@ cd "$WORK"
         self.reduction_counter = reduction_number
 
         # Return content to restart from
-        restart_content = self.get_reduction_content(reduction_number)
         return restart_content, excluded_test_cases
 
     # === Directory mode methods ===

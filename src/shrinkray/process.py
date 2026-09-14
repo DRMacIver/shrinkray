@@ -5,7 +5,11 @@ import os
 import random
 import resource
 import signal
+import subprocess
 import sys
+import tempfile
+from contextlib import ExitStack
+from typing import IO, Any
 
 import trio
 
@@ -210,3 +214,71 @@ async def interrupt_wait_and_kill(sp: "trio.Process", delay: float = 0.1) -> Non
             raise ValueError(
                 f"Could not kill subprocess with pid {sp.pid}. Something has gone seriously wrong."
             )
+
+
+async def run_managed_process(
+    command: list[str],
+    *,
+    timeout: float = 300.0,
+    memory_limit: int | None = None,
+    cwd: str | None = None,
+    input: bytes | None = None,
+    output_fd: int | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run a bounded process, reaping its process group on every exit path.
+
+    File-backed stdin avoids pipe-feeder deadlocks when a command exits
+    without reading its input. Captured output is drained by Trio.
+    """
+    result: subprocess.CompletedProcess[bytes] | None = None
+    proc: trio.Process | None = None
+    command = memory_limited_command(command, memory_limit)
+    with ExitStack() as stack:
+        stdin: IO[bytes] | int = subprocess.DEVNULL
+        if input is not None:
+            input_file = stack.enter_context(tempfile.TemporaryFile())
+            await trio.to_thread.run_sync(input_file.write, input)
+            input_file.seek(0)
+            stdin = input_file
+
+        output: dict[str, Any] = {}
+        if output_fd is None:
+            output.update(capture_stdout=True, capture_stderr=True)
+        else:
+            output.update(stdout=output_fd, stderr=output_fd)
+
+        async def run(
+            task_status: trio.TaskStatus[trio.Process] = trio.TASK_STATUS_IGNORED,
+        ) -> None:
+            nonlocal result
+            result = await trio.run_process(
+                command,
+                stdin=stdin,
+                **output,
+                cwd=cwd,
+                start_new_session=True,
+                check=False,
+                task_status=task_status,
+            )
+
+        try:
+            async with trio.open_nursery() as nursery:
+                proc = await nursery.start(run)
+                assert proc is not None
+                with trio.move_on_after(timeout) as scope:
+                    await proc.wait()
+                if scope.cancelled_caught:
+                    nursery.cancel_scope.cancel()
+                # Kill descendants before waiting for output drain: a daemon
+                # inheriting stdout must not hold that drain open forever.
+                try:
+                    signal_group(proc, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            if scope.cancelled_caught:
+                raise subprocess.TimeoutExpired(command, timeout)
+        finally:
+            if proc is not None:
+                kill_process_group(proc)
+    assert result is not None
+    return result

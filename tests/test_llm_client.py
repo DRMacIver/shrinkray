@@ -11,6 +11,7 @@ import importlib
 import sys
 import threading
 import time
+from collections import OrderedDict
 from typing import Any
 
 import pytest
@@ -553,3 +554,46 @@ async def test_concurrent_identical_requests_generate_once(
 
     assert fake.calls == 1
     assert outcomes == ["hi", "hi"]
+
+
+def test_cache_lookup_is_atomic_with_eviction():
+    client = LlamaCppClient(model=LocalModel(path="unused"), generation_cache_size=1)
+    key = ("first", 1, 0, 0.0)
+    replacement = ("second", 1, 0, 0.0)
+    entered = threading.Event()
+    release = threading.Event()
+    evicting = threading.Event()
+    evicted = threading.Event()
+    results = []
+
+    class PausingCache(OrderedDict):
+        def __getitem__(self, item):
+            result = super().__getitem__(item)
+            entered.set()
+            assert release.wait(5)
+            return result
+
+    client._generation_cache = PausingCache({key: "answer"})
+
+    def read():
+        results.append(client._cached_generation(key))
+
+    def evict():
+        evicting.set()
+        client._remember_generation(replacement, "next")
+        evicted.set()
+
+    reader = threading.Thread(target=read)
+    writer = threading.Thread(target=evict)
+    reader.start()
+    assert entered.wait(5)
+    writer.start()
+    assert evicting.wait(5)
+    try:
+        assert not evicted.wait(0.05)
+    finally:
+        release.set()
+        reader.join(5)
+        writer.join(5)
+    assert results == ["answer"]
+    assert evicted.is_set()

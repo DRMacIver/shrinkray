@@ -1271,3 +1271,14 @@ async def test_merge_probes_are_counted():
     stats = problem.stats
     assert stats.merge_probes > 0
     assert 0 < stats.merge_probe_calls <= stats.calls
+
+
+async def test_apply_patches_accepts_single_use_iterables():
+    async def interesting(value):
+        return bool(value)
+
+    problem = BasicReductionProblem(
+        initial=b"ab", is_interesting=interesting, work=WorkContext()
+    )
+    await apply_patches(problem, Cuts(), iter([[(0, 1)], [(1, 2)]]))
+    assert len(problem.current_test_case) == 1

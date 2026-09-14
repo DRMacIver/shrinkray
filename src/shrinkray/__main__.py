@@ -404,6 +404,10 @@ def main(
     if not backup:
         backup = filename + os.extsep + "bak"
 
+    memory_limit_explicit = (
+        memory_limit_source == click.core.ParameterSource.COMMANDLINE
+    )
+
     # Run initial validation before any state setup
     # This validates the interestingness test and formatter with proper output streaming
     formatter_command = None
@@ -420,6 +424,8 @@ def main(
         # test case; like the reducer, only give up once it has missed
         # GATE_RUNS times in a row.
         retries=0 if assume_deterministic else GATE_RUNS - 1,
+        timeout=timeout,
+        memory_limit=memory_limit if memory_limit_explicit else None,
     )
 
     if not validation_result.success:
@@ -436,13 +442,6 @@ def main(
     # Determine if --also-interesting was explicitly passed
     # If --no-history and --also-interesting not explicit, disable also-interesting
     ctx = click.get_current_context()
-
-    # Whether the user set --memory-limit themselves (vs the physical-RAM
-    # default). Only the default is auto-disabled when it blocks the initial
-    # test. Reuses the source already computed for the enforceability warning.
-    memory_limit_explicit = (
-        memory_limit_source == click.core.ParameterSource.COMMANDLINE
-    )
 
     if (
         llm_only

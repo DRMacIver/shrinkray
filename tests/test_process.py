@@ -18,6 +18,7 @@ from shrinkray.process import (
     memory_limited_command,
     parse_memory_limit,
     peak_child_rss_bytes,
+    run_managed_process,
     signal_group,
 )
 
@@ -617,3 +618,37 @@ async def test_kill_process_group_with_real_process():
     with trio.move_on_after(1):
         await sp.wait()
     assert sp.returncode is not None
+
+
+async def test_managed_process_reaps_descendants_holding_output():
+    # The child inherits the stdout pipe but outlives the process that
+    # run_process waits on. Cleanup must end it before draining the pipe.
+    with trio.fail_after(5):
+        result = await run_managed_process(
+            [
+                sys.executable,
+                "-c",
+                'import subprocess; subprocess.Popen(["sleep", "60"]); print("finished", flush=True)',
+            ]
+        )
+    assert result.returncode == 0
+    assert result.stdout == b"finished\n"
+
+
+async def test_managed_process_timeout_reaps_group():
+    with trio.fail_after(5):
+        with pytest.raises(subprocess.TimeoutExpired):
+            await run_managed_process(
+                [
+                    sys.executable,
+                    "-c",
+                    'import subprocess,time; subprocess.Popen(["sleep", "60"]); time.sleep(60)',
+                ],
+                timeout=0.2,
+            )
+
+
+async def test_managed_process_missing_command():
+    with pytest.raises(ExceptionGroup) as caught:
+        await run_managed_process(["/nonexistent/shrinkray-review-command"])
+    assert isinstance(caught.value.exceptions[0], FileNotFoundError)

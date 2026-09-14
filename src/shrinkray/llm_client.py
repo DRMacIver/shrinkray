@@ -86,6 +86,7 @@ class LlamaCppClient(LLMClient):
     generation_cache_size: int = DEFAULT_GENERATION_CACHE_SIZE
 
     _llama: "Llama | None" = field(default=None, init=False)
+    _cache_lock: threading.Lock = field(factory=threading.Lock, init=False)
     _thread_lock: threading.Lock = field(factory=threading.Lock, init=False)
     _load_thread: threading.Thread | None = field(default=None, init=False)
     _load_error: Exception | None = field(default=None, init=False)
@@ -187,22 +188,24 @@ class LlamaCppClient(LLMClient):
     def _cached_generation(self, key: tuple[str, int, int, float]) -> str | None:
         """The cached completion for these parameters, marked most-recently
         used, or None if it isn't cached."""
-        try:
-            value = self._generation_cache[key]
-        except KeyError:
-            return None
-        self._generation_cache.move_to_end(key)
-        return value
+        with self._cache_lock:
+            try:
+                value = self._generation_cache[key]
+            except KeyError:
+                return None
+            self._generation_cache.move_to_end(key)
+            return value
 
     def _remember_generation(
         self, key: tuple[str, int, int, float], value: str
     ) -> None:
         """Cache a completion as most-recently used, evicting the
         least-recently used entries once over generation_cache_size."""
-        self._generation_cache[key] = value
-        self._generation_cache.move_to_end(key)
-        while len(self._generation_cache) > self.generation_cache_size:
-            self._generation_cache.popitem(last=False)
+        with self._cache_lock:
+            self._generation_cache[key] = value
+            self._generation_cache.move_to_end(key)
+            while len(self._generation_cache) > self.generation_cache_size:
+                self._generation_cache.popitem(last=False)
 
     async def complete(
         self, prompt: str, *, max_tokens: int, seed: int, temperature: float

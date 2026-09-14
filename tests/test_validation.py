@@ -13,6 +13,7 @@ import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
+import trio
 
 from shrinkray.cli import InputType
 from shrinkray.validation import (
@@ -1282,3 +1283,41 @@ def test_run_validation_forwards_retries(capsys):
         )
         assert result.success
         assert "nondeterministic" in capsys.readouterr().err
+
+
+async def test_validation_timeout_kills_oracle(tmp_path):
+    target = tmp_path / "case"
+    target.write_bytes(b"hello")
+    result = await validate_initial_example(
+        file_path=str(target),
+        test=[sys.executable, "-c", "import time; time.sleep(60)"],
+        input_type=InputType.arg,
+        in_place=False,
+        timeout=0.1,
+    )
+    assert not result.success
+    assert result.error_message is not None
+    assert "timed out" in result.error_message.lower()
+
+
+async def test_cancelled_basename_validation_restores_original(tmp_path, monkeypatch):
+    target = tmp_path / "case"
+    target.write_bytes(b"original")
+    original_open = trio.open_file
+    with trio.CancelScope() as scope:
+
+        async def cancel_after_open(*args, **kwargs):
+            result = await original_open(*args, **kwargs)
+            if args == (str(target), "wb"):
+                scope.cancel()
+            return result
+
+        monkeypatch.setattr(trio, "open_file", cancel_after_open)
+        await validate_initial_example(
+            file_path=str(target),
+            test=["/usr/bin/true"],
+            input_type=InputType.basename,
+            in_place=True,
+        )
+    assert scope.cancelled_caught
+    assert target.read_bytes() == b"original"

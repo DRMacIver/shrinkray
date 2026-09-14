@@ -2002,9 +2002,7 @@ async def test_handle_restart_from_nonexistent_reduction():
     worker = ReducerWorker()
     worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
     worker.state.history_manager = MagicMock()
-    worker.state.history_manager.restart_from_reduction.side_effect = (
-        FileNotFoundError()
-    )
+    worker.state.history_manager.get_reduction_content.side_effect = FileNotFoundError()
     worker.state.output_manager = None
 
     response = await worker._handle_restart_from("test-id", {"reduction_number": 999})
@@ -2050,13 +2048,8 @@ async def test_handle_restart_from_success():
 
 
 @pytest.mark.trio
-async def test_handle_restart_from_write_failure_still_reports_restart():
-    """Regression test: a failure writing the new test case to the target
-    file happens after the restart has irrevocably taken effect (the old
-    reduction is cancelled and the new reducer installed, so the run()
-    loop may already be executing it). Reporting it as a failed restart
-    told the client the opposite of what happened. The file is rewritten
-    on the next successful reduction anyway."""
+async def test_handle_restart_from_write_failure_stops_restart():
+    """A failed write is reported before the replacement reducer starts."""
     worker = ReducerWorker()
     worker._cancel_scope = None
     worker.running = True
@@ -2077,9 +2070,9 @@ async def test_handle_restart_from_write_failure_still_reports_restart():
 
     response = await worker._handle_restart_from("test-id", {"reduction_number": 3})
 
-    assert response.error is None
-    assert response.result == {"status": "restarted", "size": 15}
-    assert worker._restart_requested is True
+    assert response.error is not None and "disk full" in response.error
+    assert worker._restart_requested is False
+    assert worker._restart_ready.is_set()
 
 
 @pytest.mark.trio
@@ -3306,3 +3299,116 @@ async def test_build_progress_update_reports_nondeterminism():
     assert update.nondeterministic is True
     assert update.reproduction_rate == pytest.approx(Evidence(10, 20).lower_bound())
     assert update.replay_calls == 1
+
+
+async def test_restart_waits_for_old_cleanup_before_reset():
+    worker = ReducerWorker(output_stream=MemoryOutputStream())
+    started = trio.Event()
+    cleaning = trio.Event()
+    release = trio.Event()
+    old_finished = False
+
+    async def old_run():
+        nonlocal old_finished
+        started.set()
+        try:
+            await trio.sleep_forever()
+        finally:
+            with trio.CancelScope(shield=True):
+                cleaning.set()
+                await release.wait()
+                old_finished = True
+
+    worker.reducer = MagicMock()
+    worker.reducer.run = old_run
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.filename = "/unused"
+    worker.state.history_manager = MagicMock()
+    worker.state.history_manager.get_reduction_content.return_value = b"old"
+    worker.state.history_manager.restart_from_reduction.return_value = (b"old", set())
+    worker.state.output_manager = None
+
+    async def write(*args):
+        assert old_finished
+
+    worker.state.write_test_case_to_file = write
+    replies = []
+
+    async def restart():
+        replies.append(
+            await worker._handle_restart_from("restart", {"reduction_number": 1})
+        )
+
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(worker.run_reducer)
+        await started.wait()
+        nursery.start_soon(restart)
+        await cleaning.wait()
+        await trio.testing.wait_all_tasks_blocked()
+        worker.state.reset_for_restart.assert_not_called()
+        assert not worker._restart_ready.is_set()
+        release.set()
+    assert replies[0].error is None
+    assert worker._restart_ready.is_set()
+
+
+async def test_restart_validation_error_leaves_reducer_running():
+    worker = ReducerWorker()
+    worker.running = True
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.history_manager = MagicMock()
+    worker.state.history_manager.get_reduction_content.side_effect = OSError(
+        "unreadable history"
+    )
+    result = await worker._handle_restart_from("restart", {"reduction_number": 1})
+    assert result.error is not None and "unreadable history" in result.error
+    assert worker.running
+    worker.state.reset_for_restart.assert_not_called()
+
+
+async def test_worker_cancels_when_stdout_pipe_is_full(monkeypatch):
+    read_fd, write_fd = os.pipe()
+    worker = ReducerWorker(input_stream=BidirectionalInputStream())
+    sent = False
+
+    async def emit_large_message():
+        nonlocal sent
+        await worker.emit(Response(id="large", error="x" * 1_000_000))
+        sent = True
+
+    try:
+        with os.fdopen(write_fd, "w") as output:
+            with monkeypatch.context() as patcher:
+                patcher.setattr(sys, "stdout", output)
+                with trio.fail_after(5):
+                    async with trio.open_nursery() as nursery:
+                        nursery.start_soon(worker.run)
+                        nursery.start_soon(emit_large_message)
+                        await trio.testing.wait_all_tasks_blocked()
+                        assert not sent
+                        nursery.cancel_scope.cancel()
+    finally:
+        os.close(read_fd)
+    assert worker._stdout_stream is not None
+
+
+async def test_worker_reuses_stdout_stream(monkeypatch):
+    read_fd, write_fd = os.pipe()
+    worker = ReducerWorker(input_stream=BidirectionalInputStream())
+    try:
+        with os.fdopen(write_fd, "w") as output:
+            with monkeypatch.context() as patcher:
+                patcher.setattr(sys, "stdout", output)
+                async with trio.open_nursery() as nursery:
+                    nursery.start_soon(worker.run)
+                    await worker.emit(Response(id="one"))
+                    await worker.emit(Response(id="two"))
+                    nursery.cancel_scope.cancel()
+        data = os.read(read_fd, 4096)
+        messages = [deserialize(line.decode()) for line in data.splitlines()]
+        assert all(isinstance(message, Response) for message in messages)
+        assert [
+            message.id for message in messages if isinstance(message, Response)
+        ] == ["one", "two"]
+    finally:
+        os.close(read_fd)

@@ -3515,17 +3515,8 @@ async def test_also_interesting_records_directory_mode(tmp_path):
 
 
 @pytest.mark.trio
-async def test_history_counter_never_lags_stats_reductions(tmp_path):
-    """Regression: history_manager.reduction_counter must be at least as large
-    as problem.stats.reductions at every scheduling point.
-
-    The progress update loop emits reductions=stats.reductions while
-    record_reduction() populates the history directory. If the callback that
-    writes to the history runs after a yielding callback (like the one that
-    writes the test case to disk), the emit loop can observe reductions=N
-    while the Nth reduction directory doesn't exist yet. A concurrent
-    restart_from(N) request then fails with "Reduction N not found".
-    """
+async def test_history_counter_agrees_after_commit(tmp_path):
+    """Progress readers wait for persistence before exposing a reduction."""
     script = tmp_path / "test.sh"
     script.write_text('#!/bin/sh\ngrep -q KEEP "$1"')
     script.chmod(0o755)
@@ -3568,6 +3559,8 @@ async def test_history_counter_never_lags_stats_reductions(tmp_path):
 
     async def observer():
         while True:
+            assert isinstance(problem, BasicReductionProblem)
+            await problem.wait_for_commit()
             r = problem.stats.reductions
             c = history_manager.reduction_counter
             if r > c:
@@ -3998,7 +3991,7 @@ def test_sweep_tolerates_unlink_failure(tmp_path, monkeypatch):
 # === successful-output pruning tests ===
 
 
-def test_record_history_keeps_concurrent_better_candidate(tmp_path):
+async def test_record_history_keeps_concurrent_better_candidate(tmp_path):
     """A candidate that is interesting and sorts better than the one just
     adopted must keep its captured output.
 
@@ -4022,7 +4015,7 @@ def test_record_history_keeps_concurrent_better_candidate(tmp_path):
         better: state.problem.sort_key(better),
     }
 
-    state._record_reduction_history(adopted)
+    await state._record_reduction_history(adopted)
 
     # The better, still-adoptable candidate's output survives.
     assert state._successful_outputs.get(better) == b"out-B"
@@ -4030,7 +4023,7 @@ def test_record_history_keeps_concurrent_better_candidate(tmp_path):
     assert state._successful_outputs.get(adopted) == b"out-A"
 
 
-def test_record_history_prunes_losing_candidate(tmp_path):
+async def test_record_history_prunes_losing_candidate(tmp_path):
     """A candidate that was interesting but sorts worse than the adopted
     one can never be adopted again, so its output is pruned."""
     state = make_in_place_state(tmp_path)
@@ -4045,7 +4038,7 @@ def test_record_history_prunes_losing_candidate(tmp_path):
         loser: state.problem.sort_key(loser),
     }
 
-    state._record_reduction_history(adopted)
+    await state._record_reduction_history(adopted)
 
     assert loser not in state._successful_outputs
     assert loser not in state._successful_output_keys
@@ -4561,14 +4554,14 @@ async def test_completed_results_are_not_flagged_as_timed_out(tmp_path):
     assert not outcome.timed_out
 
 
-def test_history_backtrack_source_reads_the_run_history(tmp_path):
+async def test_history_backtrack_source_reads_the_run_history(tmp_path):
     state = make_nd_state(
         tmp_path, history_enabled=True, history_base_dir=str(tmp_path)
     )
     problem = state.problem
     assert state.history_manager is not None
-    state._record_reduction_history(b"hello worl")
-    state._record_reduction_history(b"hello wor")
+    await state._record_reduction_history(b"hello worl")
+    await state._record_reduction_history(b"hello wor")
     source = HistoryBacktrackSource(state)
     assert len(source) == 3
     assert source[0] == b"hello world"
@@ -4581,7 +4574,7 @@ def test_history_backtrack_source_reads_the_run_history(tmp_path):
     del problem
 
 
-def test_history_backtrack_source_decodes_directories(tmp_path):
+async def test_history_backtrack_source_decodes_directories(tmp_path):
     script = tmp_path / "test.sh"
     script.write_text("#!/bin/sh\nexit 0")
     script.chmod(0o755)
@@ -4605,7 +4598,7 @@ def test_history_backtrack_source_decodes_directories(tmp_path):
         history_base_dir=str(tmp_path),
     )
     state.problem  # initialises the history manager
-    state._record_reduction_history({"a.txt": b"file"})
+    await state._record_reduction_history({"a.txt": b"file"})
     source = HistoryBacktrackSource(state)
     assert len(source) == 2
     assert source[0] == {"a.txt": b"file a"}
@@ -4686,3 +4679,62 @@ def test_load_state_for_path_passes_assume_deterministic(tmp_path):
         assume_deterministic=True,
     )
     assert state.assume_deterministic is True
+
+
+async def test_timeout_exit_zero_is_not_interesting(simple_state):
+    async def run(test_case, debug=False):
+        return ScriptRunResult(exit_code=0, timed_out=True, timeout_used=1.0)
+
+    simple_state.run_for_result = run
+    outcome = await simple_state.check_interesting(b"a")
+    assert not outcome.interesting
+    assert outcome.timed_out
+    assert outcome.cache_valid is not None
+
+
+async def test_basename_attempt_restores_incumbent(simple_state):
+    simple_state.in_place = True
+    simple_state.input_type = InputType.basename
+    problem = simple_state.problem
+
+    async def run(working, **kwargs):
+        assert Path(working).read_bytes() == b"rejected"
+        return ScriptRunResult(exit_code=1)
+
+    simple_state.run_script_on_file = run
+    assert not await problem.is_interesting(b"rejected")
+    assert Path(simple_state.filename).read_bytes() == problem.current_test_case
+
+
+async def test_atomic_target_write_preserves_original_on_failure(
+    simple_state, monkeypatch
+):
+    original = Path(simple_state.filename).read_bytes()
+
+    def fail_replace(source, target):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("shrinkray.state.os.replace", fail_replace)
+    with pytest.raises(OSError, match="disk full"):
+        await simple_state.write_test_case_to_file(simple_state.filename, b"new")
+    assert Path(simple_state.filename).read_bytes() == original
+    assert not list(Path(simple_state.filename).parent.glob(".shrinkray-*"))
+
+
+async def test_atomic_target_write_preserves_symlink_and_mode(simple_state):
+    target = Path(simple_state.filename)
+    real = target.with_suffix(".real")
+    target.rename(real)
+    real.chmod(0o751)
+    target.symlink_to(real)
+    await simple_state.write_test_case_to_file(str(target), b"new")
+    assert target.is_symlink()
+    assert real.read_bytes() == b"new"
+    assert real.stat().st_mode & 0o777 == 0o751
+
+
+async def test_atomic_target_write_recreates_missing_target(simple_state):
+    target = Path(simple_state.filename)
+    target.unlink()
+    await simple_state.write_test_case_to_file(str(target), b"recovered")
+    assert target.read_bytes() == b"recovered"

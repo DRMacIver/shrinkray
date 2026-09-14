@@ -203,6 +203,7 @@ async def apply_patches[PatchType, TargetType](
     # old test case and must not be applied to the new one. An interesting
     # result that changed nothing (it can sort above the current test case)
     # falls through to trying the patches individually.
+    patches = list(patches)
     before = problem.current_test_case
     try:
         combined = patch_info.apply(patch_info.combine(*patches), before)
@@ -216,7 +217,6 @@ async def apply_patches[PatchType, TargetType](
 
     applier = PatchApplier(patch_info, problem)
 
-    patches = list(patches)
     problem.work.random.shuffle(patches)
     patches.sort(key=patch_info.size, reverse=True)
     # Workers pull from this shared iterator. Advancing it never awaits, so

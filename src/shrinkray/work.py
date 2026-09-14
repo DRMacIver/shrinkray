@@ -134,7 +134,7 @@ class WorkContext:
             return (x, await f(x))
 
         async with trio.open_nursery() as nursery:
-            send, receive = trio.open_memory_channel(float("inf"))
+            send, receive = trio.open_memory_channel(self.parallelism)
 
             @nursery.start_soon
             async def _():
@@ -142,7 +142,10 @@ class WorkContext:
                     async with aclosing(results) as aiter:
                         async for x, v in aiter:
                             if v:
-                                await send.send(x)
+                                try:
+                                    await send.send(x)
+                                except trio.BrokenResourceError:
+                                    return
                     send.close()
 
             yield receive
@@ -225,20 +228,20 @@ async def parallel_map[S, T](
 ):
     send_out_values, receive_out_values = trio.open_memory_channel(parallelism)
 
-    work = list(enumerate(ls))
-    work.reverse()
+    work = iter(enumerate(ls))
+    slots = trio.Semaphore(parallelism)
 
-    # Workers send (index, result) pairs here. The channel is big enough to
-    # hold every result, so workers never block on it.
-    send_results, receive_results = trio.open_memory_channel(len(ls))
+    # A slot covers execution and out-of-order buffering, so a slow early
+    # result cannot let later results accumulate without bound.
+    send_results, receive_results = trio.open_memory_channel(parallelism)
 
     async with trio.open_nursery() as nursery:
         for _ in range(parallelism):
 
             @nursery.start_soon
             async def do_work():
-                while work:
-                    i, x = work.pop()
+                for i, x in work:
+                    await slots.acquire()
                     await send_results.send((i, await f(x)))
 
         @nursery.start_soon
@@ -251,6 +254,7 @@ async def parallel_map[S, T](
                     while not result_heap or result_heap[0][0] != i:
                         heapq.heappush(result_heap, await receive_results.receive())
                     await send_out_values.send(heapq.heappop(result_heap)[1])
+                    slots.release()
             except trio.BrokenResourceError:
                 # The consumer closed the receive channel (stopped reading
                 # early); there are no more results to deliver. Raising

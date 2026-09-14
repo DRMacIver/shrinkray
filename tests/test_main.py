@@ -1095,7 +1095,7 @@ exit 0
     )
     script.chmod(0o755)
 
-    # Run with a very short timeout (0.1 seconds)
+    # Run with a very short timeout (0.01 seconds)
     result = subprocess.run(
         [
             sys.executable,
@@ -1115,9 +1115,10 @@ exit 0
     # Should fail
     assert result.returncode != 0
 
-    # Should show timeout error message
-    assert "TimeoutExceededOnInitial" in result.stderr
-    assert "exceeded timeout" in result.stderr
+    # Validation enforces the timeout before reduction starts.
+    assert "Interestingness test timed out during validation" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert target.read_text() == "hello world"
 
 
 @pytest.mark.slow
@@ -1160,12 +1161,11 @@ exit 0
     # Should fail
     assert result.returncode != 0
 
-    # Should show timeout error message
-    # The error comes through as a raw traceback since the timeout
-    # happens during problem.setup() in the worker subprocess
+    # Validation enforces the timeout before the worker starts.
     combined_output = result.stdout + result.stderr
-    # Just check that timeout is mentioned somewhere in the output
-    assert "timeout" in combined_output.lower()
+    assert "Interestingness test timed out during validation" in combined_output
+    assert "Traceback" not in combined_output
+    assert target.read_text() == "hello world"
 
 
 @pytest.mark.slow

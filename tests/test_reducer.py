@@ -2600,3 +2600,38 @@ async def test_restart_phase_sees_the_outer_problems_nondeterminism():
     with patch.object(ShrinkRay, "run_pass", spy):
         await reducer.run()
     assert seen == {True}
+
+
+async def test_directory_bounds_active_file_reducers(monkeypatch):
+    running = 0
+    peak = 0
+    visited = []
+    release = trio.Event()
+
+    async def run_file(self):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        visited.append(self.target.current_test_case)
+        try:
+            await release.wait()
+        finally:
+            running -= 1
+
+    async def interesting(value):
+        return True
+
+    monkeypatch.setattr(ShrinkRay, "run", run_file)
+    problem = BasicReductionProblem(
+        initial={str(i): str(i).encode() for i in range(100)},
+        is_interesting=interesting,
+        work=WorkContext(parallelism=2),
+    )
+    reducer = DirectoryShrinkRay(target=problem, python_reducer=False)
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(reducer.shrink_values)
+        await trio.testing.wait_all_tasks_blocked()
+        assert running == 2
+        release.set()
+    assert peak == 2
+    assert len(visited) == 100

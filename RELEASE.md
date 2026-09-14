@@ -1,0 +1,4 @@
+- Fix cancellation, in-place reduction, and restart races that could leave an incorrect or incomplete result on disk.
+- Fix concurrent nondeterminism detection, reject timed-out tests even when their signal handlers exit successfully, and report unexpected worker exits instead of hanging.
+- Bound speculative work and directory reduction concurrency, reduce blocking disk I/O, and coalesce pending progress updates while preserving graph history.
+- Apply timeout and explicit memory limits during initial validation, and clean up validation subprocesses on cancellation.

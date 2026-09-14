@@ -970,7 +970,13 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
     async def shrink_values(self):
         async with trio.open_nursery() as nursery:
             applier = PatchApplier(patches=UpdateKeys(), problem=self.target)
-            for k in self.target.current_test_case.keys():
+            keys = iter(self.target.current_test_case)
+
+            async def reduce_files() -> None:
+                for k in keys:
+                    await reduce_file(k)
+
+            async def reduce_file(k: str) -> None:
                 key_problem = KeyProblem(
                     base_problem=self.target,
                     applier=applier,
@@ -1001,4 +1007,12 @@ class DirectoryShrinkRay(Reducer[dict[str, bytes]]):
                     llm_only=self.llm_only,
                     restart_at_fixpoint=self.restart_at_fixpoint,
                 )
-                nursery.start_soon(key_shrinkray.run)
+                await key_shrinkray.run()
+
+            for _ in range(
+                min(
+                    len(self.target.current_test_case),
+                    max(1, self.target.work.parallelism),
+                )
+            ):
+                nursery.start_soon(reduce_files)

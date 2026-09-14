@@ -2000,6 +2000,7 @@ async def test_handle_restart_from_directory_reduction():
 async def test_handle_restart_from_nonexistent_reduction():
     """Test restart_from handler with nonexistent reduction number."""
     worker = ReducerWorker()
+    worker.running = True
     worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
     worker.state.history_manager = MagicMock()
     worker.state.history_manager.get_reduction_content.side_effect = FileNotFoundError()
@@ -2041,15 +2042,36 @@ async def test_handle_restart_from_success():
     worker.state.reset_for_restart.assert_called_once_with(
         b"restart content", {b"excluded1", b"excluded2"}
     )
-    # running is False after restart; the run() loop will set it to True
-    assert worker.running is False
+    # The replacement reducer is installed, so the worker is running again
+    # even before the run() loop has picked it up.
+    assert worker.running is True
     # restart_requested must be True so the run() loop continues
     assert worker._restart_requested is True
 
 
 @pytest.mark.trio
-async def test_handle_restart_from_write_failure_stops_restart():
-    """A failed write is reported before the replacement reducer starts."""
+async def test_handle_restart_from_refused_when_not_running():
+    """A restart after the reduction has finished (or been cancelled) has
+    no reducer to replace, so it is refused rather than left pending."""
+    worker = ReducerWorker()
+    worker.running = False
+    worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
+    worker.state.history_manager = MagicMock()
+    worker.state.output_manager = None
+
+    response = await worker._handle_restart_from("test-id", {"reduction_number": 3})
+
+    assert response.error == "Reduction is not running"
+    worker.state.history_manager.restart_from_reduction.assert_not_called()
+    assert worker._restart_requested is False
+
+
+@pytest.mark.trio
+async def test_handle_restart_from_write_failure_still_reports_restart():
+    """A failure writing the restart point to the target happens after the
+    restart has irrevocably taken effect (the old reduction is cancelled
+    and the replacement installed), so it is logged rather than reported
+    as a failed restart. The file is rewritten on the next reduction."""
     worker = ReducerWorker()
     worker._cancel_scope = None
     worker.running = True
@@ -2070,8 +2092,10 @@ async def test_handle_restart_from_write_failure_stops_restart():
 
     response = await worker._handle_restart_from("test-id", {"reduction_number": 3})
 
-    assert response.error is not None and "disk full" in response.error
-    assert worker._restart_requested is False
+    assert response.error is None
+    assert response.result == {"status": "restarted", "size": 15}
+    assert worker._restart_requested is True
+    assert worker.running is True
     assert worker._restart_ready.is_set()
 
 
@@ -2262,6 +2286,41 @@ async def test_handle_restart_from_exception_after_validation():
     assert "Traceback" in response.error
     # Restart flag should be reset since we can't proceed
     assert worker._restart_requested is False
+    # The old reduction is already cancelled, so the worker cannot carry
+    # on: the failure is what the run() loop reports instead of completion.
+    assert worker.fatal_error is not None
+    assert "State reset failed" in worker.fatal_error
+
+
+@pytest.mark.trio
+async def test_run_loop_reports_failed_restart_instead_of_completion():
+    """A restart that failed after cancelling the old reduction ends the
+    worker with that error, not with a 'completed' status that would tell
+    the user the reduction finished normally."""
+    worker = ReducerWorker()
+
+    async def mock_run_reducer():
+        worker.fatal_error = "restart went wrong"
+
+    async def mock_read_commands(
+        input_stream: InputStream | None = None,
+        task_status: trio.TaskStatus[None] = trio.TASK_STATUS_IGNORED,
+    ) -> None:
+        task_status.started()
+        await trio.sleep_forever()
+
+    worker.run_reducer = mock_run_reducer
+    worker.emit_progress_updates = AsyncMock()
+    worker._build_progress_update = AsyncMock(return_value=None)
+    worker.emit = AsyncMock()
+    worker.read_commands = mock_read_commands
+    worker.running = True
+
+    with trio.move_on_after(1):
+        await worker.run()
+
+    emitted = [call.args[0] for call in worker.emit.call_args_list]
+    assert [message.error for message in emitted] == ["restart went wrong"]
 
 
 @pytest.mark.trio
@@ -3321,6 +3380,7 @@ async def test_restart_waits_for_old_cleanup_before_reset():
 
     worker.reducer = MagicMock()
     worker.reducer.run = old_run
+    worker.running = True
     worker.state = MagicMock(spec=ShrinkRayStateSingleFile)
     worker.state.filename = "/unused"
     worker.state.history_manager = MagicMock()

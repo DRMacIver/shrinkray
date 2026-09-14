@@ -69,6 +69,10 @@ class ReducerWorker:
         self._reducer_done.set()
         self._restart_ready = trio.Event()
         self._restart_ready.set()
+        # Set when a restart failed after the old reduction was already
+        # cancelled; reported in place of completion, since the reduction
+        # neither finished nor can continue.
+        self.fatal_error: str | None = None
         # Parallelism tracking
         self._parallel_samples = 0
         self._parallel_total = 0
@@ -377,7 +381,13 @@ class ReducerWorker:
                 error="Restart from history not supported for directory reductions",
             )
 
-        # Validate without moving history or changing its counters.
+        # Once the reduction has finished or been cancelled there is no
+        # reducer to replace and the run() loop has exited.
+        if not self.running:
+            return Response(id=request_id, error="Reduction is not running")
+
+        # Validate without moving history or changing its counters, so a
+        # bad request leaves the running reduction untouched.
         try:
             self.state.history_manager.get_reduction_content(reduction_number)
         except FileNotFoundError:
@@ -397,7 +407,7 @@ class ReducerWorker:
             await self._reducer_done.wait()
 
             # All oracle cleanup and accepted-result writes from the old run
-            # have finished. The main loop waits for _restart_ready before
+            # have finished. The run() loop waits for _restart_ready before
             # inspecting or running the replacement reducer.
             new_test_case, excluded_set = (
                 self.state.history_manager.restart_from_reduction(reduction_number)
@@ -413,25 +423,37 @@ class ReducerWorker:
             self.state.reset_for_restart(new_test_case, excluded_set)
             self.reducer = self.state.reducer
             self.problem = self.reducer.target
+        except Exception:
+            # The old reduction is already cancelled and nothing replaced
+            # it, so the worker cannot carry on; run() reports this
+            # failure instead of completion.
+            self._restart_requested = False
+            traceback.print_exc()
+            self.fatal_error = traceback.format_exc()
+            return Response(id=request_id, error=self.fatal_error)
+        finally:
+            self._restart_ready.set()
+
+        # The restart has taken effect. Writing the restart point to the
+        # target is best effort: a failure is logged, and the file is
+        # rewritten by the next reduction anyway.
+        try:
             with trio.CancelScope(shield=True):
                 await self.state.write_test_case_to_file(
                     self.state.filename, new_test_case
                 )
-            if self._size_history and self._original_start_time is not None:
-                current_runtime = time.time() - self._original_start_time
-                self._size_history.append((current_runtime, len(new_test_case)))
-                self._last_recorded_size = len(new_test_case)
-                self._last_history_time = current_runtime
-            return Response(
-                id=request_id,
-                result={"status": "restarted", "size": len(new_test_case)},
-            )
         except Exception:
-            self._restart_requested = False
             traceback.print_exc()
-            return Response(id=request_id, error=traceback.format_exc())
-        finally:
-            self._restart_ready.set()
+        if self._size_history and self._original_start_time is not None:
+            current_runtime = time.time() - self._original_start_time
+            self._size_history.append((current_runtime, len(new_test_case)))
+            self._last_recorded_size = len(new_test_case)
+            self._last_history_time = current_runtime
+        self.running = True
+        return Response(
+            id=request_id,
+            result={"status": "restarted", "size": len(new_test_case)},
+        )
 
     def _get_test_output_preview(self) -> tuple[str, int | None, int | None]:
         """Get preview of current test output, test ID, and return code.
@@ -763,26 +785,24 @@ class ReducerWorker:
                 # Start progress updates
                 nursery.start_soon(self.emit_progress_updates)
 
-                # Run reducer, looping if restart is requested
+                # Run reducer, looping if restart is requested. A restart
+                # handler installs the replacement reducer (and marks the
+                # worker running again) before setting _restart_ready.
                 while True:
                     self._restart_requested = False
                     await self.run_reducer()
                     await self._restart_ready.wait()
-
-                    # Check if we should restart
                     if not self._restart_requested:
                         break
 
-                    # Set running=True here since run_reducer's finally block set it to False
-                    self.running = True
-
-                # Emit final progress update before completion
-                final_update = await self._build_progress_update()
-                if final_update is not None:
-                    await self.emit(final_update)
-
-                # Signal completion
-                await self.emit(Response(id="", result={"status": "completed"}))
+                if self.fatal_error is not None:
+                    await self.emit(Response(id="", error=self.fatal_error))
+                else:
+                    # Emit final progress update before completion
+                    final_update = await self._build_progress_update()
+                    if final_update is not None:
+                        await self.emit(final_update)
+                    await self.emit(Response(id="", result={"status": "completed"}))
                 nursery.cancel_scope.cancel()
         finally:
             if self._stdout_stream is not None:

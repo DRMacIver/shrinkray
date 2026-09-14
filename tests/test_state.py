@@ -1146,8 +1146,11 @@ async def test_run_for_result_in_place_cleanup_handles_unlink_error(
 async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
     """Test that the process group is killed when the task is cancelled."""
     script = tmp_path / "test.sh"
-    # Script that sleeps forever
-    script.write_text("#!/bin/sh\nsleep 1000")
+    started = tmp_path / "started"
+    # Script that announces itself and then sleeps forever. The test
+    # cancels only once the script is running, so the cancellation
+    # cannot land before the process has been spawned on a loaded machine.
+    script.write_text(f"#!/bin/sh\ntouch {started}\nsleep 1000")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -1176,8 +1179,11 @@ async def test_process_group_killed_on_cancellation(tmp_path, monkeypatch):
         original_kill(sp)
 
     monkeypatch.setattr(state_mod, "kill_process_group", tracking_kill)
-    with trio.move_on_after(0.5):
-        await state.run_for_result(b"hello")
+    async with trio.open_nursery() as nursery:
+        nursery.start_soon(state.run_for_result, b"hello")
+        while not started.exists():
+            await trio.sleep(0.01)
+        nursery.cancel_scope.cancel()
 
     assert kill_called[0]
 

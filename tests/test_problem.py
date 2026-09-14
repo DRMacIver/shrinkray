@@ -2329,6 +2329,25 @@ async def test_gauntlet_timeout_mid_run_rejects_and_keeps_the_evidence():
     assert ledger.evidence.interesting == ledger.evidence.runs > 1
 
 
+async def test_gauntlet_timeout_without_validity_is_not_latched():
+    calls = 0
+
+    async def interesting(value):
+        nonlocal calls
+        if value == b"a":
+            calls += 1
+            if calls == 1:
+                return InterestingnessResult(interesting=False, timed_out=True)
+        return True
+
+    problem = nd_problem(interesting, initial=b"ab")
+    policy(problem).flip()
+    assert not await problem.is_interesting(b"a")
+    assert problem.ledger(b"a").verdict is None
+    assert await problem.is_interesting(b"a")
+    assert problem.current_test_case == b"a"
+
+
 async def test_seed_run_timeout_ends_the_top_up_but_not_the_accept():
     calls = 0
 

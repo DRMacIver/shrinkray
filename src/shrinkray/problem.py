@@ -1404,8 +1404,10 @@ class BasicReductionProblem(ReductionProblem[T]):
         candidate reproduces, so it is not evidence, but the candidate
         cannot be adopted under the current timeout: reject it, for as
         long as `cache_valid` says the timeout it ran under still stands,
-        keeping the evidence it has for a retry after a raise."""
-        ledger.verdict = False
+        keeping the evidence it has for a retry after a raise. Without a
+        validity condition nothing is latched, so the next proposal of
+        the candidate runs it again, as after a missed fast-sweep run."""
+        ledger.verdict = None if cache_valid is None else False
         ledger.cache_valid = cache_valid
         return False
 

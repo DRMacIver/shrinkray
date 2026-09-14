@@ -20,6 +20,11 @@ import trio
 
 from shrinkray.cli import InputType
 from shrinkray.process import run_managed_process
+from shrinkray.state import DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT
+
+
+class _ValidationTimedOut(Exception):
+    """The interestingness test did not finish within its timeout."""
 
 
 @dataclass
@@ -149,14 +154,29 @@ async def _run_validation_test(
                 output_fd = sys.stderr.fileno()
             except (io.UnsupportedOperation, OSError):
                 output_fd = None
-            return await run_managed_process(
-                command,
-                cwd=cwd,
-                input=stdin_data,
-                output_fd=output_fd,
-                timeout=300.0 if timeout is None else timeout,
-                memory_limit=memory_limit,
-            )
+            # Without a configured timeout the initial call gets the same
+            # calibration bound the reducer would give it.
+            if timeout is None:
+                effective_timeout = DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT
+                advice = "Pass --timeout to allow a slower test."
+            else:
+                effective_timeout = timeout
+                advice = "Try raising or disabling --timeout."
+            try:
+                return await run_managed_process(
+                    command,
+                    cwd=cwd,
+                    input=stdin_data,
+                    output_fd=output_fd,
+                    timeout=effective_timeout,
+                    memory_limit=memory_limit,
+                )
+            except subprocess.TimeoutExpired:
+                raise _ValidationTimedOut(
+                    f"Interestingness test timed out after {effective_timeout:g}s "
+                    f"on the initial test case. {advice}\n\n"
+                    f"To reproduce:\n{_format_command_for_display(command, cwd)}"
+                )
 
         result = await run_subprocess()
         _report_run(result)
@@ -203,10 +223,10 @@ async def _run_validation_test(
             temp_dirs=temp_dirs,
         )
 
-    except subprocess.TimeoutExpired:
+    except _ValidationTimedOut as e:
         return ValidationResult(
             success=False,
-            error_message="Interestingness test timed out during validation",
+            error_message=str(e),
             temp_dirs=temp_dirs,
         )
     except Exception as e:

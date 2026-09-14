@@ -1116,7 +1116,8 @@ exit 0
     assert result.returncode != 0
 
     # Validation enforces the timeout before reduction starts.
-    assert "Interestingness test timed out during validation" in result.stderr
+    assert "Interestingness test timed out after 0.01s" in result.stderr
+    assert "--timeout" in result.stderr
     assert "Traceback" not in result.stderr
     assert target.read_text() == "hello world"
 
@@ -1163,7 +1164,7 @@ exit 0
 
     # Validation enforces the timeout before the worker starts.
     combined_output = result.stdout + result.stderr
-    assert "Interestingness test timed out during validation" in combined_output
+    assert "Interestingness test timed out after 0.01s" in combined_output
     assert "Traceback" not in combined_output
     assert target.read_text() == "hello world"
 

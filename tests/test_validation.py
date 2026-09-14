@@ -1297,7 +1297,27 @@ async def test_validation_timeout_kills_oracle(tmp_path):
     )
     assert not result.success
     assert result.error_message is not None
-    assert "timed out" in result.error_message.lower()
+    assert "timed out after 0.1s" in result.error_message
+    assert "--timeout" in result.error_message
+    assert "To reproduce:" in result.error_message
+
+
+async def test_validation_timeout_without_configured_timeout_suggests_one(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr("shrinkray.validation.DYNAMIC_TIMEOUT_CALIBRATION_TIMEOUT", 0.1)
+    target = tmp_path / "case"
+    target.write_bytes(b"hello")
+    result = await validate_initial_example(
+        file_path=str(target),
+        test=[sys.executable, "-c", "import time; time.sleep(60)"],
+        input_type=InputType.arg,
+        in_place=False,
+    )
+    assert not result.success
+    assert result.error_message is not None
+    assert "timed out after 0.1s" in result.error_message
+    assert "Pass --timeout" in result.error_message
 
 
 async def test_cancelled_basename_validation_restores_original(tmp_path, monkeypatch):

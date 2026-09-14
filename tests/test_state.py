@@ -2622,10 +2622,11 @@ def test_state_with_history_enabled_creates_output_manager(tmp_path):
     assert state.output_manager is not None
 
 
-def test_get_last_captured_output_with_no_output_manager(tmp_path):
-    """Test _get_last_captured_output returns None when output_manager is None."""
+async def test_run_script_captures_no_output_without_output_manager(tmp_path):
+    """Without an output manager the test's output is discarded, so the
+    run result carries none."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/sh\nexit 0")
+    script.write_text("#!/bin/sh\necho captured\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2647,13 +2648,17 @@ def test_get_last_captured_output_with_no_output_manager(tmp_path):
         history_enabled=False,  # Disable history to not create output_manager
     )
 
-    assert state._get_last_captured_output() is None
+    assert state.output_manager is None
+    result = await state.run_script_on_file(str(target), cwd=str(tmp_path))
+    assert result.exit_code == 0
+    assert result.output is None
 
 
-def test_get_last_captured_output_with_no_output_available(tmp_path):
-    """Test _get_last_captured_output returns None when no output is available."""
+async def test_run_script_returns_captured_output(tmp_path):
+    """With an output manager the run result carries the test's combined
+    stdout and stderr, read back as soon as the test finishes."""
     script = tmp_path / "test.sh"
-    script.write_text("#!/bin/sh\nexit 0")
+    script.write_text("#!/bin/sh\necho out\necho err >&2\nexit 0")
     script.chmod(0o755)
 
     target = tmp_path / "test.txt"
@@ -2676,45 +2681,10 @@ def test_get_last_captured_output_with_no_output_available(tmp_path):
         history_base_dir=str(tmp_path),
     )
 
-    # Output manager exists but has no output yet
     assert state.output_manager is not None
-    assert state._get_last_captured_output() is None
-
-
-def test_get_last_captured_output_returns_stored_output(tmp_path):
-    """Test _get_last_captured_output returns the stored _last_test_output."""
-    script = tmp_path / "test.sh"
-    script.write_text("#!/bin/sh\nexit 0")
-    script.chmod(0o755)
-
-    target = tmp_path / "test.txt"
-    target.write_text("hello")
-
-    state = ShrinkRayStateSingleFile(
-        input_type=InputType.arg,
-        in_place=False,
-        test=[str(script)],
-        filename=str(target),
-        timeout=5.0,
-        base="test.txt",
-        parallelism=1,
-        initial=b"hello",
-        formatter="none",
-        trivial_is_error=True,
-        seed=0,
-        volume=Volume.quiet,
-        history_enabled=True,
-        history_base_dir=str(tmp_path),
-    )
-
-    # _get_last_captured_output returns _last_test_output (set during run_script_on_file)
-    assert state._get_last_captured_output() is None
-
-    # Directly set the stored output (simulating what run_script_on_file does)
-    state._last_test_output = b"test output content"
-
-    output = state._get_last_captured_output()
-    assert output == b"test output content"
+    result = await state.run_script_on_file(str(target), cwd=str(tmp_path))
+    assert result.exit_code == 0
+    assert result.output == b"out\nerr\n"
 
 
 async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
@@ -2764,8 +2734,8 @@ async def test_run_script_on_file_handles_output_oserror(tmp_path, monkeypatch):
     )
     assert run_result.exit_code == 0
 
-    # The OSError was caught, so _last_test_output should be None
-    assert state._last_test_output is None
+    # The OSError was caught, so the run carries no output.
+    assert run_result.output is None
 
 
 def test_directory_state_get_test_case_bytes_returns_serialized(tmp_path):
@@ -4266,11 +4236,10 @@ async def test_adopted_reductions_keep_their_test_output(tmp_path):
     assert b"still interesting" in output
 
 
-async def test_history_records_reductions_without_captured_output(
-    tmp_path, monkeypatch
-):
+async def test_history_records_reductions_without_captured_output(tmp_path):
     state = _history_output_state(tmp_path)
-    monkeypatch.setattr(state, "_get_last_captured_output", lambda: None)
+    # Without an output manager the test's output is never captured.
+    state.output_manager = None
     _ = state.reducer
     problem = state.problem
     await problem.setup()

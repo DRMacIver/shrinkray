@@ -276,11 +276,6 @@ class ShrinkRayState[TestCase](ABC):
     # Stores the output from the last debug run
     _last_debug_output: str = ""
 
-    # Stores the output from the most recently completed test (for history recording)
-    # This is read immediately after the test's output file is closed to avoid
-    # race conditions with other parallel tests
-    _last_test_output: bytes | None = None
-
     # Optional output manager for capturing test output (TUI mode or history)
     output_manager: OutputCaptureManager | None = None
 
@@ -492,29 +487,17 @@ class ShrinkRayState[TestCase](ABC):
                 output_dir=self._output_tempdir.name
             )
 
-    def _get_last_captured_output(self) -> bytes | None:
-        """Get the output from the most recently completed test.
-
-        Returns the output content if available, None otherwise.
-        This returns the output that was captured immediately when the test
-        completed, avoiding race conditions with other parallel tests.
-        """
-        return self._last_test_output
-
-    def _check_also_interesting(self, exit_code: int, test_case: TestCase) -> None:
-        """Check if exit code matches also-interesting and record if so.
-
-        Args:
-            exit_code: The exit code from the test
-            test_case: The test case that was tested
-        """
+    def _check_also_interesting(
+        self, exit_code: int, test_case: TestCase, output: bytes | None
+    ) -> None:
+        """Record `test_case` as also-interesting if `exit_code` is the
+        also-interesting code, with `output` as its captured test output."""
         if (
             self.also_interesting_code is not None
             and exit_code == self.also_interesting_code
             and self.history_manager is not None
         ):
             test_case_bytes = self._get_test_case_bytes(test_case)
-            output = self._get_last_captured_output()
             self.history_manager.record_also_interesting(test_case_bytes, output)
 
     def reducer_log_dir(self) -> str | None:
@@ -733,21 +716,18 @@ class ShrinkRayState[TestCase](ABC):
             # because group children may still be alive.
             if sp is not None:
                 kill_process_group(sp)
-            # Clean up output file handle and capture output immediately
+            # Close the output file and read it back now, before the output
+            # manager can recycle it for another test.
             if output_file_handle is not None:
                 output_file_handle.close()
-                # Read the output file NOW, before any other test can interfere
-                # This avoids race conditions where get_current_output() returns
-                # a different test's partial output
-                # output_path must be set since it's assigned with output_file_handle
+                # output_path is assigned together with output_file_handle
                 assert output_path is not None
                 try:
                     with open(output_path, "rb") as f:
                         with trio.CancelScope(shield=True):
                             captured_output = await trio.to_thread.run_sync(f.read)
-                        self._last_test_output = captured_output
                 except OSError:
-                    self._last_test_output = None
+                    captured_output = None
             if test_id is not None and self.output_manager is not None:
                 if exit_code is not None:
                     recorded_code = exit_code
@@ -1022,16 +1002,14 @@ class ShrinkRayState[TestCase](ABC):
 
         async with self.is_interesting_limiter:
             result = await self.run_for_result(test_case)
-            self._last_test_output = result.output
             if not result.timed_out:
-                self._check_also_interesting(result.exit_code, test_case)
+                self._check_also_interesting(
+                    result.exit_code, test_case, result.output
+                )
             if result.exit_code == 0 and not result.timed_out:
-                # Capture output now while still in the limiter to avoid race conditions
-                # where another test starts and overwrites the "current" output
                 test_case_bytes = self._get_test_case_bytes(test_case)
-                output = self._get_last_captured_output()
-                if output is not None:
-                    self._successful_outputs[test_case_bytes] = output
+                if result.output is not None:
+                    self._successful_outputs[test_case_bytes] = result.output
                     self._successful_output_keys[test_case_bytes] = (
                         self.problem.sort_key(test_case)
                     )

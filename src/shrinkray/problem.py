@@ -1151,29 +1151,30 @@ class BasicReductionProblem(ReductionProblem[T]):
 
     async def __test_candidate(self, test_case: T, cache_key: str) -> bool:
         """Returns true if this test_case is interesting."""
+        # The wait for a previous owner may have ended with its adoption.
         if test_case == self.current_test_case:
             return True
         ledger = self.__ledgers.get(cache_key)
         if ledger is not None and ledger.latched():
             assert ledger.verdict is not None
-            if not ledger.adoption_pending:
-                return ledger.verdict
-            # A previous owner may have been cancelled while waiting to
-            # commit. A cached success still has to adopt this improvement.
-            return await self.__finish_candidate(test_case, ledger, True)
+            if ledger.adoption_pending:
+                # The previous owner was cancelled while waiting to commit,
+                # so this cached success still has to adopt the improvement.
+                return await self.__finish_candidate(test_case, ledger, ledger.verdict)
+            return ledger.verdict
 
         if self.__policy is not None:
             await self.__maybe_verify_current()
 
+        if ledger is None:
+            ledger = Ledger()
+            self.__ledgers[cache_key] = ledger
         if self.__policy is None or not self.__policy.active:
             result, _, cache_valid = await self.__execute(test_case)
-            ledger = Ledger(verdict=result, cache_valid=cache_valid)
             ledger.evidence.record(result)
-            self.__ledgers[cache_key] = ledger
+            ledger.verdict = result
+            ledger.cache_valid = cache_valid
         else:
-            if ledger is None:
-                ledger = Ledger()
-                self.__ledgers[cache_key] = ledger
             result = await self.__run_gauntlet(test_case, ledger)
 
         ledger.adoption_pending = result

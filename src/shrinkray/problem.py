@@ -1170,8 +1170,9 @@ class BasicReductionProblem(ReductionProblem[T]):
             ledger = Ledger()
             self.__ledgers[cache_key] = ledger
         if self.__policy is None or not self.__policy.active:
-            result, _, cache_valid = await self.__execute(test_case)
-            ledger.evidence.record(result)
+            result, timed_out, cache_valid = await self.__execute(test_case)
+            if not timed_out:
+                ledger.evidence.record(result)
             ledger.verdict = result
             ledger.cache_valid = cache_valid
         else:
@@ -1319,7 +1320,13 @@ class BasicReductionProblem(ReductionProblem[T]):
 
     async def __gauntlet_batch(self, test_case: T, evidence: Evidence) -> bool:
         """Drive `evidence` about `test_case` to a gauntlet verdict against
-        the current anchor, at the hit minimum in force."""
+        the current anchor, at the hit minimum in force.
+
+        Here, as in the confirmation batch, a run that times out counts
+        as a miss: these batches judge whether a test case the run may
+        fall back to reproduces within the run's timeout, and treating
+        the timeout as a miss keeps the batch bounded and errs towards
+        the older, larger entry."""
         assert self.__policy is not None
         while True:
             verdict = gauntlet(
@@ -1345,7 +1352,9 @@ class BasicReductionProblem(ReductionProblem[T]):
         policy = self.__policy
         if ledger.min_hits is None:
             ledger.min_hits = policy.min_hits
-        interesting, _, _ = await self.__execute(test_case)
+        interesting, timed_out, cache_valid = await self.__execute(test_case)
+        if timed_out:
+            return self.__reject_for_timeout(ledger, cache_valid)
         ledger.evidence.record(interesting)
         if not interesting and not policy.confirming:
             return False
@@ -1363,7 +1372,9 @@ class BasicReductionProblem(ReductionProblem[T]):
                 # Top the ledger up towards the seed size, but only while
                 # the runs could still raise the anchor: that is their
                 # only purpose, and once a miss or the anchor's level has
-                # put a raise out of reach they are wasted.
+                # put a raise out of reach they are wasted. A seed run
+                # that times out is not a sample either way and ends the
+                # top-up; the accept itself stands.
                 while (
                     ledger.evidence.runs < ANCHOR_SEED_RUNS
                     and policy.raise_reachable(
@@ -1371,12 +1382,32 @@ class BasicReductionProblem(ReductionProblem[T]):
                         ANCHOR_SEED_RUNS - ledger.evidence.runs,
                     )
                 ):
-                    interesting, _, _ = await self.__execute(test_case, replay="seed")
+                    interesting, timed_out, _ = await self.__execute(
+                        test_case, replay="seed"
+                    )
+                    if timed_out:
+                        break
                     ledger.evidence.record(interesting)
                 ledger.verdict = True
                 return True
-            interesting, _, _ = await self.__execute(test_case, replay="gauntlet")
+            interesting, timed_out, cache_valid = await self.__execute(
+                test_case, replay="gauntlet"
+            )
+            if timed_out:
+                return self.__reject_for_timeout(ledger, cache_valid)
             ledger.evidence.record(interesting)
+
+    def __reject_for_timeout(
+        self, ledger: Ledger, cache_valid: Callable[[], bool] | None
+    ) -> bool:
+        """A candidate run timed out. That says nothing about whether the
+        candidate reproduces, so it is not evidence, but the candidate
+        cannot be adopted under the current timeout: reject it, for as
+        long as `cache_valid` says the timeout it ran under still stands,
+        keeping the evidence it has for a retry after a raise."""
+        ledger.verdict = False
+        ledger.cache_valid = cache_valid
+        return False
 
     @property
     def current_test_case(self) -> T:

@@ -2241,14 +2241,11 @@ async def test_progress_waits_for_writes_but_not_oracle_verification(autojump_cl
         release.set()
 
 
-async def test_retried_timeout_keeps_the_candidates_evidence():
-    # A result whose cache validity lapses (a timeout after the timeout is
-    # raised) is re-run, and the re-run extends the candidate's ledger
-    # rather than replacing it.
+async def test_retried_verdict_extends_the_candidates_ledger():
+    # A result whose cache validity lapses is re-run, and the re-run
+    # extends the candidate's ledger rather than replacing it.
     async def interesting(value):
-        return InterestingnessResult(
-            interesting=False, cache_valid=lambda: False, timed_out=True
-        )
+        return InterestingnessResult(interesting=False, cache_valid=lambda: False)
 
     problem = BasicReductionProblem(
         initial=b"ab", is_interesting=interesting, work=WorkContext()
@@ -2258,3 +2255,96 @@ async def test_retried_timeout_keeps_the_candidates_evidence():
     assert not await problem.is_interesting(b"a")
     assert problem.ledger(b"a") is ledger
     assert ledger.evidence.runs == 2
+
+
+async def test_timed_out_run_is_not_evidence_under_a_deterministic_test():
+    async def interesting(value):
+        return InterestingnessResult(
+            interesting=False, cache_valid=lambda: False, timed_out=True
+        )
+
+    problem = BasicReductionProblem(
+        initial=b"ab", is_interesting=interesting, work=WorkContext()
+    )
+    assert not await problem.is_interesting(b"a")
+    assert problem.ledger(b"a").evidence.runs == 0
+
+
+# === Timeouts under nondeterminism handling ===
+
+
+async def test_gauntlet_timeout_rejects_until_the_timeout_is_raised():
+    # The first run of the candidate times out: it is rejected without
+    # the timeout counting as a miss, and once the timeout is raised (the
+    # cached rejection lapses) it is judged afresh on its real runs.
+    raised = False
+    calls = 0
+
+    async def interesting(value):
+        nonlocal calls
+        if value == b"a":
+            calls += 1
+            if calls == 1:
+                return InterestingnessResult(
+                    interesting=False, cache_valid=lambda: not raised, timed_out=True
+                )
+        return True
+
+    problem = nd_problem(interesting, initial=b"ab")
+    policy(problem).flip()
+    assert not await problem.is_interesting(b"a")
+    ledger = problem.ledger(b"a")
+    assert ledger.verdict is False
+    assert ledger.evidence.runs == 0
+    assert not await problem.is_interesting(b"a")
+    assert calls == 1
+    raised = True
+    assert await problem.is_interesting(b"a")
+    assert problem.current_test_case == b"a"
+    assert ledger.evidence.interesting == ledger.evidence.runs
+
+
+async def test_gauntlet_timeout_mid_run_rejects_and_keeps_the_evidence():
+    calls = 0
+
+    async def interesting(value):
+        nonlocal calls
+        if value == b"a":
+            calls += 1
+            if calls == 2:
+                return InterestingnessResult(
+                    interesting=False, cache_valid=lambda: False, timed_out=True
+                )
+        return True
+
+    problem = nd_problem(interesting, initial=b"ab")
+    policy(problem).flip()
+    assert not await problem.is_interesting(b"a")
+    ledger = problem.ledger(b"a")
+    assert ledger.verdict is False
+    assert ledger.evidence == Evidence(1, 1)
+    # The rejection lapsed with its timeout, so the retry resumes from the
+    # evidence already gathered.
+    assert await problem.is_interesting(b"a")
+    assert ledger.evidence.interesting == ledger.evidence.runs > 1
+
+
+async def test_seed_run_timeout_ends_the_top_up_but_not_the_accept():
+    calls = 0
+
+    async def interesting(value):
+        nonlocal calls
+        if value == b"a":
+            calls += 1
+            if calls == 5:
+                return InterestingnessResult(interesting=False, timed_out=True)
+        return True
+
+    problem = nd_problem(interesting, initial=b"ab")
+    policy(problem).flip()
+    assert await problem.is_interesting(b"a")
+    assert problem.current_test_case == b"a"
+    ledger = problem.ledger(b"a")
+    assert ledger.verdict is True
+    assert ledger.evidence == Evidence(4, 4)
+    assert calls == 5

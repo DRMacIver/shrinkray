@@ -1040,9 +1040,10 @@ class ShrinkRayState[TestCase](ABC):
 
         Args:
             new_initial: The new initial test case content
-            excluded: Set of test cases to reject as uninteresting
+            excluded: Set of test cases to reject as uninteresting, in
+                addition to those excluded by earlier restarts
         """
-        self.excluded_test_cases = excluded
+        self.excluded_test_cases = (self.excluded_test_cases or set()) | excluded
         # Clear cached reducer so it will be recreated on next access
         try:
             del self._cached_reducer

@@ -3643,6 +3643,11 @@ async def test_reset_for_restart_clears_reducer(tmp_path):
     # Exclusion set should be set
     assert state.excluded_test_cases == {b"excluded"}
 
+    # A later restart adds to the exclusions rather than replacing them:
+    # the values reduced to before the first restart stay rejected.
+    state.reset_for_restart(b"worl", {b"excluded again"})
+    assert state.excluded_test_cases == {b"excluded", b"excluded again"}
+
 
 @pytest.mark.trio
 async def test_reset_for_restart_without_existing_reducer(tmp_path):
